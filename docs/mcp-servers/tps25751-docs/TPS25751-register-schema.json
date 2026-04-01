@@ -1,0 +1,134 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "tps25751-registers.schema.json",
+  "title": "TPS25751 Register Configuration",
+  "description": "Schema for TPS25751 PD Controller register definitions",
+  "type": "object",
+  "required": [
+    "registers"
+  ],
+  "properties": {
+    "registers": {
+      "type": "array",
+      "description": "Array of TPS25751 register definitions.",
+      "minItems": 1,
+      "items": {
+        "$ref": "#/$defs/register"
+      }
+    }
+  },
+  "additionalProperties": false,
+  "$defs": {
+    "hexValue": {
+      "type": "string",
+      "pattern": "^[0-9A-Fa-f]+h$",
+      "description": "Hexadecimal value with 'h' suffix"
+    },
+    "bitRange": {
+      "type": "string",
+      "pattern": "^\\d+-\\d+$",
+      "description": "Bit range in format 'high-low'"
+    },
+    "fieldValueKey": {
+      "type": "string",
+      "pattern": "^([0-9A-Fa-f]+h|APP |BOOT|PTCH)$",
+      "description": "Valid field value key (hex value or special mode identifier)"
+    },
+    "register": {
+      "type": "object",
+      "required": [
+        "offset",
+        "name",
+        "width",
+        "reset",
+        "fields"
+      ],
+      "properties": {
+        "offset": {
+          "$ref": "#/$defs/hexValue",
+          "description": "Register offset address in hexadecimal format with 'h' suffix"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Register name"
+        },
+        "width": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 512,
+          "description": "Register width (in bits)"
+        },
+        "reset": {
+          "$ref": "#/$defs/hexValue",
+          "description": "Reset value in hexadecimal format with 'h' suffix"
+        },
+        "description": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Register description"
+        },
+        "fields": {
+          "type": "array",
+          "description": "Array of field definitions within the register",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/field"
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "field": {
+      "type": "object",
+      "required": [
+        "bit_field",
+        "name",
+        "access_type",
+        "reset"
+      ],
+      "properties": {
+        "bit_field": {
+          "$ref": "#/$defs/bitRange",
+          "description": "Bit range in format 'high-low'"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Field name"
+        },
+        "access_type": {
+          "type": "string",
+          "enum": [
+            "R",
+            "R/W",
+            "W"
+          ],
+          "description": "Access type: Read-only, Write-only, or Read/Write"
+        },
+        "reset": {
+          "$ref": "#/$defs/hexValue",
+          "description": "Field reset value in hexadecimal format with 'h' suffix"
+        },
+        "description": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Field description"
+        },
+        "values": {
+          "type": "object",
+          "description": "Enumerated values and their meanings",
+          "minProperties": 1,
+          "patternProperties": {
+            "^([0-9A-Fa-f]+h|APP |BOOT|PTCH)$": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    }
+  }
+}

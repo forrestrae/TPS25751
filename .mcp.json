@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "tps25751-docs": {
+      "type": "stdio",
+      "command": "uv",
+      "args": ["run", "./docs/mcp-servers/tps25751-docs/server.py"]
+    }
+  }
+}

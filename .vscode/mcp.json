@@ -1,0 +1,9 @@
+{
+  "servers": {
+    "tps25751-docs": {
+      "type": "stdio",
+      "command": "uv",
+      "args": ["run", "${workspaceFolder}/docs/mcp-servers/tps25751-docs/server.py"]
+    }
+  }
+}

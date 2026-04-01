@@ -1,0 +1,18 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-settings.json",
+  "permissions": {
+    "allow": [
+      "mcp__tps25751-docs__search_register",
+      "mcp__tps25751-docs__explain_bitfield",
+      "mcp__tps25751-docs__generate_code_example",
+      "mcp__tps25751-docs__list_library_files"
+    ],
+    "deny": []
+  },
+  "enabledMcpjsonServers": [
+    "tps25751-docs"
+  ],
+  "enabledPlugins": {
+    "clangd-lsp@claude-plugins-official": true
+  }
+}

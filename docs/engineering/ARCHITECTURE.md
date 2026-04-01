@@ -1,0 +1,923 @@
+# TPS25751 Library - System Architecture
+
+**Last Updated:** 2025-10-20
+**Status:** Active
+
+---
+
+## Overview
+
+This document describes the system architecture and design patterns of the TPS25751 library. Understanding this architecture is essential for implementing new features, debugging issues, and maintaining consistency across the codebase.
+
+---
+
+## Table of Contents
+
+1. [System Overview](#system-overview)
+2. [Component Architecture](#component-architecture)
+3. [Design Patterns](#design-patterns)
+4. [Class Hierarchy](#class-hierarchy)
+5. [Data Flow](#data-flow)
+6. [Extension Points](#extension-points)
+
+---
+
+## System Overview
+
+### High-Level Architecture
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                     Application Layer                        │
+│                  (User Sketches / Examples)                  │
+└───────────────────────────────┬─────────────────────────────┘
+                                │
+┌───────────────────────────────▼─────────────────────────────┐
+│                    TPS25751 Main Class                       │
+│              (Convenience Methods / I2C Manager)             │
+└───────────────────────────────┬─────────────────────────────┘
+                                │
+        ┌───────────────────────┼───────────────────────┐
+        │                       │                       │
+┌───────▼────────┐    ┌────────▼────────┐    ┌────────▼────────┐
+│  Factory Layer  │    │  Register Layer  │    │  I2C Protocol  │
+│                │    │                  │    │                │
+│ - Create regs  │    │ - Validation     │    │ - Length byte  │
+│ - Type mapping │    │ - Parsing        │    │ - Wire lib     │
+│ - Registry     │    │ - Debug print    │    │ - Error handle │
+└────────┬───────┘    └────────┬─────────┘    └────────┬───────┘
+         │                     │                       │
+         └─────────────────────┼───────────────────────┘
+                               │
+                    ┌──────────▼──────────┐
+                    │   Utility Layer     │
+                    │                     │
+                    │ - Bit extraction    │
+                    │ - Debug helpers     │
+                    │ - Type traits       │
+                    └─────────────────────┘
+```
+
+### Layer Responsibilities
+
+**Application Layer:**
+- User code / example sketches
+- High-level USB-C PD logic
+- Application-specific behavior
+
+**Main Class (TPS25751):**
+- I2C communication management
+- Register read/write coordination
+- Convenience methods for common operations
+- Error handling and retry logic
+
+**Factory Layer:**
+- Register object creation
+- Type-to-address mapping
+- Dependency injection support
+- Singleton pattern for global access
+
+**Register Layer:**
+- Individual register implementations
+- Data validation (3 tiers)
+- Bitfield parsing
+- Debug output formatting
+
+**I2C Protocol Layer:**
+- TPS25751-specific protocol handling
+- Length-prefixed reads
+- Wire library abstraction
+- Communication error handling
+
+**Utility Layer:**
+- Bit manipulation helpers
+- Debug infrastructure
+- Common type definitions
+- Platform-specific utilities
+
+---
+
+## Component Architecture
+
+### Core Components
+
+#### 1. TPS25751 Main Controller
+
+**File:** `lib/TPS25751/src/TPS25751.cpp`
+
+**Purpose:** Central coordination of I2C communication and register access
+
+**Key Methods:**
+```cpp
+class TPS25751 {
+public:
+    bool begin(uint8_t address = 0x20);
+
+    // Register read convenience methods
+    std::unique_ptr<TPS25751Status> readStatusRegister(bool validate = false);
+    std::unique_ptr<TPS25751Mode> readModeRegister(bool validate = false);
+    // ... one per register type
+
+    // Generic register access
+    bool readRegister(uint8_t regAddr, uint8_t* buffer, size_t bufferSize);
+    bool writeRegister(uint8_t regAddr, const uint8_t* data, size_t length);
+
+private:
+    uint8_t i2cAddress_;
+    TwoWire* wire_;  // I2C interface (Wire or Wire1)
+};
+```
+
+**Responsibilities:**
+- Initialize I2C communication
+- Manage device address
+- Provide type-safe register access
+- Handle I2C protocol details
+- Error detection and reporting
+
+#### 2. TPS25751Register Base Class
+
+**File:** `lib/TPS25751/src/TPS25751Register.cpp`
+
+**Purpose:** Abstract base for all register implementations
+
+**Class Hierarchy:**
+```cpp
+class TPS25751Register {
+public:
+    // Pure virtual - must override
+    virtual uint8_t getAddress() const = 0;
+    virtual uint8_t getExpectedSize() const = 0;
+    virtual bool isReadOnly() const = 0;
+    virtual bool validateBasic() const = 0;
+    virtual bool validateData() const = 0;
+    virtual bool validateSemantic() const = 0;
+    virtual void debugPrint() const = 0;
+
+    // Implemented in base
+    uint8_t getDataLength() const;
+    const uint8_t* getData() const;
+
+    // Rule of Five
+    virtual ~TPS25751Register() = default;
+    TPS25751Register(const TPS25751Register& other);
+    TPS25751Register(TPS25751Register&& other) noexcept;
+    TPS25751Register& operator=(const TPS25751Register& other);
+    TPS25751Register& operator=(TPS25751Register&& other) noexcept;
+
+protected:
+    TPS25751Register(uint8_t address, uint8_t expectedSize);
+    TPS25751Register(uint8_t address, uint8_t expectedSize,
+                     const uint8_t* data, size_t length);
+
+    // Data storage
+    std::vector<uint8_t> data_;
+    uint8_t address_;
+    uint8_t expectedSize_;
+};
+```
+
+**Responsibilities:**
+- Define register interface contract
+- Manage raw register data storage
+- Provide RAII memory management
+- Enable polymorphic register handling
+
+#### 3. Concrete Register Classes
+
+**Example:** `TPS25751Status`
+
+```cpp
+class TPS25751Status : public TPS25751Register {
+public:
+    TPS25751Status();
+    TPS25751Status(const uint8_t* data, size_t length);
+
+    // Accessor methods for each field
+    uint8_t getConnectionState() const;
+    const char* getConnectionStateString() const;
+    bool isVBUSPresent() const;
+    uint8_t getPowerRole() const;
+    // ... more accessors
+
+    // Override base class pure virtuals
+    uint8_t getAddress() const override { return 0x1A; }
+    uint8_t getExpectedSize() const override { return 5; }
+    bool isReadOnly() const override { return true; }
+    bool validateBasic() const override;
+    bool validateData() const override;
+    bool validateSemantic() const override;
+    void debugPrint() const override;
+
+private:
+    // Helper methods
+    uint8_t extractConnectionState() const;
+    uint8_t extractPowerRole() const;
+    // ... more helpers
+};
+```
+
+**Current Implementations:** (9 total)
+- TPS25751Status (0x1A)
+- TPS25751Mode (0x03)
+- TPS25751PowerPathStatus (0x26)
+- TPS25751BootFlags (0x2D)
+- TPS25751PortConfig (0x28)
+- TPS25751TypeCState (0x69)
+- TPS25751InterruptEvent (0x14)
+- TPS25751PowerStatus (0x3F)
+- TPS25751PDStatus (0x40)
+
+#### 4. Factory Pattern Implementation
+
+**Files:**
+- `lib/TPS25751/include/TPS25751RegisterFactory.h`
+- `lib/TPS25751/src/TPS25751RegisterFactory.cpp`
+
+**Components:**
+
+**A. RegisterType Enum:**
+```cpp
+enum class RegisterType : uint8_t {
+    STATUS = 0,
+    MODE = 1,
+    BOOT_FLAGS = 2,
+    POWER_PATH_STATUS = 3,
+    PORT_CONFIG = 4,
+    TYPEC_STATE = 5,
+    INTERRUPT_EVENT = 6,
+    POWER_STATUS = 7,
+    PD_STATUS = 8,
+    UNKNOWN = 255
+};
+```
+
+**B. Abstract Factory Interface:**
+```cpp
+class TPS25751RegisterFactory {
+public:
+    virtual ~TPS25751RegisterFactory() = default;
+
+    virtual std::unique_ptr<TPS25751Register>
+        createRegister(RegisterType type) = 0;
+
+    virtual std::unique_ptr<TPS25751Register>
+        createRegister(TPS25751Registers::Address addr) = 0;
+
+    virtual std::unique_ptr<TPS25751Register>
+        createRegister(RegisterType type, const uint8_t* data, size_t length) = 0;
+
+    static RegisterType getRegisterType(TPS25751Registers::Address addr);
+    static TPS25751Registers::Address getAddress(RegisterType type);
+    static bool validateTypeAddress(RegisterType type, TPS25751Registers::Address addr);
+};
+```
+
+**C. Concrete Factory:**
+```cpp
+class TPS25751RegisterFactoryImpl : public TPS25751RegisterFactory {
+public:
+    std::unique_ptr<TPS25751Register> createRegister(RegisterType type) override;
+    // ... other overrides
+
+private:
+    std::unique_ptr<TPS25751Register> createStatusRegister() const;
+    std::unique_ptr<TPS25751Register> createModeRegister() const;
+    // ... one per register type
+};
+```
+
+**D. Singleton Access:**
+```cpp
+class TPS25751Factory {
+public:
+    static TPS25751RegisterFactory& getInstance();
+    static void setFactory(std::unique_ptr<TPS25751RegisterFactory> factory);
+
+private:
+    static std::unique_ptr<TPS25751RegisterFactory> instance_;
+};
+```
+
+#### 5. Utility Components
+
+**TPS25751BitUtils:**
+```cpp
+class TPS25751BitUtils {
+public:
+    static uint8_t extractBits(const uint8_t* data, uint8_t byteIndex,
+                               uint8_t bitCount, uint8_t bitOffset);
+
+    static uint16_t extractBits16(const uint8_t* data, uint8_t startByte,
+                                  uint8_t bitCount, uint8_t bitOffset);
+
+    static uint32_t extractBits32(const uint8_t* data, uint8_t startByte,
+                                  uint8_t bitCount, uint8_t bitOffset);
+
+    static bool getBit(const uint8_t* data, uint8_t byteIndex, uint8_t bitIndex);
+
+    static void setBit(uint8_t* data, uint8_t byteIndex, uint8_t bitIndex, bool value);
+};
+```
+
+**TPS25751Debug:**
+```cpp
+// Debug categories
+#define DEBUG_CAT_I2C        0x01
+#define DEBUG_CAT_REGISTER   0x02
+#define DEBUG_CAT_VALIDATION 0x04
+#define DEBUG_CAT_FACTORY    0x08
+
+// Debug levels
+#define DEBUG_LEVEL_NONE     0
+#define DEBUG_LEVEL_ERROR    1
+#define DEBUG_LEVEL_WARNING  2
+#define DEBUG_LEVEL_INFO     3
+#define DEBUG_LEVEL_VERBOSE  4
+
+class TPS25751Debug {
+public:
+    static void print(uint8_t category, uint8_t level, const char* message);
+    static void setLevel(uint8_t level);
+    static void enableCategory(uint8_t category);
+    static void disableCategory(uint8_t category);
+};
+```
+
+---
+
+## Design Patterns
+
+### 1. Factory Method Pattern
+
+**Intent:** Centralize object creation and type management without RTTI
+
+**Why:** Platform compiles with `-fno-rtti`, cannot use `dynamic_cast` or `typeid`
+
+**Implementation:**
+```cpp
+// Create by type
+auto status = TPS25751Factory::getInstance()
+    .createRegister(RegisterType::STATUS);
+
+// Create by address (factory determines type)
+auto reg = TPS25751Factory::getInstance()
+    .createRegister(TPS25751Registers::Address::STATUS);
+
+// Type-safe casting
+RegisterType type = TPS25751RegisterFactory::getRegisterType(reg->getAddress());
+if (type == RegisterType::STATUS) {
+    auto* statusPtr = static_cast<TPS25751Status*>(reg.get());
+}
+```
+
+**Benefits:**
+- Type safety without RTTI
+- Centralized creation logic
+- Easy to add new register types
+- Testable (can inject mock factory)
+
+### 2. Template Method Pattern
+
+**Intent:** Define validation skeleton, let subclasses implement steps
+
+**Implementation:**
+```cpp
+// Base class defines the template
+class TPS25751Register {
+public:
+    bool validate() const {
+        return validateBasic() && validateData() && validateSemantic();
+    }
+
+    // Steps implemented by subclasses
+    virtual bool validateBasic() const = 0;
+    virtual bool validateData() const = 0;
+    virtual bool validateSemantic() const = 0;
+};
+
+// Subclass implements steps
+class TPS25751Status : public TPS25751Register {
+    bool validateBasic() const override {
+        return getDataLength() == getExpectedSize();
+    }
+
+    bool validateData() const override {
+        return checkReservedBits() && checkFieldRanges();
+    }
+
+    bool validateSemantic() const override {
+        return checkLogicalConsistency();
+    }
+};
+```
+
+**Benefits:**
+- Consistent validation flow
+- Each level independently testable
+- Performance flexibility (choose validation depth)
+
+### 3. Singleton Pattern
+
+**Intent:** Single global factory instance with injection capability
+
+**Implementation:**
+```cpp
+class TPS25751Factory {
+public:
+    static TPS25751RegisterFactory& getInstance() {
+        if (!instance_) {
+            instance_ = std::make_unique<TPS25751RegisterFactoryImpl>();
+        }
+        return *instance_;
+    }
+
+    static void setFactory(std::unique_ptr<TPS25751RegisterFactory> factory) {
+        instance_ = std::move(factory);
+    }
+
+private:
+    static std::unique_ptr<TPS25751RegisterFactory> instance_;
+};
+```
+
+**Benefits:**
+- Global access point
+- Lazy initialization
+- Testable (can inject mock factory)
+- Thread-safe on embedded (single-threaded)
+
+### 4. RAII (Resource Acquisition Is Initialization)
+
+**Intent:** Automatic resource management
+
+**Implementation:**
+```cpp
+class TPS25751Register {
+public:
+    TPS25751Register(uint8_t address, uint8_t expectedSize,
+                     const uint8_t* data, size_t length)
+        : address_(address)
+        , expectedSize_(expectedSize)
+        , data_(data, data + length)  // Copy into vector
+    {
+        // Resource acquired in constructor
+    }
+
+    ~TPS25751Register() {
+        // Automatic cleanup (vector destructor)
+    }
+
+private:
+    std::vector<uint8_t> data_;  // RAII container
+};
+```
+
+**Benefits:**
+- No manual memory management
+- Exception-safe (if exceptions enabled)
+- Automatic cleanup
+- No memory leaks
+
+### 5. Strategy Pattern (Validation)
+
+**Intent:** Select validation strategy at runtime
+
+**Implementation:**
+```cpp
+// Different validation strategies
+enum class ValidationLevel {
+    BASIC,      // Fast, minimal checks
+    DATA,       // Medium, field validation
+    SEMANTIC    // Slow, full logical checks
+};
+
+class TPS25751Register {
+public:
+    bool validate(ValidationLevel level) const {
+        switch (level) {
+            case ValidationLevel::BASIC:
+                return validateBasic();
+            case ValidationLevel::DATA:
+                return validateBasic() && validateData();
+            case ValidationLevel::SEMANTIC:
+                return validateBasic() && validateData() && validateSemantic();
+        }
+    }
+};
+```
+
+**Benefits:**
+- Performance tuning
+- Different validation in production vs. debug
+- Progressive validation
+
+---
+
+## Class Hierarchy
+
+### Inheritance Tree
+
+```
+TPS25751Register (abstract base)
+├── TPS25751Status
+├── TPS25751Mode
+├── TPS25751PowerPathStatus
+├── TPS25751BootFlags
+├── TPS25751PortConfig
+├── TPS25751TypeCState
+├── TPS25751InterruptEvent
+├── TPS25751PowerStatus
+└── TPS25751PDStatus
+
+TPS25751RegisterFactory (abstract factory)
+└── TPS25751RegisterFactoryImpl (concrete factory)
+
+TPS25751Factory (singleton)
+
+TPS25751 (main controller)
+
+TPS25751BitUtils (utility, all static)
+
+TPS25751Debug (utility, all static)
+```
+
+### Relationship Diagram
+
+```
+┌────────────────┐
+│   TPS25751     │
+│                │
+│ Main Controller│
+└───────┬────────┘
+        │ uses
+        ▼
+┌────────────────────┐      ┌──────────────────┐
+│ TPS25751Factory    │      │ TPS25751Register │
+│                    │      │  (abstract base) │
+│ Singleton          │◄─────┤                  │
+└─────────┬──────────┘      └────────▲─────────┘
+          │ manages                   │
+          ▼                           │ inherits
+┌──────────────────────┐              │
+│ TPS25751Register     │              │
+│ FactoryImpl          │        ┌─────┴──────────┐
+│                      │        │                │
+│ creates───────────────────────►│ TPS25751Status │
+└──────────────────────┘        │ TPS25751Mode   │
+                                │ ...            │
+                                └────────────────┘
+```
+
+---
+
+## Data Flow
+
+### Register Read Flow
+
+```
+1. Application calls TPS25751::readStatusRegister()
+        │
+        ▼
+2. TPS25751 calls readRegister(0x1A, buffer, 5)
+        │
+        ▼
+3. I2C Protocol Layer:
+   - Wire.beginTransmission(address)
+   - Wire.write(0x1A)  // Register address
+   - Wire.endTransmission(false)  // Repeated start
+   - Wire.requestFrom(address, 1)  // Read length byte
+   - length = Wire.read()
+   - Wire.requestFrom(address, length)  // Read data
+   - Read 'length' bytes into buffer
+        │
+        ▼
+4. Factory creates register object:
+   - factory.createRegister(RegisterType::STATUS, buffer, length)
+   - Returns std::unique_ptr<TPS25751Status>
+        │
+        ▼
+5. Application validates if needed:
+   - status->validateData()
+        │
+        ▼
+6. Application accesses data:
+   - status->getConnectionState()
+   - status->isVBUSPresent()
+        │
+        ▼
+7. Bitfield extraction (internal):
+   - TPS25751BitUtils::extractBits(data, byte, count, offset)
+        │
+        ▼
+8. Return value to application
+```
+
+### Register Write Flow
+
+```
+1. Application creates/modifies register object:
+   - TPS25751PortControl control;
+   - control.setPortEnabled(true);
+        │
+        ▼
+2. Application calls TPS25751::writeRegister(control)
+        │
+        ▼
+3. Validate before write:
+   - control.validateData()
+        │
+        ▼
+4. I2C Protocol Layer:
+   - Wire.beginTransmission(address)
+   - Wire.write(registerAddress)
+   - Wire.write(data, length)
+   - Wire.endTransmission()
+        │
+        ▼
+5. Verify write (optional):
+   - Read back and compare
+```
+
+### Factory Creation Flow
+
+```
+1. Request: createRegister(RegisterType::STATUS)
+        │
+        ▼
+2. Factory lookup: switch(type)
+        │
+        ▼
+3. Call type-specific creator:
+   - createStatusRegister()
+        │
+        ▼
+4. Construct object:
+   - return std::make_unique<TPS25751Status>();
+        │
+        ▼
+5. Return as base class pointer:
+   - std::unique_ptr<TPS25751Register>
+```
+
+---
+
+## Extension Points
+
+### Adding a New Register Class
+
+**Required Steps:**
+
+1. **Create register class** inheriting from `TPS25751Register`
+2. **Add to RegisterType enum** in factory
+3. **Add forward declaration** in factory header
+4. **Implement factory methods** (create with/without data)
+5. **Update factory switch statements** in all createRegister() variants
+6. **Update type mapping** (getRegisterType, getAddress)
+7. **Add convenience method** to TPS25751 main class (optional)
+8. **Write unit tests**
+9. **Document with Doxygen**
+
+**Extension Points:**
+- New register types via factory registration
+- Custom validation logic via override
+- Custom debug output via debugPrint()
+- Additional accessor methods in subclass
+
+### Dependency Injection Points
+
+**Factory Injection:**
+```cpp
+// Replace global factory for testing
+auto mockFactory = std::make_unique<MockRegisterFactory>();
+TPS25751Factory::setFactory(std::move(mockFactory));
+
+// Use mock factory
+auto reg = TPS25751Factory::getInstance().createRegister(RegisterType::STATUS);
+// Returns mock object instead of real one
+```
+
+**I2C Injection:**
+```cpp
+// TPS25751 can use Wire or Wire1
+TPS25751 tps(&Wire1);  // Use alternate I2C bus
+```
+
+### Customization Points
+
+**Validation Levels:**
+```cpp
+class MyCustomRegister : public TPS25751Register {
+    bool validateSemantic() const override {
+        // Add application-specific validation
+        return baseValidation() && myCustomChecks();
+    }
+};
+```
+
+**Debug Output:**
+```cpp
+class MyCustomRegister : public TPS25751Register {
+    void debugPrint() const override {
+        // Custom format for specific needs
+        printInMyFormat();
+    }
+};
+```
+
+---
+
+## Component Relationships
+
+### Module Dependencies
+
+```
+Application
+    ↓ uses
+TPS25751 (main class)
+    ↓ uses
+    ├─→ TPS25751Factory (register creation)
+    ├─→ TPS25751Register subclasses (data access)
+    └─→ Wire (I2C communication)
+
+TPS25751Factory
+    ↓ creates
+TPS25751Register subclasses
+    ↓ uses
+TPS25751BitUtils (bit extraction)
+```
+
+### Compile-Time Dependencies
+
+```
+TPS25751Register.h (base class)
+    ↑ depends on
+    │
+    ├─ TPS25751Status.h
+    ├─ TPS25751Mode.h
+    └─ ... (all register headers)
+        ↑ used by
+        │
+    TPS25751RegisterFactory.h
+        ↑ used by
+        │
+    TPS25751.h (main class)
+        ↑ used by
+        │
+    Application code
+```
+
+---
+
+## Memory Management Strategy
+
+### Ownership Model
+
+**Factory creates, user owns:**
+```cpp
+// Factory creates with std::unique_ptr
+auto status = factory.createRegister(RegisterType::STATUS);
+// User owns, automatic cleanup when out of scope
+```
+
+**Main class convenience methods:**
+```cpp
+// TPS25751 creates and returns ownership
+auto status = tps.readStatusRegister();
+// Caller owns returned object
+```
+
+**Data storage:**
+```cpp
+class TPS25751Register {
+private:
+    std::vector<uint8_t> data_;  // Owned by register object
+    // Automatic cleanup in destructor
+};
+```
+
+### Move Semantics
+
+**Prefer moving over copying:**
+```cpp
+// Factory returns by value (move)
+std::unique_ptr<TPS25751Register> createRegister(RegisterType type) {
+    return std::make_unique<TPS25751Status>();  // Move, not copy
+}
+
+// Move constructor
+TPS25751Status(TPS25751Status&& other) noexcept
+    : TPS25751Register(std::move(other)) {
+    // Move members
+}
+```
+
+---
+
+## Testing Architecture
+
+### Unit Test Structure
+
+```
+Each register class has:
+    - Constructor tests
+    - Validation tests (3 levels)
+    - Accessor tests (all public methods)
+    - Edge case tests
+    - Factory integration tests
+```
+
+### Integration Test Structure
+
+```
+Cross-component tests:
+    - Factory creation for all types
+    - Round-trip read/write
+    - Multi-register sequences
+    - Error handling chains
+```
+
+### Mock Points
+
+**Mockable interfaces:**
+- TPS25751RegisterFactory (abstract factory)
+- I2C communication (can wrap Wire)
+- Register classes (virtual methods)
+
+---
+
+## Future Architecture Considerations
+
+### Planned Enhancements
+
+1. **Caching Layer**
+   - Cache frequently-read registers
+   - Invalidate on write or interrupt
+   - Reduce I2C traffic
+
+2. **Async I2C**
+   - Non-blocking register reads
+   - Callback notification
+   - Better performance
+
+3. **Register Subscriptions**
+   - Observer pattern
+   - Notify on register changes
+   - Event-driven architecture
+
+4. **Configuration Profiles**
+   - Save/restore device state
+   - Profile management
+   - Factory reset capability
+
+---
+
+## Architectural Decision Records
+
+### ADR-004: Factory Pattern for Register Creation
+**Status:** Accepted
+**Decision:** Use Factory Method pattern instead of direct instantiation
+**Rationale:**
+- Platform has no RTTI, need type management
+- Centralized creation logic
+- Testable via dependency injection
+**Consequences:**
+- All register creation goes through factory
+- Type safety without dynamic_cast
+- Slightly more boilerplate for new types
+
+### ADR-005: Three-Tier Validation
+**Status:** Accepted
+**Decision:** Separate validation into Basic, Data, Semantic levels
+**Rationale:**
+- Performance tuning (choose validation depth)
+- Progressive validation strategy
+- Clear separation of concerns
+**Consequences:**
+- Every register implements 3 validation methods
+- Validation can be skipped in production if needed
+- Better test coverage
+
+### ADR-006: std::vector for Data Storage
+**Status:** Accepted
+**Decision:** Use std::vector<uint8_t> instead of raw arrays
+**Rationale:**
+- Automatic memory management
+- RAII compliance
+- Safe resizing
+**Consequences:**
+- Small heap overhead
+- No manual memory management
+- Exception-safe (if enabled)
+
+---
+
+## Revision History
+
+| Version | Date | Author | Changes |
+|---------|------|--------|---------|
+| 1.0 | 2025-10-20 | Claude Code | Initial architecture document |
+
+---
+
+*Understanding this architecture ensures consistent, maintainable implementations.*

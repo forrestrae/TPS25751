@@ -1,0 +1,27 @@
+{
+  "$schema": "https://raw.githubusercontent.com/platformio/platformio-core/develop/platformio/assets/schema/library.json",
+  "name": "TPS25751",
+  "version": "1.0.0",
+  "description": "Arduino-compatible library for the TPS25751, a USB-C PD controller from Texas Instruments.",
+  "keywords": "TPS25751, USBPD, Texas Instruments",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/forrestrae/TPS25751.git"
+  },
+  "authors": [
+    {
+      "name": "Forrest Rae",
+      "email": "fbr@14x.net",
+      "url": "https://github.com/forrestrae",
+      "maintainer": true
+    }
+  ],
+  "license": "PolyForm-Noncommercial-1.0.0",
+  "frameworks": "arduino",
+  "platforms": "*",
+  "dependencies": [
+    {
+      "name": "Wire"
+    }
+  ]
+}

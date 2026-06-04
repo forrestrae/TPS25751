@@ -175,67 +175,50 @@ void TPS25751::setDebugCategories(uint8_t categories) {
 }
 
 // Factory-based register creation implementations
-std::unique_ptr<TPS25751Register> TPS25751::readRegisterByType(RegisterType type) const {
-    // Get the address for this register type
-    TPS25751Registers::Address addr = TPS25751RegisterFactory::getAddress(type);
-    if (addr == static_cast<TPS25751Registers::Address>(0xFF)) {
-        TPS_DEBUG_ERROR(DEBUG_CAT_REGISTER, "Invalid register type: %u", static_cast<uint8_t>(type));
-        return nullptr;
-    }
-    
-    // Get register info
+std::unique_ptr<TPS25751Register> TPS25751::readRegisterByAddress(TPS25751Registers::Address addr) const {
+    // Look up register info (size). A null result means the address is unknown.
     auto regInfo = TPS25751Registers::getRegisterInfo(addr);
     if (!regInfo) {
         TPS_DEBUG_ERROR(DEBUG_CAT_REGISTER, "No register info for address 0x%02X", static_cast<uint8_t>(addr));
         return nullptr;
     }
-    
-    // Create register using factory
-    auto reg = TPS25751Factory::getInstance().createRegister(type);
+
+    // Confirm the address has a decoder class before reading from the bus.
+    auto reg = TPS25751Factory::getInstance().createRegister(addr);
     if (!reg) {
-        TPS_DEBUG_ERROR(DEBUG_CAT_REGISTER, "Failed to create register of type %u", static_cast<uint8_t>(type));
+        TPS_DEBUG_ERROR(DEBUG_CAT_REGISTER, "Unsupported register address: 0x%02X", static_cast<uint8_t>(addr));
         return nullptr;
     }
-    
+
     // Read data into a temporary buffer
     auto buffer = std::make_unique<uint8_t[]>(regInfo->size);
     if (!readRegister(static_cast<uint8_t>(addr), buffer.get(), regInfo->size)) {
-        TPS_DEBUG_ERROR(DEBUG_CAT_REGISTER, "Failed to read register data for type %u", static_cast<uint8_t>(type));
+        TPS_DEBUG_ERROR(DEBUG_CAT_REGISTER, "Failed to read register data for address 0x%02X", static_cast<uint8_t>(addr));
         return nullptr;
     }
-    
+
     // Create register with actual data
-    return TPS25751Factory::getInstance().createRegister(type, buffer.get(), regInfo->size);
+    return TPS25751Factory::getInstance().createRegister(addr, buffer.get(), regInfo->size);
 }
 
-std::unique_ptr<TPS25751Register> TPS25751::readRegisterByAddress(TPS25751Registers::Address addr) const {
-    RegisterType type = TPS25751RegisterFactory::getRegisterType(addr);
-    if (type == RegisterType::UNKNOWN) {
-        TPS_DEBUG_ERROR(DEBUG_CAT_REGISTER, "Unknown register address: 0x%02X", static_cast<uint8_t>(addr));
-        return nullptr;
-    }
-    
-    return readRegisterByType(type);
-}
-
-std::unique_ptr<TPS25751Register> TPS25751::readAndValidateRegisterByType(RegisterType type, bool validate) const {
-    auto reg = readRegisterByType(type);
+std::unique_ptr<TPS25751Register> TPS25751::readAndValidateRegisterByAddress(TPS25751Registers::Address addr, bool validate) const {
+    auto reg = readRegisterByAddress(addr);
     if (!reg) {
         return nullptr;
     }
-    
+
     if (validate && !validateRegister(*reg)) {
-        TPS_DEBUG_WARN(DEBUG_CAT_REGISTER, "Register validation failed for type %u", static_cast<uint8_t>(type));
+        TPS_DEBUG_WARN(DEBUG_CAT_REGISTER, "Register validation failed for address 0x%02X", static_cast<uint8_t>(addr));
         return nullptr;
     }
-    
-    TPS_DEBUG_INFO(DEBUG_CAT_REGISTER, "Successfully read and validated register type %u", static_cast<uint8_t>(type));
+
+    TPS_DEBUG_INFO(DEBUG_CAT_REGISTER, "Successfully read and validated register at address 0x%02X", static_cast<uint8_t>(addr));
     return reg;
 }
 
 // Type-safe factory-based convenience method implementations
 std::unique_ptr<TPS25751Status> TPS25751::readStatusRegister(bool validate) const {
-    auto reg = readAndValidateRegisterByType(RegisterType::STATUS, validate);
+    auto reg = readAndValidateRegisterByAddress(TPS25751Registers::Address::STATUS, validate);
     if (!reg) return nullptr;
     
     // Since we control the factory creation, we can use static_cast
@@ -247,7 +230,7 @@ std::unique_ptr<TPS25751Status> TPS25751::readStatusRegister(bool validate) cons
 }
 
 std::unique_ptr<TPS25751Mode> TPS25751::readModeRegister(bool validate) const {
-    auto reg = readAndValidateRegisterByType(RegisterType::MODE, validate);
+    auto reg = readAndValidateRegisterByAddress(TPS25751Registers::Address::MODE, validate);
     if (!reg) return nullptr;
     
     if (reg) {
@@ -258,7 +241,7 @@ std::unique_ptr<TPS25751Mode> TPS25751::readModeRegister(bool validate) const {
 }
 
 std::unique_ptr<TPS25751BootFlags> TPS25751::readBootFlagsRegister(bool validate) const {
-    auto reg = readAndValidateRegisterByType(RegisterType::BOOT_FLAGS, validate);
+    auto reg = readAndValidateRegisterByAddress(TPS25751Registers::Address::BOOT_STATUS, validate);
     if (!reg) return nullptr;
     
     if (reg) {
@@ -269,7 +252,7 @@ std::unique_ptr<TPS25751BootFlags> TPS25751::readBootFlagsRegister(bool validate
 }
 
 std::unique_ptr<TPS25751PowerPathStatus> TPS25751::readPowerPathStatusRegister(bool validate) const {
-    auto reg = readAndValidateRegisterByType(RegisterType::POWER_PATH_STATUS, validate);
+    auto reg = readAndValidateRegisterByAddress(TPS25751Registers::Address::POWER_PATH_STATUS, validate);
     if (!reg) return nullptr;
     
     if (reg) {
@@ -280,7 +263,7 @@ std::unique_ptr<TPS25751PowerPathStatus> TPS25751::readPowerPathStatusRegister(b
 }
 
 std::unique_ptr<TPS25751PortConfig> TPS25751::readPortConfigRegister(bool validate) const {
-    auto reg = readAndValidateRegisterByType(RegisterType::PORT_CONFIG, validate);
+    auto reg = readAndValidateRegisterByAddress(TPS25751Registers::Address::PORT_CONFIGURATION, validate);
     if (!reg) return nullptr;
 
     if (reg) {
@@ -291,7 +274,7 @@ std::unique_ptr<TPS25751PortConfig> TPS25751::readPortConfigRegister(bool valida
 }
 
 std::unique_ptr<TPS25751TypeCState> TPS25751::readTypeCStateRegister(bool validate) const {
-    auto reg = readAndValidateRegisterByType(RegisterType::TYPEC_STATE, validate);
+    auto reg = readAndValidateRegisterByAddress(TPS25751Registers::Address::TYPEC_STATE, validate);
     if (!reg) return nullptr;
 
     if (reg) {
@@ -302,7 +285,7 @@ std::unique_ptr<TPS25751TypeCState> TPS25751::readTypeCStateRegister(bool valida
 }
 
 std::unique_ptr<TPS25751InterruptEvent> TPS25751::readInterruptEventRegister(bool validate) const {
-    auto reg = readAndValidateRegisterByType(RegisterType::INTERRUPT_EVENT, validate);
+    auto reg = readAndValidateRegisterByAddress(TPS25751Registers::Address::INT_EVENT1, validate);
     if (!reg) return nullptr;
 
     if (reg) {
@@ -313,7 +296,7 @@ std::unique_ptr<TPS25751InterruptEvent> TPS25751::readInterruptEventRegister(boo
 }
 
 std::unique_ptr<TPS25751PowerStatus> TPS25751::readPowerStatusRegister(bool validate) const {
-    auto reg = readAndValidateRegisterByType(RegisterType::POWER_STATUS, validate);
+    auto reg = readAndValidateRegisterByAddress(TPS25751Registers::Address::POWER_STATUS, validate);
     if (!reg) return nullptr;
 
     if (reg) {
@@ -324,7 +307,7 @@ std::unique_ptr<TPS25751PowerStatus> TPS25751::readPowerStatusRegister(bool vali
 }
 
 std::unique_ptr<TPS25751PDStatus> TPS25751::readPDStatusRegister(bool validate) const {
-    auto reg = readAndValidateRegisterByType(RegisterType::PD_STATUS, validate);
+    auto reg = readAndValidateRegisterByAddress(TPS25751Registers::Address::PD_STATUS, validate);
     if (!reg) return nullptr;
 
     if (reg) {
@@ -335,7 +318,7 @@ std::unique_ptr<TPS25751PDStatus> TPS25751::readPDStatusRegister(bool validate) 
 }
 
 std::unique_ptr<TPS25751GPIOStatus> TPS25751::readGPIOStatusRegister(bool validate) const {
-    auto reg = readAndValidateRegisterByType(RegisterType::GPIO_STATUS, validate);
+    auto reg = readAndValidateRegisterByAddress(TPS25751Registers::Address::GPIO_STATUS, validate);
     if (!reg) return nullptr;
 
     if (reg) {
@@ -346,7 +329,7 @@ std::unique_ptr<TPS25751GPIOStatus> TPS25751::readGPIOStatusRegister(bool valida
 }
 
 std::unique_ptr<TPS25751PortControl> TPS25751::readPortControlRegister(bool validate) const {
-    auto reg = readAndValidateRegisterByType(RegisterType::PORT_CONTROL, validate);
+    auto reg = readAndValidateRegisterByAddress(TPS25751Registers::Address::PORT_CONTROL, validate);
     if (!reg) return nullptr;
 
     if (reg) {
@@ -357,7 +340,7 @@ std::unique_ptr<TPS25751PortControl> TPS25751::readPortControlRegister(bool vali
 }
 
 std::unique_ptr<TPS25751ActivePDOContract> TPS25751::readActivePDOContractRegister(bool validate) const {
-    auto reg = readAndValidateRegisterByType(RegisterType::ACTIVE_PDO_CONTRACT, validate);
+    auto reg = readAndValidateRegisterByAddress(TPS25751Registers::Address::ACTIVE_PDO_CONTRACT, validate);
     if (!reg) return nullptr;
 
     if (reg) {
@@ -368,7 +351,7 @@ std::unique_ptr<TPS25751ActivePDOContract> TPS25751::readActivePDOContractRegist
 }
 
 std::unique_ptr<TPS25751ActiveRDOContract> TPS25751::readActiveRDOContractRegister(bool validate) const {
-    auto reg = readAndValidateRegisterByType(RegisterType::ACTIVE_RDO_CONTRACT, validate);
+    auto reg = readAndValidateRegisterByAddress(TPS25751Registers::Address::ACTIVE_RDO_CONTRACT, validate);
     if (!reg) return nullptr;
 
     if (reg) {
@@ -379,7 +362,7 @@ std::unique_ptr<TPS25751ActiveRDOContract> TPS25751::readActiveRDOContractRegist
 }
 
 std::unique_ptr<TPS25751ReceivedSourceCaps> TPS25751::readReceivedSourceCapsRegister(bool validate) const {
-    auto reg = readAndValidateRegisterByType(RegisterType::RECEIVED_SOURCE_CAPS, validate);
+    auto reg = readAndValidateRegisterByAddress(TPS25751Registers::Address::RECEIVED_SOURCE_CAPABILITIES, validate);
     if (!reg) return nullptr;
 
     if (reg) {
@@ -390,7 +373,7 @@ std::unique_ptr<TPS25751ReceivedSourceCaps> TPS25751::readReceivedSourceCapsRegi
 }
 
 std::unique_ptr<TPS25751ReceivedSinkCaps> TPS25751::readReceivedSinkCapsRegister(bool validate) const {
-    auto reg = readAndValidateRegisterByType(RegisterType::RECEIVED_SINK_CAPS, validate);
+    auto reg = readAndValidateRegisterByAddress(TPS25751Registers::Address::RECEIVED_SINK_CAPABILITIES, validate);
     if (!reg) return nullptr;
 
     if (reg) {

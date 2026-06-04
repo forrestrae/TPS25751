@@ -63,12 +63,12 @@ public:
     bool readRegister(TPS25751Registers::RegisterInfo regInfo, uint8_t *buffer) const;
     bool readRegister(TPS25751Registers::Address addr, uint8_t *buffer, size_t length) const;
     
-    template<typename RegisterType>
-    bool readRegister(TPS25751Registers::RegisterInfo regInfo, RegisterType &registerOut) const
+    template<typename RegisterT>
+    bool readRegister(TPS25751Registers::RegisterInfo regInfo, RegisterT &registerOut) const
     {
         uint8_t buffer[regInfo.size];
         if (readRegister(regInfo, buffer)) {
-            registerOut = RegisterType(buffer, regInfo.size);
+            registerOut = RegisterT(buffer, regInfo.size);
             return true;
         }
         return false;
@@ -122,36 +122,29 @@ public:
     
     // Factory-based register creation methods
     /**
-     * @brief Create and read a register using the factory pattern
-     * @param type Register type to create and read
-     * @return Unique pointer to populated register (nullptr if failed)
-     */
-    std::unique_ptr<TPS25751Register> readRegisterByType(RegisterType type) const;
-    
-    /**
      * @brief Create and read a register by address using the factory pattern
      * @param addr Register address
      * @return Unique pointer to populated register (nullptr if failed)
      */
     std::unique_ptr<TPS25751Register> readRegisterByAddress(TPS25751Registers::Address addr) const;
-    
+
     /**
      * @brief Read register data into a factory-created object with validation
-     * @param type Register type to create
+     * @param addr Register address to create and read
      * @param validate Whether to perform validation after reading
      * @return Unique pointer to validated register (nullptr if failed or invalid)
      */
-    std::unique_ptr<TPS25751Register> readAndValidateRegisterByType(RegisterType type, bool validate = true) const;
-    
+    std::unique_ptr<TPS25751Register> readAndValidateRegisterByAddress(TPS25751Registers::Address addr, bool validate = true) const;
+
     /**
      * @brief Generic register reader that creates appropriate register objects
      * @tparam T Target register type (will be cast from base)
-     * @param type Register type to create
+     * @param addr Register address to create
      * @return Unique pointer to specific register type (nullptr if failed or wrong type)
      */
     template<typename T>
-    std::unique_ptr<T> readRegisterAs(RegisterType type) const {
-        auto reg = readRegisterByType(type);
+    std::unique_ptr<T> readRegisterAs(TPS25751Registers::Address addr) const {
+        auto reg = readRegisterByAddress(addr);
         if (!reg) return nullptr;
         
         // Since we control factory creation, we can use static_cast

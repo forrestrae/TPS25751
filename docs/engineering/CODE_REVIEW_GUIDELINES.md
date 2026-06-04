@@ -23,7 +23,7 @@ The most critical review category for this codebase. Many bugs here cause silent
 - **Byte order in multi-byte fields**: Confirm endianness matches TPS25751 register layout; little-endian fields in a big-endian context (or vice versa) will produce wrong values silently
 - **Reserved bit masking**: Reserved bits must be masked out before comparing or validating field values; raw reads may have non-zero reserved bits set by hardware
 - **Integer overflow in bitfield math**: Shifting or multiplying `uint8_t` values before casting to a wider type can overflow; cast first
-- **Null pointer on factory miss**: `createRegister()` returns `nullptr` for unknown `RegisterType` values. Callers must check before dereferencing
+- **Null pointer on factory miss**: `createRegister()` returns `nullptr` for addresses without a decoder class. Callers must check before dereferencing
 - **Validation tier skipping**: `validateData()` must call `validateBasic()` first; `validateSemantic()` must call `validateData()` first. Breaking this chain produces misleading results
 - **Move-after-use**: After moving a `std::unique_ptr` into a factory return, the source is null. Ensure moved-from objects are not accessed
 - **Incomplete Rule of Five**: If any of copy constructor, copy assignment, move constructor, move assignment, or destructor is user-defined, all five must be considered — missing one leads to double-free or shallow copies
@@ -50,7 +50,7 @@ Verify that new code follows all mandatory standards from [STANDARDS.md](STANDAR
 - **Class structure**: Inherits from `TPS25751Register`; implements all pure virtual methods (`getAddress`, `getExpectedSize`, `isReadOnly`, `validateBasic`, `validateData`, `validateSemantic`, `debugPrint`)
 - **Three-tier validation**: All three levels implemented and chained correctly
 - **Debug print format**: Follows the exact `========================================` header/footer format with `F()` macros
-- **Factory integration**: New register type added to `RegisterType` enum, forward declaration added, all `createRegister()` variants updated, `getRegisterType()` and `getAddress()` helpers updated
+- **Factory integration**: Register address present in `TPS25751Registers::Address` (with `RegisterInfo` size), forward declaration added, all `createRegister()` variants updated with a `case` for the new address
 - **Magic numbers**: Bitfield masks and shift counts defined as `static constexpr` named constants, not inline literals
 - **Doxygen**: Every public method has `@brief`, `@return`, and a `@see` reference to the TI datasheet section
 
@@ -91,6 +91,6 @@ Verify that new code follows all mandatory standards from [STANDARDS.md](STANDAR
 ## Additional Concerns
 
 - **Performance**: Unnecessary copies of register data (pass `const TPS25751Register*` or `const TPS25751Register&` instead of by value)
-- **Backwards compatibility**: Changes to `RegisterType` enum values (not just additions) break binary compatibility with serialized data
+- **Backwards compatibility**: Changes to `TPS25751Registers::Address` enum values (not just additions) break binary compatibility with serialized data
 - **Missing datasheet reference**: Any bitfield constant or enum value without a `@see` TI TRM section reference makes future verification impossible
 - **Hardware test status**: Note in the PR whether changes have been validated on physical TPS25751 hardware

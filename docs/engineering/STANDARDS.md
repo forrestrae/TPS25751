@@ -110,19 +110,16 @@ TPS25751Status& operator=(TPS25751Status&& other) noexcept = default;
 
 ## Factory Integration
 
-### Step 1: Add to RegisterType Enum
+Registers are identified solely by their hardware address
+(`TPS25751Registers::Address`) — there is no separate type enum. The factory
+dispatches object creation directly on the address.
 
-In `TPS25751RegisterFactory.h`:
+### Step 1: Add the Address (if not already present)
 
-```cpp
-enum class RegisterType : uint8_t {
-    STATUS = 0,
-    MODE = 1,
-    // ... existing types ...
-    [NEW_REGISTER_NAME] = X,  // Use next available number
-    UNKNOWN = 255
-};
-```
+The 27 hardware addresses already live in `TPS25751Registers::Address` in
+`TPS25751RegisterAddress.h`, each paired with a `RegisterInfo` size entry. If the
+register you are adding is already in that enum (it usually is), there is nothing to
+add here.
 
 ### Step 2: Add Forward Declaration
 
@@ -132,7 +129,7 @@ At the top of `TPS25751RegisterFactory.h`:
 class TPS25751[NewRegisterName];
 ```
 
-### Step 3: Implement Factory Methods
+### Step 3: Implement Factory Helper Methods
 
 In `TPS25751RegisterFactoryImpl` (both .h and .cpp):
 
@@ -152,44 +149,24 @@ std::unique_ptr<TPS25751Register> TPS25751RegisterFactoryImpl::create[NewRegiste
 }
 ```
 
-### Step 4: Update createRegister() Methods
+### Step 4: Add a case to each createRegister() switch
 
-Add cases to all `createRegister()` method variants:
+Add one `case` keyed on the register's `Address` to each of the three
+`createRegister()` variants (no-arg, `(data, length)`, and `(const RegisterInfo&)`):
 
 ```cpp
-std::unique_ptr<TPS25751Register> TPS25751RegisterFactoryImpl::createRegister(RegisterType type) {
-    switch (type) {
+std::unique_ptr<TPS25751Register> TPS25751RegisterFactoryImpl::createRegister(TPS25751Registers::Address addr) {
+    switch (addr) {
         // ... existing cases ...
-        case RegisterType::[NEW_REGISTER_NAME]:
+        case TPS25751Registers::Address::[NEW_REGISTER_ADDRESS]:
             return create[NewRegisterName]Register();
         // ...
     }
 }
 ```
 
-### Step 5: Update Helper Methods
-
-Update `getRegisterType()` and `getAddress()` static methods:
-
-```cpp
-RegisterType TPS25751RegisterFactory::getRegisterType(TPS25751Registers::Address addr) {
-    switch (addr) {
-        // ... existing cases ...
-        case TPS25751Registers::Address::[NEW_REGISTER_ADDRESS]:
-            return RegisterType::[NEW_REGISTER_NAME];
-        // ...
-    }
-}
-
-TPS25751Registers::Address TPS25751RegisterFactory::getAddress(RegisterType type) {
-    switch (type) {
-        // ... existing cases ...
-        case RegisterType::[NEW_REGISTER_NAME]:
-            return TPS25751Registers::Address::[NEW_REGISTER_ADDRESS];
-        // ...
-    }
-}
-```
+Addresses without a `case` fall through to `default:` and return `nullptr`, which is
+how un-decoded registers are reported.
 
 ---
 
@@ -443,7 +420,7 @@ TEST(TPS25751StatusTest, BoundaryValues) {
 
 ```cpp
 TEST(TPS25751StatusTest, FactoryCreation) {
-    auto reg = TPS25751Factory::getInstance().createRegister(RegisterType::STATUS);
+    auto reg = TPS25751Factory::getInstance().createRegister(TPS25751Registers::Address::STATUS);
     EXPECT_NE(reg, nullptr);
 
     // Cast and verify type
@@ -455,7 +432,7 @@ TEST(TPS25751StatusTest, FactoryCreation) {
 TEST(TPS25751StatusTest, FactoryCreationWithData) {
     uint8_t data[] = {0x01, 0x02, 0x03, 0x04, 0x05};
     auto reg = TPS25751Factory::getInstance().createRegister(
-        RegisterType::STATUS, data, sizeof(data));
+        TPS25751Registers::Address::STATUS, data, sizeof(data));
     EXPECT_NE(reg, nullptr);
     EXPECT_EQ(reg->getDataLength(), 5);
 }
@@ -511,7 +488,7 @@ public:
 ✅ **DO:**
 ```cpp
 std::unique_ptr<TPS25751Register> reg =
-    TPS25751Factory::getInstance().createRegister(RegisterType::STATUS);
+    TPS25751Factory::getInstance().createRegister(TPS25751Registers::Address::STATUS);
 ```
 
 **Use raw pointers ONLY for non-owning references:**
@@ -560,9 +537,8 @@ auto* status = static_cast<TPS25751Status*>(reg.get());  // OK
 
 **Safe casting pattern:**
 ```cpp
-// Use factory's type information
-RegisterType type = TPS25751RegisterFactory::getRegisterType(reg->getAddress());
-if (type == RegisterType::STATUS) {
+// Dispatch on the register's address (the single register identity)
+if (reg->getAddress() == static_cast<uint8_t>(TPS25751Registers::Address::STATUS)) {
     auto* status = static_cast<TPS25751Status*>(reg.get());
     // Now safe to use status
 }
@@ -711,11 +687,10 @@ Use this checklist for every new register:
 - [ ] `validateSemantic()` checks logical consistency
 - [ ] `debugPrint()` follows standard format
 - [ ] All accessor methods have Doxygen comments
-- [ ] Added to `RegisterType` enum
+- [ ] Register address present in `TPS25751Registers::Address` (+ `RegisterInfo` size entry)
 - [ ] Forward declaration added to factory header
 - [ ] Factory creation methods implemented
-- [ ] All `createRegister()` variants handle new type
-- [ ] `getRegisterType()` and `getAddress()` updated
+- [ ] All `createRegister()` variants handle the new address (`case` added to each switch)
 - [ ] Unit tests written with >90% coverage
 - [ ] Constructor tests pass
 - [ ] Validation tests pass

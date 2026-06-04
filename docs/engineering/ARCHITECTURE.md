@@ -236,21 +236,11 @@ private:
 
 **Components:**
 
-**A. RegisterType Enum:**
-```cpp
-enum class RegisterType : uint8_t {
-    STATUS = 0,
-    MODE = 1,
-    BOOT_FLAGS = 2,
-    POWER_PATH_STATUS = 3,
-    PORT_CONFIG = 4,
-    TYPEC_STATE = 5,
-    INTERRUPT_EVENT = 6,
-    POWER_STATUS = 7,
-    PD_STATUS = 8,
-    UNKNOWN = 255
-};
-```
+**A. Register Identity — `TPS25751Registers::Address`:**
+
+Registers are identified by their hardware address. There is no separate factory
+type enum; `TPS25751Registers::Address` (in `TPS25751RegisterAddress.h`) is the
+single source of truth and the key the factory dispatches on.
 
 **B. Abstract Factory Interface:**
 ```cpp
@@ -259,25 +249,25 @@ public:
     virtual ~TPS25751RegisterFactory() = default;
 
     virtual std::unique_ptr<TPS25751Register>
-        createRegister(RegisterType type) = 0;
-
-    virtual std::unique_ptr<TPS25751Register>
         createRegister(TPS25751Registers::Address addr) = 0;
 
     virtual std::unique_ptr<TPS25751Register>
-        createRegister(RegisterType type, const uint8_t* data, size_t length) = 0;
+        createRegister(TPS25751Registers::Address addr, const uint8_t* data, size_t length) = 0;
 
-    static RegisterType getRegisterType(TPS25751Registers::Address addr);
-    static TPS25751Registers::Address getAddress(RegisterType type);
-    static bool validateTypeAddress(RegisterType type, TPS25751Registers::Address addr);
+    virtual std::unique_ptr<TPS25751Register>
+        createRegister(const TPS25751Registers::RegisterInfo& regInfo) = 0;
 };
 ```
+
+An address without a decoder class returns `nullptr` from `createRegister()` — that
+is how un-decoded registers are reported (previously the `RegisterType::UNKNOWN`
+sentinel).
 
 **C. Concrete Factory:**
 ```cpp
 class TPS25751RegisterFactoryImpl : public TPS25751RegisterFactory {
 public:
-    std::unique_ptr<TPS25751Register> createRegister(RegisterType type) override;
+    std::unique_ptr<TPS25751Register> createRegister(TPS25751Registers::Address addr) override;
     // ... other overrides
 
 private:
@@ -356,17 +346,12 @@ public:
 
 **Implementation:**
 ```cpp
-// Create by type
-auto status = TPS25751Factory::getInstance()
-    .createRegister(RegisterType::STATUS);
-
-// Create by address (factory determines type)
+// Create by address (the single register identity)
 auto reg = TPS25751Factory::getInstance()
     .createRegister(TPS25751Registers::Address::STATUS);
 
-// Type-safe casting
-RegisterType type = TPS25751RegisterFactory::getRegisterType(reg->getAddress());
-if (type == RegisterType::STATUS) {
+// Type-safe casting — dispatch on the register's address
+if (reg && reg->getAddress() == static_cast<uint8_t>(TPS25751Registers::Address::STATUS)) {
     auto* statusPtr = static_cast<TPS25751Status*>(reg.get());
 }
 ```
@@ -593,7 +578,7 @@ TPS25751Debug (utility, all static)
         │
         ▼
 4. Factory creates register object:
-   - factory.createRegister(RegisterType::STATUS, buffer, length)
+   - factory.createRegister(TPS25751Registers::Address::STATUS, buffer, length)
    - Returns std::unique_ptr<TPS25751Status>
         │
         ▼
@@ -642,10 +627,10 @@ TPS25751Debug (utility, all static)
 ### Factory Creation Flow
 
 ```
-1. Request: createRegister(RegisterType::STATUS)
+1. Request: createRegister(TPS25751Registers::Address::STATUS)
         │
         ▼
-2. Factory lookup: switch(type)
+2. Factory lookup: switch(addr)
         │
         ▼
 3. Call type-specific creator:
@@ -669,14 +654,13 @@ TPS25751Debug (utility, all static)
 **Required Steps:**
 
 1. **Create register class** inheriting from `TPS25751Register`
-2. **Add to RegisterType enum** in factory
+2. **Ensure the address exists** in `TPS25751Registers::Address` (+ `RegisterInfo` size)
 3. **Add forward declaration** in factory header
 4. **Implement factory methods** (create with/without data)
-5. **Update factory switch statements** in all createRegister() variants
-6. **Update type mapping** (getRegisterType, getAddress)
-7. **Add convenience method** to TPS25751 main class (optional)
-8. **Write unit tests**
-9. **Document with Doxygen**
+5. **Update factory switch statements** in all createRegister() variants (one `case` per address)
+6. **Add convenience method** to TPS25751 main class (optional)
+7. **Write unit tests**
+8. **Document with Doxygen**
 
 **Extension Points:**
 - New register types via factory registration
@@ -693,7 +677,7 @@ auto mockFactory = std::make_unique<MockRegisterFactory>();
 TPS25751Factory::setFactory(std::move(mockFactory));
 
 // Use mock factory
-auto reg = TPS25751Factory::getInstance().createRegister(RegisterType::STATUS);
+auto reg = TPS25751Factory::getInstance().createRegister(TPS25751Registers::Address::STATUS);
 // Returns mock object instead of real one
 ```
 
@@ -776,7 +760,7 @@ TPS25751Register.h (base class)
 **Factory creates, user owns:**
 ```cpp
 // Factory creates with std::unique_ptr
-auto status = factory.createRegister(RegisterType::STATUS);
+auto status = factory.createRegister(TPS25751Registers::Address::STATUS);
 // User owns, automatic cleanup when out of scope
 ```
 
@@ -801,7 +785,7 @@ private:
 **Prefer moving over copying:**
 ```cpp
 // Factory returns by value (move)
-std::unique_ptr<TPS25751Register> createRegister(RegisterType type) {
+std::unique_ptr<TPS25751Register> createRegister(TPS25751Registers::Address addr) {
     return std::make_unique<TPS25751Status>();  // Move, not copy
 }
 

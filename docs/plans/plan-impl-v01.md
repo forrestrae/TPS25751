@@ -222,7 +222,7 @@ These registers are either write-only, application-specific, or used in speciali
 - Parse PDO type (Fixed, Battery, Variable, Augmented)
 - Extract voltage, current, and power fields
 - Decode PDO flags and options
-- Add factory support in `RegisterType` enum
+- Add factory support (a `case` keyed on the register's `TPS25751Registers::Address`)
 - Unit tests for all PDO types
 
 **ACTIVE_RDO_CONTRACT (0x35) - 4 bytes**
@@ -271,10 +271,9 @@ These registers are either write-only, application-specific, or used in speciali
 - Unit tests for control scenarios
 
 #### 1.4 Factory Integration
-- Add all 6 register types to `RegisterType` enum
+- Ensure all 6 register addresses are present in `TPS25751Registers::Address` (with `RegisterInfo` sizes)
 - Update `TPS25751RegisterFactoryImpl` with creation methods
-- Update `getRegisterType()` and `getAddress()` mappings
-- Add validation in `validateTypeAddress()`
+- Add a `case` for each new address to every `createRegister()` switch
 
 #### 1.5 Main Library Integration
 - Add convenience methods to `TPS25751` class:

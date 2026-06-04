@@ -292,41 +292,30 @@ void test_oversized_data() {
 **Test factory pattern integration:**
 
 ```cpp
-void test_factory_create_by_type() {
-    auto reg = TPS25751Factory::getInstance().createRegister(RegisterType::STATUS);
-
-    TEST_ASSERT_NOT_NULL(reg.get());
-    TEST_ASSERT_EQUAL_UINT8(0x1A, reg->getAddress());
-    TEST_ASSERT_EQUAL_UINT8(5, reg->getExpectedSize());
-}
-
 void test_factory_create_by_address() {
     auto reg = TPS25751Factory::getInstance().createRegister(
         TPS25751Registers::Address::STATUS);
 
     TEST_ASSERT_NOT_NULL(reg.get());
     TEST_ASSERT_EQUAL_UINT8(0x1A, reg->getAddress());
+    TEST_ASSERT_EQUAL_UINT8(5, reg->getExpectedSize());
 }
 
 void test_factory_create_with_data() {
     uint8_t data[] = {0x01, 0x02, 0x03, 0x04, 0x05};
     auto reg = TPS25751Factory::getInstance().createRegister(
-        RegisterType::STATUS, data, sizeof(data));
+        TPS25751Registers::Address::STATUS, data, sizeof(data));
 
     TEST_ASSERT_NOT_NULL(reg.get());
     TEST_ASSERT_EQUAL_UINT8(5, reg->getDataLength());
 }
 
-void test_factory_type_address_mapping() {
-    RegisterType type = TPS25751RegisterFactory::getRegisterType(
-        TPS25751Registers::Address::STATUS);
+void test_factory_unsupported_address_returns_null() {
+    // An address with no decoder class yields nullptr
+    auto reg = TPS25751Factory::getInstance().createRegister(
+        TPS25751Registers::Address::ADC_RESULTS);
 
-    TEST_ASSERT_EQUAL(RegisterType::STATUS, type);
-
-    TPS25751Registers::Address addr =
-        TPS25751RegisterFactory::getAddress(RegisterType::STATUS);
-
-    TEST_ASSERT_EQUAL_UINT8(0x1A, static_cast<uint8_t>(addr));
+    TEST_ASSERT_NULL(reg.get());
 }
 ```
 
@@ -509,44 +498,25 @@ private:
 ### Factory Integration Tests
 
 ```cpp
-void test_factory_creates_all_register_types() {
-    RegisterType types[] = {
-        RegisterType::STATUS,
-        RegisterType::MODE,
-        RegisterType::BOOT_FLAGS,
-        RegisterType::POWER_PATH_STATUS,
-        RegisterType::PORT_CONFIG,
-        RegisterType::TYPEC_STATE,
-        RegisterType::INTERRUPT_EVENT,
-        RegisterType::POWER_STATUS,
-        RegisterType::PD_STATUS,
-        // ... add all implemented types
-    };
-
-    for (auto type : types) {
-        auto reg = TPS25751Factory::getInstance().createRegister(type);
-        TEST_ASSERT_NOT_NULL(reg.get());
-    }
-}
-
-void test_all_addresses_map_to_types() {
+void test_factory_creates_all_implemented_registers() {
     TPS25751Registers::Address addresses[] = {
         TPS25751Registers::Address::STATUS,
         TPS25751Registers::Address::MODE,
-        // ... all implemented addresses
+        TPS25751Registers::Address::BOOT_STATUS,
+        TPS25751Registers::Address::POWER_PATH_STATUS,
+        TPS25751Registers::Address::PORT_CONFIGURATION,
+        TPS25751Registers::Address::TYPEC_STATE,
+        TPS25751Registers::Address::INT_EVENT1,
+        TPS25751Registers::Address::POWER_STATUS,
+        TPS25751Registers::Address::PD_STATUS,
+        // ... add all implemented addresses
     };
 
     for (auto addr : addresses) {
-        RegisterType type = TPS25751RegisterFactory::getRegisterType(addr);
-        TEST_ASSERT_NOT_EQUAL(RegisterType::UNKNOWN, type);
-
-        // Verify round-trip
-        TPS25751Registers::Address mappedAddr =
-            TPS25751RegisterFactory::getAddress(type);
-        TEST_ASSERT_EQUAL_UINT8(
-            static_cast<uint8_t>(addr),
-            static_cast<uint8_t>(mappedAddr)
-        );
+        auto reg = TPS25751Factory::getInstance().createRegister(addr);
+        TEST_ASSERT_NOT_NULL(reg.get());
+        // The created object reports the address it was created for
+        TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(addr), reg->getAddress());
     }
 }
 ```

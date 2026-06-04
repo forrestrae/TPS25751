@@ -60,16 +60,15 @@ if (typeid(*reg) == typeid(TPS25751Status)) { }
 
 **✅ ALWAYS do this:**
 ```cpp
-// Use static_cast with factory type information
-RegisterType type = TPS25751RegisterFactory::getRegisterType(reg->getAddress());
-if (type == RegisterType::STATUS) {
+// Use static_cast, dispatching on the register's address
+if (reg->getAddress() == static_cast<uint8_t>(TPS25751Registers::Address::STATUS)) {
     auto* status = static_cast<TPS25751Status*>(reg.get());
     // Now safe to use status
 }
 
-// Or use the factory directly
+// Or use the factory directly (keyed on Address)
 auto status = TPS25751Factory::getInstance()
-    .createRegister(RegisterType::STATUS);
+    .createRegister(TPS25751Registers::Address::STATUS);
 auto* statusPtr = static_cast<TPS25751Status*>(status.get());
 ```
 
@@ -652,14 +651,10 @@ class TPS25751Register {
 public:
     virtual uint8_t getAddress() const = 0;
 
-    // Type-safe casting helper
+    // Type-safe casting helper — compare against the expected register's address
     template<typename T>
     T* as() {
-        RegisterType expectedType = T::getStaticRegisterType();
-        RegisterType actualType =
-            TPS25751RegisterFactory::getRegisterType(getAddress());
-
-        if (expectedType == actualType) {
+        if (getAddress() == static_cast<uint8_t>(T::staticAddress())) {
             return static_cast<T*>(this);
         }
         return nullptr;

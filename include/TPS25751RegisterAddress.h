@@ -8,6 +8,9 @@ namespace TPS25751Registers {
 
 /**
  * @brief Strongly typed enum for TPS25751 register addresses
+ *
+ * This is the single source of truth for register identity throughout the
+ * library; the factory dispatches register-object creation directly on it.
  */
 enum class Address : uint8_t {
     MODE = 0x03,

@@ -102,7 +102,7 @@ Before implementing a new register class, ensure:
 - [ ] Understand I2C protocol (first byte is LENGTH, not data!)
 - [ ] Use `static_cast`, NEVER `dynamic_cast` (no RTTI on platform)
 - [ ] Implement three-tier validation (basic, data, semantic)
-- [ ] Add to factory enum and implement creation methods
+- [ ] Add a factory `case` keyed on the register's `TPS25751Registers::Address` and implement creation methods
 - [ ] Follow debug print format exactly
 - [ ] Write unit tests with >90% coverage
 - [ ] Document with Doxygen following [DOCUMENTATION.md](docs/engineering/DOCUMENTATION.md)
@@ -119,7 +119,7 @@ template<typename T> void foo() { static_assert(false, "msg"); }  // Template er
 **✅ ALWAYS DO:**
 ```cpp
 auto* status = static_cast<TPS25751Status*>(ptr);   // Use static_cast
-RegisterType type = getRegisterType(addr);           // Use factory pattern
+auto reg = factory.createRegister(addr);             // Use factory pattern (by Address)
 Serial.println(F("String in flash"));                // Use F() macro
 ```
 
@@ -205,8 +205,8 @@ SFINAE over `static_assert(false)`, and RAII/`unique_ptr` memory management.
 ### Usage Patterns
 
 ```cpp
-// Factory-based creation (preferred)
-auto status = TPS25751Factory::getInstance().createRegister(RegisterType::STATUS);
+// Factory-based creation (preferred) — registers are identified by Address
+auto status = TPS25751Factory::getInstance().createRegister(TPS25751Registers::Address::STATUS);
 
 // Integrated TPS25751 methods
 auto statusReg = tps.readStatusRegister(true);  // with validation
@@ -347,7 +347,7 @@ TPS25751-specific traps to add:
 2. **Research**: Use `mcp__tps25751-docs__search_register` tool to find register details from TI docs
 3. **Plan**: Review [STANDARDS.md](docs/engineering/STANDARDS.md) template
 4. **Implement**: Create class following checklist above
-5. **Factory**: Add to `RegisterType` enum and factory implementation
+5. **Factory**: Add a `case` for the register's `TPS25751Registers::Address` to the factory's `createRegister` switches (no separate type enum — `Address` is the single register identity)
 6. **Test**: Write unit tests achieving >90% coverage
 7. **Document**: Add Doxygen comments following [DOCUMENTATION.md](docs/engineering/DOCUMENTATION.md)
 8. **Validate**: Test on hardware if available

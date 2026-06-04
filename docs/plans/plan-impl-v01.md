@@ -1,9 +1,9 @@
-f# TPS25751 Register Implementation Plan v0.1
+# TPS25751 Register Implementation Plan v0.1
 
-**Date:** 2025-10-20
-**Last Updated:** 2025-10-22
-**Project:** TPS25751 USB-C PD Controller Library
-**Status:** Phase 1 Complete - In Progress (Phase 2)
+* **Date:** 2025-10-20
+* **Last Updated:** 2025-10-22
+* **Project:** TPS25751 USB-C PD Controller Library
+* **Status:** Phase 1 Complete - In Progress (Phase 2)
 
 ---
 

@@ -15,8 +15,8 @@ The TPS25751 library is an object-oriented C++ library for interfacing with the 
 - RAII memory management for embedded systems
 - Platform-optimized for Teensy 4.x (ARM Cortex-M7, no RTTI)
 
-**Last Updated:** 2026-03-31
-**Current Phase:** Planning Phase - See [Implementation Plan](docs/plans/plan-impl-v01.md)
+**Last Updated:** 2026-06-03
+**Current Phase:** Active implementation — 15/27 registers done; see [Implementation Plan](docs/plans/plan-impl-v01.md) for the remaining 12
 
 ---
 
@@ -198,9 +198,9 @@ The library includes a complete Factory Method Pattern implementation:
 
 ### Platform-Specific Considerations
 
-- **No RTTI**: Platform compiles with `-fno-rtti`, requiring `static_cast` instead of `dynamic_cast`
-- **Template Constraints**: Use SFINAE patterns instead of `static_assert(false)` to avoid compilation issues
-- **Memory Constraints**: Careful use of `std::unique_ptr` and move semantics for embedded efficiency
+See [Common Platform Gotchas](#common-platform-gotchas), ADR-003, and
+[CONSTRAINTS.md](docs/engineering/CONSTRAINTS.md) — no RTTI (`static_cast` only),
+SFINAE over `static_assert(false)`, and RAII/`unique_ptr` memory management.
 
 ### Usage Patterns
 
@@ -253,6 +253,7 @@ auto statusReg = tps.readStatusRegister(true);  // with validation
 ```
 /
 ├── AGENTS.md                           # This file - Library developer guide
+│                                       #   (CLAUDE.md is a symlink -> AGENTS.md; edit AGENTS.md)
 ├── .mcp.json                           # Claude Code MCP server config
 ├── .claude/                            # Claude Code-specific settings
 ├── .cursor/mcp.json                    # Cursor MCP server config
@@ -317,16 +318,16 @@ auto statusReg = tps.readStatusRegister(true);  // with validation
    - Debug print following format
    - Unit tests with >90% coverage
    - Doxygen documentation
-5. **Test on hardware:** If available, validate with actual TPS25751
+6. **Test on hardware:** If available, validate with actual TPS25751
 
 ### Common Mistakes to Avoid
 
-- ❌ Using `dynamic_cast` (use `static_cast`)
-- ❌ Using `typeid` (use factory pattern)
-- ❌ Forgetting I2C length byte (first byte is length, not data!)
+See [Common Platform Gotchas](#common-platform-gotchas) for the C++/platform
+rules (no `dynamic_cast`/`typeid`, use `F()`, no `static_assert(false)`). Two
+TPS25751-specific traps to add:
+
+- ❌ Forgetting the I2C length byte (first byte is length, not data!)
 - ❌ Wrong PDO unit conversion (PPS uses different units!)
-- ❌ String literals without `F()` macro (wastes RAM)
-- ❌ `static_assert(false)` in templates (use dependent type)
 
 ### When You Get Stuck
 
@@ -351,13 +352,33 @@ auto statusReg = tps.readStatusRegister(true);  // with validation
 7. **Document**: Add Doxygen comments following [DOCUMENTATION.md](docs/engineering/DOCUMENTATION.md)
 8. **Validate**: Test on hardware if available
 
-### Testing Your Changes
+### Building & Testing Your Changes
+
+This directory is a **library**, not a standalone PlatformIO project — there is no
+root `platformio.ini`, and the bundled example does **not** build on its own (its
+`lib_deps = lib/TPS25751` only resolves from a project that actually contains
+`lib/TPS25751`).
+
+In this repo the library lives at `lib/TPS25751` inside the parent PlatformIO
+project (`TPS25751-i2ct-test`, two levels up), which symlinks the example's
+`platformio.ini`, `src/`, and `include/` and provides `lib/TPS25751`. Build from
+**that parent project root**:
 
 ```bash
-# From project root
-pio test                  # Run unit tests
-pio test --coverage       # Run with coverage report
+# From this library root, the parent project is two levels up:
+cd ../..                  # -> TPS25751-i2ct-test (has platformio.ini -> example)
+pio run                   # Compile for Teensy 4.0 (default_envs = teensy40)
+pio run -t upload         # Flash to a connected Teensy
+pio device monitor        # Serial monitor @ 115200
 ```
+
+(When consuming this as a published library, copy the example out into your own
+PlatformIO project and add this library under `lib/`.)
+
+> **No unit tests exist yet.** `test/` is a PlatformIO placeholder (README only).
+> The `>90% coverage` target in [TESTING.md](docs/engineering/TESTING.md) and a
+> `pio test` workflow are the *intended* setup, not a working one — adding the
+> test harness is still pending.
 
 ### Publishing the Library
 

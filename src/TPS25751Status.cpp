@@ -134,7 +134,7 @@ std::string toString(const UsbHostPresence s)
         case USB_HOST_SOURCE_NOT_DATA_CAPABLE:
             return "Attached source is not data capable";
         case USB_HOST_SOURCE_NOT_PD_CAPABLE:
-            return "ttached source is not USB PD capable";
+            return "Attached source is not USB PD capable";
         case USB_HOST_PRESENT:
             return "Host Present";
         default:

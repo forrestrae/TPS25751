@@ -39,9 +39,9 @@ void setup()
     TPS25751::setDebugLevel(DEBUG_LEVEL_WARN);
     TPS25751::setDebugCategories(DEBUG_CAT_I2C | DEBUG_CAT_REGISTER | DEBUG_CAT_VALIDATION);
 
-    // Configure TPS25751 Interupt Pin
+    // Configure TPS25751 Interrupt Pin
     pinMode(I2CT_IRQ_PIN, INPUT_PULLUP);
-    attachInterrupt(digitalPinToInterrupt(21), handleInterruptEvent, FALLING);
+    attachInterrupt(digitalPinToInterrupt(I2CT_IRQ_PIN), handleInterruptEvent, FALLING);
 
     Serial.println(F("Initializing TPS25751..."));
     pd.begin();

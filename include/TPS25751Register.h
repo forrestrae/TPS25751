@@ -1,7 +1,6 @@
 #pragma once
+
 #include <Arduino.h>
-#include <cstdint>
-#include <cstring>
 #include "TPS25751Debug.h"
 
 class TPS25751Register {

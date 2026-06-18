@@ -1,7 +1,6 @@
 #pragma once
 
-#include <Arduino.h>
-#include <stdint.h>
+
 #include "TPS25751Register.h"
 #include "TPS25751RegisterAddress.h"
 

@@ -1,6 +1,6 @@
 #include "TPS25751Debug.h"
-#include <stdarg.h>
-#include <stdio.h>
+
+#include <Arduino.h>
 
 namespace TPS25751Debug {
 

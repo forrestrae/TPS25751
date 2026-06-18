@@ -1,7 +1,6 @@
 #ifndef TPS25751_H
 #define TPS25751_H
 
-#include <Arduino.h>
 #include <Wire.h>
 #include "TPS25751.h"
 #include "TPS25751Mode.h"

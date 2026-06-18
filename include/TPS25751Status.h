@@ -1,8 +1,6 @@
 #ifndef TPS25751STATUS_H
 #define TPS25751STATUS_H
 
-// #include <Arduino.h>
-// #include <cstdint>
 #include <string>
 
 #include "TPS25751Register.h"

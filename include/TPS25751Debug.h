@@ -1,6 +1,5 @@
 #pragma once
 
-#include <Arduino.h>
 #include <Stream.h>
 
 // Debug level configuration - can be overridden at compile time

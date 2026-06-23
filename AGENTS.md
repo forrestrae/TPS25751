@@ -15,8 +15,10 @@ The TPS25751 library is an object-oriented C++ library for interfacing with the 
 - RAII memory management for embedded systems
 - Platform-optimized for Teensy 4.x (ARM Cortex-M7, no RTTI)
 
-**Last Updated:** 2026-06-03
-**Current Phase:** Active implementation — 15/27 registers done; see [Implementation Plan](docs/plans/plan-impl-v01.md) for the remaining 12
+**Last Updated:** 2026-06-22
+**Current Phase:** Active implementation — 17/27 registers done (COMMAND/DATA added,
+enabling the 4CC command-task interface and I2Cc downstream-device proxy); see
+[Implementation Plan](docs/plans/plan-impl-v01.md) for the remaining 10
 
 ---
 
@@ -127,13 +129,15 @@ Serial.println(F("String in flash"));                // Use F() macro
 
 ## Implementation Status
 
-**Implemented Registers:** 15/27
+**Implemented Registers:** 17/27
 - STATUS, MODE, POWER_PATH_STATUS, BOOT_FLAGS, PORT_CONFIG
 - TYPEC_STATE, INTERRUPT_EVENT, POWER_STATUS, PD_STATUS
 - ACTIVE_PDO_CONTRACT, ACTIVE_RDO_CONTRACT, PORT_CONTROL
 - GPIO_STATUS, RECEIVED_SINK_CAPS, RECEIVED_SOURCE_CAPS
+- COMMAND, DATA — the 4CC command-task control/payload registers (TRM Sec 4.4.2);
+  see `TPS25751::executeCommand()` and `TPS25751DownstreamDevice`
 
-**In Progress:** Planning remaining 12 registers
+**In Progress:** Planning remaining 10 registers
 - See [Implementation Plan v0.1](docs/plans/plan-impl-v01.md) for prioritized roadmap
 
 ---
@@ -148,6 +152,9 @@ Serial.println(F("String in flash"));                // Use F() macro
 - **`TPS25751RegisterFactory`**: Abstract factory interface for creating register objects
 - **`TPS25751RegisterFactoryImpl`**: Concrete factory implementation
 - **`TPS25751Factory`**: Singleton pattern for global factory access
+- **`TPS25751DownstreamDevice`**: Proxies register access to a device on the
+  TPS25751's secondary I2Cc bus (e.g. a BQ25798 charger) via the I2Cr/I2Cw 4CC
+  command-tasks; composes a `TPS25751` host rather than subclassing it
 
 ### Register Classes
 
@@ -167,6 +174,33 @@ Each register has its own class inheriting from `TPS25751Register`:
 - `TPS25751GPIOStatus`: GPIO pin status
 - `TPS25751ReceivedSinkCaps`: Received sink capabilities
 - `TPS25751ReceivedSourceCaps`: Received source capabilities
+- `TPS25751Command`: COMMAND register (0x08) — 4CC task code, clear/rejected state
+- `TPS25751Data`: DATA register (0x09) — generic 64-byte 4CC task payload (no fixed layout)
+
+### 4CC Command-Task Interface & I2Cc Downstream-Device Proxy
+
+The TPS25751 reaches devices on its secondary I2Cc bus (e.g. a BQ25798 charger)
+through a generic 4CC command-task interface: write input bytes to DATA, write a
+4-character ASCII task code to COMMAND, the controller runs the task, then clears
+COMMAND (success) or writes `"!CMD"` (rejected); results are read back from DATA.
+
+- **`TPS25751::executeCommand(cmd, inData, inLen, outData, outLen, timeoutMs)`**:
+  generic, task-agnostic executor — handles the DATA write → COMMAND write →
+  poll → DATA read handshake.
+- **`TPS25751FourCC` / `TPS25751TaskStatus` / `TPS25751TaskResult`**
+  (`include/TPS25751Task.h`): value types for the 4CC code and the executor's
+  result (`Success` / `Rejected` / `Timeout` / `I2CError`).
+- **`TPS25751DownstreamDevice`**: the I2Cc analog of `TPS25751` — encodes/decodes
+  the I2Cr (read) and I2Cw (write) task DATA payloads, including the 7-bit target
+  address masking, the read-data-starts-at-DATA-offset-1 convention, the 11-byte
+  I2Cw payload cap, the I2Cw `Length`-counts-the-offset-byte rule (`payload_len + 1`),
+  and the TRM's 5-second minimum spacing between consecutive same-type commands
+  (warns via `DEBUG_CAT_TASK`, does not hard-block). I2Cr/I2Cw layouts verified on
+  hardware against a BQ25798.
+
+See [docs/engineering/ARCHITECTURE.md](docs/engineering/ARCHITECTURE.md) (ADR-007)
+and [docs/engineering/CONSTRAINTS.md](docs/engineering/CONSTRAINTS.md) ("4CC Command
+Interface & I2Cc Downstream-Device Proxy") for full details.
 
 ### Key Design Patterns
 
@@ -323,11 +357,30 @@ auto statusReg = tps.readStatusRegister(true);  // with validation
 ### Common Mistakes to Avoid
 
 See [Common Platform Gotchas](#common-platform-gotchas) for the C++/platform
-rules (no `dynamic_cast`/`typeid`, use `F()`, no `static_assert(false)`). Two
+rules (no `dynamic_cast`/`typeid`, use `F()`, no `static_assert(false)`).
 TPS25751-specific traps to add:
 
 - ❌ Forgetting the I2C length byte (first byte is length, not data!)
 - ❌ Wrong PDO unit conversion (PPS uses different units!)
+- ❌ Reading I2Cr results from `DATA[0]` instead of `DATA[1]` (`DATA[0]` is
+  the task return code, not the first byte of the downstream register read)
+- ❌ Setting the I2Cw `Length` field to just the payload length — it must count
+  the register-offset byte too (`payload_len + 1`). The controller transmits
+  exactly `Length` bytes starting at the offset byte, so `Length == payload_len`
+  sends only the offset (a pointer-only write: ACKed, no NACK, register unchanged)
+- ❌ Assuming I2Cw mirrors I2Cr — it doesn't. I2Cr is `{addr, regOffset, numBytes}`;
+  I2Cw is `{addr, Length, regOffset, payload}` (length/offset swapped, Length counts
+  the offset byte)
+- ❌ Exceeding the I2Cw 11-byte payload cap (bytes beyond DATA offset 14 are
+  silently dropped by the controller, not rejected — always bounds-check
+  `len <= 11` before calling)
+- ❌ Requesting more than 63 bytes in one I2Cr (the 64-byte DATA register holds
+  the return code at `DATA[0]`, leaving 63 for read data)
+- ❌ Passing a raw 8-bit I2C address (with an R/W bit baked in) as the I2Cr/
+  I2Cw target address — bit 7 is reserved and must be masked to 7 bits
+- ❌ Assuming `TPS25751::executeCommand()` enforces the TRM's 5-second
+  minimum spacing between consecutive I2Cr (or consecutive I2Cw) commands —
+  it doesn't; only `TPS25751DownstreamDevice` tracks and warns about this
 
 ### When You Get Stuck
 

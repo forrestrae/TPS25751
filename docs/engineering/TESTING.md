@@ -572,6 +572,38 @@ void test_port_control_round_trip() {
 }
 ```
 
+### 4CC Command-Task / I2Cc Proxy Test Cases (required)
+
+These cover the write path, executor, and downstream-device codec added for the
+4CC command-task interface (TRM Sec 4.4.2/4.4.3). Required, regardless of unit
+test harness availability:
+
+- **Write-path framing**: mock `Wire` and assert `writeRegister()` sends
+  `[regAddr][length][data...]` — i.e. the length byte is *sent*, mirroring the
+  read path's *received* length byte. Assert failure is returned (and no crash)
+  when `Wire.write()`'s return value is short or `endTransmission()` is non-zero.
+- **Executor reject path**: mock COMMAND read-back as `"!CMD"` after a write;
+  assert `executeCommand()` returns `TPS25751TaskStatus::Rejected`, not `Success`
+  or `Timeout`.
+- **Executor success path**: mock COMMAND clearing to all-zero after N polls and
+  DATA containing a known payload; assert `TPS25751TaskResult.returnCode == DATA[0]`
+  and `outData` is filled starting at `DATA[0]` (not offset 1 — that offset is an
+  I2Cr-specific convention applied by the caller, not by `executeCommand()` itself).
+- **Executor timeout path**: mock COMMAND that never clears/rejects; assert
+  `TPS25751TaskStatus::Timeout` after `timeoutMs` and that the loop actually exits
+  (no hang).
+- **I2Cr encode/decode round-trip**: assert `TPS25751DownstreamDevice::readRegister()`
+  builds the 3-byte input `{addr, devReg, len}` correctly (including masking bit 7
+  off `addr`), and that returned bytes are copied from **DATA offset 1**
+  (`raw[1..len]`), not offset 0.
+- **I2Cw encode/decode round-trip**: assert the input payload is
+  `{addr, len, 0, devReg, payload...}` and that `len > 10` is rejected by the
+  caller before ever reaching `executeCommand()`.
+- **5-second spacing (logical, non-hardware)**: assert `TPS25751DownstreamDevice`
+  logs/warns (rather than blocking) when two same-type (I2Cr or I2Cw) calls are
+  issued less than 5 s apart, using an injectable/mockable `millis()` if the test
+  harness supports it.
+
 ---
 
 ## Hardware Testing
@@ -643,6 +675,28 @@ For each register implementation:
 - [ ] No I2C communication errors
 - [ ] Values match datasheet descriptions
 - [ ] Edge cases tested (connect/disconnect, power changes, etc.)
+
+### I2Cc Downstream-Device Proxy Hardware Checklist
+
+Requires a real device on the TPS25751's I2Cc bus (e.g. a BQ25798 charger) and,
+ideally, a logic analyzer on the I2Cc lines:
+
+- [ ] `executeCommand(TPS25751FourCC::of("!XYZ"))` smoke test returns `Rejected`
+      (no device required; validates the COMMAND/DATA handshake itself)
+- [ ] `TPS25751DownstreamDevice::readRegister()` against a known-value register
+      (e.g. a part-ID register) returns the expected bytes
+- [ ] Logic-analyzer capture confirms the I2Cr input payload on the wire matches
+      `{addr, devReg, len}` and that read bytes really start at DATA offset 1
+- [ ] `TPS25751DownstreamDevice::writeRegister()` against a scratch/writable
+      downstream register, confirmed via a subsequent read or logic-analyzer
+      capture — this also confirms the I2Cw "Length" field's exact interpretation
+      (the TRM wording leaves whether it counts the register-offset byte mildly
+      ambiguous; resolve against the capture, not the TRM text alone)
+- [ ] Two consecutive I2Cr calls (or two consecutive I2Cw calls) issued <5 s apart
+      produce the `DEBUG_CAT_TASK` warning and confirm the call still proceeds
+      (not hard-blocked)
+- [ ] 7-bit target address masking verified against the capture (bit 7 of the
+      address byte is 0 on the wire even if a caller passes an 8-bit value in)
 
 ### Power Delivery Test Scenarios
 

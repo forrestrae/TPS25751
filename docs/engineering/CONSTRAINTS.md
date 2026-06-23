@@ -227,6 +227,75 @@ Wire.requestFrom(addr, 5);  // Reads length + 4 bytes of data
 buffer[0] = Wire.read();     // This is the LENGTH, not data!
 ```
 
+### Writing Registers
+
+Writes mirror the read framing: the length byte is **sent**, not just received.
+
+**TPS25751 I2C write:**
+```
+START | ADDR+W | REG | LENGTH | DATA... | STOP
+                       ^^^^^^^
+                       Byte count, sent right after the register address
+```
+
+**Correct implementation** (`TPS25751::writeRegister`, `src/TPS25751.cpp`):
+```cpp
+bool TPS25751::writeRegister(uint8_t regAddr, const uint8_t* data, size_t length) const {
+    _wire.beginTransmission(_address);
+    _wire.write(regAddr);
+    _wire.write(static_cast<uint8_t>(length));   // length byte, same as the read path
+    size_t written = _wire.write(data, length);
+    if (written != length) return false;          // didn't queue all bytes
+    return _wire.endTransmission(true) == 0;
+}
+```
+
+**Common mistake:**
+```cpp
+// WRONG - omits the length byte; the controller will misinterpret the payload
+Wire.beginTransmission(addr);
+Wire.write(regAddr);
+Wire.write(data, length);
+Wire.endTransmission();
+```
+
+### 4CC Command Interface & I2Cc Downstream-Device Proxy (TRM Sec 4.4.2/4.4.3)
+
+Beyond the 15 directly-mapped status/config registers, the TPS25751 exposes a generic
+**4CC command-task** interface through two registers:
+
+- **COMMAND** (`0x08`, 4 bytes): write a 4-character ASCII task code (e.g. `"I2Cr"`) to
+  start a task. The controller **clears COMMAND to all-zero** on success, or **writes
+  back `"!CMD"`** if the code is unrecognized. Reading COMMAND while a task is in
+  flight returns the in-progress code.
+- **DATA** (`0x09`, 64 bytes): generic scratch register carrying the task's
+  input/output payload. It has no fixed layout of its own — interpretation depends
+  entirely on which task is running.
+
+The handshake (`TPS25751::executeCommand()`, `src/TPS25751.cpp`): write input payload to
+DATA (if any) → write the 4CC to COMMAND → poll COMMAND until it clears or rejects (or
+`timeoutMs` elapses) → on success, read the full 64-byte DATA back (`DATA[0]` is the
+task's return code).
+
+**I2Cr** and **I2Cw** are 4CC tasks that proxy register access to a device on the
+TPS25751's *secondary* I2C bus (I2Cc_SDA/SCL), e.g. a BQ25798 charger
+(`TPS25751DownstreamDevice`, `include/TPS25751DownstreamDevice.h`):
+
+| Task | Input DATA layout | Output DATA layout |
+|------|--------------------|---------------------|
+| **I2Cr** (read) | `DATA[0]`=target addr (7-bit, bit 7 reserved=0), `DATA[1]`=register offset, `DATA[2]`=NumBytes (max **63** — `DATA[0]` holds the return code) | `DATA[0]`=task return code, `DATA[1..NumBytes]`=bytes read — **read data starts at offset 1**, not 0 |
+| **I2Cw** (write) | `DATA[0]`=target addr (7-bit, bit 7 reserved=0), `DATA[1]`=**Length**, `DATA[2]`=register offset, `DATA[3..]`=payload (max 11 bytes). **`Length` counts the register-offset byte + payload (= payload_len + 1)**: the controller transmits exactly `Length` bytes starting at the offset byte, so `Length == payload_len` does a pointer-only write that changes nothing. | `DATA[0]`=task return code (success only means the write was *queued*, not necessarily completed on the I2Cc wire — confirm with an I2Cr read-back) |
+
+> **I2Cr vs I2Cw are not symmetric.** I2Cr is `{addr, regOffset, numBytes}` with the count = data bytes. I2Cw is `{addr, Length, regOffset, payload}` — length and offset are swapped **and** `Length` includes the offset byte (`payload_len + 1`). Both confirmed on hardware against a BQ25798.
+
+**5-second minimum spacing:** per the TRM, consecutive **I2Cr** commands — and,
+separately, consecutive **I2Cw** commands — must be issued **at least 5 seconds
+apart**. This is host pacing guidance distinct from `executeCommand()`'s much
+shorter (~200 ms) completion poll. `TPS25751DownstreamDevice` tracks the last
+issue time of each task type via `millis()` and emits a `DEBUG_CAT_TASK` warning
+if called sooner — it does **not** hard-block, since callers may already be
+managing the timing themselves.
+
 ### Maximum Read Sizes
 
 Different registers have different maximum sizes:
@@ -635,6 +704,27 @@ void processData() {
     auto buffer = std::make_unique<uint8_t[]>(2048);  // Heap
 }
 ```
+
+### 7. Forgetting the I2Cr/I2Cw Target Address Is 7-Bit
+
+**Wrong:**
+```cpp
+// WRONG - passes a raw 8-bit address (possibly including a R/W bit) straight
+// into the I2Cr/I2Cw input payload
+uint8_t in[3] = { deviceAddress, devReg, len };
+```
+
+**Right:**
+```cpp
+// RIGHT - bit 7 of the I2Cr/I2Cw target-address byte is reserved (must be 0);
+// mask it off once, e.g. in the TPS25751DownstreamDevice constructor
+_deviceAddress = static_cast<uint8_t>(deviceAddress & 0x7F);
+```
+
+Also remember the I2Cr **read data starts at DATA offset 1** (`DATA[0]` is the task
+return code), the I2Cw payload is capped at **11 bytes**, and the I2Cw **`Length`
+field counts the register-offset byte + payload (`payload_len + 1`)** — see
+[4CC Command Interface & I2Cc Downstream-Device Proxy](#4cc-command-interface--i2cc-downstream-device-proxy-trm-sec-442443).
 
 ---
 

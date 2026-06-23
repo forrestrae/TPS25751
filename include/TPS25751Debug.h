@@ -13,6 +13,7 @@
 #define DEBUG_CAT_REGISTER    0x02  // Register operations
 #define DEBUG_CAT_VALIDATION  0x04  // Validation failures
 #define DEBUG_CAT_PARSING     0x08  // Data parsing/extraction
+#define DEBUG_CAT_TASK        0x10  // 4CC command-task execution / I2Cc downstream-device proxy
 #define DEBUG_CAT_ALL         0xFF
 
 // Current debug categories - can be configured at runtime

@@ -161,6 +161,48 @@ bool TPS25751::readRegister(TPS25751Registers::Address addr, uint8_t *buffer, si
     return readRegister(static_cast<uint8_t>(addr), buffer, length);
 }
 
+bool TPS25751::writeRegister(const uint8_t regAddr, const uint8_t *data, const size_t length) const
+{
+    TPS_DEBUG_TRACE(DEBUG_CAT_I2C, "Writing register 0x%02X (addr=0x%02X, len=%u)", regAddr, _address, (unsigned)length);
+
+    _wire.beginTransmission(_address);
+    _wire.write(regAddr);
+    _wire.write(static_cast<uint8_t>(length));
+    size_t written = _wire.write(data, length);
+    if (written != length)
+    {
+        TPS_DEBUG_ERROR(DEBUG_CAT_I2C, "write() failed: expected %u bytes, wrote %u", (unsigned)length, (unsigned)written);
+        TPS_REPORT_I2C_ERROR(_address, regAddr, "write", written);
+        return false;
+    }
+
+    uint8_t result = _wire.endTransmission(true);
+    if (result != 0) {
+        TPS_REPORT_I2C_ERROR(_address, regAddr, "endTransmission", result);
+        return false;
+    }
+
+    TPS_DEBUG_INFO(DEBUG_CAT_I2C, "Successfully wrote register 0x%02X", regAddr);
+    TPS_DEBUG_HEXDUMP(DEBUG_CAT_I2C, data, length, "Register data written");
+    return true;
+}
+
+// Type-safe register writing methods
+bool TPS25751::writeRegister(TPS25751Registers::Address addr, const uint8_t *data, size_t length) const
+{
+    uint8_t expectedSize = TPS25751Registers::getRegisterSize(addr);
+    if (expectedSize != 0 && expectedSize != length) {
+        // Size mismatch detected
+        return false;
+    }
+    return writeRegister(static_cast<uint8_t>(addr), data, length);
+}
+
+bool TPS25751::writeRegister(TPS25751Registers::RegisterInfo regInfo, const uint8_t *data) const
+{
+    return writeRegister(static_cast<uint8_t>(regInfo.address), data, regInfo.size);
+}
+
 // Debug configuration implementations
 void TPS25751::setDebugStream(Stream* stream) {
     TPS25751Debug::setDebugStream(stream);
@@ -381,4 +423,103 @@ std::unique_ptr<TPS25751ReceivedSinkCaps> TPS25751::readReceivedSinkCapsRegister
         return std::unique_ptr<TPS25751ReceivedSinkCaps>(sinkCapsReg);
     }
     return nullptr;
+}
+
+std::unique_ptr<TPS25751Command> TPS25751::readCommandRegister(bool validate) const {
+    auto reg = readAndValidateRegisterByAddress(TPS25751Registers::Address::COMMAND, validate);
+    if (!reg) return nullptr;
+
+    if (reg) {
+        TPS25751Command* commandReg = static_cast<TPS25751Command*>(reg.release());
+        return std::unique_ptr<TPS25751Command>(commandReg);
+    }
+    return nullptr;
+}
+
+std::unique_ptr<TPS25751Data> TPS25751::readDataRegister(bool validate) const {
+    auto reg = readAndValidateRegisterByAddress(TPS25751Registers::Address::DATA, validate);
+    if (!reg) return nullptr;
+
+    if (reg) {
+        TPS25751Data* dataReg = static_cast<TPS25751Data*>(reg.release());
+        return std::unique_ptr<TPS25751Data>(dataReg);
+    }
+    return nullptr;
+}
+
+// 4CC command-task executor (TRM Sec 4.4.2)
+TPS25751TaskStatus TPS25751::waitForCommandClear(uint32_t timeoutMs) const
+{
+    uint32_t start = millis();
+    uint8_t buf[TPS25751Registers::Registers::COMMAND.size];
+
+    for (;;) {
+        if (!readRegister(static_cast<uint8_t>(TPS25751Registers::Address::COMMAND), buf, sizeof(buf))) {
+            TPS_DEBUG_ERROR(DEBUG_CAT_TASK, "executeCommand: failed to poll COMMAND");
+            return TPS25751TaskStatus::I2CError;
+        }
+
+        TPS25751Command cmd(buf, sizeof(buf));
+        if (cmd.isClear()) {
+            return TPS25751TaskStatus::Success;
+        }
+        if (cmd.isRejected()) {
+            TPS_DEBUG_WARN(DEBUG_CAT_TASK, "executeCommand: rejected (\"!CMD\")");
+            return TPS25751TaskStatus::Rejected;
+        }
+
+        if (millis() - start > timeoutMs) {
+            TPS_DEBUG_ERROR(DEBUG_CAT_TASK, "executeCommand: timed out waiting for COMMAND to clear");
+            return TPS25751TaskStatus::Timeout;
+        }
+
+        delay(5);
+    }
+}
+
+TPS25751TaskResult TPS25751::executeCommand(
+    TPS25751FourCC cmd,
+    const uint8_t* inData, size_t inLen,
+    uint8_t* outData, size_t outLen,
+    uint32_t timeoutMs) const
+{
+    TPS_DEBUG_TRACE(DEBUG_CAT_TASK, "executeCommand: '%c%c%c%c' (inLen=%u, outLen=%u)",
+                     cmd.code[0], cmd.code[1], cmd.code[2], cmd.code[3], (unsigned)inLen, (unsigned)outLen);
+
+    // Stage the input payload in DATA first (if any). Uses the private raw
+    // overload (exact inLen) rather than the public Address overload, which
+    // requires length == DATA's full 64 bytes and would reject short payloads.
+    if (inData != nullptr && inLen > 0) {
+        if (!writeRegister(static_cast<uint8_t>(TPS25751Registers::Address::DATA), inData, inLen)) {
+            TPS_DEBUG_ERROR(DEBUG_CAT_TASK, "executeCommand: failed to write DATA");
+            return TPS25751TaskResult{TPS25751TaskStatus::I2CError, 0};
+        }
+    }
+
+    // Kick off the task by writing the 4CC to COMMAND.
+    if (!writeRegister(TPS25751Registers::Address::COMMAND, reinterpret_cast<const uint8_t*>(cmd.code), sizeof(cmd.code))) {
+        TPS_DEBUG_ERROR(DEBUG_CAT_TASK, "executeCommand: failed to write COMMAND");
+        return TPS25751TaskResult{TPS25751TaskStatus::I2CError, 0};
+    }
+
+    TPS25751TaskStatus status = waitForCommandClear(timeoutMs);
+    if (status != TPS25751TaskStatus::Success) {
+        return TPS25751TaskResult{status, 0};
+    }
+
+    // Read back the full DATA register (exact register size, avoiding partial-read ambiguity).
+    uint8_t raw[TPS25751Registers::Registers::DATA.size];
+    if (!readRegister(static_cast<uint8_t>(TPS25751Registers::Address::DATA), raw, sizeof(raw))) {
+        TPS_DEBUG_ERROR(DEBUG_CAT_TASK, "executeCommand: failed to read DATA after completion");
+        return TPS25751TaskResult{TPS25751TaskStatus::I2CError, 0};
+    }
+
+    uint8_t returnCode = raw[0];
+    if (outData != nullptr && outLen > 0) {
+        const size_t copyLen = (outLen < sizeof(raw)) ? outLen : sizeof(raw);
+        memcpy(outData, raw, copyLen);
+    }
+
+    TPS_DEBUG_INFO(DEBUG_CAT_TASK, "executeCommand: success, returnCode=0x%02X", returnCode);
+    return TPS25751TaskResult{TPS25751TaskStatus::Success, returnCode};
 }

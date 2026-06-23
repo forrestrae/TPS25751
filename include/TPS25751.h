@@ -18,9 +18,11 @@
 #include "TPS25751ActiveRDOContract.h"
 #include "TPS25751ReceivedSourceCaps.h"
 #include "TPS25751ReceivedSinkCaps.h"
+#include "TPS25751Command.h"
+#include "TPS25751Data.h"
 #include "TPS25751RegisterAddress.h"
 #include "TPS25751RegisterFactory.h"
-// #include "TPS25751RegisterBuilder.h"
+#include "TPS25751Task.h"
 
 
 /*
@@ -61,7 +63,11 @@ public:
     // Type-safe register reading methods
     bool readRegister(TPS25751Registers::RegisterInfo regInfo, uint8_t *buffer) const;
     bool readRegister(TPS25751Registers::Address addr, uint8_t *buffer, size_t length) const;
-    
+
+    // Type-safe register writing methods (mirror the read overloads above)
+    bool writeRegister(TPS25751Registers::Address addr, const uint8_t *data, size_t length) const;
+    bool writeRegister(TPS25751Registers::RegisterInfo regInfo, const uint8_t *data) const;
+
     template<typename RegisterT>
     bool readRegister(TPS25751Registers::RegisterInfo regInfo, RegisterT &registerOut) const
     {
@@ -260,11 +266,68 @@ public:
      */
     std::unique_ptr<TPS25751ReceivedSinkCaps> readReceivedSinkCapsRegister(bool validate = true) const;
 
+    /**
+     * @brief Read Command register (0x08) using factory pattern
+     *
+     * Note: COMMAND is typically transient (write a 4CC, poll until it clears
+     * or rejects via executeCommand()). This convenience read is provided for
+     * symmetry/debugging — under normal use prefer executeCommand().
+     *
+     * @param validate Whether to validate the register after reading
+     * @return Unique pointer to Command register (nullptr if failed)
+     */
+    std::unique_ptr<TPS25751Command> readCommandRegister(bool validate = true) const;
+
+    /**
+     * @brief Read Data register (0x09) using factory pattern
+     * @param validate Whether to validate the register after reading
+     * @return Unique pointer to Data register (nullptr if failed)
+     */
+    std::unique_ptr<TPS25751Data> readDataRegister(bool validate = true) const;
+
+    /**
+     * @brief Execute a 4CC command-task via the COMMAND/DATA interface (TRM Sec 4.4.2)
+     *
+     * Writes @p inData to DATA (if provided), writes @p cmd to COMMAND, then polls
+     * COMMAND until the TPS25751 clears it (success), replaces it with "!CMD"
+     * (rejected/unrecognized), or @p timeoutMs elapses. On success, the full 64-byte
+     * DATA register is read back; @p outData is filled from DATA byte 0 (so
+     * outData[0] is the task return code) up to min(outLen, 64) bytes. Task-specific
+     * output layouts (e.g. I2Cr's read bytes starting at DATA offset 1) are unpacked
+     * by the caller.
+     *
+     * @param cmd       4-character command code (e.g. TPS25751FourCC::of("I2Cr"))
+     * @param inData    Optional input payload written to DATA before COMMAND (nullptr to skip)
+     * @param inLen     Length of inData in bytes (0-64)
+     * @param outData   Optional buffer to receive DATA after completion (nullptr to skip)
+     * @param outLen    Size of outData in bytes
+     * @param timeoutMs Maximum time to wait for COMMAND to clear/reject
+     * @return Result containing the completion status and the task return code
+     */
+    TPS25751TaskResult executeCommand(
+        TPS25751FourCC cmd,
+        const uint8_t* inData = nullptr, size_t inLen = 0,
+        uint8_t* outData = nullptr, size_t outLen = 0,
+        uint32_t timeoutMs = 200) const;
+
 private:
     TwoWire &_wire;
     uint8_t _address;
 
     bool readRegister(uint8_t regAddr, uint8_t *buffer, size_t length) const;
+    bool writeRegister(uint8_t regAddr, const uint8_t *data, size_t length) const;
+
+    /**
+     * @brief Poll COMMAND until it clears (success) or rejects ("!CMD")
+     *
+     * Isolated from executeCommand() so a future interrupt-driven variant can
+     * replace just this helper without touching the DATA staging/encode-decode
+     * logic (see ARCHITECTURE.md ADR-007 / the IRQ deferral rationale).
+     *
+     * @param timeoutMs Maximum time to wait
+     * @return Success, Rejected, Timeout, or I2CError
+     */
+    TPS25751TaskStatus waitForCommandClear(uint32_t timeoutMs) const;
 };
 
 #endif // TPS25751_H

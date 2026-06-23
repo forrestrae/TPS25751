@@ -12,8 +12,15 @@ The most critical review category for this codebase. Many bugs here cause silent
 - **`static_assert(false)` in templates**: Causes compilation errors even for unused template specializations. Use SFINAE/dependent types instead
 - **Missing `F()` macro**: String literals passed to `Serial.print/println` without `F()` waste RAM. All string literals in debug output must use `F()`
 - **I2C length byte**: The TPS25751 protocol prefixes responses with a byte count. Forgetting to skip byte 0 when parsing register data is a common bug
+- **I2C write length byte**: Writes mirror reads — the length byte must be *sent* (`Wire.write((uint8_t)length)` right after the register address), not just expected on reads. A write that omits it will desync the controller's framing
 - **PDO unit mismatch**: Fixed-supply and PPS (Programmable Power Supply) PDOs use different voltage/current units. Always verify the conversion factor matches the PDO type
 - **Stack usage**: Deep call stacks and large stack-allocated arrays can overflow the limited RAM. Prefer `std::unique_ptr` and heap allocation for buffers > ~64 bytes
+- **I2Cr read data offset**: The I2Cr 4CC task's result bytes start at **DATA offset 1**, not 0 — `DATA[0]` is the task return code. Copying from `raw[0]` instead of `raw[1]` silently shifts every byte
+- **I2Cw payload length cap**: I2Cw payloads are capped at **11 bytes** (DATA bytes 4-14); bytes beyond DATA byte 14 are silently ignored by the controller, not rejected — verify callers bounds-check `len <= 11` before calling
+- **I2Cw `Length` counts the register-offset byte**: The I2Cw `Length` field (`DATA[1]`) is `payload_len + 1`, not `payload_len` — the controller transmits exactly `Length` bytes starting at the offset byte (`DATA[2]`). Setting `Length == payload_len` sends only the offset, a pointer-only write that is ACKed (no NACK) but changes nothing. Note I2Cw `{addr, Length, regOffset, payload}` is **not** symmetric with I2Cr `{addr, regOffset, numBytes}`
+- **I2Cr read length cap**: A single I2Cr returns at most **63** data bytes (the 64-byte DATA register reserves `DATA[0]` for the return code); bounds-check `len <= 63`
+- **I2Cr/I2Cw target address must be 7-bit**: Bit 7 of the target-address byte in the I2Cr/I2Cw input payload is reserved and must be 0. Passing a raw 8-bit address (e.g. one that already has a R/W bit baked in) corrupts the target device lookup
+- **`executeCommand()` 5-second spacing is not enforced by the executor**: The TRM's 5 s minimum spacing between consecutive I2Cr (or consecutive I2Cw) commands is tracked by `TPS25751DownstreamDevice`, not `TPS25751::executeCommand()` itself. Code that calls `executeCommand()` directly with `"I2Cr"`/`"I2Cw"` (bypassing `TPS25751DownstreamDevice`) gets no spacing protection at all
 
 ---
 

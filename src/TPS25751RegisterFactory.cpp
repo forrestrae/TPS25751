@@ -14,8 +14,9 @@
 #include "TPS25751ActiveRDOContract.h"
 #include "TPS25751ReceivedSourceCaps.h"
 #include "TPS25751ReceivedSinkCaps.h"
+#include "TPS25751Command.h"
+#include "TPS25751Data.h"
 #include "TPS25751Debug.h"
-#include <memory>
 
 // Static factory instance
 std::unique_ptr<TPS25751RegisterFactory> TPS25751Factory::instance_;
@@ -55,6 +56,10 @@ std::unique_ptr<TPS25751Register> TPS25751RegisterFactoryImpl::createRegister(TP
             return createReceivedSourceCapsRegister();
         case TPS25751Registers::Address::RECEIVED_SINK_CAPABILITIES:
             return createReceivedSinkCapsRegister();
+        case TPS25751Registers::Address::COMMAND:
+            return createCommandRegister();
+        case TPS25751Registers::Address::DATA:
+            return createDataRegister();
         default:
             TPS_DEBUG_ERROR(DEBUG_CAT_REGISTER, "Unsupported register address: 0x%02X", static_cast<uint8_t>(addr));
             return nullptr;
@@ -101,6 +106,10 @@ std::unique_ptr<TPS25751Register> TPS25751RegisterFactoryImpl::createRegister(TP
             return createReceivedSourceCapsRegister(data, length);
         case TPS25751Registers::Address::RECEIVED_SINK_CAPABILITIES:
             return createReceivedSinkCapsRegister(data, length);
+        case TPS25751Registers::Address::COMMAND:
+            return createCommandRegister(data, length);
+        case TPS25751Registers::Address::DATA:
+            return createDataRegister(data, length);
         default:
             TPS_DEBUG_ERROR(DEBUG_CAT_REGISTER, "Unsupported register address: 0x%02X", static_cast<uint8_t>(addr));
             return nullptr;
@@ -142,6 +151,10 @@ std::unique_ptr<TPS25751Register> TPS25751RegisterFactoryImpl::createRegister(co
             return std::make_unique<TPS25751ReceivedSourceCaps>(regInfo);
         case TPS25751Registers::Address::RECEIVED_SINK_CAPABILITIES:
             return std::make_unique<TPS25751ReceivedSinkCaps>(regInfo);
+        case TPS25751Registers::Address::COMMAND:
+            return std::make_unique<TPS25751Command>(regInfo);
+        case TPS25751Registers::Address::DATA:
+            return std::make_unique<TPS25751Data>(regInfo);
         default:
             TPS_DEBUG_ERROR(DEBUG_CAT_REGISTER, "Unsupported register address: 0x%02X", static_cast<uint8_t>(regInfo.address));
             return nullptr;
@@ -268,6 +281,22 @@ std::unique_ptr<TPS25751Register> TPS25751RegisterFactoryImpl::createReceivedSin
 
 std::unique_ptr<TPS25751Register> TPS25751RegisterFactoryImpl::createReceivedSinkCapsRegister(const uint8_t* data, size_t length) const {
     return std::make_unique<TPS25751ReceivedSinkCaps>(data, length);
+}
+
+std::unique_ptr<TPS25751Register> TPS25751RegisterFactoryImpl::createCommandRegister() const {
+    return std::make_unique<TPS25751Command>();
+}
+
+std::unique_ptr<TPS25751Register> TPS25751RegisterFactoryImpl::createCommandRegister(const uint8_t* data, size_t length) const {
+    return std::make_unique<TPS25751Command>(data, length);
+}
+
+std::unique_ptr<TPS25751Register> TPS25751RegisterFactoryImpl::createDataRegister() const {
+    return std::make_unique<TPS25751Data>();
+}
+
+std::unique_ptr<TPS25751Register> TPS25751RegisterFactoryImpl::createDataRegister(const uint8_t* data, size_t length) const {
+    return std::make_unique<TPS25751Data>(data, length);
 }
 
 // Singleton factory instance management

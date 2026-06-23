@@ -39,8 +39,8 @@ This document describes the system architecture and design patterns of the TPS25
                                 │
         ┌───────────────────────┼───────────────────────┐
         │                       │                       │
-┌───────▼────────┐    ┌────────▼────────┐    ┌────────▼────────┐
-│  Factory Layer  │    │  Register Layer  │    │  I2C Protocol  │
+┌───────▼────────┐    ┌────────▼─────────┐    ┌───────▼────────┐
+│  Factory Layer │    │  Register Layer  │    │  I2C Protocol  │
 │                │    │                  │    │                │
 │ - Create regs  │    │ - Validation     │    │ - Length byte  │
 │ - Type mapping │    │ - Parsing        │    │ - Wire lib     │
@@ -85,9 +85,25 @@ This document describes the system architecture and design patterns of the TPS25
 
 **I2C Protocol Layer:**
 - TPS25751-specific protocol handling
-- Length-prefixed reads
+- Length-prefixed reads and writes
 - Wire library abstraction
 - Communication error handling
+
+**4CC Command-Task Layer:**
+- Generic command-task executor (`TPS25751::executeCommand()`) over the COMMAND
+  (0x08) / DATA (0x09) registers (TRM Sec 4.4.2)
+- `TPS25751Command` / `TPS25751Data` register classes (COMMAND/DATA decoders)
+- `TPS25751Task.h` value types: `TPS25751FourCC`, `TPS25751TaskStatus`,
+  `TPS25751TaskResult`
+- DATA write → COMMAND write → poll-to-clear/reject → DATA read handshake
+
+**I2Cc Downstream-Proxy Layer:**
+- `TPS25751DownstreamDevice` — proxies register access to a device on the
+  TPS25751's secondary I2C bus (I2Cc_SDA/SCL) via the I2Cr/I2Cw 4CC tasks
+- Encodes/decodes the I2Cr/I2Cw DATA payloads (target address, register offset,
+  length, payload)
+- Future downstream device register classes (e.g. a BQ25798 charger) reuse the
+  same `TPS25751Register` decoder base as the host-side registers
 
 **Utility Layer:**
 - Bit manipulation helpers
@@ -513,7 +529,11 @@ TPS25751Register (abstract base)
 ├── TPS25751TypeCState
 ├── TPS25751InterruptEvent
 ├── TPS25751PowerStatus
-└── TPS25751PDStatus
+├── TPS25751PDStatus
+├── TPS25751Command           (COMMAND, 0x08 — 4CC command-task control)
+├── TPS25751Data              (DATA, 0x09 — generic 4CC task payload)
+└── ... (downstream device register classes, e.g. a future BQ25798ChargerStatus,
+        extend this same base — see TPS25751DownstreamDevice::readRegister<T>())
 
 TPS25751RegisterFactory (abstract factory)
 └── TPS25751RegisterFactoryImpl (concrete factory)
@@ -521,11 +541,20 @@ TPS25751RegisterFactory (abstract factory)
 TPS25751Factory (singleton)
 
 TPS25751 (main controller)
+└── executeCommand() — 4CC command-task executor (COMMAND/DATA handshake)
+
+TPS25751DownstreamDevice (I2Cc proxy; composes a TPS25751 host, not a subclass)
 
 TPS25751BitUtils (utility, all static)
 
 TPS25751Debug (utility, all static)
 ```
+
+**Note:** downstream-device register classes (for parts on the TPS25751's I2Cc bus,
+e.g. a BQ25798 charger) are **not** TPS25751-specific — they extend the same
+device-agnostic `TPS25751Register` decoder base used above, and are read via
+`TPS25751DownstreamDevice::readRegister<T>(devReg, out, len)` rather than the
+host's own factory.
 
 ### Relationship Diagram
 
@@ -600,7 +629,74 @@ TPS25751Debug (utility, all static)
 
 ### Register Write Flow
 
+The write path mirrors the read path's length-prefixed framing, but **sends** the
+length byte instead of receiving it. Implemented as `TPS25751::writeRegister()`
+(private raw overload + two public type-safe overloads, `include/TPS25751.h`,
+`src/TPS25751.cpp`):
+
 ```
+1. Application calls a type-safe overload:
+   - tps.writeRegister(TPS25751Registers::Address::COMMAND, data, length)
+   - tps.writeRegister(TPS25751Registers::RegisterInfo, data)
+        │
+        ▼
+2. Size guard (Address overload only):
+   - getRegisterSize(addr) must equal `length` (0 = unknown address, skip check)
+        │
+        ▼
+3. Private raw writeRegister(regAddr, data, length):
+   - Wire.beginTransmission(address)
+   - Wire.write(regAddr)
+   - Wire.write((uint8_t)length)        // length byte, sent (not received)
+   - Wire.write(data, length)            // verify return == length
+   - Wire.endTransmission(true)          // verify return == 0
+        │
+        ▼
+4. TPS_REPORT_I2C_ERROR / TPS_DEBUG_* on any failure; bool success returned
+```
+
+### 4CC Command-Task Flow (`executeCommand`, TRM Sec 4.4.2)
+
+```
+1. Application calls:
+   - tps.executeCommand(TPS25751FourCC::of("I2Cr"), inData, inLen, outData, outLen)
+        │
+        ▼
+2. If inData: write it to DATA via the private raw writeRegister(uint8_t, data, inLen)
+   - (NOT the public Address overload — that requires length == 64 for DATA and
+     would reject a short payload)
+        │
+        ▼
+3. Write the 4CC to COMMAND:
+   - writeRegister(Address::COMMAND, cmd.code, 4)
+        │
+        ▼
+4. waitForCommandClear(timeoutMs) polls COMMAND (~5 ms between reads):
+   - TPS25751Command(buf,4).isClear()    → Success
+   - TPS25751Command(buf,4).isRejected() → Rejected ("!CMD")
+   - elapsed > timeoutMs                 → Timeout
+   - I2C read failure                    → I2CError
+        │
+        ▼
+5. On Success, read the full 64-byte DATA register back (private raw readRegister)
+        │
+        ▼
+6. returnCode = DATA[0]; if outData, memcpy(outData, DATA, min(outLen, 64))
+        │
+        ▼
+7. Return TPS25751TaskResult{status, returnCode}
+```
+
+This handshake is the basis for `TPS25751DownstreamDevice`'s I2Cr/I2Cw codec (see
+[I2Cc Downstream-Proxy Layer](#layer-responsibilities) and CONSTRAINTS.md's
+"4CC Command Interface & I2Cc Downstream-Device Proxy" section) — `readRegister()`/
+`writeRegister()` there call `executeCommand()` with the I2Cr/I2Cw input payload and
+unpack the task-specific output layout (e.g. I2Cr's read bytes starting at DATA
+offset 1) themselves, keeping `executeCommand()` itself task-agnostic.
+
+```
+Superseded sketch (kept for reference; not the real API
+— there is no TPS25751::writeRegister(registerObject) overload):
 1. Application creates/modifies register object:
    - TPS25751PortControl control;
    - control.setPortEnabled(true);
@@ -667,6 +763,29 @@ TPS25751Debug (utility, all static)
 - Custom validation logic via override
 - Custom debug output via debugPrint()
 - Additional accessor methods in subclass
+
+### Adding a Downstream Device Driver
+
+Devices on the TPS25751's secondary I2Cc bus (e.g. a BQ25798 charger) are **not**
+added through the host's factory — they compose `TPS25751DownstreamDevice`
+(`include/TPS25751DownstreamDevice.h`) instead:
+
+1. **Construct** a `TPS25751DownstreamDevice` for the part's I2C address:
+   `TPS25751DownstreamDevice charger(tps, 0x6B);`
+2. **Define register classes** for the device exactly like a TPS25751 register —
+   extend `TPS25751Register`, same three-tier-style validation
+   (`isSemanticallyValid()`), same `debugPrint()` convention. No factory `case`
+   is needed; these classes are device-specific and not part of
+   `TPS25751RegisterFactory`.
+3. **Read** via the typed overload: `device.readRegister<MyChargerStatus>(devReg, out, len)`
+   (decodes through the I2Cr task; raw byte access via the non-template
+   `readRegister(devReg, buf, len)` overload is also available).
+4. **Write** via `device.writeRegister(devReg, data, len)` (I2Cw task, payload
+   capped at 11 bytes per the TRM; the library handles the I2Cw `Length` field,
+   which counts the register-offset byte + payload).
+5. **Respect the TRM's 5-second minimum spacing** between consecutive I2Cr (or
+   consecutive I2Cw) commands — `TPS25751DownstreamDevice` warns via
+   `DEBUG_CAT_TASK` if violated but does not block the call.
 
 ### Dependency Injection Points
 
@@ -854,6 +973,16 @@ Cross-component tests:
    - Profile management
    - Factory reset capability
 
+5. **Interrupt-driven `executeCommand()` completion** *(deferred — see ADR-007)*
+   - Optional `irqPin` on the `TPS25751` constructor
+   - ISR sets a volatile flag on `cmd1Complete` (INT_EVENT1 bit 30) instead of
+     busy-polling COMMAND
+   - Executor waits on the flag, then reads INT_EVENT1 for the result +
+     `i2cControllerNacked` (bit 82) and clears via INT_CLEAR1
+   - `waitForCommandClear()` is already isolated as a single private helper in
+     `TPS25751` specifically so this variant can replace it without touching the
+     DATA staging / encode-decode logic
+
 ---
 
 ## Architectural Decision Records
@@ -894,6 +1023,42 @@ Cross-component tests:
 - No manual memory management
 - Exception-safe (if enabled)
 
+### ADR-007: 4CC Command-Task Layer + I2Cc Downstream-Device Proxy
+**Status:** Accepted
+**Date:** 2026-06
+**Context:** The TPS25751 exposes most functionality as directly-addressed
+registers, but reaches devices on its secondary I2Cc bus (e.g. a BQ25798
+charger) only through a generic "4CC" command-task interface (COMMAND/DATA,
+TRM Sec 4.4.2) — write a payload to DATA, write a 4-character task code to
+COMMAND, poll for completion, read results back from DATA. The **I2Cr**/**I2Cw**
+tasks are this interface's read/write proxy to the I2Cc bus.
+**Decision:**
+- Add a generic, task-agnostic executor (`TPS25751::executeCommand()`) on the
+  host, plus `TPS25751Command`/`TPS25751Data` register classes wired into the
+  existing factory like the other 15 registers.
+- Add `TPS25751DownstreamDevice` as a *separate, composed* abstraction (not a
+  `TPS25751Register` subclass, not part of `TPS25751RegisterFactory`) that
+  encodes/decodes the I2Cr/I2Cw DATA payloads on top of `executeCommand()`.
+- Downstream device register classes reuse the existing `TPS25751Register`
+  decoder base, so they look and behave like host-side registers from the
+  caller's perspective, without requiring a second factory.
+- Completion detection is a simple ~200 ms busy-poll on COMMAND
+  (`waitForCommandClear()`); an interrupt-driven variant is deferred (see
+  Planned Enhancements) because the TRM's 5-second inter-command spacing is a
+  separate constraint an IRQ does not eliminate — so async polling is a
+  latency/CPU optimization, not a correctness fix, and isn't worth the
+  ISR/INT_EVENT1/INT_CLEAR1 complexity until the I2Cc path is proven on
+  hardware.
+**Consequences:**
+- The 4CC layer is generic — any future task code (not just I2Cr/I2Cw) can
+  reuse `executeCommand()` directly.
+- `TPS25751DownstreamDevice` must itself enforce the TRM's 5-second minimum
+  spacing between consecutive same-type (I2Cr or I2Cw) commands; this is host
+  pacing the executor cannot see, since it operates one task at a time.
+- Adding a downstream device is cheaper than adding a TPS25751 register (no
+  factory wiring), at the cost of not benefiting from the host's factory
+  validation/dispatch machinery.
+
 ---
 
 ## Revision History
@@ -901,6 +1066,7 @@ Cross-component tests:
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
 | 1.0 | 2025-10-20 | Claude Code | Initial architecture document |
+| 1.1 | 2026-06-22 | Claude Code | Added 4CC command-task layer, I2Cc downstream-device proxy (ADR-007), register write flow |
 
 ---
 

@@ -28,6 +28,17 @@ This document defines the mandatory implementation standards for all TPS25751 re
 
 ## Class Structure
 
+> **Note on the current codebase:** the template below shows the intended
+> long-term shape (`getAddress()`/`getExpectedSize()`/`isReadOnly()`,
+> `validateBasic()`/`validateData()`/`validateSemantic()`). The actual base class
+> (`TPS25751Register`) and all implemented registers — including `TPS25751Command`
+> and `TPS25751Data` — instead expose `isValid()`, `isValidSize(expectedSize)`,
+> `hasValidData()` from the base, and only override the single virtual
+> `isSemanticallyValid() const` (chaining the base checks internally) plus
+> `debugPrint(Stream& s = Serial) const override`. New register classes should
+> match this **real, in-use** pattern, not the template's separate three-method
+> spelling, until/unless the base class itself is migrated.
+
 ### Mandatory Class Template
 
 Every register class MUST follow this structure:
@@ -167,6 +178,17 @@ std::unique_ptr<TPS25751Register> TPS25751RegisterFactoryImpl::createRegister(TP
 
 Addresses without a `case` fall through to `default:` and return `nullptr`, which is
 how un-decoded registers are reported.
+
+**COMMAND (0x08) and DATA (0x09)** now have classes (`TPS25751Command`,
+`TPS25751Data`) wired in exactly this way — see them for a worked example of the
+four-step checklist above. `TPS25751Data` is a generic 64-byte register with **no
+fixed field layout** (its interpretation depends on which 4CC command-task is in
+flight; see `TPS25751::executeCommand()` and `TPS25751DownstreamDevice` in
+ARCHITECTURE.md), so its semantic validation is intentionally minimal — just the
+inherited size/non-null checks (`isValid() && isValidSize(64)`) — rather than
+field-specific checks. `TPS25751Command`'s semantic validation accepts the clear
+(all-zero) state, the `"!CMD"` rejection code, or any 4-character printable-ASCII
+task code.
 
 ---
 

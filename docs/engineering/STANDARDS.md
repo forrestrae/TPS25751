@@ -190,6 +190,42 @@ field-specific checks. `TPS25751Command`'s semantic validation accepts the clear
 (all-zero) state, the `"!CMD"` rejection code, or any 4-character printable-ASCII
 task code.
 
+### Downstream Device Register Classes
+
+Register classes for downstream devices (e.g. `BQ25798::REG00h`) follow the **same
+mandatory template** as host-side registers: default constructor + `(const uint8_t*,
+size_t)` constructor, three-tier validation (or the equivalent `isSemanticallyValid()`
+chain), `debugPrint()` using `F()`. They inherit `TPS25751Register` — not any
+TPS25751-specific subclass — and are decoded-only unless write support is explicitly
+required.
+
+The per-device factory mirrors the host factory exactly: `<Device>::RegisterFactory`
+(abstract interface) → `<Device>::RegisterFactoryImpl` (switch on
+`<Device>::Registers::Address`, `default` returns `nullptr`) → `<Device>::Factory`
+(singleton). The host `TPS25751RegisterFactory` and its switch statements are
+**not modified** when adding a downstream device.
+
+#### Big-Endian 16-Bit Assembly Rule
+
+`TPS25751BitUtils::extractBits16` is **little-endian** (assembles `raw[0]` as LSB).
+Downstream devices such as the BQ25798 store 16-bit registers big-endian. Always
+assemble multi-byte downstream fields manually:
+
+```cpp
+// CORRECT for big-endian downstream devices (e.g. BQ25798 16-bit registers)
+uint16_t raw16 = (static_cast<uint16_t>(data_[0]) << 8) | data_[1];
+
+// WRONG — extractBits16 is little-endian; silently byte-swaps the value
+uint16_t raw16 = TPS25751BitUtils::extractBits16(data_.data(), 0, 16, 0);
+```
+
+For signed ADC channels (e.g. BQ25798 IBUS/IBAT/TDIE), reinterpret the assembled
+`uint16_t` as `int16_t` for correct 2's-complement interpretation:
+
+```cpp
+int16_t current_raw = static_cast<int16_t>(raw16);
+```
+
 ---
 
 ## Validation Requirements
@@ -730,6 +766,7 @@ Use this checklist for every new register:
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
 | 1.0 | 2025-10-20 | Claude Code | Initial standards document extracted from implementation plan |
+| 1.1 | 2026-06-24 | Claude Code | Added downstream device register class conventions and big-endian 16-bit assembly rule (ADR-008) |
 
 ---
 

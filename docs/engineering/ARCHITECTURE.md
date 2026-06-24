@@ -102,8 +102,17 @@ This document describes the system architecture and design patterns of the TPS25
   TPS25751's secondary I2C bus (I2Cc_SDA/SCL) via the I2Cr/I2Cw 4CC tasks
 - Encodes/decodes the I2Cr/I2Cw DATA payloads (target address, register offset,
   length, payload)
-- Future downstream device register classes (e.g. a BQ25798 charger) reuse the
-  same `TPS25751Register` decoder base as the host-side registers
+- Downstream device register classes reuse the same `TPS25751Register` decoder base
+  as the host-side registers
+
+**BQ25798 Downstream Device Driver Layer:**
+- `BQ25798::Device` — typed driver for the BQ25798 buck-boost charger; inherits
+  `TPS25751DownstreamDevice`, adds 57 typed `read<Register>()` accessors
+- `BQ25798::Registers::Address` enum + `RegisterInfo` table (mirrors host pattern)
+- `BQ25798::RegisterFactory` / `BQ25798::RegisterFactoryImpl` / `BQ25798::Factory`
+  singleton — per-device factory with the same switch-on-Address pattern as the host
+- All 57 BQ25798 register classes extend `TPS25751Register` (decode-only); live under
+  `include/BQ25798/` and `src/BQ25798/`
 
 **Utility Layer:**
 - Bit manipulation helpers
@@ -520,7 +529,7 @@ public:
 ### Inheritance Tree
 
 ```
-TPS25751Register (abstract base)
+TPS25751Register (abstract base — shared decoder base for ALL register classes)
 ├── TPS25751Status
 ├── TPS25751Mode
 ├── TPS25751PowerPathStatus
@@ -532,29 +541,36 @@ TPS25751Register (abstract base)
 ├── TPS25751PDStatus
 ├── TPS25751Command           (COMMAND, 0x08 — 4CC command-task control)
 ├── TPS25751Data              (DATA, 0x09 — generic 4CC task payload)
-└── ... (downstream device register classes, e.g. a future BQ25798ChargerStatus,
-        extend this same base — see TPS25751DownstreamDevice::readRegister<T>())
+├── BQ25798::REG00h … BQ25798::REG48h  (57 BQ25798 register classes, decode-only;
+│                                        live in include/BQ25798/ + src/BQ25798/)
+└── ... (any future downstream device register classes extend this same base)
 
 TPS25751RegisterFactory (abstract factory)
 └── TPS25751RegisterFactoryImpl (concrete factory)
 
 TPS25751Factory (singleton)
 
+BQ25798::RegisterFactory (abstract factory — per-device, mirrors host pattern)
+└── BQ25798::RegisterFactoryImpl (concrete, switch on BQ25798::Registers::Address)
+
+BQ25798::Factory (singleton — per-device, mirrors TPS25751Factory)
+
 TPS25751 (main controller)
 └── executeCommand() — 4CC command-task executor (COMMAND/DATA handshake)
 
 TPS25751DownstreamDevice (I2Cc proxy; composes a TPS25751 host, not a subclass)
+└── BQ25798::Device (typed driver; inherits TPS25751DownstreamDevice, adds 57 typed
+                     read<Register>() accessors for all BQ25798 registers)
 
 TPS25751BitUtils (utility, all static)
 
 TPS25751Debug (utility, all static)
 ```
 
-**Note:** downstream-device register classes (for parts on the TPS25751's I2Cc bus,
-e.g. a BQ25798 charger) are **not** TPS25751-specific — they extend the same
-device-agnostic `TPS25751Register` decoder base used above, and are read via
-`TPS25751DownstreamDevice::readRegister<T>(devReg, out, len)` rather than the
-host's own factory.
+**Note:** `TPS25751Register` is a device-agnostic decoder base — downstream device
+register classes (for parts on the TPS25751's I2Cc bus) extend it exactly like
+host-side registers. Each device maintains its own Address enum, RegisterInfo table,
+and factory; the host factory is unaffected by downstream additions.
 
 ### Relationship Diagram
 
@@ -766,26 +782,44 @@ Superseded sketch (kept for reference; not the real API
 
 ### Adding a Downstream Device Driver
 
-Devices on the TPS25751's secondary I2Cc bus (e.g. a BQ25798 charger) are **not**
-added through the host's factory — they compose `TPS25751DownstreamDevice`
-(`include/TPS25751DownstreamDevice.h`) instead:
+The BQ25798 driver (`BQ25798::Device`) is the reference implementation — follow
+its layout when adding a new downstream device.
 
-1. **Construct** a `TPS25751DownstreamDevice` for the part's I2C address:
-   `TPS25751DownstreamDevice charger(tps, 0x6B);`
-2. **Define register classes** for the device exactly like a TPS25751 register —
-   extend `TPS25751Register`, same three-tier-style validation
-   (`isSemanticallyValid()`), same `debugPrint()` convention. No factory `case`
-   is needed; these classes are device-specific and not part of
-   `TPS25751RegisterFactory`.
-3. **Read** via the typed overload: `device.readRegister<MyChargerStatus>(devReg, out, len)`
-   (decodes through the I2Cr task; raw byte access via the non-template
-   `readRegister(devReg, buf, len)` overload is also available).
-4. **Write** via `device.writeRegister(devReg, data, len)` (I2Cw task, payload
-   capped at 11 bytes per the TRM; the library handles the I2Cw `Length` field,
-   which counts the register-offset byte + payload).
-5. **Respect the TRM's 5-second minimum spacing** between consecutive I2Cr (or
+**Recipe (concrete steps mirroring the BQ25798 implementation):**
+
+1. **Create `include/<Device>/` and `src/<Device>/`** for all device-specific headers
+   and sources. Use a `namespace <Device>` throughout.
+2. **Define `<Device>::Registers::Address`** (enum of hardware register addresses)
+   and a `RegisterInfo` table — mirrors `TPS25751Registers` and
+   `TPS25751RegisterAddress.h`.
+3. **Implement register classes** under `include/<Device>/` (one class per register),
+   each inheriting `TPS25751Register`. Follow the same mandatory template as
+   host-side registers: default constructor + `(const uint8_t*, size_t)` constructor,
+   three-tier validation (`isSemanticallyValid()`, or `validateBasic/Data/Semantic`
+   as appropriate), `debugPrint()` with `F()`. Keep classes decode-only unless write
+   support is explicitly required.
+   - **Multi-byte (16-bit) registers on big-endian downstream devices**: assemble
+     `(raw[0] << 8) | raw[1]`, NOT `TPS25751BitUtils::extractBits16` (little-endian;
+     will silently byte-swap the value).
+   - **Signed ADC channels**: reinterpret the assembled uint16_t via `int16_t` (2's
+     complement); do not treat as unsigned.
+   - **ADC LSB step sizes**: use values from the device datasheet directly; MCP
+     register definitions may not include conversion factors.
+4. **Create `<Device>::RegisterFactory` / `RegisterFactoryImpl` / `Factory`**
+   (same abstract interface + singleton pattern as `TPS25751RegisterFactory` /
+   `TPS25751Factory`, but scoped to the device). The factory switch dispatches on
+   `<Device>::Registers::Address`; unknown addresses return `nullptr`.
+5. **Create `<Device>::Device : public TPS25751DownstreamDevice`** in
+   `include/<Device>/<Device>Device.h`. Add one typed `read<Register>()` method per
+   register (calls the inherited `readRegister<T>()` template; returns
+   `std::unique_ptr<T>`). The inherited `writeRegister(devReg, data, len)` is
+   available for write-capable registers.
+6. **Respect the TRM's 5-second minimum spacing** between consecutive I2Cr (or
    consecutive I2Cw) commands — `TPS25751DownstreamDevice` warns via
    `DEBUG_CAT_TASK` if violated but does not block the call.
+7. **Register the device's MCP docs server** in `.mcp.json` (pointing the generic
+   `device-register-docs/server.py` at the new `devices/<device>/` manifest) and
+   update the MCP table in `AGENTS.md`.
 
 ### Dependency Injection Points
 
@@ -1059,6 +1093,39 @@ tasks are this interface's read/write proxy to the I2Cc bus.
   factory wiring), at the cost of not benefiting from the host's factory
   validation/dispatch machinery.
 
+### ADR-008: Downstream-Device Driver Tier (BQ25798)
+**Status:** Accepted
+**Date:** 2026-06
+**Context:** `TPS25751DownstreamDevice` provides raw I2Cr/I2Cw proxy access, but
+callers need typed, validated register objects for the BQ25798 charger — without
+coupling the host TPS25751 factory to a third-party device.
+**Decision:**
+- The typed driver **inherits** `TPS25751DownstreamDevice` (e.g. `BQ25798::Device`)
+  rather than composing it, so the driver is itself the proxy with zero extra
+  indirection.
+- All driver code lives in a dedicated `namespace <Device>` with its own directories
+  (`include/<Device>/`, `src/<Device>/`), fully decoupled from the host namespace.
+- Each downstream device maintains its own `Address` enum, `RegisterInfo` table, and
+  factory (`<Device>::RegisterFactory` / `RegisterFactoryImpl` / `Factory` singleton),
+  **mirroring the host-side pattern exactly**. The host factory is not modified.
+- Downstream device register classes are **decode-only** and reuse `TPS25751Register`
+  as their decoder base — they look and behave identically to host-side registers from
+  the caller's perspective.
+- Writes go through the inherited `TPS25751DownstreamDevice::writeRegister()`, or
+  driver-specific setter methods that validate and encode before calling it.
+**Consequences:**
+- Adding a new downstream device is self-contained: new directories + namespace +
+  factory, no changes to any TPS25751 host files.
+- **Big-endian 16-bit registers**: downstream devices (e.g. BQ25798) store 16-bit
+  fields big-endian; assemble as `(raw[0] << 8) | raw[1]`, not via
+  `extractBits16` (which is little-endian and silently byte-swaps the value).
+- **Signed ADC channels** (IBUS, IBAT, TDIE on BQ25798): assembled uint16_t must be
+  reinterpreted as `int16_t` (2's complement); treating as unsigned gives wrong sign.
+- **ADC LSB step sizes** must be sourced from the device datasheet (SLUSE02 for
+  BQ25798); the MCP register definitions do not carry conversion factors.
+- The BQ25798 implementation (57 registers, 4 example sketches) is the canonical
+  reference for future downstream device drivers.
+
 ---
 
 ## Revision History
@@ -1067,6 +1134,7 @@ tasks are this interface's read/write proxy to the I2Cc bus.
 |---------|------|--------|---------|
 | 1.0 | 2025-10-20 | Claude Code | Initial architecture document |
 | 1.1 | 2026-06-22 | Claude Code | Added 4CC command-task layer, I2Cc downstream-device proxy (ADR-007), register write flow |
+| 1.2 | 2026-06-24 | Claude Code | Added BQ25798 downstream device driver tier (ADR-008), updated inheritance tree, extension-point recipe |
 
 ---
 

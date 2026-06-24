@@ -167,6 +167,15 @@ Serial.println(F("String in flash"));                // Use F() macro
 - **`TPS25751DownstreamDevice`**: Proxies register access to a device on the
   TPS25751's secondary I2Cc bus (e.g. a BQ25798 charger) via the I2Cr/I2Cw 4CC
   command-tasks; composes a `TPS25751` host rather than subclassing it
+- **`BQ25798::Device`**: Typed driver for the BQ25798 buck-boost charger on the
+  I2Cc bus; inherits `TPS25751DownstreamDevice` and adds 57 typed
+  `read<Register>(bool validate=true)` accessors returning
+  `std::unique_ptr<BQ25798::<RegisterClass>>`. Lives under `include/BQ25798/` and
+  `src/BQ25798/`; uses its own `BQ25798::Registers::Address` enum,
+  `BQ25798::RegisterInfo` table, and per-device factory (`BQ25798::Factory` /
+  `BQ25798::RegisterFactoryImpl`) mirroring the host-side pattern. All 57 BQ25798
+  register classes are decode-only and reuse `TPS25751Register` as their decoder
+  base — see ADR-008 in [ARCHITECTURE.md](docs/engineering/ARCHITECTURE.md)
 
 ### Register Classes
 
@@ -213,6 +222,32 @@ COMMAND (success) or writes `"!CMD"` (rejected); results are read back from DATA
 See [docs/engineering/ARCHITECTURE.md](docs/engineering/ARCHITECTURE.md) (ADR-007)
 and [docs/engineering/CONSTRAINTS.md](docs/engineering/CONSTRAINTS.md) ("4CC Command
 Interface & I2Cc Downstream-Device Proxy") for full details.
+
+### BQ25798 Downstream Device Driver
+
+`BQ25798::Device` is the first complete downstream device driver built on
+`TPS25751DownstreamDevice`. It lives entirely under its own namespace and
+directories (`include/BQ25798/`, `src/BQ25798/`) and exposes a typed API
+identical in style to the host TPS25751 class:
+
+```cpp
+BQ25798::Device charger(tps, 0x6B);
+auto info = charger.readPartInfo();   // returns unique_ptr<BQ25798::PartInfo>
+auto adc  = charger.readADCIBUS();    // returns unique_ptr<BQ25798::ADCIBUS>
+```
+
+Key correctness conventions established for all downstream device register classes:
+- **16-bit registers are big-endian**: assemble as `(raw[0] << 8) | raw[1]`, NOT via
+  `TPS25751BitUtils::extractBits16` (which is little-endian and will byte-swap them).
+- **Signed ADC channels** (IBUS, IBAT, TDIE): raw value is 2's-complement; reinterpret
+  via `int16_t` after assembly.
+- **ADC LSB step sizes** come from the BQ25798 datasheet (SLUSE02), not from the MCP
+  register definitions — use the datasheet values for unit conversions.
+
+For the full design rationale see ADR-008 in
+[docs/engineering/ARCHITECTURE.md](docs/engineering/ARCHITECTURE.md) and the review
+traps in [docs/engineering/CONSTRAINTS.md](docs/engineering/CONSTRAINTS.md)
+("BQ25798 Downstream Device Decode Conventions").
 
 ### Key Design Patterns
 

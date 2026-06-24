@@ -21,13 +21,17 @@ The most critical review category for this codebase. Many bugs here cause silent
 - **I2Cr read length cap**: A single I2Cr returns at most **63** data bytes (the 64-byte DATA register reserves `DATA[0]` for the return code); bounds-check `len <= 63`
 - **I2Cr/I2Cw target address must be 7-bit**: Bit 7 of the target-address byte in the I2Cr/I2Cw input payload is reserved and must be 0. Passing a raw 8-bit address (e.g. one that already has a R/W bit baked in) corrupts the target device lookup
 - **`executeCommand()` 5-second spacing is not enforced by the executor**: The TRM's 5 s minimum spacing between consecutive I2Cr (or consecutive I2Cw) commands is tracked by `TPS25751DownstreamDevice`, not `TPS25751::executeCommand()` itself. Code that calls `executeCommand()` directly with `"I2Cr"`/`"I2Cw"` (bypassing `TPS25751DownstreamDevice`) gets no spacing protection at all
+- **Downstream 16-bit registers are big-endian — `extractBits16` byte-swaps them**: `TPS25751BitUtils::extractBits16` assembles `raw[0]` as LSB. Downstream devices (e.g. BQ25798) store 16-bit registers big-endian (`raw[0]` = MSB). Always assemble downstream 16-bit fields manually: `(static_cast<uint16_t>(raw[0]) << 8) | raw[1]`
+- **Signed downstream ADC channels**: BQ25798 IBUS, IBAT, and TDIE ADC values are 2's-complement signed. After big-endian assembly, reinterpret as `int16_t` before converting to physical units; treating as `uint16_t` produces wrong sign for negative currents
+- **Downstream factory switch completeness**: Every value in `<Device>::Registers::Address` must have a `case` in all three `createRegister()` overloads; a missing `case` silently returns `nullptr` and causes a null-dereference at the call site
+- **ADC LSB unit-conversion sourced from datasheet, not MCP**: The `bq25798-docs` MCP server does not carry ADC step sizes. Conversion factors (e.g. TDIE: 0.5 °C/LSB, IBUS/IBAT: 1 mA/LSB) must be taken from the BQ25798 datasheet (SLUSE02); using the wrong LSB produces silently wrong physical values
 
 ---
 
 ## Hard-to-Notice Bugs
 
 - **Off-by-one in bitfield extraction**: Verify bit positions match the TI datasheet exactly — bit 0 vs bit 1 shifts are easy to transpose
-- **Byte order in multi-byte fields**: Confirm endianness matches TPS25751 register layout; little-endian fields in a big-endian context (or vice versa) will produce wrong values silently
+- **Byte order in multi-byte fields**: Confirm endianness matches the target register layout. TPS25751 host registers are little-endian; BQ25798 downstream registers are big-endian. `extractBits16` is always little-endian — do not use it for big-endian downstream registers
 - **Reserved bit masking**: Reserved bits must be masked out before comparing or validating field values; raw reads may have non-zero reserved bits set by hardware
 - **Integer overflow in bitfield math**: Shifting or multiplying `uint8_t` values before casting to a wider type can overflow; cast first
 - **Null pointer on factory miss**: `createRegister()` returns `nullptr` for addresses without a decoder class. Callers must check before dereferencing
@@ -57,7 +61,7 @@ Verify that new code follows all mandatory standards from [STANDARDS.md](STANDAR
 - **Class structure**: Inherits from `TPS25751Register`; implements all pure virtual methods (`getAddress`, `getExpectedSize`, `isReadOnly`, `validateBasic`, `validateData`, `validateSemantic`, `debugPrint`)
 - **Three-tier validation**: All three levels implemented and chained correctly
 - **Debug print format**: Follows the exact `========================================` header/footer format with `F()` macros
-- **Factory integration**: Register address present in `TPS25751Registers::Address` (with `RegisterInfo` size), forward declaration added, all `createRegister()` variants updated with a `case` for the new address
+- **Factory integration**: For host registers — address present in `TPS25751Registers::Address` (with `RegisterInfo` size), forward declaration added, all `createRegister()` variants updated with a `case` for the new address. For downstream device registers — address present in `<Device>::Registers::Address`, all `<Device>::RegisterFactoryImpl::createRegister()` variants have a `case`; the host factory is untouched
 - **Magic numbers**: Bitfield masks and shift counts defined as `static constexpr` named constants, not inline literals
 - **Doxygen**: Every public method has `@brief`, `@return`, and a `@see` reference to the TI datasheet section
 

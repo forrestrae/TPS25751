@@ -728,6 +728,66 @@ field counts the register-offset byte + payload (`payload_len + 1`)** — see
 
 ---
 
+## BQ25798 Downstream Device Decode Conventions
+
+These apply to all BQ25798 register classes and, by analogy, to any downstream
+device whose registers are big-endian.
+
+### 1. 16-Bit Registers Are Big-Endian — Do Not Use `extractBits16`
+
+`TPS25751BitUtils::extractBits16` assembles `raw[0]` as the **LSB** (little-endian).
+BQ25798 stores 16-bit registers with `raw[0]` as the **MSB** (big-endian). Using
+`extractBits16` silently byte-swaps every 16-bit value.
+
+**Wrong:**
+```cpp
+uint16_t v = TPS25751BitUtils::extractBits16(data_.data(), 0, 16, 0); // byte-swapped!
+```
+
+**Right:**
+```cpp
+uint16_t v = (static_cast<uint16_t>(data_[0]) << 8) | data_[1];
+```
+
+### 2. Signed ADC Channels — Reinterpret as `int16_t`
+
+The BQ25798 IBUS, IBAT, and TDIE ADC registers return 2's-complement signed
+values. After big-endian assembly, reinterpret as `int16_t`:
+
+**Wrong:**
+```cpp
+uint16_t raw = (static_cast<uint16_t>(data_[0]) << 8) | data_[1];
+float ibus_mA = raw * 1.0f;   // wrong sign for negative currents
+```
+
+**Right:**
+```cpp
+uint16_t raw = (static_cast<uint16_t>(data_[0]) << 8) | data_[1];
+int16_t signed_raw = static_cast<int16_t>(raw);
+float ibus_mA = signed_raw * lsb_mA;  // correct sign
+```
+
+### 3. ADC LSB Step Sizes Come from the Datasheet, Not the MCP Definitions
+
+The `bq25798-docs` MCP server provides register field descriptions but does **not**
+carry unit-conversion factors (ADC LSB step sizes). Source these from the BQ25798
+datasheet (SLUSE02, Table 9-xx for each ADC channel):
+
+| Channel | LSB | Notes |
+|---------|-----|-------|
+| IBUS | 1 mA | Signed |
+| IBAT | 1 mA | Signed |
+| VBUS | 1 mV | Unsigned |
+| VAC1/VAC2 | 1 mV | Unsigned |
+| VBAT | 1 mV | Unsigned |
+| VSYS | 1 mV | Unsigned |
+| TS | 0.09765625 % | Unsigned (NTC ratio) |
+| TDIE | 0.5 °C | Signed |
+
+Hardcoding the wrong LSB (e.g. 1.0 for TDIE) produces silently wrong physical values.
+
+---
+
 ## Platform-Specific Workarounds
 
 ### Dealing with RTTI Absence
@@ -798,6 +858,7 @@ void foo() {
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
 | 1.0 | 2025-10-20 | Claude Code | Initial constraints document extracted from implementation plan |
+| 1.1 | 2026-06-24 | Claude Code | Added BQ25798 downstream device decode conventions (big-endian, signed ADC, LSB sources) |
 
 ---
 

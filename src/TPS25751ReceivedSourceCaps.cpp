@@ -27,7 +27,15 @@ PDOType TPS25751ReceivedSourceCaps::getPDOType(uint8_t index) const {
 }
 
 bool TPS25751ReceivedSourceCaps::hasSourceCaps() const {
-    return pdoCount() > 0;
+    // The "Number Valid PDOs" count (byte 0, bits 2:0) can persist as a stale,
+    // non-zero value after a source detaches: the controller clears the PDO
+    // payload to all zeros but leaves the previous count in place (observed on
+    // hardware: byte 0 == 0x06 with PDO bytes 1..24 all zero after disconnect).
+    // A genuine Source Capabilities message always carries a valid, non-zero
+    // 5 V Fixed PDO as PDO 1, so treat an all-zero PDO 1 as "no caps present"
+    // regardless of the count. This keeps the disconnected state from being
+    // misread as six empty PDOs (which would fail semantic validation).
+    return pdoCount() > 0 && getPDO(0) != 0;
 }
 
 // Helper method to extract bits from a specific PDO
@@ -200,8 +208,12 @@ bool TPS25751ReceivedSourceCaps::isSemanticallyValid() const {
                 uint16_t current = getFixedMaxCurrent_mA(i);
                 if (current == 0) return false;
 
-                // First PDO must be 5V for USB PD spec compliance
-                if (i == 0 && voltage != 5000) return false;
+                // USB PD requires PDO 1 to be the vSafe5V Fixed Supply object.
+                // Enforce that as a sanity check, but with a tolerance band
+                // rather than exact equality: sources may advertise a nominal
+                // 5 V that lands a step or two off 5000 mV, and rejecting the
+                // entire (otherwise decodable) register over that is too strict.
+                if (i == 0 && (voltage < 4750 || voltage > 5250)) return false;
                 break;
             }
 

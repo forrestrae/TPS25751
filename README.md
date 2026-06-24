@@ -131,16 +131,37 @@ All read methods return a `std::unique_ptr` to the register object, or `nullptr`
 ### Debug Configuration
 
 ```cpp
-// Set verbosity level
-TPS25751::setDebugLevel(DEBUG_LEVEL_OFF);    // No output
+// Set verbosity level (no build flag required)
+TPS25751::setDebugLevel(DEBUG_LEVEL_NONE);   // No output (default at boot)
 TPS25751::setDebugLevel(DEBUG_LEVEL_ERROR);  // Errors only
 TPS25751::setDebugLevel(DEBUG_LEVEL_WARN);   // Warnings and errors
 TPS25751::setDebugLevel(DEBUG_LEVEL_INFO);   // Informational
 TPS25751::setDebugLevel(DEBUG_LEVEL_DEBUG);  // Verbose
+TPS25751::setDebugLevel(DEBUG_LEVEL_TRACE);  // Most verbose
 
 // Filter by category (bitfield, combine with |)
 TPS25751::setDebugCategories(DEBUG_CAT_I2C | DEBUG_CAT_REGISTER | DEBUG_CAT_VALIDATION);
 ```
+
+`setDebugLevel()` works at runtime with **no build flags required** — all levels
+are compiled in by default and gated at runtime. The level defaults to
+`DEBUG_LEVEL_NONE` (silent) at boot; call `setDebugLevel()` to raise it.
+
+#### Compile-time controls
+
+Two independent macros tune the defaults, both overridable via build flags
+(e.g. `build_flags = -DDEBUG_LEVEL_MAX=DEBUG_LEVEL_WARN` in `platformio.ini`):
+
+| Macro | Purpose | Default |
+|---|---|---|
+| `DEBUG_LEVEL` | The **runtime default** — the initial value of the debug level before `setDebugLevel()` is called. | `DEBUG_LEVEL_NONE` (0) |
+| `DEBUG_LEVEL_MAX` | The **compile-time ceiling** — messages above this level are stripped from the binary entirely (their macros expand to nothing). | `DEBUG_LEVEL_TRACE` (all levels compiled in) |
+
+**Size-constrained builds:** to reclaim flash/RAM on a release build, lower the
+ceiling with `-DDEBUG_LEVEL_MAX=DEBUG_LEVEL_NONE` (or any level). Everything
+above the ceiling is removed at compile time, so `setDebugLevel()` cannot raise
+the level past it — the stripped code no longer exists. Leave `DEBUG_LEVEL_MAX`
+at its default for development so runtime control of every level keeps working.
 
 ### Interrupt Handling
 

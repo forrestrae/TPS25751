@@ -346,9 +346,10 @@ public:
 // Debug levels
 #define DEBUG_LEVEL_NONE     0
 #define DEBUG_LEVEL_ERROR    1
-#define DEBUG_LEVEL_WARNING  2
+#define DEBUG_LEVEL_WARN     2
 #define DEBUG_LEVEL_INFO     3
-#define DEBUG_LEVEL_VERBOSE  4
+#define DEBUG_LEVEL_DEBUG    4
+#define DEBUG_LEVEL_TRACE    5
 
 class TPS25751Debug {
 public:
@@ -358,6 +359,30 @@ public:
     static void disableCategory(uint8_t category);
 };
 ```
+
+**Compile-time vs. runtime debug control.** The verbosity is governed by two
+*independent* macros so that runtime control works out of the box while builds can
+still strip debug code for size:
+
+- `DEBUG_LEVEL` — the **runtime default**, the initial value of
+  `TPS25751Debug::currentDebugLevel` before `setDebugLevel()` is called. Defaults
+  to `DEBUG_LEVEL_NONE` (silent).
+- `DEBUG_LEVEL_MAX` — the **compile-time ceiling**. The `TPS_DEBUG_*` macros are
+  gated by `#if DEBUG_LEVEL_MAX >= <level>`; anything above the ceiling expands to
+  nothing and is removed from the binary. Defaults to `DEBUG_LEVEL_TRACE` so all
+  levels are compiled in and `setDebugLevel()` can enable any of them with no
+  build flag.
+
+Because the ceiling defaults to `TRACE`, `TPS25751::setDebugLevel(level)` is fully
+effective at runtime without `-DDEBUG_LEVEL=...`. For **size-constrained / release
+builds**, lower the ceiling (e.g. `-DDEBUG_LEVEL_MAX=DEBUG_LEVEL_NONE`) to strip
+the higher-level debug code — `setDebugLevel()` then cannot raise verbosity above
+the ceiling, since that code no longer exists.
+
+> Historical note: `DEBUG_LEVEL` alone used to gate compilation (defaulting to 0),
+> so without `-DDEBUG_LEVEL=5` every `TPS_DEBUG_*` call was stripped and
+> `setDebugLevel()` had no effect. Splitting the ceiling into `DEBUG_LEVEL_MAX`
+> fixed that.
 
 ---
 

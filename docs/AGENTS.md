@@ -7,34 +7,31 @@ This document describes the TPS25751 Documentation MCP (Model Context Protocol) 
 The TPS25751 Documentation MCP server provides:
 - Access to technical documentation and datasheets
 - Register descriptions with bit field explanations
-- Code examples and usage patterns
 - I2C communication protocol details
-- Library file descriptions and purposes
+
+The server is **device-generic**: a `device.json` manifest controls which chip's
+registers are served. The default manifest targets the TPS25751, but the server
+can serve any device by pointing `DEVICE_CONFIG` at a different manifest file.
 
 ## Server Configuration
 
-The MCP server has been configured locally for this project:
+Two MCP servers are configured locally for this project, both backed by the same
+generic server binary pointed at different device definitions via `DEVICE_CONFIG`:
 
-**Server Name**: `tps25751-docs`  
-**Server Path**: `mcp-servers/tps25751-docs/server.py`  
+**Server Path**: `mcp-servers/device-register-docs/server.py`
+**Servers**: `tps25751-docs` (→ `devices/tps25751/`), `bq25798-docs` (→ `devices/bq25798/`)
 **Scope**: Local (project-specific)
 
 ## Available Resources
 
 The server provides access to the following resources:
 
-### 1. Documentation Files
-- **TPS25751 Technical Reference Manual.pdf**: Comprehensive technical documentation
-- **TPS25751 USB Type-C and USB PD Controller.pdf**: Device-specific documentation
-
-**Access Pattern**: `@tps25751://doc/filename.pdf`
-
-### 2. Register Documentation
+### 1. Register Documentation
 All 27 TPS25751 registers are documented with bit field descriptions. Use the
 `mcp__tps25751-docs__search_register` tool to find any register by name, address,
-or keyword. For the complete list, use `mcp__tps25751-docs__list_library_files`.
+or keyword. For a register index, access the `tps25751://registers` resource.
 
-### 3. I2C Configuration
+### 2. I2C Configuration
 - I2C addresses and communication protocol details
 - Library constants and usage examples
 
@@ -42,7 +39,7 @@ or keyword. For the complete list, use `mcp__tps25751-docs__list_library_files`.
 
 ## Available Tools
 
-The server provides four main tools for development assistance:
+The server provides three tools for development assistance:
 
 ### 1. `search_register`
 Search for register information by name, address, or description.
@@ -59,19 +56,12 @@ Get detailed explanations of specific bit fields in registers.
 - `register`: Register name (STATUS, MODE, etc.)
 - `field`: Bit field name or position
 
-### 3. `generate_code_example`
-Generate Arduino/PlatformIO code examples for common operations.
+### 3. `get_register`
+Exact, case-insensitive lookup of a single register by name.
 
-**Usage**: "Generate code to read STATUS and MODE registers"
+**Usage**: "Get the STATUS register"
 **Parameters**:
-- `operation`: Operation type (read_register, initialize, debug_print)
-- `registers`: List of registers to include
-
-### 4. `list_library_files`
-List all TPS25751 library files with their purposes and descriptions.
-
-**Usage**: "List all library files"
-**Parameters**: None
+- `name`: Register name (spaces or underscores, any case)
 
 ## Usage Examples
 
@@ -81,6 +71,11 @@ List all TPS25751 library files with their purposes and descriptions.
 ```
 This will provide detailed information about the STATUS register including bit fields and usage examples.
 
+```
+@tps25751://registers
+```
+Lists all registers with their addresses and a one-line description.
+
 ### Search for Registers
 Use the search tool to find registers by functionality:
 ```
@@ -88,11 +83,10 @@ Use the search tool to find registers by functionality:
 "Find registers that contain connection state"
 ```
 
-### Generate Code Examples
-Request code examples for specific operations:
+### Exact Register Lookup
 ```
-"Generate code to initialize TPS25751 and read all status registers"
-"Show me an example of reading the MODE register with error handling"
+"Get the STATUS register"
+"Get the POWER_PATH_STATUS register"
 ```
 
 ### Explain Specific Bit Fields
@@ -104,11 +98,8 @@ Get detailed explanations of register bit fields:
 
 ## Integration with Development
 
-### Code References
-The server provides code references in the format `file_path:line_number` when applicable, allowing easy navigation to source code locations.
-
 ### Library Integration
-All examples use the existing TPS25751 library classes:
+The server is used alongside the existing TPS25751 library classes:
 - `TPS25751`: Main controller class
 - `TPS25751Status`, `TPS25751Mode`, etc.: Register-specific classes
 - `TPS25751BitUtils`: Bitfield manipulation utilities
@@ -124,39 +115,38 @@ The server is aware of the PlatformIO build system and provides examples compati
 ### Server Connection Issues
 If the MCP server is not available:
 1. Verify Python 3.10+ is installed
-2. Check that MCP requirements are installed: `pip install mcp>=1.2.0 httpx>=0.25.0`
-3. Ensure the server script is executable: `chmod +x mcp-servers/tps25751-docs/server.py`
+2. Check that MCP requirements are installed: `pip install "mcp[cli]>=1.28.0" jsonschema`
+3. Ensure the server script is executable: `chmod +x mcp-servers/device-register-docs/server.py`
 4. Restart Claude Code
 
-### Missing Documentation
-If documentation files are not found:
-1. Verify PDF files exist in `lib/TPS25751/docs/`
-2. Check file permissions
-3. Ensure relative paths are correct from the server script location
+### Missing Registers
+If a register can't be found:
+1. Verify the device's registers JSON exists under
+   `mcp-servers/device-register-docs/devices/<device>/`
+2. Check the startup log for a schema-validation warning
+3. Confirm you're querying the right server (`tps25751-docs` vs `bq25798-docs`)
 
 ### Resource Access
-Resources are accessed using the `tps25751://` URI scheme:
-- Documentation: `tps25751://doc/filename.pdf`
-- Registers: `tps25751://register/register_name`
-- Configuration: `tps25751://config/i2c`
+Resources are accessed using each device's `uri_scheme` — `tps25751://` for the
+TPS25751 server and `bq25798://` for the BQ25798 server:
+- Register index: `<scheme>://registers`
+- Single register: `<scheme>://register/register_name`
+- Configuration: `<scheme>://config/i2c`
 
 ## Development Notes
 
 ### Extending the Server
 To add new resources or tools:
-1. Edit `mcp-servers/tps25751-docs/server.py`
-2. Add new resources to `list_resources()`
-3. Handle new URIs in `read_resource()`
-4. Add new tools to `list_tools()` and `call_tool()`
-5. Restart Claude Code to reload the server
+1. Edit `mcp-servers/device-register-docs/server.py` (changes apply to all devices)
+2. Restart Claude Code to reload the servers
 
 ### Register Definitions
-Register information is maintained in `tps25751_registers_extracted.json`. Update
-the JSON file (not `server.py`) when adding new registers or modifying bit field
-descriptions. The server loads this file at startup.
-
-### Code Generation Templates
-Code examples are generated from templates in the `code_examples` dictionary. Customize these templates to match your coding style and project requirements.
+Register information is maintained per device in
+`mcp-servers/device-register-docs/devices/<device>/<device>_registers_extracted.json`.
+Update the JSON file (not `server.py`) when adding registers or modifying bit field
+descriptions. The server loads it at startup and optionally validates it against that
+device's schema in the same folder if `jsonschema` is installed. Use the
+`/add-register-device` skill to onboard a new device.
 
 ## Additional Resources
 

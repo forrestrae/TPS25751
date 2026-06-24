@@ -4,13 +4,16 @@
     "allow": [
       "mcp__tps25751-docs__search_register",
       "mcp__tps25751-docs__explain_bitfield",
-      "mcp__tps25751-docs__generate_code_example",
-      "mcp__tps25751-docs__list_library_files"
+      "mcp__tps25751-docs__get_register",
+      "mcp__bq25798-docs__search_register",
+      "mcp__bq25798-docs__explain_bitfield",
+      "mcp__bq25798-docs__get_register"
     ],
     "deny": []
   },
   "enabledMcpjsonServers": [
-    "tps25751-docs"
+    "tps25751-docs",
+    "bq25798-docs"
   ],
   "enabledPlugins": {
     "clangd-lsp@claude-plugins-official": true

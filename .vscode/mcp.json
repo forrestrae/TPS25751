@@ -3,7 +3,14 @@
     "tps25751-docs": {
       "type": "stdio",
       "command": "uv",
-      "args": ["run", "${workspaceFolder}/docs/mcp-servers/tps25751-docs/server.py"]
+      "args": ["run", "${workspaceFolder}/docs/mcp-servers/device-register-docs/server.py"],
+      "env": { "DEVICE_CONFIG": "devices/tps25751/device.json" }
+    },
+    "bq25798-docs": {
+      "type": "stdio",
+      "command": "uv",
+      "args": ["run", "${workspaceFolder}/docs/mcp-servers/device-register-docs/server.py"],
+      "env": { "DEVICE_CONFIG": "devices/bq25798/device.json" }
     }
   }
 }

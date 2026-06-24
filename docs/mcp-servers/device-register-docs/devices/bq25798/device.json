@@ -1,0 +1,10 @@
+{
+  "server_name": "bq25798-docs",
+  "device_name": "BQ25798",
+  "uri_scheme": "bq25798",
+  "class_prefix": "BQ25798",
+  "registers_file": "bq25798_registers_extracted.json",
+  "schema_file": "BQ25798-register-schema.json",
+  "i2c_addresses": ["0x6B"],
+  "i2c_protocol": "The BQ25798 uses standard I2C register access at 7-bit address 0x6B: write the 8-bit register offset, then read or write the register data byte(s). Registers are 8-bit; multi-byte values (e.g. ADC results) span consecutive registers, MSB first."
+}

@@ -169,8 +169,8 @@ For complete library documentation, see [lib/TPS25751/AGENTS.md](lib/TPS25751/AG
 - Search classes, functions, understand inheritance, trace call graphs
 
 **For Register Documentation:**
-- MCP Server Guide: [lib/TPS25751/docs/mcp-servers/tps25751-docs/AGENTS.md](lib/TPS25751/docs/mcp-servers/tps25751-docs/AGENTS.md)
-- Use `search_register`, `explain_bitfield` MCP tools
+- MCP Server Guide: [lib/TPS25751/docs/mcp-servers/device-register-docs/AGENTS.md](lib/TPS25751/docs/mcp-servers/device-register-docs/AGENTS.md)
+- Use `search_register`, `explain_bitfield`, `get_register` MCP tools (`tps25751-docs` for the PD controller, `bq25798-docs` for the charger)
 
 ---
 

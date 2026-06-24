@@ -1,0 +1,4454 @@
+{
+  "device": "BQ25798",
+  "source": "BQ25798-chapter7.html",
+  "register_count": 57,
+  "registers": [
+    {
+      "offset": "0h",
+      "name": "REG00_Minimal_System_Voltage",
+      "width": 8,
+      "reset": "X",
+      "description": "Minimal System Voltage",
+      "fields": [
+        {
+          "bit_field": "7-6",
+          "name": "RESERVED",
+          "access_type": "R/W",
+          "reset": "0h",
+          "description": "RESERVED"
+        },
+        {
+          "bit_field": "5-0",
+          "name": "VSYSMIN_5:0",
+          "access_type": "R/W",
+          "reset": "X",
+          "reset_sources": [
+            "REG_RST"
+          ],
+          "description": "Minimal System Voltage which must be less than VREG in REG01.\nDuring POR, the device reads the resistance tie to PROG pin, to identify the default battery cell count and determine the default power on VSYSMIN list below:\n1s: 3.5V\n2s: 7V\n3s: 9V\n4s: 12V",
+          "encoding": {
+            "range": "2500mV-16000mV",
+            "fixed_offset": "2500mV",
+            "bit_step_size": "250mV",
+            "clamp": [
+              "high"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "offset": "1h",
+      "name": "REG01_Charge_Voltage_Limit",
+      "width": 16,
+      "reset": "X",
+      "description": "Charge Voltage Limit",
+      "fields": [
+        {
+          "bit_field": "15-11",
+          "name": "RESERVED",
+          "access_type": "R",
+          "reset": "0h",
+          "description": "RESERVED"
+        },
+        {
+          "bit_field": "10-0",
+          "name": "VREG_10:0",
+          "access_type": "R/W",
+          "reset": "X",
+          "reset_sources": [
+            "REG_RST"
+          ],
+          "description": "Battery Voltage Limit:\nDuring POR, the device reads the resistance tie to PROG pin, to identify the default battery cell count and determine the default power-on battery voltage regulation limit:\n1s: 4.2V\n2s: 8.4V\n3s: 12.6V\n4s: 16.8V",
+          "encoding": {
+            "range": "3000mV-18800mV",
+            "fixed_offset": "0mV",
+            "bit_step_size": "10mV",
+            "clamp": [
+              "low"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "offset": "3h",
+      "name": "REG03_Charge_Current_Limit",
+      "width": 16,
+      "reset": "X",
+      "description": "Charge Current Limit",
+      "fields": [
+        {
+          "bit_field": "15-9",
+          "name": "RESERVED",
+          "access_type": "R",
+          "reset": "0h",
+          "description": "RESERVED"
+        },
+        {
+          "bit_field": "8-0",
+          "name": "ICHG_8:0",
+          "access_type": "R/W",
+          "reset": "X",
+          "reset_sources": [
+            "WATCHDOG",
+            "REG_RST"
+          ],
+          "description": "Charge Current Limit\nDuring POR, the device reads the resistance tie to PROG pin, to identify the default battery cell count and determine the default power-on battery charging current: 1A",
+          "encoding": {
+            "range": "50mA-5000mA",
+            "fixed_offset": "0mA",
+            "bit_step_size": "10mA",
+            "clamp": [
+              "low"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "offset": "5h",
+      "name": "REG05_Input_Voltage_Limit",
+      "width": 8,
+      "reset": "24h",
+      "description": "Input Voltage Limit",
+      "fields": [
+        {
+          "bit_field": "7-0",
+          "name": "VINDPM_7:0",
+          "access_type": "R/W",
+          "reset": "24h",
+          "description": "Absolute VINDPM Threshold\nVINDPM register is reset to 3600mV upon adapter unplugged and it is set to the value based on the VBUS measurement when the adapter plugs in. It is not reset by the REG_RST and the WATCHDOG",
+          "encoding": {
+            "por": "3600mV (24h)",
+            "range": "3600mV-22000mV",
+            "fixed_offset": "0mV",
+            "bit_step_size": "100mV",
+            "clamp": [
+              "low"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "offset": "6h",
+      "name": "REG06_Input_Current_Limit",
+      "width": 16,
+      "reset": "12Ch",
+      "description": "Input Current Limit",
+      "fields": [
+        {
+          "bit_field": "15-9",
+          "name": "RESERVED",
+          "access_type": "R",
+          "reset": "0h",
+          "description": "RESERVED"
+        },
+        {
+          "bit_field": "8-0",
+          "name": "IINDPM_8:0",
+          "access_type": "R/W",
+          "reset": "12Ch",
+          "reset_sources": [
+            "REG_RST"
+          ],
+          "description": "Based on D+/D- detection results:\nUSB SDP = 500mA\nUSB CDP = 1.5A\nUSB DCP = 3.25A\nAdjustable High Voltage DCP = 1.5A\nUnknown Adapter = 3A\nNon-Standard Adapter = 1A/2A/2.1A/2.4A",
+          "encoding": {
+            "por": "3000mA (12Ch)",
+            "range": "100mA-3300mA",
+            "fixed_offset": "0mA",
+            "bit_step_size": "10mA",
+            "clamp": [
+              "low"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "offset": "8h",
+      "name": "REG08_Precharge_Control",
+      "width": 8,
+      "reset": "C3h",
+      "description": "Precharge Control",
+      "fields": [
+        {
+          "bit_field": "7-6",
+          "name": "VBAT_LOWV_1:0",
+          "access_type": "R/W",
+          "reset": "3h",
+          "reset_sources": [
+            "REG_RST"
+          ],
+          "description": "Battery voltage thresholds for the transition from precharge to fast charge, which is defined as a ratio of battery regulation limit (VREG)",
+          "values": {
+            "0h": "15%*VREG",
+            "1h": "62.2%*VREG",
+            "2h": "66.7%*VREG",
+            "3h": "71.4%*VREG"
+          },
+          "encoding": {
+            "por": "11b"
+          }
+        },
+        {
+          "bit_field": "5-0",
+          "name": "IPRECHG_5:0",
+          "access_type": "R/W",
+          "reset": "3h",
+          "reset_sources": [
+            "WATCHDOG",
+            "REG_RST"
+          ],
+          "description": "Precharge current limit",
+          "encoding": {
+            "por": "120mA (3h)",
+            "range": "40mA-2000mA",
+            "fixed_offset": "0mA",
+            "bit_step_size": "40mA",
+            "clamp": [
+              "low"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "offset": "9h",
+      "name": "REG09_Termination_Control",
+      "width": 8,
+      "reset": "5h",
+      "description": "Termination Control",
+      "fields": [
+        {
+          "bit_field": "7-7",
+          "name": "RESERVED",
+          "access_type": "R",
+          "reset": "0h",
+          "description": "RESERVED"
+        },
+        {
+          "bit_field": "6-6",
+          "name": "REG_RST",
+          "access_type": "R/W",
+          "reset": "0h",
+          "description": "Reset registers to default values and reset timer",
+          "values": {
+            "0h": "Not reset",
+            "1h": "Reset"
+          },
+          "encoding": {
+            "por": "0b"
+          }
+        },
+        {
+          "bit_field": "5-5",
+          "name": "STOP_WD_CHG",
+          "access_type": "R/W",
+          "reset": "0h",
+          "description": "Defines whether a watchdog timer expiration will disable charging",
+          "values": {
+            "0h": "WD timer expiration keeps existing EN_CHG setting",
+            "1h": "WD timer expiration sets EN_CHG=0"
+          },
+          "encoding": {
+            "por": "0b"
+          }
+        },
+        {
+          "bit_field": "4-0",
+          "name": "ITERM_4:0",
+          "access_type": "R/W",
+          "reset": "5h",
+          "reset_sources": [
+            "WATCHDOG",
+            "REG_RST"
+          ],
+          "description": "Termination current",
+          "encoding": {
+            "por": "200mA (5h)",
+            "range": "40mA-1000mA",
+            "fixed_offset": "0mA",
+            "bit_step_size": "40mA",
+            "clamp": [
+              "low"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "offset": "Ah",
+      "name": "REG0A_Re-charge_Control",
+      "width": 8,
+      "reset": "X",
+      "description": "Re-charge Control",
+      "fields": [
+        {
+          "bit_field": "7-6",
+          "name": "CELL_1:0",
+          "access_type": "R/W",
+          "reset": "X",
+          "description": "At POR, the charger reads the PROG pin resistance to determine the battery cell count and update this CELL bits accordingly.",
+          "values": {
+            "0h": "1s",
+            "1h": "2s",
+            "2h": "3s",
+            "3h": "4s"
+          }
+        },
+        {
+          "bit_field": "5-4",
+          "name": "TRECHG_1:0",
+          "access_type": "R/W",
+          "reset": "2h",
+          "reset_sources": [
+            "WATCHDOG",
+            "REG_RST"
+          ],
+          "description": "Battery recharge deglich time",
+          "values": {
+            "0h": "64ms",
+            "1h": "256ms",
+            "2h": "1024ms (default)",
+            "3h": "2048ms"
+          },
+          "encoding": {
+            "por": "10b"
+          }
+        },
+        {
+          "bit_field": "3-0",
+          "name": "VRECHG_3:0",
+          "access_type": "R/W",
+          "reset": "3h",
+          "reset_sources": [
+            "WATCHDOG",
+            "REG_RST"
+          ],
+          "description": "Battery Recharge Threshold Offset (Below VREG)",
+          "encoding": {
+            "por": "200mV (3h)",
+            "range": "50mV-800mV",
+            "fixed_offset": "50mV",
+            "bit_step_size": "50mV"
+          }
+        }
+      ]
+    },
+    {
+      "offset": "Bh",
+      "name": "REG0B_VOTG_regulation",
+      "width": 16,
+      "reset": "DCh",
+      "description": "VOTG regulation",
+      "fields": [
+        {
+          "bit_field": "15-11",
+          "name": "RESERVED",
+          "access_type": "R",
+          "reset": "0h",
+          "description": "RESERVED"
+        },
+        {
+          "bit_field": "10-0",
+          "name": "VOTG_10:0",
+          "access_type": "R/W",
+          "reset": "DCh",
+          "reset_sources": [
+            "WATCHDOG",
+            "REG_RST"
+          ],
+          "description": "OTG mode regulation voltage",
+          "encoding": {
+            "por": "5000mV (DCh)",
+            "range": "2800mV-22000mV",
+            "fixed_offset": "2800mV",
+            "bit_step_size": "10mV",
+            "clamp": [
+              "high"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "offset": "Dh",
+      "name": "REG0D_IOTG_regulation",
+      "width": 8,
+      "reset": "4Bh",
+      "description": "IOTG regulation",
+      "fields": [
+        {
+          "bit_field": "7-7",
+          "name": "PRECHG_TMR",
+          "access_type": "R/W",
+          "reset": "0h",
+          "reset_sources": [
+            "WATCHDOG",
+            "REG_RST"
+          ],
+          "description": "Pre-charge safety timer setting",
+          "values": {
+            "0h": "2 hrs (default)",
+            "1h": "0.5 hrs"
+          },
+          "encoding": {
+            "por": "0b"
+          }
+        },
+        {
+          "bit_field": "6-0",
+          "name": "IOTG_6:0",
+          "access_type": "R/W",
+          "reset": "4Bh",
+          "reset_sources": [
+            "WATCHDOG",
+            "REG_RST"
+          ],
+          "description": "OTG current limit",
+          "encoding": {
+            "por": "3040mA (4Bh)",
+            "range": "160mA-3360mA",
+            "fixed_offset": "0mA",
+            "bit_step_size": "40mA",
+            "clamp": [
+              "low"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "offset": "Eh",
+      "name": "REG0E_Timer_Control",
+      "width": 8,
+      "reset": "3Dh",
+      "description": "Timer Control",
+      "fields": [
+        {
+          "bit_field": "7-6",
+          "name": "TOPOFF_TMR_1:0",
+          "access_type": "R/W",
+          "reset": "0h",
+          "reset_sources": [
+            "WATCHDOG",
+            "REG_RST"
+          ],
+          "description": "Top-off timer control",
+          "values": {
+            "0h": "Disabled (default)",
+            "1h": "15 mins",
+            "2h": "30 mins",
+            "3h": "45 mins"
+          },
+          "encoding": {
+            "por": "00b"
+          }
+        },
+        {
+          "bit_field": "5-5",
+          "name": "EN_TRICHG_TMR",
+          "access_type": "R/W",
+          "reset": "1h",
+          "reset_sources": [
+            "WATCHDOG",
+            "REG_RST"
+          ],
+          "description": "Enable trickle charge timer (fixed as 1hr)",
+          "values": {
+            "0h": "Disabled",
+            "1h": "Enabled (default)"
+          },
+          "encoding": {
+            "por": "1b"
+          }
+        },
+        {
+          "bit_field": "4-4",
+          "name": "EN_PRECHG_TMR",
+          "access_type": "R/W",
+          "reset": "1h",
+          "reset_sources": [
+            "WATCHDOG",
+            "REG_RST"
+          ],
+          "description": "Enable pre-charge timer",
+          "values": {
+            "0h": "Disabled",
+            "1h": "Enabled (default)"
+          },
+          "encoding": {
+            "por": "1b"
+          }
+        },
+        {
+          "bit_field": "3-3",
+          "name": "EN_CHG_TMR",
+          "access_type": "R/W",
+          "reset": "1h",
+          "reset_sources": [
+            "WATCHDOG",
+            "REG_RST"
+          ],
+          "description": "Enable fast charge timer",
+          "values": {
+            "0h": "Disabled",
+            "1h": "Enabled (default)"
+          },
+          "encoding": {
+            "por": "1b"
+          }
+        },
+        {
+          "bit_field": "2-1",
+          "name": "CHG_TMR_1:0",
+          "access_type": "R/W",
+          "reset": "2h",
+          "reset_sources": [
+            "WATCHDOG",
+            "REG_RST"
+          ],
+          "description": "Fast charge timer setting",
+          "values": {
+            "0h": "5 hrs",
+            "1h": "8 hrs",
+            "2h": "12 hrs (default)",
+            "3h": "24 hrs"
+          },
+          "encoding": {
+            "por": "10b"
+          }
+        },
+        {
+          "bit_field": "0-0",
+          "name": "TMR2X_EN",
+          "access_type": "R/W",
+          "reset": "1h",
+          "reset_sources": [
+            "WATCHDOG",
+            "REG_RST"
+          ],
+          "description": "TMR2X_EN",
+          "values": {
+            "0h": "Trickle charge, pre-charge and fast charge timer NOT slowed by 2X during input DPM or thermal regulation.",
+            "1h": "Trickle charge, pre-charge and fast charge timer slowed by 2X during input DPM or thermal regulation (default)"
+          },
+          "encoding": {
+            "por": "1b"
+          }
+        }
+      ]
+    },
+    {
+      "offset": "Fh",
+      "name": "REG0F_Charger_Control_0",
+      "width": 8,
+      "reset": "A2h",
+      "description": "Charger Control 0",
+      "fields": [
+        {
+          "bit_field": "7-7",
+          "name": "EN_AUTO_IBATDIS",
+          "access_type": "R/W",
+          "reset": "1h",
+          "reset_sources": [
+            "REG_RST"
+          ],
+          "description": "Enable the auto battery discharging during the battery OVP fault",
+          "values": {
+            "0h": "The charger will NOT apply a discharging current on BAT during battery OVP",
+            "1h": "The charger will apply a discharging current on BAT during battery OVP"
+          },
+          "encoding": {
+            "por": "1b"
+          }
+        },
+        {
+          "bit_field": "6-6",
+          "name": "FORCE_IBATDIS",
+          "access_type": "R/W",
+          "reset": "0h",
+          "reset_sources": [
+            "REG_RST"
+          ],
+          "description": "Force a battery discharging current",
+          "values": {
+            "0h": "IDLE (default)",
+            "1h": "Force the charger to apply a discharging current on BAT regardless the battery OVP status"
+          },
+          "encoding": {
+            "por": "0b"
+          }
+        },
+        {
+          "bit_field": "5-5",
+          "name": "EN_CHG",
+          "access_type": "R/W",
+          "reset": "1h",
+          "reset_sources": [
+            "WATCHDOG",
+            "REG_RST"
+          ],
+          "description": "Charger Enable Configuration",
+          "values": {
+            "0h": "Charge Disable",
+            "1h": "Charge Enable (default)"
+          },
+          "encoding": {
+            "por": "1b"
+          }
+        },
+        {
+          "bit_field": "4-4",
+          "name": "EN_ICO",
+          "access_type": "R/W",
+          "reset": "0h",
+          "reset_sources": [
+            "REG_RST"
+          ],
+          "description": "Input Current Optimizer (ICO) Enable",
+          "values": {
+            "0h": "Disable ICO (default)",
+            "1h": "Enable ICO"
+          },
+          "encoding": {
+            "por": "0b"
+          }
+        },
+        {
+          "bit_field": "3-3",
+          "name": "FORCE_ICO",
+          "access_type": "R/W",
+          "reset": "0h",
+          "reset_sources": [
+            "WATCHDOG",
+            "REG_RST"
+          ],
+          "description": "Force start input current optimizer (ICO)\nNote: This bit can only be set and returns 0 after ICO starts. This bit only valid when EN_ICO = 1",
+          "values": {
+            "0h": "Do NOT force ICO (Default)",
+            "1h": "Force ICO start"
+          },
+          "encoding": {
+            "por": "0b"
+          }
+        },
+        {
+          "bit_field": "2-2",
+          "name": "EN_HIZ",
+          "access_type": "R/W",
+          "reset": "0h",
+          "reset_sources": [
+            "REG_RST"
+          ],
+          "description": "Enable HIZ mode.\nThis bit will be also reset to 0, when the adapter is plugged in at VBUS.",
+          "values": {
+            "0h": "Disable (default)",
+            "1h": "Enable"
+          },
+          "encoding": {
+            "por": "0b"
+          }
+        },
+        {
+          "bit_field": "1-1",
+          "name": "EN_TERM",
+          "access_type": "R/W",
+          "reset": "1h",
+          "reset_sources": [
+            "WATCHDOG",
+            "REG_RST"
+          ],
+          "description": "Enable termination",
+          "values": {
+            "0h": "Disable",
+            "1h": "Enable (default)"
+          },
+          "encoding": {
+            "por": "1b"
+          }
+        },
+        {
+          "bit_field": "0-0",
+          "name": "EN_BACKUP",
+          "access_type": "R/W",
+          "reset": "0h",
+          "reset_sources": [
+            "WATCHDOG",
+            "REG_RST"
+          ],
+          "description": "Enables backup mode where OTG automatically engages when VBUS droops below voltage set in REG10.",
+          "values": {
+            "0h": "Disable (default)",
+            "1h": "Enable"
+          },
+          "encoding": {
+            "por": "0b"
+          }
+        }
+      ]
+    },
+    {
+      "offset": "10h",
+      "name": "REG10_Charger_Control_1",
+      "width": 8,
+      "reset": "85h",
+      "description": "Charger Control 1",
+      "fields": [
+        {
+          "bit_field": "7-6",
+          "name": "VBUS_BACKUP_1:0",
+          "access_type": "R/W",
+          "reset": "2h",
+          "reset_sources": [
+            "REG_RST"
+          ],
+          "description": "The thresholds to trigger the backup mode, defined as a ratio of VINDPM",
+          "values": {
+            "0h": "40%*VINDPM",
+            "1h": "60%*VINDPM",
+            "2h": "80%*VINDPM (default)",
+            "3h": "100%*VINDPM"
+          },
+          "encoding": {
+            "por": "10b"
+          }
+        },
+        {
+          "bit_field": "5-4",
+          "name": "VAC_OVP_1:0",
+          "access_type": "R/W",
+          "reset": "0h",
+          "reset_sources": [
+            "REG_RST"
+          ],
+          "description": "VAC_OVP thresholds",
+          "values": {
+            "0h": "26V (default)",
+            "1h": "18V",
+            "2h": "12V",
+            "3h": "7V"
+          },
+          "encoding": {
+            "por": "11b"
+          }
+        },
+        {
+          "bit_field": "3-3",
+          "name": "WD_RST",
+          "access_type": "R/W",
+          "reset": "0h",
+          "reset_sources": [
+            "WATCHDOG",
+            "REG_RST"
+          ],
+          "description": "I2C watch dog timer reset",
+          "values": {
+            "0h": "Normal (default)",
+            "1h": "Reset (this bit goes back to 0 after timer resets)"
+          },
+          "encoding": {
+            "por": "0b"
+          }
+        },
+        {
+          "bit_field": "2-0",
+          "name": "WATCHDOG_2:0",
+          "access_type": "R/W",
+          "reset": "5h",
+          "reset_sources": [
+            "REG_RST"
+          ],
+          "description": "Watchdog timer settings",
+          "values": {
+            "0h": "Disable",
+            "1h": "0.5s",
+            "2h": "1s",
+            "3h": "2s",
+            "4h": "20s",
+            "5h": "40s (default)",
+            "6h": "80s",
+            "7h": "160s"
+          },
+          "encoding": {
+            "por": "101b"
+          }
+        }
+      ]
+    },
+    {
+      "offset": "11h",
+      "name": "REG11_Charger_Control_2",
+      "width": 8,
+      "reset": "40h",
+      "description": "Charger Control 2",
+      "fields": [
+        {
+          "bit_field": "7-7",
+          "name": "FORCE_INDET",
+          "access_type": "R/W",
+          "reset": "0h",
+          "reset_sources": [
+            "WATCHDOG",
+            "REG_RST"
+          ],
+          "description": "Force D+/D- detection",
+          "values": {
+            "0h": "Do NOT force D+/D- detection (default)",
+            "1h": "Force D+/D- algorithm, when D+/D- detection is done, this bit will be reset to 0"
+          },
+          "encoding": {
+            "por": "0b"
+          }
+        },
+        {
+          "bit_field": "6-6",
+          "name": "AUTO_INDET_EN",
+          "access_type": "R/W",
+          "reset": "1h",
+          "reset_sources": [
+            "WATCHDOG",
+            "REG_RST"
+          ],
+          "description": "Automatic D+/D- Detection Enable",
+          "values": {
+            "0h": "Disable D+/D- detection when VBUS is plugged-in",
+            "1h": "Enable D+/D- detection when VBUS is plugged-in (default)"
+          },
+          "encoding": {
+            "por": "1b"
+          }
+        },
+        {
+          "bit_field": "5-5",
+          "name": "EN_12V",
+          "access_type": "R/W",
+          "reset": "0h",
+          "reset_sources": [
+            "REG_RST"
+          ],
+          "description": "EN_12V HVDC",
+          "values": {
+            "0h": "Disable 12V mode in HVDCP (default)",
+            "1h": "Enable 12V mode in HVDCP"
+          },
+          "encoding": {
+            "por": "0b"
+          }
+        },
+        {
+          "bit_field": "4-4",
+          "name": "EN_9V",
+          "access_type": "R/W",
+          "reset": "0h",
+          "reset_sources": [
+            "REG_RST"
+          ],
+          "description": "EN_9V HVDC",
+          "values": {
+            "0h": "Disable 9V mode in HVDCP (default)",
+            "1h": "Enable 9V mode in HVDCP"
+          },
+          "encoding": {
+            "por": "0b"
+          }
+        },
+        {
+          "bit_field": "3-3",
+          "name": "HVDCP_EN",
+          "access_type": "R/W",
+          "reset": "0h",
+          "reset_sources": [
+            "REG_RST"
+          ],
+          "description": "High voltage DCP enable.",
+          "values": {
+            "0h": "Disable HVDCP handshake (default)",
+            "1h": "Enable HVDCP handshake"
+          },
+          "encoding": {
+            "por": "0b"
+          }
+        },
+        {
+          "bit_field": "2-1",
+          "name": "SDRV_CTRL_1:0",
+          "access_type": "R/W",
+          "reset": "0h",
+          "reset_sources": [
+            "REG_RST"
+          ],
+          "description": "SFET control\nThe external ship FET control logic to force the device enter different modes.",
+          "values": {
+            "0h": "IDLE (default)",
+            "1h": "Shutdown Mode",
+            "2h": "Ship Mode",
+            "3h": "System Power Reset"
+          },
+          "encoding": {
+            "por": "00b"
+          }
+        },
+        {
+          "bit_field": "0-0",
+          "name": "SDRV_DLY",
+          "access_type": "R/W",
+          "reset": "0h",
+          "reset_sources": [
+            "REG_RST"
+          ],
+          "description": "Delay time added to the taking action in bit [2:1] of the SFET control",
+          "values": {
+            "0h": "Add 10s delay time (default)",
+            "1h": "Do NOT add 10s delay time"
+          },
+          "encoding": {
+            "por": "0b"
+          }
+        }
+      ]
+    },
+    {
+      "offset": "12h",
+      "name": "REG12_Charger_Control_3",
+      "width": 8,
+      "reset": "0h",
+      "description": "Charger Control 3",
+      "fields": [
+        {
+          "bit_field": "7-7",
+          "name": "DIS_ACDRV",
+          "access_type": "R/W",
+          "reset": "0h",
+          "reset_sources": [
+            "VACx < V",
+            "VAC_PRESENT"
+          ],
+          "description": "When this bit is set, the charger will force both EN_ACDRV1=0 and EN_ACDRV2=0",
+          "encoding": {
+            "por": "0b"
+          }
+        },
+        {
+          "bit_field": "6-6",
+          "name": "EN_OTG",
+          "access_type": "R/W",
+          "reset": "0h",
+          "reset_sources": [
+            "WATCHDOG",
+            "REG_RST"
+          ],
+          "description": "OTG mode control",
+          "values": {
+            "0h": "OTG Disable (default)",
+            "1h": "OTG Enable"
+          },
+          "encoding": {
+            "por": "0b"
+          }
+        },
+        {
+          "bit_field": "5-5",
+          "name": "PFM_OTG_DIS",
+          "access_type": "R/W",
+          "reset": "0h",
+          "reset_sources": [
+            "WATCHDOG",
+            "REG_RST"
+          ],
+          "description": "Disable PFM in OTG mode",
+          "values": {
+            "0h": "Enable=PFM on (Default)",
+            "1h": "Disable=PFM off"
+          },
+          "encoding": {
+            "por": "0b"
+          }
+        },
+        {
+          "bit_field": "4-4",
+          "name": "PFM_FWD_DIS",
+          "access_type": "R/W",
+          "reset": "0h",
+          "reset_sources": [
+            "REG_RST"
+          ],
+          "description": "Disable PFM in forward mode",
+          "values": {
+            "0h": "Enable=PFM on (Default)",
+            "1h": "Disable=PFM off"
+          },
+          "encoding": {
+            "por": "0b"
+          }
+        },
+        {
+          "bit_field": "3-3",
+          "name": "WKUP_DLY",
+          "access_type": "R/W",
+          "reset": "0h",
+          "reset_sources": [
+            "REG_RST"
+          ],
+          "description": "When wake up the device from ship mode, how much time (t\nSM_EXIT\n) is required to pull low the QON pin.",
+          "values": {
+            "0h": "1s (Default)",
+            "1h": "15ms"
+          },
+          "encoding": {
+            "por": "0b"
+          }
+        },
+        {
+          "bit_field": "2-2",
+          "name": "DIS_LDO",
+          "access_type": "R/W",
+          "reset": "0h",
+          "reset_sources": [
+            "WATCHDOG",
+            "REG_RST"
+          ],
+          "description": "Disable BATFET LDO mode in pre-charge stage.",
+          "values": {
+            "0h": "Enable=LDO on (Default)",
+            "1h": "Disable=LDO off"
+          },
+          "encoding": {
+            "por": "0b"
+          }
+        },
+        {
+          "bit_field": "1-1",
+          "name": "DIS_OTG_OOA",
+          "access_type": "R/W",
+          "reset": "0h",
+          "reset_sources": [
+            "WATCHDOG",
+            "REG_RST"
+          ],
+          "description": "Disable OOA in OTG mode",
+          "values": {
+            "0h": "Enable=OOA on if PFM on (Default)",
+            "1h": "Disable=OOA off"
+          },
+          "encoding": {
+            "por": "0b"
+          }
+        },
+        {
+          "bit_field": "0-0",
+          "name": "DIS_FWD_OOA",
+          "access_type": "R/W",
+          "reset": "0h",
+          "reset_sources": [
+            "REG_RST"
+          ],
+          "description": "Disable OOA in forward mode",
+          "values": {
+            "0h": "Enable=OOA on if PFM on (Default)",
+            "1h": "Disable=OOA off"
+          },
+          "encoding": {
+            "por": "0b"
+          }
+        }
+      ]
+    },
+    {
+      "offset": "13h",
+      "name": "REG13_Charger_Control_4",
+      "width": 8,
+      "reset": "X",
+      "description": "Charger Control 4",
+      "fields": [
+        {
+          "bit_field": "7-7",
+          "name": "EN_ACDRV2",
+          "access_type": "R/W",
+          "reset": "0h",
+          "description": "External ACFET2-RBFET2 gate driver control\nAt POR, if the charger detects that there is no ACFET2-RBFET2 populated, this bit will be locked at 0",
+          "values": {
+            "0h": "turn off (default)",
+            "1h": "turn on"
+          },
+          "encoding": {
+            "por": "0b"
+          }
+        },
+        {
+          "bit_field": "6-6",
+          "name": "EN_ACDRV1",
+          "access_type": "R/W",
+          "reset": "0h",
+          "description": "External ACFET1-RBFET1 gate driver control\nAt POR, if the charger detects that there is no ACFET1-RBFET1 populated, this bit will be locked at 0",
+          "values": {
+            "0h": "turn off (default)",
+            "1h": "turn on"
+          },
+          "encoding": {
+            "por": "0b"
+          }
+        },
+        {
+          "bit_field": "5-5",
+          "name": "PWM_FREQ",
+          "access_type": "R/W",
+          "reset": "X",
+          "description": "Switching frequency selection, this bit POR default value is based on the PROG pin strapping.",
+          "values": {
+            "0h": "1.5 MHz",
+            "1h": "750 kHz"
+          }
+        },
+        {
+          "bit_field": "4-4",
+          "name": "DIS_STAT",
+          "access_type": "R/W",
+          "reset": "0h",
+          "reset_sources": [
+            "WATCHDOG",
+            "REG_RST"
+          ],
+          "description": "Disable the STAT pin output",
+          "values": {
+            "0h": "Enable (Default)",
+            "1h": "Disable"
+          },
+          "encoding": {
+            "por": "0b"
+          }
+        },
+        {
+          "bit_field": "3-3",
+          "name": "DIS_VSYS_SHORT",
+          "access_type": "R/W",
+          "reset": "0h",
+          "reset_sources": [
+            "REG_RST"
+          ],
+          "description": "Disable forward mode VSYS short hiccup protection.",
+          "values": {
+            "0h": "Enable (Default)",
+            "1h": "Disable"
+          },
+          "encoding": {
+            "por": "0b"
+          }
+        },
+        {
+          "bit_field": "2-2",
+          "name": "DIS_VOTG_UVP",
+          "access_type": "R/W",
+          "reset": "0h",
+          "reset_sources": [
+            "REG_RST"
+          ],
+          "description": "Disable OTG mode VOTG UVP hiccup protection.",
+          "values": {
+            "0h": "Enable (Default)",
+            "1h": "Disable"
+          },
+          "encoding": {
+            "por": "0b"
+          }
+        },
+        {
+          "bit_field": "1-1",
+          "name": "FORCE_VINDPM_DET",
+          "access_type": "R/W",
+          "reset": "0h",
+          "reset_sources": [
+            "REG_RST"
+          ],
+          "description": "Force VINDPM detection\nNote: only when VBAT>VSYSMIN, this bit can be set to 1. Once the VINDPM auto detection is done, this bits returns to 0.",
+          "values": {
+            "0h": "Do NOT force VINDPM detection (default)",
+            "1h": "Force the converter stop switching, and ADC measures the VBUS voltage without input current, then the charger updates the VINDPM register accordingly."
+          },
+          "encoding": {
+            "por": "0b"
+          }
+        },
+        {
+          "bit_field": "0-0",
+          "name": "EN_IBUS_OCP",
+          "access_type": "R/W",
+          "reset": "1h",
+          "reset_sources": [
+            "REG_RST"
+          ],
+          "description": "Enable IBUS_OCP in forward mode",
+          "values": {
+            "0h": "Disable",
+            "1h": "Enable (default)"
+          },
+          "encoding": {
+            "por": "1b"
+          }
+        }
+      ]
+    },
+    {
+      "offset": "14h",
+      "name": "REG14_Charger_Control_5",
+      "width": 8,
+      "reset": "16h",
+      "description": "Charger Control 5",
+      "fields": [
+        {
+          "bit_field": "7-7",
+          "name": "SFET_PRESENT",
+          "access_type": "R/W",
+          "reset": "0h",
+          "description": "The user has to set this bit based on whether a ship FET is populated or not. The POR default value is 0, which means the charger does not support all the features associated with the ship FET. The register bits list below all are locked at 0.\nEN_BATOC=0\nSDRV_CTRL=00\nWhen this bit is set to 1, the register bits list above become programmable, and the charger can support the features associated with the ship FET",
+          "values": {
+            "0h": "No ship FET populated",
+            "1h": "Ship FET populated"
+          },
+          "encoding": {
+            "por": "0b"
+          }
+        },
+        {
+          "bit_field": "6-6",
+          "name": "RESERVED",
+          "access_type": "R",
+          "reset": "0h",
+          "description": "Reserved"
+        },
+        {
+          "bit_field": "5-5",
+          "name": "EN_IBAT",
+          "access_type": "R/W",
+          "reset": "0h",
+          "reset_sources": [
+            "WATCHDOG",
+            "REG_RST"
+          ],
+          "description": "IBAT discharge current sensing enable for ADC in battery only/HiZ mode",
+          "values": {
+            "0h": "Disable the IBAT discharge sensing at battery only/HiZ (default)",
+            "1h": "Enable the IBAT discharge sensing at battery only/HiZ using higher Iq"
+          },
+          "encoding": {
+            "por": "0b"
+          }
+        },
+        {
+          "bit_field": "4-3",
+          "name": "IBAT_REG_1:0",
+          "access_type": "R/W",
+          "reset": "2h",
+          "reset_sources": [
+            "WATCHDOG",
+            "REG_RST"
+          ],
+          "description": "Battery discharging current regulation in OTG mode",
+          "values": {
+            "0h": "3A",
+            "1h": "4A",
+            "2h": "5A",
+            "3h": "Disable (default)"
+          },
+          "encoding": {
+            "por": "10b"
+          }
+        },
+        {
+          "bit_field": "2-2",
+          "name": "EN_IINDPM",
+          "access_type": "R/W",
+          "reset": "1h",
+          "reset_sources": [
+            "WATCHDOG",
+            "REG_RST"
+          ],
+          "description": "Enable the internal IINDPM register input current regulation and IOTG register for OTG output current regulation",
+          "values": {
+            "0h": "Disable",
+            "1h": "Enable (default)"
+          },
+          "encoding": {
+            "por": "1b"
+          }
+        },
+        {
+          "bit_field": "1-1",
+          "name": "EN_EXTILIM",
+          "access_type": "R/W",
+          "reset": "1h",
+          "reset_sources": [
+            "REG_RST"
+          ],
+          "description": "Enable the external ILIM_HIZ pin input current regulation",
+          "values": {
+            "0h": "Disable",
+            "1h": "Enable (default)"
+          },
+          "encoding": {
+            "por": "1b"
+          }
+        },
+        {
+          "bit_field": "0-0",
+          "name": "EN_BATOC",
+          "access_type": "R/W",
+          "reset": "0h",
+          "reset_sources": [
+            "WATCHDOG",
+            "REG_RST"
+          ],
+          "description": "Enable the battery discharging current OCP",
+          "values": {
+            "0h": "Disable (default)",
+            "1h": "Enable"
+          },
+          "encoding": {
+            "por": "0b"
+          }
+        }
+      ]
+    },
+    {
+      "offset": "15h",
+      "name": "REG15_MPPT_Control",
+      "width": 8,
+      "reset": "AAh",
+      "description": "MPPT Control",
+      "fields": [
+        {
+          "bit_field": "7-5",
+          "name": "VOC_PCT_2:0",
+          "access_type": "R/W",
+          "reset": "5h",
+          "reset_sources": [
+            "REG_RST"
+          ],
+          "description": "To set the VINDPM as a percentage of the VBUS open circuit voltage when the VOC measurement is done.",
+          "values": {
+            "0h": "0.5625",
+            "1h": "0.625",
+            "2h": "0.6875",
+            "3h": "0.75",
+            "4h": "0.8125",
+            "5h": "0.875 (default)",
+            "6h": "0.9375",
+            "7h": "1"
+          },
+          "encoding": {
+            "por": "101b"
+          }
+        },
+        {
+          "bit_field": "4-3",
+          "name": "VOC_DLY_1:0",
+          "access_type": "R/W",
+          "reset": "1h",
+          "reset_sources": [
+            "REG_RST"
+          ],
+          "description": "After the converter stops switching, the time delay before the VOC is measured.",
+          "values": {
+            "0h": "50ms",
+            "1h": "300ms (default)",
+            "2h": "2s",
+            "3h": "5s"
+          },
+          "encoding": {
+            "por": "01b"
+          }
+        },
+        {
+          "bit_field": "2-1",
+          "name": "VOC_RATE_1:0",
+          "access_type": "R/W",
+          "reset": "1h",
+          "reset_sources": [
+            "REG_RST"
+          ],
+          "description": "The time interval two VBUS open circuit voltage measurements.",
+          "values": {
+            "0h": "30s",
+            "1h": "2mins (default)",
+            "2h": "10mins",
+            "3h": "30mins"
+          },
+          "encoding": {
+            "por": "01b"
+          }
+        },
+        {
+          "bit_field": "0-0",
+          "name": "EN_MPPT",
+          "access_type": "R/W",
+          "reset": "0h",
+          "reset_sources": [
+            "REG_RST"
+          ],
+          "description": "Enable the MPPT to measure the VBUS open circuit voltage.",
+          "values": {
+            "0h": "Disable (default)",
+            "1h": "Enable"
+          },
+          "encoding": {
+            "por": "0b"
+          }
+        }
+      ]
+    },
+    {
+      "offset": "16h",
+      "name": "REG16_Temperature_Control",
+      "width": 8,
+      "reset": "C0h",
+      "description": "Temperature Control",
+      "fields": [
+        {
+          "bit_field": "7-6",
+          "name": "TREG_1:0",
+          "access_type": "R/W",
+          "reset": "3h",
+          "reset_sources": [
+            "WATCHDOG",
+            "REG_RST"
+          ],
+          "description": "Thermal regulation thresholds.",
+          "values": {
+            "0h": "60°C",
+            "1h": "80°C",
+            "2h": "100°C",
+            "3h": "120°C (default)"
+          },
+          "encoding": {
+            "por": "11b"
+          }
+        },
+        {
+          "bit_field": "5-4",
+          "name": "TSHUT_1:0",
+          "access_type": "R/W",
+          "reset": "0h",
+          "reset_sources": [
+            "WATCHDOG",
+            "REG_RST"
+          ],
+          "description": "Thermal shutdown thresholds.",
+          "values": {
+            "0h": "150°C (default)",
+            "1h": "130°C",
+            "2h": "120°C",
+            "3h": "85°C"
+          },
+          "encoding": {
+            "por": "00b"
+          }
+        },
+        {
+          "bit_field": "3-3",
+          "name": "VBUS_PD_EN",
+          "access_type": "R/W",
+          "reset": "0h",
+          "reset_sources": [
+            "REG_RST"
+          ],
+          "description": "Enable VBUS pull down resistor (6k Ohm)",
+          "values": {
+            "0h": "Disable (default)",
+            "1h": "Enable"
+          },
+          "encoding": {
+            "por": "0b"
+          }
+        },
+        {
+          "bit_field": "2-2",
+          "name": "VAC1_PD_EN",
+          "access_type": "R/W",
+          "reset": "0h",
+          "reset_sources": [
+            "REG_RST"
+          ],
+          "description": "Enable VAC1 pull down resistor",
+          "values": {
+            "0h": "Disable (default)",
+            "1h": "Enable"
+          },
+          "encoding": {
+            "por": "0b"
+          }
+        },
+        {
+          "bit_field": "1-1",
+          "name": "VAC2_PD_EN",
+          "access_type": "R/W",
+          "reset": "0h",
+          "reset_sources": [
+            "REG_RST"
+          ],
+          "description": "Enable VAC2 pull down resistor",
+          "values": {
+            "0h": "Disable (default)",
+            "1h": "Enable"
+          },
+          "encoding": {
+            "por": "0b"
+          }
+        },
+        {
+          "bit_field": "0-0",
+          "name": "BKUP_ACFET1_ON",
+          "access_type": "R/W",
+          "reset": "0h",
+          "reset_sources": [
+            "REG_RST"
+          ],
+          "description": "When the charger is operated in backup mode, ACFET1 is off. Setting this bit to 1, the charger clears the EN_BACKUP bit to 0, sets DIS_ACDRV=0 and EN_ACDRV1=1 to turn on the ACFET1.",
+          "values": {
+            "0h": "IDLE (default)",
+            "1h": "To turn on ACFET1 in backup mode"
+          },
+          "encoding": {
+            "por": "0b"
+          }
+        }
+      ]
+    },
+    {
+      "offset": "17h",
+      "name": "REG17_NTC_Control_0",
+      "width": 8,
+      "reset": "7Ah",
+      "description": "NTC Control 0",
+      "fields": [
+        {
+          "bit_field": "7-5",
+          "name": "JEITA_VSET_2:0",
+          "access_type": "R/W",
+          "reset": "3h",
+          "reset_sources": [
+            "WATCHDOG",
+            "REG_RST"
+          ],
+          "description": "JEITA high temperature range (TWARM - THOT) charge voltage setting",
+          "values": {
+            "0h": "Charge Suspend",
+            "1h": "Set VREG to VREG-800mV",
+            "2h": "Set VREG to VREG-600mV",
+            "3h": "Set VREG to VREG-400mV (default)",
+            "4h": "Set VREG to VREG-300mV",
+            "5h": "Set VREG to VREG-200mV",
+            "6h": "Set VREG to VREG-100mV",
+            "7h": "VREG unchanged"
+          },
+          "encoding": {
+            "por": "011b"
+          }
+        },
+        {
+          "bit_field": "4-3",
+          "name": "JEITA_ISETH_1:0",
+          "access_type": "R/W",
+          "reset": "3h",
+          "reset_sources": [
+            "WATCHDOG",
+            "REG_RST"
+          ],
+          "description": "JEITA high temperature range (TWARM - THOT) charge current setting",
+          "values": {
+            "0h": "Charge Suspend",
+            "1h": "Set ICHG to 20%* ICHG",
+            "2h": "Set ICHG to 40%* ICHG",
+            "3h": "ICHG unchanged (default)"
+          },
+          "encoding": {
+            "por": "11b"
+          }
+        },
+        {
+          "bit_field": "2-1",
+          "name": "JEITA_ISETC_1:0",
+          "access_type": "R/W",
+          "reset": "1h",
+          "reset_sources": [
+            "WATCHDOG",
+            "REG_RST"
+          ],
+          "description": "JEITA low temperature range (TCOLD - TCOOL) charge current setting",
+          "values": {
+            "0h": "Charge Suspend",
+            "1h": "Set ICHG to 20%* ICHG (default)",
+            "2h": "Set ICHG to 40%* ICHG",
+            "3h": "ICHG unchanged"
+          },
+          "encoding": {
+            "por": "01b"
+          }
+        },
+        {
+          "bit_field": "0-0",
+          "name": "RESERVED",
+          "access_type": "R",
+          "reset": "0h",
+          "description": "Reserved"
+        }
+      ]
+    },
+    {
+      "offset": "18h",
+      "name": "REG18_NTC_Control_1",
+      "width": 8,
+      "reset": "54h",
+      "description": "NTC Control 1",
+      "fields": [
+        {
+          "bit_field": "7-6",
+          "name": "TS_COOL_1:0",
+          "access_type": "R/W",
+          "reset": "1h",
+          "reset_sources": [
+            "WATCHDOG",
+            "REG_RST"
+          ],
+          "description": "JEITA VT2 comparator voltage rising thresholds as a percentage of REGN. The corresponding temperature in the brackets is achieved when a 103AT NTC thermistor is used, RT1=5.24kΩ and RT2=30.31kΩ.",
+          "values": {
+            "0h": "71.1% (5°C)",
+            "1h": "68.4% (default) (10°C)",
+            "2h": "65.5% (15°C)",
+            "3h": "62.4% (20°C)"
+          },
+          "encoding": {
+            "por": "01b"
+          }
+        },
+        {
+          "bit_field": "5-4",
+          "name": "TS_WARM_1:0",
+          "access_type": "R/W",
+          "reset": "1h",
+          "reset_sources": [
+            "WATCHDOG",
+            "REG_RST"
+          ],
+          "description": "JEITA VT3 comparator voltage falling thresholds as a percentage of REGN. The corresponding temperature in the brackets is achieved when a 103AT NTC thermistor is used, RT1=5.24kΩ and RT2=30.31kΩ.",
+          "values": {
+            "0h": "48.4% (40°C)",
+            "1h": "44.8% (default) (45°C)",
+            "2h": "41.2% (50°C)",
+            "3h": "37.7% (55°C)"
+          },
+          "encoding": {
+            "por": "01b"
+          }
+        },
+        {
+          "bit_field": "3-2",
+          "name": "BHOT_1:0",
+          "access_type": "R/W",
+          "reset": "1h",
+          "reset_sources": [
+            "WATCHDOG",
+            "REG_RST"
+          ],
+          "description": "OTG mode TS HOT temperature threshold",
+          "values": {
+            "0h": "55°C",
+            "1h": "60°C (default)",
+            "2h": "65°C",
+            "3h": "Disable"
+          },
+          "encoding": {
+            "por": "01b"
+          }
+        },
+        {
+          "bit_field": "1-1",
+          "name": "BCOLD",
+          "access_type": "R/W",
+          "reset": "0h",
+          "reset_sources": [
+            "WATCHDOG",
+            "REG_RST"
+          ],
+          "description": "OTG mode TS COLD temperature threshold",
+          "values": {
+            "0h": "-10°C (default)",
+            "1h": "-20°C"
+          },
+          "encoding": {
+            "por": "0b"
+          }
+        },
+        {
+          "bit_field": "0-0",
+          "name": "TS_IGNORE",
+          "access_type": "R/W",
+          "reset": "0h",
+          "reset_sources": [
+            "WATCHDOG",
+            "REG_RST"
+          ],
+          "description": "Ignore the TS feedback, the charger considers the TS is always good to allow the charging and OTG modes, all the four TS status bits always stay at 0000 to report the normal condition.",
+          "values": {
+            "0h": "NOT ignore (Default)",
+            "1h": "Ignore"
+          },
+          "encoding": {
+            "por": "0b"
+          }
+        }
+      ]
+    },
+    {
+      "offset": "19h",
+      "name": "REG19_ICO_Current_Limit",
+      "width": 16,
+      "reset": "0h",
+      "description": "ICO Current Limit",
+      "fields": [
+        {
+          "bit_field": "15-9",
+          "name": "RESERVED",
+          "access_type": "R",
+          "reset": "0h",
+          "description": "RESERVED"
+        },
+        {
+          "bit_field": "8-0",
+          "name": "ICO_ILIM_8:0",
+          "access_type": "R",
+          "reset": "0h",
+          "description": "Input Current Limit obtained from ICO or ILIM_HIZ pin setting",
+          "encoding": {
+            "por": "0mA (0h)",
+            "range": "100mA-3300mA",
+            "fixed_offset": "0mA",
+            "bit_step_size": "10mA",
+            "clamp": [
+              "low"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "offset": "1Bh",
+      "name": "REG1B_Charger_Status_0",
+      "width": 8,
+      "reset": "0h",
+      "description": "Charger Status 0",
+      "fields": [
+        {
+          "bit_field": "7-7",
+          "name": "IINDPM_STAT",
+          "access_type": "R",
+          "reset": "0h",
+          "description": "IINDPM status (forward mode) or IOTG status (OTG mode)",
+          "values": {
+            "0h": "Normal",
+            "1h": "In IINDPM regulation or IOTG regulation"
+          },
+          "encoding": {
+            "por": "0b"
+          }
+        },
+        {
+          "bit_field": "6-6",
+          "name": "VINDPM_STAT",
+          "access_type": "R",
+          "reset": "0h",
+          "description": "VINDPM status (forward mode) or VOTG status (OTG mode)",
+          "values": {
+            "0h": "Normal",
+            "1h": "In VINDPM regulation or VOTG regualtion"
+          },
+          "encoding": {
+            "por": "0b"
+          }
+        },
+        {
+          "bit_field": "5-5",
+          "name": "WD_STAT",
+          "access_type": "R",
+          "reset": "0h",
+          "description": "I2C watch dog timer status",
+          "values": {
+            "0h": "Normal",
+            "1h": "WD timer expired"
+          },
+          "encoding": {
+            "por": "0b"
+          }
+        },
+        {
+          "bit_field": "4-4",
+          "name": "RESERVED",
+          "access_type": "R",
+          "reset": "0h",
+          "description": "RESERVED"
+        },
+        {
+          "bit_field": "3-3",
+          "name": "PG_STAT",
+          "access_type": "R",
+          "reset": "0h",
+          "description": "Power Good Status",
+          "values": {
+            "0h": "NOT in power good status",
+            "1h": "Power good"
+          },
+          "encoding": {
+            "por": "0b"
+          }
+        },
+        {
+          "bit_field": "2-2",
+          "name": "AC2_PRESENT_STAT",
+          "access_type": "R",
+          "reset": "0h",
+          "description": "VAC2 insert status",
+          "values": {
+            "0h": "VAC2 NOT present",
+            "1h": "VAC2 present (above present threshold)"
+          },
+          "encoding": {
+            "por": "0b"
+          }
+        },
+        {
+          "bit_field": "1-1",
+          "name": "AC1_PRESENT_STAT",
+          "access_type": "R",
+          "reset": "0h",
+          "description": "VAC1 insert status",
+          "values": {
+            "0h": "VAC1 NOT present",
+            "1h": "VAC1 present (above present threshold)"
+          },
+          "encoding": {
+            "por": "0b"
+          }
+        },
+        {
+          "bit_field": "0-0",
+          "name": "VBUS_PRESENT_STAT",
+          "access_type": "R",
+          "reset": "0h",
+          "description": "VBUS present status",
+          "values": {
+            "0h": "VBUS NOT present",
+            "1h": "VBUS present (above present threshold)"
+          },
+          "encoding": {
+            "por": "0b"
+          }
+        }
+      ]
+    },
+    {
+      "offset": "1Ch",
+      "name": "REG1C_Charger_Status_1",
+      "width": 8,
+      "reset": "0h",
+      "description": "Charger Status 1",
+      "fields": [
+        {
+          "bit_field": "7-5",
+          "name": "CHG_STAT_2:0",
+          "access_type": "R",
+          "reset": "0h",
+          "description": "Charge Status bits",
+          "values": {
+            "0h": "Not Charging",
+            "1h": "Trickle Charge",
+            "2h": "Pre-charge",
+            "3h": "Fast charge (CC mode)",
+            "4h": "Taper Charge (CV mode)",
+            "5h": "Reserved",
+            "6h": "Top-off Timer Active Charging",
+            "7h": "Charge Termination Done"
+          },
+          "encoding": {
+            "por": "000b"
+          }
+        },
+        {
+          "bit_field": "4-1",
+          "name": "VBUS_STAT_3:0",
+          "access_type": "R",
+          "reset": "0h",
+          "description": "VBUS status bits\n0h: No Input or BHOT or BCOLD in OTG mode\n1h: USB SDP (500mA)\n2h: USB CDP (1.5A)\n3h: USB DCP (3.25A)\n4h: Adjustable High Voltage DCP (HVDCP) (1.5A)\n5h: Unknown adaptor (3A)\n6h: Non-Standard Adapter (1A/2A/2.1A/2.4A)\n7h: In OTG mode\n8h: Not qualified adaptor\n9h: Reserved\nAh: Reserved\nBh: Device directly powered from VBUS\nCh: Backup Mode\nDh: Reserved\nEh: Reserved\nFh: Reserved",
+          "encoding": {
+            "por": "0h"
+          }
+        },
+        {
+          "bit_field": "0-0",
+          "name": "BC1.2_DONE_STAT",
+          "access_type": "R",
+          "reset": "0h",
+          "description": "BC1.2 status bit",
+          "values": {
+            "0h": "BC1.2 or non-standard detection NOT complete",
+            "1h": "BC1.2 or non-standard detection complete"
+          },
+          "encoding": {
+            "por": "0b"
+          }
+        }
+      ]
+    },
+    {
+      "offset": "1Dh",
+      "name": "REG1D_Charger_Status_2",
+      "width": 8,
+      "reset": "0h",
+      "description": "Charger Status 2",
+      "fields": [
+        {
+          "bit_field": "7-6",
+          "name": "ICO_STAT_1:0",
+          "access_type": "R",
+          "reset": "0h",
+          "description": "Input Current Optimizer (ICO) status",
+          "values": {
+            "0h": "ICO disabled",
+            "1h": "ICO optimization in progress",
+            "2h": "Maximum input current detected",
+            "3h": "Reserved"
+          },
+          "encoding": {
+            "por": "00b"
+          }
+        },
+        {
+          "bit_field": "5-3",
+          "name": "RESERVED",
+          "access_type": "R",
+          "reset": "0h",
+          "description": "RESERVED"
+        },
+        {
+          "bit_field": "2-2",
+          "name": "TREG_STAT",
+          "access_type": "R",
+          "reset": "0h",
+          "description": "IC thermal regulation status",
+          "values": {
+            "0h": "Normal",
+            "1h": "Device in thermal regulation"
+          },
+          "encoding": {
+            "por": "0b"
+          }
+        },
+        {
+          "bit_field": "1-1",
+          "name": "DPDM_STAT",
+          "access_type": "R",
+          "reset": "0h",
+          "description": "D+/D- detection status bits",
+          "values": {
+            "0h": "The D+/D- detection is NOT started yet, or the detection is done",
+            "1h": "The D+/D- detection is ongoing"
+          },
+          "encoding": {
+            "por": "0b"
+          }
+        },
+        {
+          "bit_field": "0-0",
+          "name": "VBAT_PRESENT_STAT",
+          "access_type": "R",
+          "reset": "0h",
+          "description": "Battery present status (V\nBAT\n> V\nBAT_UVLOZ\n)\nBAT\nNOT present\nBAT\npresent",
+          "values": {
+            "0h": "V BAT NOT present",
+            "1h": "V BAT present"
+          },
+          "encoding": {
+            "por": "0b"
+          }
+        }
+      ]
+    },
+    {
+      "offset": "1Eh",
+      "name": "REG1E_Charger_Status_3",
+      "width": 8,
+      "reset": "0h",
+      "description": "Charger Status 3",
+      "fields": [
+        {
+          "bit_field": "7-7",
+          "name": "ACRB2_STAT",
+          "access_type": "R",
+          "reset": "0h",
+          "description": "The ACFET2-RBFET2 status",
+          "values": {
+            "0h": "ACFET2-RBFET2 is NOT placed",
+            "1h": "ACFET2-RBFET2 is placed"
+          },
+          "encoding": {
+            "por": "0b"
+          }
+        },
+        {
+          "bit_field": "6-6",
+          "name": "ACRB1_STAT",
+          "access_type": "R",
+          "reset": "0h",
+          "description": "The ACFET1-RBFET1 status",
+          "values": {
+            "0h": "ACFET1-RBFET1 is NOT placed",
+            "1h": "ACFET1-RBFET1 is placed"
+          },
+          "encoding": {
+            "por": "0b"
+          }
+        },
+        {
+          "bit_field": "5-5",
+          "name": "ADC_DONE_STAT",
+          "access_type": "R",
+          "reset": "0h",
+          "description": "ADC Conversion Status (in one-shot mode only)",
+          "values": {
+            "0h": "Conversion NOT complete",
+            "1h": "Conversion complete"
+          },
+          "encoding": {
+            "por": "0b"
+          }
+        },
+        {
+          "bit_field": "4-4",
+          "name": "VSYS_STAT",
+          "access_type": "R",
+          "reset": "0h",
+          "description": "VSYS Regulation Status (forward mode)\nBAT\n> V\nSYSMIN\n)\nBAT\n< V\nSYSMIN\n)",
+          "values": {
+            "0h": "Not in VSYSMIN regulation (V BAT > V SYSMIN )",
+            "1h": "In VSYSMIN regulation (V BAT < V SYSMIN )"
+          },
+          "encoding": {
+            "por": "0b"
+          }
+        },
+        {
+          "bit_field": "3-3",
+          "name": "CHG_TMR_STAT",
+          "access_type": "R",
+          "reset": "0h",
+          "description": "Fast charge timer status",
+          "values": {
+            "0h": "Normal",
+            "1h": "Safety timer expired"
+          },
+          "encoding": {
+            "por": "0b"
+          }
+        },
+        {
+          "bit_field": "2-2",
+          "name": "TRICHG_TMR_STAT",
+          "access_type": "R",
+          "reset": "0h",
+          "description": "Trickle charge timer status",
+          "values": {
+            "0h": "Normal",
+            "1h": "Safety timer expired"
+          },
+          "encoding": {
+            "por": "0b"
+          }
+        },
+        {
+          "bit_field": "1-1",
+          "name": "PRECHG_TMR_STAT",
+          "access_type": "R",
+          "reset": "0h",
+          "description": "Pre-charge timer status",
+          "values": {
+            "0h": "Normal",
+            "1h": "Safety timer expired"
+          },
+          "encoding": {
+            "por": "0b"
+          }
+        },
+        {
+          "bit_field": "0-0",
+          "name": "RESERVED",
+          "access_type": "R",
+          "reset": "0h",
+          "description": "RESERVED"
+        }
+      ]
+    },
+    {
+      "offset": "1Fh",
+      "name": "REG1F_Charger_Status_4",
+      "width": 8,
+      "reset": "0h",
+      "description": "Charger Status 4",
+      "fields": [
+        {
+          "bit_field": "7-5",
+          "name": "RESERVED",
+          "access_type": "R",
+          "reset": "0h",
+          "description": "RESERVED"
+        },
+        {
+          "bit_field": "4-4",
+          "name": "VBATOTG_LOW_STAT",
+          "access_type": "R",
+          "reset": "0h",
+          "description": "The battery voltage is too low to enable OTG mode.",
+          "values": {
+            "0h": "The battery voltage is high enough to enable the OTG operation",
+            "1h": "The battery volage is too low to enable the OTG operation"
+          },
+          "encoding": {
+            "por": "0b"
+          }
+        },
+        {
+          "bit_field": "3-3",
+          "name": "TS_COLD_STAT",
+          "access_type": "R",
+          "reset": "0h",
+          "description": "The TS temperature is in the cold range, lower than T1.",
+          "values": {
+            "0h": "TS status is NOT in cold range",
+            "1h": "TS status is in cold range"
+          },
+          "encoding": {
+            "por": "0b"
+          }
+        },
+        {
+          "bit_field": "2-2",
+          "name": "TS_COOL_STAT",
+          "access_type": "R",
+          "reset": "0h",
+          "description": "The TS temperature is in the cool range, between T1 and T2.",
+          "values": {
+            "0h": "TS status is NOT in cool range",
+            "1h": "TS status is in cool range"
+          },
+          "encoding": {
+            "por": "0b"
+          }
+        },
+        {
+          "bit_field": "1-1",
+          "name": "TS_WARM_STAT",
+          "access_type": "R",
+          "reset": "0h",
+          "description": "The TS temperature is in the warm range, between T3 and T5.",
+          "values": {
+            "0h": "TS status is NOT in warm range",
+            "1h": "TS status is in warm range"
+          },
+          "encoding": {
+            "por": "0b"
+          }
+        },
+        {
+          "bit_field": "0-0",
+          "name": "TS_HOT_STAT",
+          "access_type": "R",
+          "reset": "0h",
+          "description": "The TS temperature is in the hot range, higher than T5.",
+          "values": {
+            "0h": "TS status is NOT in hot range",
+            "1h": "TS status is in hot range"
+          },
+          "encoding": {
+            "por": "0b"
+          }
+        }
+      ]
+    },
+    {
+      "offset": "20h",
+      "name": "REG20_FAULT_Status_0",
+      "width": 8,
+      "reset": "0h",
+      "description": "FAULT Status 0",
+      "fields": [
+        {
+          "bit_field": "7-7",
+          "name": "IBAT_REG_STAT",
+          "access_type": "R",
+          "reset": "0h",
+          "description": "IBAT regulation status",
+          "values": {
+            "0h": "Normal",
+            "1h": "Device in battery discharging current regulation"
+          },
+          "encoding": {
+            "por": "0b"
+          }
+        },
+        {
+          "bit_field": "6-6",
+          "name": "VBUS_OVP_STAT",
+          "access_type": "R",
+          "reset": "0h",
+          "description": "VBUS over-voltage status",
+          "values": {
+            "0h": "Normal",
+            "1h": "Device in over voltage protection"
+          },
+          "encoding": {
+            "por": "0b"
+          }
+        },
+        {
+          "bit_field": "5-5",
+          "name": "VBAT_OVP_STAT",
+          "access_type": "R",
+          "reset": "0h",
+          "description": "VBAT over-voltage status",
+          "values": {
+            "0h": "Normal",
+            "1h": "Device in over voltage protection"
+          },
+          "encoding": {
+            "por": "0b"
+          }
+        },
+        {
+          "bit_field": "4-4",
+          "name": "IBUS_OCP_STAT",
+          "access_type": "R",
+          "reset": "0h",
+          "description": "IBUS over-current status",
+          "values": {
+            "0h": "Normal",
+            "1h": "Device in over current protection"
+          },
+          "encoding": {
+            "por": "0b"
+          }
+        },
+        {
+          "bit_field": "3-3",
+          "name": "IBAT_OCP_STAT",
+          "access_type": "R",
+          "reset": "0h",
+          "description": "IBAT over-current status",
+          "values": {
+            "0h": "Normal",
+            "1h": "Device in over current protection"
+          },
+          "encoding": {
+            "por": "0b"
+          }
+        },
+        {
+          "bit_field": "2-2",
+          "name": "CONV_OCP_STAT",
+          "access_type": "R",
+          "reset": "0h",
+          "description": "Converter over current status",
+          "values": {
+            "0h": "Normal",
+            "1h": "Converter in over current protection"
+          },
+          "encoding": {
+            "por": "0b"
+          }
+        },
+        {
+          "bit_field": "1-1",
+          "name": "VAC2_OVP_STAT",
+          "access_type": "R",
+          "reset": "0h",
+          "description": "VAC2 over-voltage status",
+          "values": {
+            "0h": "Normal",
+            "1h": "Device in over voltage protection"
+          },
+          "encoding": {
+            "por": "0b"
+          }
+        },
+        {
+          "bit_field": "0-0",
+          "name": "VAC1_OVP_STAT",
+          "access_type": "R",
+          "reset": "0h",
+          "description": "VAC1 over-voltage status",
+          "values": {
+            "0h": "Normal",
+            "1h": "Device in over voltage protection"
+          },
+          "encoding": {
+            "por": "0b"
+          }
+        }
+      ]
+    },
+    {
+      "offset": "21h",
+      "name": "REG21_FAULT_Status_1",
+      "width": 8,
+      "reset": "0h",
+      "description": "FAULT Status 1",
+      "fields": [
+        {
+          "bit_field": "7-7",
+          "name": "VSYS_SHORT_STAT",
+          "access_type": "R",
+          "reset": "0h",
+          "description": "VSYS short circuit status",
+          "values": {
+            "0h": "Normal",
+            "1h": "Device in SYS short circuit protection"
+          },
+          "encoding": {
+            "por": "0b"
+          }
+        },
+        {
+          "bit_field": "6-6",
+          "name": "VSYS_OVP_STAT",
+          "access_type": "R",
+          "reset": "0h",
+          "description": "VSYS over-voltage status",
+          "values": {
+            "0h": "Normal",
+            "1h": "Device in SYS over-voltage protection"
+          },
+          "encoding": {
+            "por": "0b"
+          }
+        },
+        {
+          "bit_field": "5-5",
+          "name": "OTG_OVP_STAT",
+          "access_type": "R",
+          "reset": "0h",
+          "description": "OTG over voltage status",
+          "values": {
+            "0h": "Normal",
+            "1h": "Device in OTG over-voltage"
+          },
+          "encoding": {
+            "por": "0b"
+          }
+        },
+        {
+          "bit_field": "4-4",
+          "name": "OTG_UVP_STAT",
+          "access_type": "R",
+          "reset": "0h",
+          "description": "OTG under voltage status.",
+          "values": {
+            "0h": "Normal",
+            "1h": "Device in OTG under voltage"
+          },
+          "encoding": {
+            "por": "0b"
+          }
+        },
+        {
+          "bit_field": "3-3",
+          "name": "RESERVED",
+          "access_type": "R",
+          "reset": "0h",
+          "description": "RESERVED"
+        },
+        {
+          "bit_field": "2-2",
+          "name": "TSHUT_STAT",
+          "access_type": "R",
+          "reset": "0h",
+          "description": "IC temperature shutdown status",
+          "values": {
+            "0h": "Normal",
+            "1h": "Device in thermal shutdown protection"
+          },
+          "encoding": {
+            "por": "0b"
+          }
+        },
+        {
+          "bit_field": "1-0",
+          "name": "RESERVED",
+          "access_type": "R",
+          "reset": "0h",
+          "description": "RESERVED"
+        }
+      ]
+    },
+    {
+      "offset": "22h",
+      "name": "REG22_Charger_Flag_0",
+      "width": 8,
+      "reset": "0h",
+      "description": "Charger Flag 0",
+      "fields": [
+        {
+          "bit_field": "7-7",
+          "name": "IINDPM_FLAG",
+          "access_type": "R",
+          "reset": "0h",
+          "description": "IINDPM / IOTG flag",
+          "values": {
+            "0h": "Normal",
+            "1h": "IINDPM / IOTG signal rising edge detected"
+          },
+          "encoding": {
+            "por": "0b"
+          }
+        },
+        {
+          "bit_field": "6-6",
+          "name": "VINDPM_FLAG",
+          "access_type": "R",
+          "reset": "0h",
+          "description": "VINDPM / VOTG Flag",
+          "values": {
+            "0h": "Normal",
+            "1h": "VINDPM / VOTG regulation signal rising edge detected"
+          },
+          "encoding": {
+            "por": "0b"
+          }
+        },
+        {
+          "bit_field": "5-5",
+          "name": "WD_FLAG",
+          "access_type": "R",
+          "reset": "0h",
+          "description": "I2C watchdog timer flag",
+          "values": {
+            "0h": "Normal",
+            "1h": "WD timer signal rising edge detected"
+          },
+          "encoding": {
+            "por": "0b"
+          }
+        },
+        {
+          "bit_field": "4-4",
+          "name": "POORSRC_FLAG",
+          "access_type": "R",
+          "reset": "0h",
+          "description": "Poor source detection flag",
+          "values": {
+            "0h": "Normal",
+            "1h": "Poor source status rising edge detected"
+          },
+          "encoding": {
+            "por": "0b"
+          }
+        },
+        {
+          "bit_field": "3-3",
+          "name": "PG_FLAG",
+          "access_type": "R",
+          "reset": "0h",
+          "description": "Power good flag",
+          "values": {
+            "0h": "Normal",
+            "1h": "Any change in PG_STAT even (adapter good qualification or adapter good going away)"
+          },
+          "encoding": {
+            "por": "0b"
+          }
+        },
+        {
+          "bit_field": "2-2",
+          "name": "AC2_PRESENT_FLAG",
+          "access_type": "R",
+          "reset": "0h",
+          "description": "VAC2 present flag",
+          "values": {
+            "0h": "Normal",
+            "1h": "VAC2 present status changed"
+          },
+          "encoding": {
+            "por": "0b"
+          }
+        },
+        {
+          "bit_field": "1-1",
+          "name": "AC1_PRESENT_FLAG",
+          "access_type": "R",
+          "reset": "0h",
+          "description": "VAC1 present flag",
+          "values": {
+            "0h": "Normal",
+            "1h": "VAC1 present status changed"
+          },
+          "encoding": {
+            "por": "0b"
+          }
+        },
+        {
+          "bit_field": "0-0",
+          "name": "VBUS_PRESENT_FLAG",
+          "access_type": "R",
+          "reset": "0h",
+          "description": "VBUS present flag",
+          "values": {
+            "0h": "Normal",
+            "1h": "VBUS present status changed"
+          },
+          "encoding": {
+            "por": "0b"
+          }
+        }
+      ]
+    },
+    {
+      "offset": "23h",
+      "name": "REG23_Charger_Flag_1",
+      "width": 8,
+      "reset": "0h",
+      "description": "Charger Flag 1",
+      "fields": [
+        {
+          "bit_field": "7-7",
+          "name": "CHG_FLAG",
+          "access_type": "R",
+          "reset": "0h",
+          "description": "Charge status flag",
+          "values": {
+            "0h": "Normal",
+            "1h": "Charge status changed"
+          },
+          "encoding": {
+            "por": "0b"
+          }
+        },
+        {
+          "bit_field": "6-6",
+          "name": "ICO_FLAG",
+          "access_type": "R",
+          "reset": "0h",
+          "description": "ICO status flag",
+          "values": {
+            "0h": "Normal",
+            "1h": "ICO status changed"
+          },
+          "encoding": {
+            "por": "0b"
+          }
+        },
+        {
+          "bit_field": "5-5",
+          "name": "RESERVED",
+          "access_type": "R",
+          "reset": "0h",
+          "description": "RESERVED"
+        },
+        {
+          "bit_field": "4-4",
+          "name": "VBUS_FLAG",
+          "access_type": "R",
+          "reset": "0h",
+          "description": "VBUS status flag",
+          "values": {
+            "0h": "Normal",
+            "1h": "VBUS status changed"
+          },
+          "encoding": {
+            "por": "0b"
+          }
+        },
+        {
+          "bit_field": "3-3",
+          "name": "RESERVED",
+          "access_type": "R",
+          "reset": "0h",
+          "description": "RESERVED"
+        },
+        {
+          "bit_field": "2-2",
+          "name": "TREG_FLAG",
+          "access_type": "R",
+          "reset": "0h",
+          "description": "IC thermal regulation flag",
+          "values": {
+            "0h": "Normal",
+            "1h": "TREG signal rising threshold detected"
+          },
+          "encoding": {
+            "por": "0b"
+          }
+        },
+        {
+          "bit_field": "1-1",
+          "name": "VBAT_PRESENT_FLAG",
+          "access_type": "R",
+          "reset": "0h",
+          "description": "VBAT present flag",
+          "values": {
+            "0h": "Normal",
+            "1h": "VBAT present status changed"
+          },
+          "encoding": {
+            "por": "0b"
+          }
+        },
+        {
+          "bit_field": "0-0",
+          "name": "BC1.2_DONE_FLAG",
+          "access_type": "R",
+          "reset": "0h",
+          "description": "BC1.2 status Flag",
+          "values": {
+            "0h": "Normal",
+            "1h": "BC1.2 detection status changed"
+          },
+          "encoding": {
+            "por": "0b"
+          }
+        }
+      ]
+    },
+    {
+      "offset": "24h",
+      "name": "REG24_Charger_Flag_2",
+      "width": 8,
+      "reset": "0h",
+      "description": "Charger Flag 2",
+      "fields": [
+        {
+          "bit_field": "7-7",
+          "name": "RESERVED",
+          "access_type": "R",
+          "reset": "0h",
+          "description": "RESERVED"
+        },
+        {
+          "bit_field": "6-6",
+          "name": "DPDM_DONE_FLAG",
+          "access_type": "R",
+          "reset": "0h",
+          "description": "D+/D- detection is done flag.",
+          "values": {
+            "0h": "D+/D- detection is NOT started or still ongoing",
+            "1h": "D+/D- detection is completed"
+          },
+          "encoding": {
+            "por": "0b"
+          }
+        },
+        {
+          "bit_field": "5-5",
+          "name": "ADC_DONE_FLAG",
+          "access_type": "R",
+          "reset": "0h",
+          "description": "ADC conversion flag (only in one-shot mode)",
+          "values": {
+            "0h": "Conversion NOT completed",
+            "1h": "Conversion completed"
+          },
+          "encoding": {
+            "por": "0b"
+          }
+        },
+        {
+          "bit_field": "4-4",
+          "name": "VSYS_FLAG",
+          "access_type": "R",
+          "reset": "0h",
+          "description": "VSYSMIN regulation flag",
+          "values": {
+            "0h": "Normal",
+            "1h": "Entered or existed VSYSMIN regulation"
+          },
+          "encoding": {
+            "por": "0b"
+          }
+        },
+        {
+          "bit_field": "3-3",
+          "name": "CHG_TMR_FLAG",
+          "access_type": "R",
+          "reset": "0h",
+          "description": "Fast charge timer flag",
+          "values": {
+            "0h": "Normal",
+            "1h": "Fast charge timer expired rising edge detected"
+          },
+          "encoding": {
+            "por": "0b"
+          }
+        },
+        {
+          "bit_field": "2-2",
+          "name": "TRICHG_TMR_FLAG",
+          "access_type": "R",
+          "reset": "0h",
+          "description": "Trickle charge timer flag",
+          "values": {
+            "0h": "Normal",
+            "1h": "Trickle charger timer expired rising edge detected"
+          },
+          "encoding": {
+            "por": "0b"
+          }
+        },
+        {
+          "bit_field": "1-1",
+          "name": "PRECHG_TMR_FLAG",
+          "access_type": "R",
+          "reset": "0h",
+          "description": "Pre-charge timer flag",
+          "values": {
+            "0h": "Normal",
+            "1h": "Pre-charge timer expired rising edge detected"
+          },
+          "encoding": {
+            "por": "0b"
+          }
+        },
+        {
+          "bit_field": "0-0",
+          "name": "TOPOFF_TMR_FLAG",
+          "access_type": "R",
+          "reset": "0h",
+          "description": "Top off timer flag",
+          "values": {
+            "0h": "Normal",
+            "1h": "Top off timer expired rising edge detected"
+          },
+          "encoding": {
+            "por": "0b"
+          }
+        }
+      ]
+    },
+    {
+      "offset": "25h",
+      "name": "REG25_Charger_Flag_3",
+      "width": 8,
+      "reset": "0h",
+      "description": "Charger Flag 3",
+      "fields": [
+        {
+          "bit_field": "7-5",
+          "name": "RESERVED",
+          "access_type": "R",
+          "reset": "0h",
+          "description": "RESERVED"
+        },
+        {
+          "bit_field": "4-4",
+          "name": "VBATOTG_LOW_FLAG",
+          "access_type": "R",
+          "reset": "0h",
+          "description": "VBAT too low to enable OTG flag",
+          "values": {
+            "0h": "Normal",
+            "1h": "VBAT falls below the threshold to enable the OTG mode"
+          },
+          "encoding": {
+            "por": "0b"
+          }
+        },
+        {
+          "bit_field": "3-3",
+          "name": "TS_COLD_FLAG",
+          "access_type": "R",
+          "reset": "0h",
+          "description": "TS cold temperature flag",
+          "values": {
+            "0h": "Normal",
+            "1h": "TS across cold temperature (T1) is detected"
+          },
+          "encoding": {
+            "por": "0b"
+          }
+        },
+        {
+          "bit_field": "2-2",
+          "name": "TS_COOL_FLAG",
+          "access_type": "R",
+          "reset": "0h",
+          "description": "TS cool temperature flag",
+          "values": {
+            "0h": "Normal",
+            "1h": "TS across cool temperature (T2) is detected"
+          },
+          "encoding": {
+            "por": "0b"
+          }
+        },
+        {
+          "bit_field": "1-1",
+          "name": "TS_WARM_FLAG",
+          "access_type": "R",
+          "reset": "0h",
+          "description": "TS warm temperature flag",
+          "values": {
+            "0h": "Normal",
+            "1h": "TS across warm temperature (T3) is detected"
+          },
+          "encoding": {
+            "por": "0b"
+          }
+        },
+        {
+          "bit_field": "0-0",
+          "name": "TS_HOT_FLAG",
+          "access_type": "R",
+          "reset": "0h",
+          "description": "TS hot temperature flag",
+          "values": {
+            "0h": "Normal",
+            "1h": "TS across hot temperature (T5) is detected"
+          },
+          "encoding": {
+            "por": "0b"
+          }
+        }
+      ]
+    },
+    {
+      "offset": "26h",
+      "name": "REG26_FAULT_Flag_0",
+      "width": 8,
+      "reset": "0h",
+      "description": "FAULT Flag 0",
+      "fields": [
+        {
+          "bit_field": "7-7",
+          "name": "IBAT_REG_FLAG",
+          "access_type": "R",
+          "reset": "0h",
+          "description": "IBAT regulation flag",
+          "values": {
+            "0h": "Normal",
+            "1h": "Enter or exit IBAT regulation"
+          },
+          "encoding": {
+            "por": "0b"
+          }
+        },
+        {
+          "bit_field": "6-6",
+          "name": "VBUS_OVP_FLAG",
+          "access_type": "R",
+          "reset": "0h",
+          "description": "VBUS over-voltage flag",
+          "values": {
+            "0h": "Normal",
+            "1h": "Enter VBUS OVP"
+          },
+          "encoding": {
+            "por": "0b"
+          }
+        },
+        {
+          "bit_field": "5-5",
+          "name": "VBAT_OVP_FLAG",
+          "access_type": "R",
+          "reset": "0h",
+          "description": "VBAT over-voltage flag",
+          "values": {
+            "0h": "Normal",
+            "1h": "Enter VBAT OVP"
+          },
+          "encoding": {
+            "por": "0b"
+          }
+        },
+        {
+          "bit_field": "4-4",
+          "name": "IBUS_OCP_FLAG",
+          "access_type": "R",
+          "reset": "0h",
+          "description": "IBUS over-current flag",
+          "values": {
+            "0h": "Normal",
+            "1h": "Enter IBUS OCP"
+          },
+          "encoding": {
+            "por": "0b"
+          }
+        },
+        {
+          "bit_field": "3-3",
+          "name": "IBAT_OCP_FLAG",
+          "access_type": "R",
+          "reset": "0h",
+          "description": "IBAT over-current flag",
+          "values": {
+            "0h": "Normal",
+            "1h": "Enter discharged OCP"
+          },
+          "encoding": {
+            "por": "0b"
+          }
+        },
+        {
+          "bit_field": "2-2",
+          "name": "CONV_OCP_FLAG",
+          "access_type": "R",
+          "reset": "0h",
+          "description": "Converter cycle-by-cycle over-current flag",
+          "values": {
+            "0h": "Normal",
+            "1h": "Enter converter OCP"
+          },
+          "encoding": {
+            "por": "0b"
+          }
+        },
+        {
+          "bit_field": "1-1",
+          "name": "VAC2_OVP_FLAG",
+          "access_type": "R",
+          "reset": "0h",
+          "description": "VAC2 over-voltage flag",
+          "values": {
+            "0h": "Normal",
+            "1h": "Enter VAC2 OVP"
+          },
+          "encoding": {
+            "por": "0b"
+          }
+        },
+        {
+          "bit_field": "0-0",
+          "name": "VAC1_OVP_FLAG",
+          "access_type": "R",
+          "reset": "0h",
+          "description": "VAC1 over-voltage flag",
+          "values": {
+            "0h": "Normal",
+            "1h": "Enter VAC1 OVP"
+          },
+          "encoding": {
+            "por": "0b"
+          }
+        }
+      ]
+    },
+    {
+      "offset": "27h",
+      "name": "REG27_FAULT_Flag_1",
+      "width": 8,
+      "reset": "0h",
+      "description": "FAULT Flag 1",
+      "fields": [
+        {
+          "bit_field": "7-7",
+          "name": "VSYS_SHORT_FLAG",
+          "access_type": "R",
+          "reset": "0h",
+          "description": "VSYS short circuit flag",
+          "values": {
+            "0h": "Normal",
+            "1h": "Stop switching due to system short"
+          },
+          "encoding": {
+            "por": "0b"
+          }
+        },
+        {
+          "bit_field": "6-6",
+          "name": "VSYS_OVP_FLAG",
+          "access_type": "R",
+          "reset": "0h",
+          "description": "VSYS over-voltage flag",
+          "values": {
+            "0h": "Normal",
+            "1h": "Stop switching due to system over-voltage"
+          },
+          "encoding": {
+            "por": "0b"
+          }
+        },
+        {
+          "bit_field": "5-5",
+          "name": "OTG_OVP_FLAG",
+          "access_type": "R",
+          "reset": "0h",
+          "description": "OTG over-voltage flag",
+          "values": {
+            "0h": "Normal",
+            "1h": "Stop OTG due to VBUS over voltage"
+          },
+          "encoding": {
+            "por": "0b"
+          }
+        },
+        {
+          "bit_field": "4-4",
+          "name": "OTG_UVP_FLAG",
+          "access_type": "R",
+          "reset": "0h",
+          "description": "OTG under-voltage flag",
+          "values": {
+            "0h": "Normal",
+            "1h": "Stop OTG due to VBUS under-voltage"
+          },
+          "encoding": {
+            "por": "0b"
+          }
+        },
+        {
+          "bit_field": "3-3",
+          "name": "RESERVED",
+          "access_type": "R",
+          "reset": "0h",
+          "description": "RESERVED"
+        },
+        {
+          "bit_field": "2-2",
+          "name": "TSHUT_FLAG",
+          "access_type": "R",
+          "reset": "0h",
+          "description": "IC thermal shutdown flag",
+          "values": {
+            "0h": "Normal",
+            "1h": "TS shutdown signal rising threshold detected"
+          },
+          "encoding": {
+            "por": "0b"
+          }
+        },
+        {
+          "bit_field": "1-0",
+          "name": "RESERVED",
+          "access_type": "R",
+          "reset": "0h",
+          "description": "RESERVED"
+        }
+      ]
+    },
+    {
+      "offset": "28h",
+      "name": "REG28_Charger_Mask_0",
+      "width": 8,
+      "reset": "0h",
+      "description": "Charger Mask 0",
+      "fields": [
+        {
+          "bit_field": "7-7",
+          "name": "IINDPM_MASK",
+          "access_type": "R/W",
+          "reset": "0h",
+          "reset_sources": [
+            "REG_RST"
+          ],
+          "description": "IINDPM / IOTG mask flag",
+          "values": {
+            "0h": "Enter IINDPM / IOTG does produce INT pulse",
+            "1h": "Enter IINDPM / IOTG does NOT produce INT pulse"
+          },
+          "encoding": {
+            "por": "0b"
+          }
+        },
+        {
+          "bit_field": "6-6",
+          "name": "VINDPM_MASK",
+          "access_type": "R/W",
+          "reset": "0h",
+          "reset_sources": [
+            "REG_RST"
+          ],
+          "description": "VINDPM / VOTG mask flag",
+          "values": {
+            "0h": "Enter VINDPM / VOTG does produce INT pulse",
+            "1h": "Enter VINDPM / VOTG does NOT produce INT pulse"
+          },
+          "encoding": {
+            "por": "0b"
+          }
+        },
+        {
+          "bit_field": "5-5",
+          "name": "WD_MASK",
+          "access_type": "R/W",
+          "reset": "0h",
+          "reset_sources": [
+            "REG_RST"
+          ],
+          "description": "I2C watch dog timer mask flag",
+          "values": {
+            "0h": "I2C watch dog timer expired does produce INT pulse",
+            "1h": "I2C watch dog timer expired does NOT produce INT pulse"
+          },
+          "encoding": {
+            "por": "0b"
+          }
+        },
+        {
+          "bit_field": "4-4",
+          "name": "POORSRC_MASK",
+          "access_type": "R/W",
+          "reset": "0h",
+          "reset_sources": [
+            "REG_RST"
+          ],
+          "description": "Poor source detection mask flag",
+          "values": {
+            "0h": "Poor source detected does produce INT",
+            "1h": "Poor source detected does NOT produce INT"
+          },
+          "encoding": {
+            "por": "0b"
+          }
+        },
+        {
+          "bit_field": "3-3",
+          "name": "PG_MASK",
+          "access_type": "R/W",
+          "reset": "0h",
+          "reset_sources": [
+            "REG_RST"
+          ],
+          "description": "Power Good mask flag",
+          "values": {
+            "0h": "PG toggle does produce INT",
+            "1h": "PG toggle does NOT produce INT"
+          },
+          "encoding": {
+            "por": "0b"
+          }
+        },
+        {
+          "bit_field": "2-2",
+          "name": "AC2_PRESENT_MASK",
+          "access_type": "R/W",
+          "reset": "0h",
+          "reset_sources": [
+            "REG_RST"
+          ],
+          "description": "VAC2 present mask flag",
+          "values": {
+            "0h": "VAC2 present status change does produce INT",
+            "1h": "VAC2 present status change does NOT produce INT"
+          },
+          "encoding": {
+            "por": "0b"
+          }
+        },
+        {
+          "bit_field": "1-1",
+          "name": "AC1_PRESENT_MASK",
+          "access_type": "R/W",
+          "reset": "0h",
+          "reset_sources": [
+            "REG_RST"
+          ],
+          "description": "VAC1 present mask flag",
+          "values": {
+            "0h": "VAC1 present status change does produce INT",
+            "1h": "VAC1 present status change does NOT produce INT"
+          },
+          "encoding": {
+            "por": "0b"
+          }
+        },
+        {
+          "bit_field": "0-0",
+          "name": "VBUS_PRESENT_MASK",
+          "access_type": "R/W",
+          "reset": "0h",
+          "reset_sources": [
+            "REG_RST"
+          ],
+          "description": "VBUS present mask flag",
+          "values": {
+            "0h": "VBUS present status change does produce INT",
+            "1h": "VBUS present status change does NOT produce INT"
+          },
+          "encoding": {
+            "por": "0b"
+          }
+        }
+      ]
+    },
+    {
+      "offset": "29h",
+      "name": "REG29_Charger_Mask_1",
+      "width": 8,
+      "reset": "0h",
+      "description": "Charger Mask 1",
+      "fields": [
+        {
+          "bit_field": "7-7",
+          "name": "CHG_MASK",
+          "access_type": "R/W",
+          "reset": "0h",
+          "reset_sources": [
+            "REG_RST"
+          ],
+          "description": "Charge status mask flag",
+          "values": {
+            "0h": "Charging status change does produce INT",
+            "1h": "Charging status change does NOT produce INT"
+          },
+          "encoding": {
+            "por": "0b"
+          }
+        },
+        {
+          "bit_field": "6-6",
+          "name": "ICO_MASK",
+          "access_type": "R/W",
+          "reset": "0h",
+          "reset_sources": [
+            "REG_RST"
+          ],
+          "description": "ICO status mask flag",
+          "values": {
+            "0h": "ICO status change does produce INT",
+            "1h": "ICO status change does NOT produce INT"
+          },
+          "encoding": {
+            "por": "0b"
+          }
+        },
+        {
+          "bit_field": "5-5",
+          "name": "RESERVED",
+          "access_type": "R",
+          "reset": "0h",
+          "description": "RESERVED"
+        },
+        {
+          "bit_field": "4-4",
+          "name": "VBUS_MASK",
+          "access_type": "R/W",
+          "reset": "0h",
+          "reset_sources": [
+            "REG_RST"
+          ],
+          "description": "VBUS status mask flag",
+          "values": {
+            "0h": "VBUS status change does produce INT",
+            "1h": "VBUS status change does NOT produce INT"
+          },
+          "encoding": {
+            "por": "0b"
+          }
+        },
+        {
+          "bit_field": "3-3",
+          "name": "RESERVED",
+          "access_type": "R",
+          "reset": "0h",
+          "description": "RESERVED"
+        },
+        {
+          "bit_field": "2-2",
+          "name": "TREG_MASK",
+          "access_type": "R/W",
+          "reset": "0h",
+          "reset_sources": [
+            "REG_RST"
+          ],
+          "description": "IC thermal regulation mask flag",
+          "values": {
+            "0h": "entering TREG does produce INT",
+            "1h": "entering TREG does NOT produce INT"
+          },
+          "encoding": {
+            "por": "0b"
+          }
+        },
+        {
+          "bit_field": "1-1",
+          "name": "VBAT_PRESENT_MASK",
+          "access_type": "R/W",
+          "reset": "0h",
+          "reset_sources": [
+            "REG_RST"
+          ],
+          "description": "VBAT present mask flag",
+          "values": {
+            "0h": "VBAT present status change does produce INT",
+            "1h": "VBAT present status change does NOT produce INT"
+          },
+          "encoding": {
+            "por": "0b"
+          }
+        },
+        {
+          "bit_field": "0-0",
+          "name": "BC1.2_DONE_MASK",
+          "access_type": "R/W",
+          "reset": "0h",
+          "reset_sources": [
+            "REG_RST"
+          ],
+          "description": "BC1.2 status mask flag",
+          "values": {
+            "0h": "BC1.2 status change does produce INT",
+            "1h": "BC1.2 status change does NOT produce INT"
+          },
+          "encoding": {
+            "por": "0b"
+          }
+        }
+      ]
+    },
+    {
+      "offset": "2Ah",
+      "name": "REG2A_Charger_Mask_2",
+      "width": 8,
+      "reset": "0h",
+      "description": "Charger Mask 2",
+      "fields": [
+        {
+          "bit_field": "7-7",
+          "name": "RESERVED",
+          "access_type": "R",
+          "reset": "0h",
+          "description": "RESERVED"
+        },
+        {
+          "bit_field": "6-6",
+          "name": "DPDM_DONE_MASK",
+          "access_type": "R/W",
+          "reset": "0h",
+          "reset_sources": [
+            "REG_RST"
+          ],
+          "description": "D+/D- detection is done mask flag",
+          "values": {
+            "0h": "D+/D- detection done does produce INT pulse",
+            "1h": "D+/D- detection done does NOT produce INT pulse"
+          },
+          "encoding": {
+            "por": "0b"
+          }
+        },
+        {
+          "bit_field": "5-5",
+          "name": "ADC_DONE_MASK",
+          "access_type": "R/W",
+          "reset": "0h",
+          "reset_sources": [
+            "REG_RST"
+          ],
+          "description": "ADC conversion mask flag (only in one-shot mode)",
+          "values": {
+            "0h": "ADC conversion done does produce INT pulse",
+            "1h": "ADC conversion done does NOT produce INT pulse"
+          },
+          "encoding": {
+            "por": "0b"
+          }
+        },
+        {
+          "bit_field": "4-4",
+          "name": "VSYS_MASK",
+          "access_type": "R/W",
+          "reset": "0h",
+          "reset_sources": [
+            "REG_RST"
+          ],
+          "description": "VSYS min regulation mask flag",
+          "values": {
+            "0h": "enter or exit VSYSMIN regulation does produce INT pulse",
+            "1h": "enter or exit VSYSMIN regulation does NOT produce INT pulse"
+          },
+          "encoding": {
+            "por": "0b"
+          }
+        },
+        {
+          "bit_field": "3-3",
+          "name": "CHG_TMR_MASK",
+          "access_type": "R/W",
+          "reset": "0h",
+          "reset_sources": [
+            "REG_RST"
+          ],
+          "description": "Fast charge timer mask flag",
+          "values": {
+            "0h": "Fast charge timer expire does produce INT",
+            "1h": "Fast charge timer expire does NOT produce INT"
+          },
+          "encoding": {
+            "por": "0b"
+          }
+        },
+        {
+          "bit_field": "2-2",
+          "name": "TRICHG_TMR_MASK",
+          "access_type": "R/W",
+          "reset": "0h",
+          "reset_sources": [
+            "REG_RST"
+          ],
+          "description": "Trickle charge timer mask flag",
+          "values": {
+            "0h": "Trickle charge timer expire does produce INT",
+            "1h": "Trickle charge timer expire does NOT produce INT"
+          },
+          "encoding": {
+            "por": "0b"
+          }
+        },
+        {
+          "bit_field": "1-1",
+          "name": "PRECHG_TMR_MASK",
+          "access_type": "R/W",
+          "reset": "0h",
+          "reset_sources": [
+            "REG_RST"
+          ],
+          "description": "Pre-charge timer mask flag",
+          "values": {
+            "0h": "Pre-charge timer expire does produce INT",
+            "1h": "Pre-charge timer expire does NOT produce INT"
+          },
+          "encoding": {
+            "por": "0b"
+          }
+        },
+        {
+          "bit_field": "0-0",
+          "name": "TOPOFF_TMR_MASK",
+          "access_type": "R/W",
+          "reset": "0h",
+          "reset_sources": [
+            "REG_RST"
+          ],
+          "description": "Top off timer mask flag",
+          "values": {
+            "0h": "Top off timer expire does produce INT",
+            "1h": "Top off timer expire does NOT produce INT"
+          },
+          "encoding": {
+            "por": "0b"
+          }
+        }
+      ]
+    },
+    {
+      "offset": "2Bh",
+      "name": "REG2B_Charger_Mask_3",
+      "width": 8,
+      "reset": "0h",
+      "description": "Charger Mask 3",
+      "fields": [
+        {
+          "bit_field": "7-5",
+          "name": "RESERVED",
+          "access_type": "R",
+          "reset": "0h",
+          "description": "RESERVED"
+        },
+        {
+          "bit_field": "4-4",
+          "name": "VBATOTG_LOW_MASK",
+          "access_type": "R/W",
+          "reset": "0h",
+          "reset_sources": [
+            "WATCHDOG",
+            "REG_RST"
+          ],
+          "description": "VBAT too low to enable OTG mask",
+          "values": {
+            "0h": "VBAT falling below the threshold to enable the OTG mode, does produce INT",
+            "1h": "VBAT falling below the threshold to enable the OTG mode, does NOT produce INT"
+          },
+          "encoding": {
+            "por": "0b"
+          }
+        },
+        {
+          "bit_field": "3-3",
+          "name": "TS_COLD_MASK",
+          "access_type": "R/W",
+          "reset": "0h",
+          "reset_sources": [
+            "WATCHDOG",
+            "REG_RST"
+          ],
+          "description": "TS cold temperature interrupt mask",
+          "values": {
+            "0h": "TS across cold temperature (T1) does produce INT",
+            "1h": "TS across cold temperature (T1) does NOT produce INT"
+          },
+          "encoding": {
+            "por": "0b"
+          }
+        },
+        {
+          "bit_field": "2-2",
+          "name": "TS_COOL_MASK",
+          "access_type": "R/W",
+          "reset": "0h",
+          "reset_sources": [
+            "WATCHDOG",
+            "REG_RST"
+          ],
+          "description": "TS cool temperature interrupt mask",
+          "values": {
+            "0h": "TS across cool temperature (T2) does produce INT",
+            "1h": "TS across cool temperature (T2) does NOT produce INT"
+          },
+          "encoding": {
+            "por": "0b"
+          }
+        },
+        {
+          "bit_field": "1-1",
+          "name": "TS_WARM_MASK",
+          "access_type": "R/W",
+          "reset": "0h",
+          "reset_sources": [
+            "WATCHDOG",
+            "REG_RST"
+          ],
+          "description": "TS warm temperature interrupt mask",
+          "values": {
+            "0h": "TS across warm temperature (T3) does produce INT",
+            "1h": "TS across warm temperature (T3) does NOT produce INT"
+          },
+          "encoding": {
+            "por": "0b"
+          }
+        },
+        {
+          "bit_field": "0-0",
+          "name": "TS_HOT_MASK",
+          "access_type": "R/W",
+          "reset": "0h",
+          "reset_sources": [
+            "WATCHDOG",
+            "REG_RST"
+          ],
+          "description": "TS hot temperature interrupt mask",
+          "values": {
+            "0h": "TS across hot temperature (T5) does produce INT",
+            "1h": "TS across hot temperature (T5) does NOT produce INT"
+          },
+          "encoding": {
+            "por": "0b"
+          }
+        }
+      ]
+    },
+    {
+      "offset": "2Ch",
+      "name": "REG2C_FAULT_Mask_0",
+      "width": 8,
+      "reset": "0h",
+      "description": "FAULT Mask 0",
+      "fields": [
+        {
+          "bit_field": "7-7",
+          "name": "IBAT_REG_MASK",
+          "access_type": "R/W",
+          "reset": "0h",
+          "reset_sources": [
+            "REG_RST"
+          ],
+          "description": "IBAT regulation mask flag",
+          "values": {
+            "0h": "enter or exit IBAT regulation does produce INT",
+            "1h": "enter or exit IBAT regulation does NOT produce INT"
+          },
+          "encoding": {
+            "por": "0b"
+          }
+        },
+        {
+          "bit_field": "6-6",
+          "name": "VBUS_OVP_MASK",
+          "access_type": "R/W",
+          "reset": "0h",
+          "reset_sources": [
+            "REG_RST"
+          ],
+          "description": "VBUS over-voltage mask flag",
+          "values": {
+            "0h": "entering VBUS OVP does produce INT",
+            "1h": "entering VBUS OVP does NOT produce INT"
+          },
+          "encoding": {
+            "por": "0b"
+          }
+        },
+        {
+          "bit_field": "5-5",
+          "name": "VBAT_OVP_MASK",
+          "access_type": "R/W",
+          "reset": "0h",
+          "reset_sources": [
+            "REG_RST"
+          ],
+          "description": "VBAT over-voltage mask flag",
+          "values": {
+            "0h": "entering VBAT OVP does produce INT",
+            "1h": "entering VBAT OVP does NOT produce INT"
+          },
+          "encoding": {
+            "por": "0b"
+          }
+        },
+        {
+          "bit_field": "4-4",
+          "name": "IBUS_OCP_MASK",
+          "access_type": "R/W",
+          "reset": "0h",
+          "reset_sources": [
+            "REG_RST"
+          ],
+          "description": "IBUS over-current mask flag",
+          "values": {
+            "0h": "IBUS OCP fault does produce INT",
+            "1h": "IBUS OCP fault does NOT produce INT"
+          },
+          "encoding": {
+            "por": "0b"
+          }
+        },
+        {
+          "bit_field": "3-3",
+          "name": "IBAT_OCP_MASK",
+          "access_type": "R/W",
+          "reset": "0h",
+          "reset_sources": [
+            "REG_RST"
+          ],
+          "description": "IBAT over-current mask flag",
+          "values": {
+            "0h": "IBAT OCP fault does produce INT",
+            "1h": "IBAT OCP fault does NOT produce INT"
+          },
+          "encoding": {
+            "por": "0b"
+          }
+        },
+        {
+          "bit_field": "2-2",
+          "name": "CONV_OCP_MASK",
+          "access_type": "R/W",
+          "reset": "0h",
+          "reset_sources": [
+            "REG_RST"
+          ],
+          "description": "Converter over-current mask flag",
+          "values": {
+            "0h": "Converter OCP fault does produce INT",
+            "1h": "Converter OCP fault does NOT produce INT"
+          },
+          "encoding": {
+            "por": "0b"
+          }
+        },
+        {
+          "bit_field": "1-1",
+          "name": "VAC2_OVP_MASK",
+          "access_type": "R/W",
+          "reset": "0h",
+          "reset_sources": [
+            "REG_RST"
+          ],
+          "description": "VAC2 over-voltage mask flag",
+          "values": {
+            "0h": "entering VAC2 OVP does produce INT",
+            "1h": "entering VAC2 OVP does NOT produce INT"
+          },
+          "encoding": {
+            "por": "0b"
+          }
+        },
+        {
+          "bit_field": "0-0",
+          "name": "VAC1_OVP_MASK",
+          "access_type": "R/W",
+          "reset": "0h",
+          "reset_sources": [
+            "REG_RST"
+          ],
+          "description": "VAC1 over-voltage mask flag",
+          "values": {
+            "0h": "entering VAC1 OVP does produce INT",
+            "1h": "entering VAC1 OVP does NOT produce INT"
+          },
+          "encoding": {
+            "por": "0b"
+          }
+        }
+      ]
+    },
+    {
+      "offset": "2Dh",
+      "name": "REG2D_FAULT_Mask_1",
+      "width": 8,
+      "reset": "0h",
+      "description": "FAULT Mask 1",
+      "fields": [
+        {
+          "bit_field": "7-7",
+          "name": "VSYS_SHORT_MASK",
+          "access_type": "R/W",
+          "reset": "0h",
+          "reset_sources": [
+            "REG_RST"
+          ],
+          "description": "VSYS short circuit mask flag",
+          "values": {
+            "0h": "System short fault does produce INT",
+            "1h": "System short fault does NOT produce INT"
+          },
+          "encoding": {
+            "por": "0b"
+          }
+        },
+        {
+          "bit_field": "6-6",
+          "name": "VSYS_OVP_MASK",
+          "access_type": "R/W",
+          "reset": "0h",
+          "reset_sources": [
+            "REG_RST"
+          ],
+          "description": "VSYS over-voltage mask flag",
+          "values": {
+            "0h": "System over-voltage fault does produce INT",
+            "1h": "System over-voltage fault does NOT produce INT"
+          },
+          "encoding": {
+            "por": "0b"
+          }
+        },
+        {
+          "bit_field": "5-5",
+          "name": "OTG_OVP_MASK",
+          "access_type": "R/W",
+          "reset": "0h",
+          "reset_sources": [
+            "REG_RST"
+          ],
+          "description": "OTG over-voltage mask flag",
+          "values": {
+            "0h": "OTG VBUS over-voltage fault does produce INT",
+            "1h": "OTG VBUS over-voltage fault does NOT produce INT"
+          },
+          "encoding": {
+            "por": "0b"
+          }
+        },
+        {
+          "bit_field": "4-4",
+          "name": "OTG_UVP_MASK",
+          "access_type": "R/W",
+          "reset": "0h",
+          "reset_sources": [
+            "REG_RST"
+          ],
+          "description": "OTG under-voltage mask flag",
+          "values": {
+            "0h": "OTG VBUS under voltage fault does produce INT",
+            "1h": "OTG VBUS under voltage fault does NOT produce INT"
+          },
+          "encoding": {
+            "por": "0b"
+          }
+        },
+        {
+          "bit_field": "3-3",
+          "name": "RESERVED",
+          "access_type": "R/W",
+          "reset": "0h",
+          "description": "RESERVED"
+        },
+        {
+          "bit_field": "2-2",
+          "name": "TSHUT_MASK",
+          "access_type": "R/W",
+          "reset": "0h",
+          "reset_sources": [
+            "REG_RST"
+          ],
+          "description": "IC thermal shutdown mask flag",
+          "values": {
+            "0h": "TSHUT does produce INT",
+            "1h": "TSHUT does NOT produce INT"
+          },
+          "encoding": {
+            "por": "0b"
+          }
+        },
+        {
+          "bit_field": "1-0",
+          "name": "RESERVED",
+          "access_type": "R",
+          "reset": "0h",
+          "description": "RESERVED"
+        }
+      ]
+    },
+    {
+      "offset": "2Eh",
+      "name": "REG2E_ADC_Control",
+      "width": 8,
+      "reset": "30h",
+      "description": "ADC Control",
+      "fields": [
+        {
+          "bit_field": "7-7",
+          "name": "ADC_EN",
+          "access_type": "R/W",
+          "reset": "0h",
+          "reset_sources": [
+            "WATCHDOG",
+            "REG_RST"
+          ],
+          "description": "ADC Control",
+          "values": {
+            "0h": "Disable",
+            "1h": "Enable"
+          },
+          "encoding": {
+            "por": "0b"
+          }
+        },
+        {
+          "bit_field": "6-6",
+          "name": "ADC_RATE",
+          "access_type": "R/W",
+          "reset": "0h",
+          "reset_sources": [
+            "REG_RST"
+          ],
+          "description": "ADC conversion rate control",
+          "values": {
+            "0h": "Continuous conversion",
+            "1h": "One shot conversion"
+          },
+          "encoding": {
+            "por": "0b"
+          }
+        },
+        {
+          "bit_field": "5-4",
+          "name": "ADC_SAMPLE_1:0",
+          "access_type": "R/W",
+          "reset": "3h",
+          "reset_sources": [
+            "REG_RST"
+          ],
+          "description": "ADC sample speed",
+          "values": {
+            "0h": "15 bit effective resolution",
+            "1h": "14 bit effective resolution",
+            "2h": "13 bit effective resolution",
+            "3h": "12 bit effective resolution (not recommended)"
+          },
+          "encoding": {
+            "por": "11b"
+          }
+        },
+        {
+          "bit_field": "3-3",
+          "name": "ADC_AVG",
+          "access_type": "R/W",
+          "reset": "0h",
+          "reset_sources": [
+            "REG_RST"
+          ],
+          "description": "ADC average control",
+          "values": {
+            "0h": "Single value",
+            "1h": "Running average (not available for IBAT discharge)"
+          },
+          "encoding": {
+            "por": "0b"
+          }
+        },
+        {
+          "bit_field": "2-2",
+          "name": "ADC_AVG_INIT",
+          "access_type": "R/W",
+          "reset": "0h",
+          "reset_sources": [
+            "REG_RST"
+          ],
+          "description": "ADC average initial value control",
+          "values": {
+            "0h": "Start average using the existing register value",
+            "1h": "Start average using a new ADC conversion"
+          },
+          "encoding": {
+            "por": "0b"
+          }
+        },
+        {
+          "bit_field": "1-0",
+          "name": "RESERVED",
+          "access_type": "R/W",
+          "reset": "0h",
+          "description": "RESERVED"
+        }
+      ]
+    },
+    {
+      "offset": "2Fh",
+      "name": "REG2F_ADC_Function_Disable_0",
+      "width": 8,
+      "reset": "0h",
+      "description": "ADC Function Disable 0",
+      "fields": [
+        {
+          "bit_field": "7-7",
+          "name": "IBUS_ADC_DIS",
+          "access_type": "R/W",
+          "reset": "0h",
+          "reset_sources": [
+            "REG_RST"
+          ],
+          "description": "IBUS ADC control",
+          "values": {
+            "0h": "Enable (Default)",
+            "1h": "Disable"
+          },
+          "encoding": {
+            "por": "0b"
+          }
+        },
+        {
+          "bit_field": "6-6",
+          "name": "IBAT_ADC_DIS",
+          "access_type": "R/W",
+          "reset": "0h",
+          "reset_sources": [
+            "REG_RST"
+          ],
+          "description": "IBAT ADC control",
+          "values": {
+            "0h": "Enable (Default)",
+            "1h": "Disable"
+          },
+          "encoding": {
+            "por": "0b"
+          }
+        },
+        {
+          "bit_field": "5-5",
+          "name": "VBUS_ADC_DIS",
+          "access_type": "R/W",
+          "reset": "0h",
+          "reset_sources": [
+            "REG_RST"
+          ],
+          "description": "VBUS ADC control",
+          "values": {
+            "0h": "Enable (Default)",
+            "1h": "Disable"
+          },
+          "encoding": {
+            "por": "0b"
+          }
+        },
+        {
+          "bit_field": "4-4",
+          "name": "VBAT_ADC_DIS",
+          "access_type": "R/W",
+          "reset": "0h",
+          "reset_sources": [
+            "REG_RST"
+          ],
+          "description": "VBAT ADC control",
+          "values": {
+            "0h": "Enable (Default)",
+            "1h": "Disable"
+          },
+          "encoding": {
+            "por": "0b"
+          }
+        },
+        {
+          "bit_field": "3-3",
+          "name": "VSYS_ADC_DIS",
+          "access_type": "R/W",
+          "reset": "0h",
+          "reset_sources": [
+            "REG_RST"
+          ],
+          "description": "VSYS ADC control",
+          "values": {
+            "0h": "Enable (Default)",
+            "1h": "Disable"
+          },
+          "encoding": {
+            "por": "0b"
+          }
+        },
+        {
+          "bit_field": "2-2",
+          "name": "TS_ADC_DIS",
+          "access_type": "R/W",
+          "reset": "0h",
+          "reset_sources": [
+            "REG_RST"
+          ],
+          "description": "TS ADC control",
+          "values": {
+            "0h": "Enable (Default)",
+            "1h": "Disable"
+          },
+          "encoding": {
+            "por": "0b"
+          }
+        },
+        {
+          "bit_field": "1-1",
+          "name": "TDIE_ADC_DIS",
+          "access_type": "R/W",
+          "reset": "0h",
+          "reset_sources": [
+            "REG_RST"
+          ],
+          "description": "TDIE ADC control",
+          "values": {
+            "0h": "Enable (Default)",
+            "1h": "Disable"
+          },
+          "encoding": {
+            "por": "0b"
+          }
+        },
+        {
+          "bit_field": "0-0",
+          "name": "RESERVED",
+          "access_type": "R",
+          "reset": "0h",
+          "description": "RESERVED"
+        }
+      ]
+    },
+    {
+      "offset": "30h",
+      "name": "REG30_ADC_Function_Disable_1",
+      "width": 8,
+      "reset": "0h",
+      "description": "ADC Function Disable 1",
+      "fields": [
+        {
+          "bit_field": "7-7",
+          "name": "DP_ADC_DIS",
+          "access_type": "R/W",
+          "reset": "0h",
+          "reset_sources": [
+            "REG_RST"
+          ],
+          "description": "D+ ADC Control",
+          "values": {
+            "0h": "Enable (Default)",
+            "1h": "Disable"
+          },
+          "encoding": {
+            "por": "0b"
+          }
+        },
+        {
+          "bit_field": "6-6",
+          "name": "DM_ADC_DIS",
+          "access_type": "R/W",
+          "reset": "0h",
+          "reset_sources": [
+            "REG_RST"
+          ],
+          "description": "D- ADC Control",
+          "values": {
+            "0h": "Enable (Default)",
+            "1h": "Disable"
+          },
+          "encoding": {
+            "por": "0b"
+          }
+        },
+        {
+          "bit_field": "5-5",
+          "name": "VAC2_ADC_DIS",
+          "access_type": "R/W",
+          "reset": "0h",
+          "reset_sources": [
+            "REG_RST"
+          ],
+          "description": "VAC2 ADC Control",
+          "values": {
+            "0h": "Enable (Default)",
+            "1h": "Disable"
+          },
+          "encoding": {
+            "por": "0b"
+          }
+        },
+        {
+          "bit_field": "4-4",
+          "name": "VAC1_ADC_DIS",
+          "access_type": "R/W",
+          "reset": "0h",
+          "reset_sources": [
+            "REG_RST"
+          ],
+          "description": "VAC1 ADC Control",
+          "values": {
+            "0h": "Enable (Default)",
+            "1h": "Disable"
+          },
+          "encoding": {
+            "por": "0b"
+          }
+        },
+        {
+          "bit_field": "3-0",
+          "name": "RESERVED",
+          "access_type": "R",
+          "reset": "0h",
+          "description": "RESERVED"
+        }
+      ]
+    },
+    {
+      "offset": "31h",
+      "name": "REG31_IBUS_ADC",
+      "width": 16,
+      "reset": "0h",
+      "description": "IBUS ADC",
+      "fields": [
+        {
+          "bit_field": "15-0",
+          "name": "IBUS_ADC_15:0",
+          "access_type": "R",
+          "reset": "0h",
+          "description": "IBUS ADC reading\nReported in 2 's Complement.\nWhen the current is flowing from VBUS to PMID, IBUS ADC reports positive value, and when the current is flowing from PMID to VBUS, IBUS ADC reports negative value.",
+          "encoding": {
+            "por": "0mA (0h)",
+            "range": "0mA-5000mA",
+            "fixed_offset": "0mA",
+            "bit_step_size": "1mA"
+          }
+        }
+      ]
+    },
+    {
+      "offset": "33h",
+      "name": "REG33_IBAT_ADC",
+      "width": 16,
+      "reset": "0h",
+      "description": "IBAT ADC",
+      "fields": [
+        {
+          "bit_field": "15-0",
+          "name": "IBAT_ADC_15:0",
+          "access_type": "R",
+          "reset": "0h",
+          "description": "IBAT ADC reading\nReported in 2 's Complement.\n.\nThe IBAT ADC reports the battery charging current in forward mode and the battery discharging current in OTG and battery only (HiZ) mode if EN_IBAT bit in REG14[5]=1. The sign bit is 0b for charging current and 1b for discharging current.",
+          "encoding": {
+            "por": "0mA (0h)",
+            "range": "0mA-8000mA",
+            "fixed_offset": "0mA",
+            "bit_step_size": "1mA"
+          }
+        }
+      ]
+    },
+    {
+      "offset": "35h",
+      "name": "REG35_VBUS_ADC",
+      "width": 16,
+      "reset": "0h",
+      "description": "VBUS ADC",
+      "fields": [
+        {
+          "bit_field": "15-0",
+          "name": "VBUS_ADC_15:0",
+          "access_type": "R",
+          "reset": "0h",
+          "description": "VBUS ADC reading.",
+          "encoding": {
+            "por": "0mV (0h)",
+            "range": "0mV-30000mV",
+            "fixed_offset": "0mV",
+            "bit_step_size": "1mV"
+          }
+        }
+      ]
+    },
+    {
+      "offset": "37h",
+      "name": "REG37_VAC1_ADC",
+      "width": 16,
+      "reset": "0h",
+      "description": "VAC1 ADC",
+      "fields": [
+        {
+          "bit_field": "15-0",
+          "name": "VAC1_ADC_15:0",
+          "access_type": "R",
+          "reset": "0h",
+          "description": "VAC1 ADC reading",
+          "encoding": {
+            "por": "0mV (0h)",
+            "range": "0mV-30000mV",
+            "fixed_offset": "0mV",
+            "bit_step_size": "1mV"
+          }
+        }
+      ]
+    },
+    {
+      "offset": "39h",
+      "name": "REG39_VAC2_ADC",
+      "width": 16,
+      "reset": "0h",
+      "description": "VAC2 ADC",
+      "fields": [
+        {
+          "bit_field": "15-0",
+          "name": "VAC2_ADC_15:0",
+          "access_type": "R",
+          "reset": "0h",
+          "description": "VAC2 ADC reading",
+          "encoding": {
+            "por": "0mV (0h)",
+            "range": "0mV-30000mV",
+            "fixed_offset": "0mV",
+            "bit_step_size": "1mV"
+          }
+        }
+      ]
+    },
+    {
+      "offset": "3Bh",
+      "name": "REG3B_VBAT_ADC",
+      "width": 16,
+      "reset": "0h",
+      "description": "VBAT ADC",
+      "fields": [
+        {
+          "bit_field": "15-0",
+          "name": "VBAT_ADC_15:0",
+          "access_type": "R",
+          "reset": "0h",
+          "description": "The battery remote sensing voltage (VBATP) ADC reading",
+          "encoding": {
+            "por": "0mV (0h)",
+            "range": "0mV-20000mV",
+            "fixed_offset": "0mV",
+            "bit_step_size": "1mV"
+          }
+        }
+      ]
+    },
+    {
+      "offset": "3Dh",
+      "name": "REG3D_VSYS_ADC",
+      "width": 16,
+      "reset": "0h",
+      "description": "VSYS ADC",
+      "fields": [
+        {
+          "bit_field": "15-0",
+          "name": "VSYS_ADC_15:0",
+          "access_type": "R",
+          "reset": "0h",
+          "description": "VSYS ADC reading",
+          "encoding": {
+            "por": "0mV (0h)",
+            "range": "0mV-24000mV",
+            "fixed_offset": "0mV",
+            "bit_step_size": "1mV"
+          }
+        }
+      ]
+    },
+    {
+      "offset": "3Fh",
+      "name": "REG3F_TS_ADC",
+      "width": 16,
+      "reset": "0h",
+      "description": "TS ADC",
+      "fields": [
+        {
+          "bit_field": "15-0",
+          "name": "TS_ADC_15:0",
+          "access_type": "R",
+          "reset": "0h",
+          "description": "TS ADC reading",
+          "encoding": {
+            "por": "0% (0h)",
+            "range": "0%-99.9023%",
+            "fixed_offset": "0%",
+            "bit_step_size": "0.0976563%"
+          }
+        }
+      ]
+    },
+    {
+      "offset": "41h",
+      "name": "REG41_TDIE_ADC",
+      "width": 16,
+      "reset": "0h",
+      "description": "TDIE ADC",
+      "fields": [
+        {
+          "bit_field": "15-0",
+          "name": "TDIE_ADC_15:0",
+          "access_type": "R",
+          "reset": "0h",
+          "description": "TDIE ADC reading\nReported in 2 's Complement.",
+          "encoding": {
+            "por": "0°C (0h)",
+            "range": "-40°C-150°C",
+            "fixed_offset": "0°C",
+            "bit_step_size": "0.5°C"
+          }
+        }
+      ]
+    },
+    {
+      "offset": "43h",
+      "name": "REG43_D+_ADC",
+      "width": 16,
+      "reset": "0h",
+      "description": "D+ ADC",
+      "fields": [
+        {
+          "bit_field": "15-0",
+          "name": "D+_ADC_15:0",
+          "access_type": "R",
+          "reset": "0h",
+          "description": "D+ ADC reading",
+          "encoding": {
+            "por": "0mV (0h)",
+            "range": "0mV-3600mV",
+            "fixed_offset": "0mV",
+            "bit_step_size": "1mV"
+          }
+        }
+      ]
+    },
+    {
+      "offset": "45h",
+      "name": "REG45_D-_ADC",
+      "width": 16,
+      "reset": "0h",
+      "description": "D- ADC",
+      "fields": [
+        {
+          "bit_field": "15-0",
+          "name": "D-_ADC_15:0",
+          "access_type": "R",
+          "reset": "0h",
+          "description": "D- ADC reading",
+          "encoding": {
+            "por": "0mV (0h)",
+            "range": "0mV-3600mV",
+            "fixed_offset": "0mV",
+            "bit_step_size": "1mV"
+          }
+        }
+      ]
+    },
+    {
+      "offset": "47h",
+      "name": "REG47_DPDM_Driver",
+      "width": 8,
+      "reset": "0h",
+      "description": "DPDM Driver",
+      "fields": [
+        {
+          "bit_field": "7-5",
+          "name": "DPLUS_DAC_2:0",
+          "access_type": "R/W",
+          "reset": "0h",
+          "description": "D+ Output Driver",
+          "values": {
+            "0h": "HIZ",
+            "1h": "0",
+            "2h": "0.6V",
+            "3h": "1.2V",
+            "4h": "2.0V",
+            "5h": "2.7V",
+            "6h": "3.3V",
+            "7h": "D+/D- Short"
+          },
+          "encoding": {
+            "por": "000b"
+          }
+        },
+        {
+          "bit_field": "4-2",
+          "name": "DMINUS_DAC_2:0",
+          "access_type": "R/W",
+          "reset": "0h",
+          "description": "D- Output Driver",
+          "values": {
+            "0h": "HIZ",
+            "1h": "0",
+            "2h": "0.6V",
+            "3h": "1.2V",
+            "4h": "2.0V",
+            "5h": "2.7V",
+            "6h": "3.3V",
+            "7h": "reserved"
+          },
+          "encoding": {
+            "por": "000b"
+          }
+        },
+        {
+          "bit_field": "1-0",
+          "name": "RESERVED",
+          "access_type": "R/W",
+          "reset": "0h",
+          "description": "RESERVED"
+        }
+      ]
+    },
+    {
+      "offset": "48h",
+      "name": "REG48_Part_Information",
+      "width": 8,
+      "reset": "0h",
+      "description": "Part Information",
+      "fields": [
+        {
+          "bit_field": "7-6",
+          "name": "RESERVED",
+          "access_type": "R",
+          "reset": "0h",
+          "description": "RESERVED"
+        },
+        {
+          "bit_field": "5-3",
+          "name": "PN_2:0",
+          "access_type": "R",
+          "reset": "3h",
+          "description": "Device Part Number",
+          "values": {
+            "011b": "BQ25798"
+          }
+        },
+        {
+          "bit_field": "2-0",
+          "name": "DEV_REV_2:0",
+          "access_type": "R",
+          "reset": "1h",
+          "description": "Device Revision",
+          "values": {
+            "001b": "BQ25798"
+          }
+        }
+      ]
+    }
+  ]
+}

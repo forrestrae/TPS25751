@@ -1,0 +1,227 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "bq25798-registers.clean.schema.json",
+  "title": "BQ25798 Register Definitions - Clean Model",
+  "description": "Schema for BQ25798 I2C register definitions with prose, enumerations, encodings, and reset causes separated into distinct fields.",
+  "type": "object",
+  "required": [
+    "device",
+    "registers"
+  ],
+  "properties": {
+    "device": {
+      "type": "string",
+      "const": "BQ25798"
+    },
+    "source": {
+      "type": "string",
+      "minLength": 1
+    },
+    "register_count": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "registers": {
+      "type": "array",
+      "description": "Array of BQ25798 register definitions.",
+      "minItems": 1,
+      "items": {
+        "$ref": "#/$defs/register"
+      }
+    }
+  },
+  "additionalProperties": false,
+  "$defs": {
+    "hexValue": {
+      "type": "string",
+      "pattern": "^[0-9A-Fa-f]+h$",
+      "description": "Hexadecimal value with h suffix."
+    },
+    "resetValue": {
+      "type": "string",
+      "pattern": "^([0-9A-Fa-f]+h|X)$",
+      "description": "Hexadecimal reset value with h suffix, or X for POR/device-configuration-dependent reset."
+    },
+    "bitRange": {
+      "type": "string",
+      "pattern": "^\\d+-\\d+$",
+      "description": "Bit range in high-low format."
+    },
+    "fieldValueKey": {
+      "type": "string",
+      "pattern": "^([0-9A-Fa-f]+h|[01]+[bB])$",
+      "description": "Enumerated field value key: hex with h suffix or binary with b/B suffix."
+    },
+    "cleanDescription": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Human-readable prose only. Structured enum values, type/access, POR, numeric encoding, clamp, and reset-cause metadata must be represented outside description.",
+      "allOf": [
+        {
+          "not": {
+            "pattern": "(^|\\n)\\s*(?:[0-9A-Fa-f]+h|[01]+[bB])\\s*="
+          }
+        },
+        {
+          "not": {
+            "pattern": "(^|\\n)\\s*Type\\s*:"
+          }
+        },
+        {
+          "not": {
+            "pattern": "(^|\\n)\\s*POR\\s*:"
+          }
+        },
+        {
+          "not": {
+            "pattern": "(^|\\n)\\s*Range\\s*:"
+          }
+        },
+        {
+          "not": {
+            "pattern": "(^|\\n)\\s*Fixed\\s+Offset\\s*:"
+          }
+        },
+        {
+          "not": {
+            "pattern": "(^|\\n)\\s*Bit\\s+Step\\s+Size\\s*:"
+          }
+        },
+        {
+          "not": {
+            "pattern": "(^|\\n)\\s*Clamped\\s+(?:Low|High)\\s*(?:\\n|$)"
+          }
+        }
+      ]
+    },
+    "encoding": {
+      "type": "object",
+      "description": "Machine-readable numeric encoding metadata from the field definition.",
+      "properties": {
+        "por": {
+          "type": "string",
+          "minLength": 1
+        },
+        "range": {
+          "type": "string",
+          "minLength": 1
+        },
+        "fixed_offset": {
+          "type": "string",
+          "minLength": 1
+        },
+        "bit_step_size": {
+          "type": "string",
+          "minLength": 1
+        },
+        "clamp": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": [
+              "low",
+              "high"
+            ]
+          },
+          "uniqueItems": true,
+          "minItems": 1
+        }
+      },
+      "additionalProperties": false
+    },
+    "register": {
+      "type": "object",
+      "required": [
+        "offset",
+        "name",
+        "width",
+        "reset",
+        "fields"
+      ],
+      "properties": {
+        "offset": {
+          "$ref": "#/$defs/hexValue"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "width": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 32
+        },
+        "reset": {
+          "$ref": "#/$defs/resetValue"
+        },
+        "description": {
+          "$ref": "#/$defs/cleanDescription"
+        },
+        "fields": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/field"
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "field": {
+      "type": "object",
+      "required": [
+        "bit_field",
+        "name",
+        "access_type",
+        "reset",
+        "description"
+      ],
+      "properties": {
+        "bit_field": {
+          "$ref": "#/$defs/bitRange"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "access_type": {
+          "type": "string",
+          "enum": [
+            "R",
+            "R/W",
+            "W"
+          ]
+        },
+        "reset": {
+          "$ref": "#/$defs/resetValue"
+        },
+        "reset_sources": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "minItems": 1
+        },
+        "description": {
+          "$ref": "#/$defs/cleanDescription"
+        },
+        "values": {
+          "type": "object",
+          "minProperties": 1,
+          "patternProperties": {
+            "^([0-9A-Fa-f]+h|[01]+[bB])$": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "additionalProperties": false
+        },
+        "encoding": {
+          "$ref": "#/$defs/encoding"
+        }
+      },
+      "additionalProperties": false
+    }
+  }
+}

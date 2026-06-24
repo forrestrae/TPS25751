@@ -1,0 +1,10 @@
+{
+  "server_name": "tps25751-docs",
+  "device_name": "TPS25751",
+  "uri_scheme": "tps25751",
+  "class_prefix": "TPS25751",
+  "registers_file": "tps25751_registers_extracted.json",
+  "schema_file": "TPS25751-register-schema.json",
+  "i2c_addresses": ["0x20", "0x21", "0x22", "0x23"],
+  "i2c_protocol": "The TPS25751 uses a custom I2C protocol where register reads are prefixed with a byte count: (1) send the register address, (2) receive the byte count as the first byte, (3) receive the register data in the remaining bytes."
+}

@@ -22,23 +22,35 @@ enabling the 4CC command-task interface and I2Cc downstream-device proxy); see
 
 ---
 
-## TPS25751 Register Documentation
+## Device Register Documentation (MCP)
 
-**IMPORTANT**: When working with TPS25751 registers, use the `tps25751-docs` MCP server for accurate register information from the TI Technical Reference Manual.
+**IMPORTANT**: When working with device registers, use the register-docs MCP servers
+for accurate register information extracted from the TI manuals. **Two servers are
+configured**, both backed by one generic server (`docs/mcp-servers/device-register-docs/server.py`)
+pointed at different device definitions:
 
-The MCP server provides:
-- 27 complete register definitions with addresses and bit fields
-- Enumerated value meanings for all fields
-- Access types ([R], [R/W], [W]) for each bit field
-- Code generation tools for Arduino/PlatformIO
+| MCP server | Tool prefix | Device | Use for |
+|---|---|---|---|
+| `tps25751-docs` | `mcp__tps25751-docs__*` | TPS25751 USB-C PD controller (27 registers) | The host PD controller's own registers (STATUS, MODE, COMMAND/DATA, …) |
+| `bq25798-docs` | `mcp__bq25798-docs__*` | BQ25798 buck-boost charger (57 registers) | The downstream charger reached over I2Cc (REG00–REG48, ADC, charge control, …) |
 
-**Available tools:** `search_register`, `explain_bitfield`, `generate_code_example`, `list_library_files`
+**Pick by device:** TPS25751 register → `mcp__tps25751-docs__*`; BQ25798 charger
+register → `mcp__bq25798-docs__*`. Both expose the same tools.
 
-**Detailed documentation:** See [docs/mcp-servers/tps25751-docs/AGENTS.md](docs/mcp-servers/tps25751-docs/AGENTS.md) for complete usage instructions and examples.
+**Available tools (each server):** `search_register`, `explain_bitfield`, `get_register`.
+Each server provides register definitions with addresses, bit fields, enumerated value
+meanings, and access types ([R], [R/W], [W]).
 
-### Configuring the MCP Server Per Tool
+The server is **device-generic**: each device is defined under
+`docs/mcp-servers/device-register-docs/devices/<device>/` by a `device.json` manifest
+plus its registers JSON and JSON schema. Add a new device with the `/add-register-device`
+skill, then register it as another MCP server in `.mcp.json`.
 
-The `tps25751-docs` MCP server uses the standard MCP protocol and works with any compatible AI coding assistant. Tool-specific config files are included in this repo:
+**Detailed documentation:** See [docs/mcp-servers/device-register-docs/AGENTS.md](docs/mcp-servers/device-register-docs/AGENTS.md) for complete usage instructions and examples.
+
+### Configuring the MCP Servers Per Tool
+
+The register-docs MCP servers use the standard MCP protocol and work with any compatible AI coding assistant. Tool-specific config files (each defining both `tps25751-docs` and `bq25798-docs`) are included in this repo:
 
 | Tool | Config File | Notes |
 |---|---|---|
@@ -309,8 +321,12 @@ auto statusReg = tps.readStatusRegister(true);  // with validation
     ├── plans/
     │   └── plan-impl-v01.md            # Implementation plan (12 registers remaining)
     └── mcp-servers/
-        └── tps25751-docs/              # MCP server for register documentation
-            └── AGENTS.md               # MCP server usage guide
+        └── device-register-docs/       # Generic register-docs MCP server (serves both devices)
+            ├── server.py               # One server; device chosen via DEVICE_CONFIG
+            ├── AGENTS.md               # MCP server usage guide
+            └── devices/
+                ├── tps25751/           # device.json + registers JSON + schema (→ tps25751-docs)
+                └── bq25798/            # device.json + registers JSON + schema (→ bq25798-docs)
 ```
 
 **Navigation:**
@@ -321,7 +337,7 @@ auto statusReg = tps.readStatusRegister(true);  // with validation
 - **Writing Tests:** See [TESTING.md](docs/engineering/TESTING.md)
 - **Reviewing Code:** See [CODE_REVIEW_GUIDELINES.md](docs/engineering/CODE_REVIEW_GUIDELINES.md)
 - **Current Roadmap:** See [Implementation Plan](docs/plans/plan-impl-v01.md)
-- **MCP Server:** See [docs/mcp-servers/tps25751-docs/AGENTS.md](docs/mcp-servers/tps25751-docs/AGENTS.md)
+- **MCP Servers:** See [docs/mcp-servers/device-register-docs/AGENTS.md](docs/mcp-servers/device-register-docs/AGENTS.md)
 
 ---
 
@@ -344,7 +360,8 @@ auto statusReg = tps.readStatusRegister(true);  // with validation
 2. **Second:** Read [STANDARDS.md](docs/engineering/STANDARDS.md) - It has the complete template
 3. **Third:** Check [CONSTRAINTS.md](docs/engineering/CONSTRAINTS.md) for platform gotchas
 4. **Use the MCP servers:**
-   - `tps25751-docs` (`search_register`, `explain_bitfield`) for register information
+   - `tps25751-docs` (`search_register`, `explain_bitfield`, `get_register`) for TPS25751 registers;
+     `bq25798-docs` for BQ25798 charger registers
 5. **Follow the checklist:** Every register needs:
    - Class inheriting from `TPS25751Register`
    - Factory integration (enum, forward declaration, creation methods)
@@ -386,7 +403,7 @@ TPS25751-specific traps to add:
 
 1. Check [CONSTRAINTS.md](docs/engineering/CONSTRAINTS.md) - Most issues are platform-specific
 2. Look at existing register implementations as examples (STATUS, MODE, etc.)
-3. Use the `tps25751-docs` MCP server for register details
+3. Use the `tps25751-docs` MCP server for TPS25751 register details (`bq25798-docs` for the charger)
 4. Reference [Implementation Plan](docs/plans/plan-impl-v01.md) for detailed requirements
 5. Check TI TPS25751 Technical Reference Manual for register specifications
 

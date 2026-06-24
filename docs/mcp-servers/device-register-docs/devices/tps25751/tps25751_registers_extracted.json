@@ -3236,10 +3236,17 @@
     {
       "offset": "35h",
       "name": "Active RDO Contract",
-      "width": 96,
-      "reset": "000000000000000000000000h",
+      "width": 128,
+      "reset": "00000000000000000000000000000000h",
       "description": "Power data object for the active contract. This register stores the RDO of the current explicit USB PD contract, or all zeroes if no contract. Table 3-20. Active RDO Contract Register Field Descriptions",
       "fields": [
+        {
+          "bit_field": "127-96",
+          "name": "RESERVED",
+          "access_type": "R",
+          "reset": "0h",
+          "description": "Reserved"
+        },
         {
           "bit_field": "95-32",
           "name": "RESERVED",

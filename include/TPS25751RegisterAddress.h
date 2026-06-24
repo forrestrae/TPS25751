@@ -76,7 +76,7 @@ namespace Registers {
     constexpr RegisterInfo TRANSMIT_SOURCE_CAPABILITIES{Address::TRANSMIT_SOURCE_CAPABILITIES, 63};
     constexpr RegisterInfo TRANSMIT_SINK_CAPABILITIES{Address::TRANSMIT_SINK_CAPABILITIES, 53};
     constexpr RegisterInfo ACTIVE_PDO_CONTRACT{Address::ACTIVE_PDO_CONTRACT, 6};
-    constexpr RegisterInfo ACTIVE_RDO_CONTRACT{Address::ACTIVE_RDO_CONTRACT, 12};
+    constexpr RegisterInfo ACTIVE_RDO_CONTRACT{Address::ACTIVE_RDO_CONTRACT, 16};  // HW returns 16B (TRM field table documents only 96 bits / 12B; high bytes are reserved padding)
     constexpr RegisterInfo AUTONEGOTIATE_SINK{Address::AUTONEGOTIATE_SINK, 24};
     constexpr RegisterInfo POWER_STATUS{Address::POWER_STATUS, 2};
     constexpr RegisterInfo PD_STATUS{Address::PD_STATUS, 4};

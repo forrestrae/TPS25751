@@ -18,13 +18,16 @@ public:
     virtual ~TPS25751Register();
     virtual void debugPrint(Stream &s = Serial) const = 0;
 
+    /**
+     * @brief Debug helper: dump raw register data to stream
+     * @param s Output stream (default Serial)
+     * @param prefix Optional prefix for the dump
+     */
+    void debugDumpRaw(Stream& s = Serial, const char* prefix = nullptr) const;
+
 protected:
     uint8_t *_raw;
     size_t _len;
-
-#ifdef PIO_UNIT_TESTING
-public:  // Make protected methods public for unit testing
-#endif
 
 public:
     /**
@@ -52,14 +55,11 @@ public:
      */
     virtual bool isSemanticallyValid() const { return isValid(); }
 
+#ifdef PIO_UNIT_TESTING
+public:  // Expose the decode helpers below for unit testing
+#else
 protected:
-    
-    /**
-     * @brief Debug helper: dump raw register data to stream
-     * @param s Output stream (default Serial)
-     * @param prefix Optional prefix for the dump
-     */
-    void debugDumpRaw(Stream& s = Serial, const char* prefix = nullptr) const;
+#endif
 
     /**
      * @brief Safely extracts a bitfield from the register data with validation

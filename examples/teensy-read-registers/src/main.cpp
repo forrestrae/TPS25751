@@ -8,7 +8,7 @@
 #include <TPS25751RegisterFactory.h>
 #include "TPS25751InterruptEvent.h"
 
-#include "settings.h"
+#define I2CT_IRQ_PIN 17
 
 const TPS25751 pd;
 
@@ -47,41 +47,40 @@ void setup()
     pd.begin();
 }
 
-void print_status()
+void print_boot_flags()
 {
     Serial.println();
-    Serial.println("-------------------- print_status --------------------");
+    Serial.println("-------------------- print_boot_flags --------------------");
     Serial.println();
-
-    if (const auto modeReg = pd.readModeRegister(true))
-    {
-        if (!modeReg->isApplicationMode())
-        {
-            modeReg->debugPrint();
-            Serial.println(F("TPS25751 not in Application mode..."));
-            delay(10000);
-            doReboot();
-        }
-        else
-            modeReg->debugPrint();
-    }
-    else
-        Serial.println(F("Failed to create/read Mode register via factory"));
 
     if (auto bootFlagsReg = pd.readBootFlagsRegister(true))
         bootFlagsReg->debugPrint();
     else
         Serial.println(F("Failed to create/read Boot Flags register via factory"));
+}
+
+void print_status_register()
+{
+    Serial.println();
+    Serial.println("-------------------- print_status --------------------");
+    Serial.println();
 
     if (const auto statusReg = pd.readStatusRegister(true))
         statusReg->debugPrint();
     else
         Serial.println(F("Failed to create/read Status register via factory"));
+}
 
-    if (const auto pdStatus = pd.readPDStatusRegister(true))
-        pdStatus->debugPrint();
+void print_pd_status()
+{
+    Serial.println();
+    Serial.println("-------------------- print_pd_status --------------------");
+    Serial.println();
+
+    if (auto pdStatusReg = pd.readPDStatusRegister(true))
+        pdStatusReg->debugPrint();
     else
-        Serial.println(F("Failed to create/read PD Status register via factory"));
+        Serial.println(F("Failed to create/read pdStatusReg register via factory"));
 }
 
 void print_power_status()
@@ -150,6 +149,13 @@ void print_contracts()
         rdoContract->debugPrint();
     else
         Serial.println(F("Failed to create/read Active RDO Contract register via factory"));
+}
+
+void print_gpio_status()
+{
+    Serial.println();
+    Serial.println("-------------------- print_gpio_status --------------------");
+    Serial.println();
 
     if (const auto gpioStatus = pd.readGPIOStatusRegister(true))
         gpioStatus->debugPrint();
@@ -157,6 +163,70 @@ void print_contracts()
         Serial.println(F("Failed to create/read GPIO Status register via factory"));
 }
 
+void print_app_mode_status(const std::unique_ptr<TPS25751Mode> &modeReg)
+{
+    modeReg->debugPrint();
+
+    print_boot_flags();
+    print_status_register();
+    print_pd_status();
+    print_power_status();
+    print_port_status();
+    print_contracts();
+}
+
+void print_boot_mode_status(const std::unique_ptr<TPS25751Mode> &modeReg)
+{
+    modeReg->debugPrint();
+
+    if (auto bootFlagsReg = pd.readBootFlagsRegister(true))
+        bootFlagsReg->debugPrint();
+    else
+        Serial.println(F("Failed to create/read Boot Flags register via factory"));
+}
+
+void print_patch_mode_status(const std::unique_ptr<TPS25751Mode> &modeReg)
+{
+    modeReg->debugPrint();
+
+    if (auto bootFlagsReg = pd.readBootFlagsRegister(true))
+        bootFlagsReg->debugPrint();
+    else
+        Serial.println(F("Failed to create/read Boot Flags register via factory"));
+}
+
+void print_status()
+{
+    Serial.println();
+    Serial.println("-------------------- print_status --------------------");
+    Serial.println();
+
+    if (const auto modeReg = pd.readModeRegister(true))
+    {
+        switch (modeReg->getModeType())
+        {
+            case ModeType::Application:
+                Serial.println(F("TPS25751 in Application mode"));
+                print_app_mode_status(modeReg);
+                break;
+            case ModeType::Boot:
+                Serial.println(F("TPS25751 in Boot mode"));
+                print_boot_mode_status(modeReg);
+                break;
+            case ModeType::Patch:
+                Serial.println(F("TPS25751 in Patch mode"));
+                print_patch_mode_status(modeReg);
+                break;
+            default:
+                Serial.println(F("TPS25751 in Unknown mode"));
+                delay(10000);
+                doReboot();
+                break;
+        }
+    }
+    else
+        Serial.println(F("Failed to create/read Mode register via factory"));
+}
 
 void loop()
 {
@@ -169,9 +239,6 @@ void loop()
     Serial.println();
 
     print_status();
-    print_power_status();
-    print_port_status();
-    print_contracts();
 
     delay(5000); // Give time to read output
 }

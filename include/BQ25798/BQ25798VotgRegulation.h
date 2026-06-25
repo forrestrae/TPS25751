@@ -26,6 +26,9 @@ namespace BQ25798 {
 class VotgRegulation : public TPS25751Register
 {
 public:
+    /// @brief Register address — single source of register identity for typed writes.
+    static constexpr Registers::Address kAddress = Registers::Address::VOTG_REGULATION;
+
     // -----------------------------------------------------------------------
     // Constructors
     // -----------------------------------------------------------------------
@@ -68,6 +71,25 @@ public:
      * @return Millivolts: (VOTG_10:0 * 10) + 2800
      */
     uint16_t millivolts() const;
+
+    // -----------------------------------------------------------------------
+    // Field setters (read-modify-write — each touches only its own field)
+    // -----------------------------------------------------------------------
+
+    /**
+     * @brief Set raw VOTG_10:0 field value (bits 10:0)
+     * @param value 11-bit raw value (masked to 11 bits)
+     */
+    void setVotgRaw(uint16_t value);
+
+    /**
+     * @brief Set OTG regulation voltage from millivolts
+     *
+     * Inverts mV = (VOTG * 10) + 2800: VOTG = (mV - 2800) / 10.
+     * Values below the 2800 mV offset clamp to 0.
+     * @param mV Voltage in millivolts
+     */
+    void setMillivolts(uint16_t mV);
 
     // -----------------------------------------------------------------------
     // TPS25751Register overrides

@@ -1,4 +1,5 @@
 #include "BQ25798/BQ25798InputVoltageLimit.h"
+#include "BQ25798/BQ25798Encode.h"
 
 namespace BQ25798 {
 
@@ -16,6 +17,24 @@ uint16_t InputVoltageLimit::millivolts() const
 {
     if (!isValid()) return 0;
     return static_cast<uint16_t>(static_cast<uint16_t>(vindpmRaw()) * kLsbMv);
+}
+
+// ---------------------------------------------------------------------------
+// Field setters (read-modify-write; reserved bits preserved)
+// ---------------------------------------------------------------------------
+
+void InputVoltageLimit::setVindpmRaw(uint8_t value)
+{
+    if (!isValid()) return;
+    // VINDPM_7:0 — full byte 0
+    BQ25798::setField8(_raw, 0, 8, value);
+}
+
+void InputVoltageLimit::setMillivolts(uint16_t mV)
+{
+    if (!isValid()) return;
+    // Invert mV = VINDPM * 100
+    BQ25798::setField8(_raw, 0, 8, static_cast<uint8_t>(mV / kLsbMv));
 }
 
 // ---------------------------------------------------------------------------

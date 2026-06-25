@@ -1,4 +1,5 @@
 #include "BQ25798/BQ25798TimerControl.h"
+#include "BQ25798/BQ25798Encode.h"
 
 namespace BQ25798 {
 
@@ -48,6 +49,52 @@ bool TimerControl::tmr2xEn() const
 {
     // TMR2X_EN — bit 0
     return extractBits(0, 1) != 0;
+}
+
+// ---------------------------------------------------------------------------
+// Field setters (read-modify-write; siblings/reserved bits preserved)
+// ---------------------------------------------------------------------------
+
+void TimerControl::setTopoffTmr(TopoffTmr v)
+{
+    if (!isValid()) return;
+    // TOPOFF_TMR_1:0 — 2-bit field, bits 7:6 (bit position 6, width 2)
+    BQ25798::setField8(_raw, 6, 2, static_cast<uint8_t>(v));
+}
+
+void TimerControl::setEnTrichgTmr(bool on)
+{
+    if (!isValid()) return;
+    // EN_TRICHG_TMR — bit 5
+    BQ25798::setField8(_raw, 5, 1, on ? 1 : 0);
+}
+
+void TimerControl::setEnPrechgTmr(bool on)
+{
+    if (!isValid()) return;
+    // EN_PRECHG_TMR — bit 4
+    BQ25798::setField8(_raw, 4, 1, on ? 1 : 0);
+}
+
+void TimerControl::setEnChgTmr(bool on)
+{
+    if (!isValid()) return;
+    // EN_CHG_TMR — bit 3
+    BQ25798::setField8(_raw, 3, 1, on ? 1 : 0);
+}
+
+void TimerControl::setChgTmr(ChgTmr v)
+{
+    if (!isValid()) return;
+    // CHG_TMR_1:0 — 2-bit field, bits 2:1 (bit position 1, width 2)
+    BQ25798::setField8(_raw, 1, 2, static_cast<uint8_t>(v));
+}
+
+void TimerControl::setTmr2xEn(bool on)
+{
+    if (!isValid()) return;
+    // TMR2X_EN — bit 0
+    BQ25798::setField8(_raw, 0, 1, on ? 1 : 0);
 }
 
 // ---------------------------------------------------------------------------

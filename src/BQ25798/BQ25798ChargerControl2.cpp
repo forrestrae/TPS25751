@@ -1,4 +1,5 @@
 #include "BQ25798/BQ25798ChargerControl2.h"
+#include "BQ25798/BQ25798Encode.h"
 
 namespace BQ25798 {
 
@@ -50,6 +51,59 @@ bool ChargerControl2::sdrvDly() const
 {
     // SDRV_DLY — bit 0 of byte 0 (1 = no delay, 0 = 10 s delay)
     return extractBits(0, 1) != 0;
+}
+
+// ---------------------------------------------------------------------------
+// Field setters (read-modify-write; siblings/reserved bits preserved)
+// ---------------------------------------------------------------------------
+
+void ChargerControl2::setForceIndet(bool on)
+{
+    if (!isValid()) return;
+    // FORCE_INDET — bit 7 of byte 0 (self-clears when detection completes)
+    BQ25798::setField8(_raw, 7, 1, on ? 1 : 0);
+}
+
+void ChargerControl2::setAutoIndetEn(bool on)
+{
+    if (!isValid()) return;
+    // AUTO_INDET_EN — bit 6 of byte 0
+    BQ25798::setField8(_raw, 6, 1, on ? 1 : 0);
+}
+
+void ChargerControl2::setEn12v(bool on)
+{
+    if (!isValid()) return;
+    // EN_12V — bit 5 of byte 0
+    BQ25798::setField8(_raw, 5, 1, on ? 1 : 0);
+}
+
+void ChargerControl2::setEn9v(bool on)
+{
+    if (!isValid()) return;
+    // EN_9V — bit 4 of byte 0
+    BQ25798::setField8(_raw, 4, 1, on ? 1 : 0);
+}
+
+void ChargerControl2::setHvdcpEn(bool on)
+{
+    if (!isValid()) return;
+    // HVDCP_EN — bit 3 of byte 0
+    BQ25798::setField8(_raw, 3, 1, on ? 1 : 0);
+}
+
+void ChargerControl2::setSdrvCtrl(SdrvCtrl v)
+{
+    if (!isValid()) return;
+    // SDRV_CTRL_1:0 — bits 2:1 (bit position 1, width 2)
+    BQ25798::setField8(_raw, 1, 2, static_cast<uint8_t>(v));
+}
+
+void ChargerControl2::setSdrvDly(bool on)
+{
+    if (!isValid()) return;
+    // SDRV_DLY — bit 0 of byte 0 (1 = no delay, 0 = 10 s delay)
+    BQ25798::setField8(_raw, 0, 1, on ? 1 : 0);
 }
 
 // ---------------------------------------------------------------------------

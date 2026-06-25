@@ -28,6 +28,9 @@ namespace BQ25798 {
 class ChargerControl4 : public TPS25751Register
 {
 public:
+    /// @brief Register address — single source of register identity for typed writes.
+    static constexpr Registers::Address kAddress = Registers::Address::CHARGER_CONTROL_4;
+
     // -----------------------------------------------------------------------
     // Constructors
     // -----------------------------------------------------------------------
@@ -100,6 +103,35 @@ public:
      * @return true if IBUS OCP is enabled
      */
     bool enIbusOcp() const;
+
+    // -----------------------------------------------------------------------
+    // Field setters (read-modify-write — each touches only its own field)
+    // -----------------------------------------------------------------------
+
+    /// @brief Enable ACFET2-RBFET2 gate driver — EN_ACDRV2 (bit 7)
+    void setEnAcdrv2(bool on);
+
+    /// @brief Enable ACFET1-RBFET1 gate driver — EN_ACDRV1 (bit 6)
+    void setEnAcdrv1(bool on);
+
+    /// @brief Set switching frequency — PWM_FREQ (bit 5). true = 750 kHz; false = 1.5 MHz.
+    void setPwmFreq(bool on);
+
+    /// @brief Disable STAT pin output — DIS_STAT (bit 4)
+    void setDisStat(bool on);
+
+    /// @brief Disable forward mode VSYS short protection — DIS_VSYS_SHORT (bit 3)
+    void setDisVsysShort(bool on);
+
+    /// @brief Disable OTG VOTG UVP protection — DIS_VOTG_UVP (bit 2)
+    void setDisVotgUvp(bool on);
+
+    /// @brief Force VINDPM detection — FORCE_VINDPM_DET (bit 1).
+    /// The bit self-clears in hardware once detection completes.
+    void setForceVindpmDet(bool on);
+
+    /// @brief Enable IBUS OCP in forward mode — EN_IBUS_OCP (bit 0)
+    void setEnIbusOcp(bool on);
 
     // -----------------------------------------------------------------------
     // TPS25751Register overrides

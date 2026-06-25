@@ -1,4 +1,5 @@
 #include "BQ25798/BQ25798AdcFunctionDisable1.h"
+#include "BQ25798/BQ25798Encode.h"
 
 namespace BQ25798 {
 
@@ -28,6 +29,38 @@ bool AdcFunctionDisable1::vac1AdcDisabled() const
 {
     // VAC1_ADC_DIS — bit 4 of byte 0
     return extractBits(4, 1) != 0;
+}
+
+// ---------------------------------------------------------------------------
+// Field setters (read-modify-write; siblings/reserved bits preserved)
+// ---------------------------------------------------------------------------
+
+void AdcFunctionDisable1::setDpAdcDisabled(bool disabled)
+{
+    if (!isValid()) return;
+    // DP_ADC_DIS — bit 7 of byte 0
+    BQ25798::setField8(_raw, 7, 1, disabled ? 1 : 0);
+}
+
+void AdcFunctionDisable1::setDmAdcDisabled(bool disabled)
+{
+    if (!isValid()) return;
+    // DM_ADC_DIS — bit 6 of byte 0
+    BQ25798::setField8(_raw, 6, 1, disabled ? 1 : 0);
+}
+
+void AdcFunctionDisable1::setVac2AdcDisabled(bool disabled)
+{
+    if (!isValid()) return;
+    // VAC2_ADC_DIS — bit 5 of byte 0
+    BQ25798::setField8(_raw, 5, 1, disabled ? 1 : 0);
+}
+
+void AdcFunctionDisable1::setVac1AdcDisabled(bool disabled)
+{
+    if (!isValid()) return;
+    // VAC1_ADC_DIS — bit 4 of byte 0
+    BQ25798::setField8(_raw, 4, 1, disabled ? 1 : 0);
 }
 
 // ---------------------------------------------------------------------------

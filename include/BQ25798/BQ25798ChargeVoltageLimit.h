@@ -30,6 +30,9 @@ namespace BQ25798 {
 class ChargeVoltageLimit : public TPS25751Register
 {
 public:
+    /// @brief Register address — single source of register identity for typed writes.
+    static constexpr Registers::Address kAddress = Registers::Address::CHARGE_VOLTAGE_LIMIT;
+
     // -----------------------------------------------------------------------
     // Constructors
     // -----------------------------------------------------------------------
@@ -74,6 +77,24 @@ public:
      * @return Voltage in mV; 0 if not valid
      */
     uint16_t millivolts() const;
+
+    // -----------------------------------------------------------------------
+    // Field setters (read-modify-write — each touches only its own field)
+    // -----------------------------------------------------------------------
+
+    /**
+     * @brief Set raw VREG field — VREG_10:0 (bits 10:0 of the 16-bit value)
+     * @param value 11-bit raw value (masked to 11 bits)
+     */
+    void setVregRaw(uint16_t value);
+
+    /**
+     * @brief Set battery voltage regulation limit from millivolts
+     *
+     * Inverts mV = VREG * 10: VREG = mV / 10.
+     * @param mV Voltage in millivolts
+     */
+    void setMillivolts(uint16_t mV);
 
     // -----------------------------------------------------------------------
     // TPS25751Register overrides

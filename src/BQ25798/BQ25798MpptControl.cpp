@@ -1,4 +1,5 @@
 #include "BQ25798/BQ25798MpptControl.h"
+#include "BQ25798/BQ25798Encode.h"
 
 namespace BQ25798 {
 
@@ -40,6 +41,38 @@ bool MpptControl::enMppt() const
 {
     // EN_MPPT — bit 0
     return extractBits(0, 1) != 0;
+}
+
+// ---------------------------------------------------------------------------
+// Field setters (read-modify-write; siblings/reserved bits preserved)
+// ---------------------------------------------------------------------------
+
+void MpptControl::setVocPct(VocPct v)
+{
+    if (!isValid()) return;
+    // VOC_PCT_2:0 — 3-bit field, bits 7:5 (bit position 5, width 3)
+    BQ25798::setField8(_raw, 5, 3, static_cast<uint8_t>(v));
+}
+
+void MpptControl::setVocDly(VocDly v)
+{
+    if (!isValid()) return;
+    // VOC_DLY_1:0 — 2-bit field, bits 4:3 (bit position 3, width 2)
+    BQ25798::setField8(_raw, 3, 2, static_cast<uint8_t>(v));
+}
+
+void MpptControl::setVocRate(VocRate v)
+{
+    if (!isValid()) return;
+    // VOC_RATE_1:0 — 2-bit field, bits 2:1 (bit position 1, width 2)
+    BQ25798::setField8(_raw, 1, 2, static_cast<uint8_t>(v));
+}
+
+void MpptControl::setEnMppt(bool on)
+{
+    if (!isValid()) return;
+    // EN_MPPT — bit 0
+    BQ25798::setField8(_raw, 0, 1, on ? 1 : 0);
 }
 
 // ---------------------------------------------------------------------------

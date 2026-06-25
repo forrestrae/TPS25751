@@ -1,4 +1,5 @@
 #include "BQ25798/BQ25798ChargerMask3.h"
+#include "BQ25798/BQ25798Encode.h"
 
 namespace BQ25798 {
 
@@ -11,6 +12,16 @@ bool ChargerMask3::tsColdMask()     const { return extractBits(3, 1) != 0; }
 bool ChargerMask3::tsCoolMask()     const { return extractBits(2, 1) != 0; }
 bool ChargerMask3::tsWarmMask()     const { return extractBits(1, 1) != 0; }
 bool ChargerMask3::tsHotMask()      const { return extractBits(0, 1) != 0; }
+
+// ---------------------------------------------------------------------------
+// Field setters (read-modify-write; sibling/reserved bits preserved)
+// ---------------------------------------------------------------------------
+
+void ChargerMask3::setVbatotgLowMask(bool masked) { if (!isValid()) return; BQ25798::setField8(_raw, 4, 1, masked ? 1 : 0); }
+void ChargerMask3::setTsColdMask(bool masked)     { if (!isValid()) return; BQ25798::setField8(_raw, 3, 1, masked ? 1 : 0); }
+void ChargerMask3::setTsCoolMask(bool masked)     { if (!isValid()) return; BQ25798::setField8(_raw, 2, 1, masked ? 1 : 0); }
+void ChargerMask3::setTsWarmMask(bool masked)     { if (!isValid()) return; BQ25798::setField8(_raw, 1, 1, masked ? 1 : 0); }
+void ChargerMask3::setTsHotMask(bool masked)      { if (!isValid()) return; BQ25798::setField8(_raw, 0, 1, masked ? 1 : 0); }
 
 // ---------------------------------------------------------------------------
 // debugPrint

@@ -30,6 +30,9 @@ namespace BQ25798 {
 class InputCurrentLimit : public TPS25751Register
 {
 public:
+    /// @brief Register address — single source of register identity for typed writes.
+    static constexpr Registers::Address kAddress = Registers::Address::INPUT_CURRENT_LIMIT;
+
     // -----------------------------------------------------------------------
     // Constructors
     // -----------------------------------------------------------------------
@@ -74,6 +77,24 @@ public:
      * @return Current in mA; 0 if not valid
      */
     uint16_t milliamps() const;
+
+    // -----------------------------------------------------------------------
+    // Field setters (read-modify-write — each touches only its own field)
+    // -----------------------------------------------------------------------
+
+    /**
+     * @brief Set raw IINDPM field — IINDPM_8:0 (bits 8:0 of the 16-bit value)
+     * @param value 9-bit raw value (masked to 9 bits)
+     */
+    void setIindpmRaw(uint16_t value);
+
+    /**
+     * @brief Set input current limit from milliamps
+     *
+     * Inverts mA = IINDPM * 10: IINDPM = mA / 10.
+     * @param mA Current in milliamps
+     */
+    void setMilliamps(uint16_t mA);
 
     // -----------------------------------------------------------------------
     // TPS25751Register overrides

@@ -27,6 +27,9 @@ namespace BQ25798 {
 class ChargerControl0 : public TPS25751Register
 {
 public:
+    /// @brief Register address — single source of register identity for typed writes.
+    static constexpr Registers::Address kAddress = Registers::Address::CHARGER_CONTROL_0;
+
     // -----------------------------------------------------------------------
     // Constructors
     // -----------------------------------------------------------------------
@@ -99,6 +102,34 @@ public:
      * @return true if backup mode is enabled (OTG engages when VBUS droops below REG10 threshold)
      */
     bool enBackup() const;
+
+    // -----------------------------------------------------------------------
+    // Field setters (read-modify-write — each touches only its own bit)
+    // -----------------------------------------------------------------------
+
+    /// @brief Set auto battery discharging during OVP — EN_AUTO_IBATDIS (bit 7)
+    void setEnAutoIbatDis(bool on);
+
+    /// @brief Set force battery discharging current — FORCE_IBATDIS (bit 6)
+    void setForceIbatDis(bool on);
+
+    /// @brief Set charger enable — EN_CHG (bit 5)
+    void setEnChg(bool on);
+
+    /// @brief Set Input Current Optimizer enable — EN_ICO (bit 4)
+    void setEnIco(bool on);
+
+    /// @brief Set force ICO start — FORCE_ICO (bit 3)
+    void setForceIco(bool on);
+
+    /// @brief Set HIZ mode enable — EN_HIZ (bit 2)
+    void setEnHiz(bool on);
+
+    /// @brief Set termination enable — EN_TERM (bit 1)
+    void setEnTerm(bool on);
+
+    /// @brief Set backup mode enable — EN_BACKUP (bit 0)
+    void setEnBackup(bool on);
 
     // -----------------------------------------------------------------------
     // TPS25751Register overrides

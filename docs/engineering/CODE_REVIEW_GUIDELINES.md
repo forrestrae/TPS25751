@@ -26,6 +26,18 @@ The most critical review category for this codebase. Many bugs here cause silent
 - **Downstream factory switch completeness**: Every value in `<Device>::Registers::Address` must have a `case` in all three `createRegister()` overloads; a missing `case` silently returns `nullptr` and causes a null-dereference at the call site
 - **ADC LSB unit-conversion sourced from datasheet, not MCP**: The `bq25798-docs` MCP server does not carry ADC step sizes. Conversion factors (e.g. TDIE: 0.5 °C/LSB, IBUS/IBAT: 1 mA/LSB) must be taken from the BQ25798 datasheet (SLUSE02); using the wrong LSB produces silently wrong physical values
 
+### Downstream-Device Write-Path Traps (ADR-009)
+
+Review these when a downstream R/W register class adds field setters or a driver adds typed writes:
+
+- **Encode must use big-endian `setField16BE` for 16-bit registers**: Mirror the decode side — `setField16BE` writes `raw[0]` as MSB. A little-endian encode helper byte-swaps the value, exactly the inverse of the `extractBits16` decode bug
+- **Inverse unit conversion must reuse the class's own decode LSB/offset constant**: An engineering-unit setter (e.g. `setMillivolts`) must invert the *same* `kLsbMv`/`kOffsetMv` the decode accessor uses. A hand-recomputed constant lets encode and decode silently disagree
+- **RMW must preserve reserved bits**: Each setter touches only its field's bits via `setField8`/`setField16BE`. Reject any setter that rebuilds the whole register from a subset of fields — it zeroes reserved bits the device expects unchanged
+- **Field value masked/clamped to width**: The encode helpers mask the value to the field width; confirm the setter does not pre-shift or pass an out-of-range value expecting a wider field. Offset-based setters must guard unsigned underflow (clamp inputs below the offset to 0)
+- **`kAddress` matches the register**: The `static constexpr Registers::Address kAddress` that `writeRegister<T>()`/`updateRegister<T>()` key on must equal the register's actual address; a mismatch writes the right bytes to the wrong register
+- **Self-clearing bits read back 0**: REG_RST, WD_RST, FORCE_* are written as `setX(true)` and cleared by hardware. Do not assert they read back 1, and do not loop expecting them to stay set
+- **Typed writes obey the I2Cw framing**: `len <= 11` and `Length = payload + 1` (counts the offset byte) apply to typed writes exactly as to raw I2Cw — see the I2Cw bullets above
+
 ---
 
 ## Hard-to-Notice Bugs

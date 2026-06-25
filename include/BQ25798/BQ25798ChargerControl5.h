@@ -27,6 +27,9 @@ namespace BQ25798 {
 class ChargerControl5 : public TPS25751Register
 {
 public:
+    /// @brief Register address — single source of register identity for typed writes.
+    static constexpr Registers::Address kAddress = Registers::Address::CHARGER_CONTROL_5;
+
     // -----------------------------------------------------------------------
     // Enumerations
     // -----------------------------------------------------------------------
@@ -101,6 +104,28 @@ public:
      * @return true if battery discharge OCP is enabled
      */
     bool enBatoc() const;
+
+    // -----------------------------------------------------------------------
+    // Field setters (read-modify-write — each touches only its own field)
+    // -----------------------------------------------------------------------
+
+    /// @brief Set ship FET populated flag — SFET_PRESENT (bit 7)
+    void setSfetPresent(bool on);
+
+    /// @brief Enable IBAT discharge sensing — EN_IBAT (bit 5)
+    void setEnIbat(bool on);
+
+    /// @brief Set battery discharge current regulation in OTG mode — IBAT_REG_1:0 (bits 4:3)
+    void setIbatReg(IbatReg v);
+
+    /// @brief Enable internal IINDPM / IOTG regulation — EN_IINDPM (bit 2)
+    void setEnIindpm(bool on);
+
+    /// @brief Enable external ILIM_HIZ pin regulation — EN_EXTILIM (bit 1)
+    void setEnExtilim(bool on);
+
+    /// @brief Enable battery discharge current OCP — EN_BATOC (bit 0)
+    void setEnBatoc(bool on);
 
     // -----------------------------------------------------------------------
     // TPS25751Register overrides

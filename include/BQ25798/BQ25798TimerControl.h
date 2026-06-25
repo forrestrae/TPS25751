@@ -24,6 +24,9 @@ namespace BQ25798 {
 class TimerControl : public TPS25751Register
 {
 public:
+    /// @brief Register address — single source of register identity for typed writes.
+    static constexpr Registers::Address kAddress = Registers::Address::TIMER_CONTROL;
+
     // -----------------------------------------------------------------------
     // Enumerations
     // -----------------------------------------------------------------------
@@ -108,6 +111,28 @@ public:
      * @return true if 2x slowdown is enabled (default)
      */
     bool tmr2xEn() const;
+
+    // -----------------------------------------------------------------------
+    // Field setters (read-modify-write — each touches only its own field)
+    // -----------------------------------------------------------------------
+
+    /// @brief Set top-off timer control — TOPOFF_TMR_1:0 (bits 7:6)
+    void setTopoffTmr(TopoffTmr v);
+
+    /// @brief Set enable trickle charge timer — EN_TRICHG_TMR (bit 5)
+    void setEnTrichgTmr(bool on);
+
+    /// @brief Set enable pre-charge timer — EN_PRECHG_TMR (bit 4)
+    void setEnPrechgTmr(bool on);
+
+    /// @brief Set enable fast charge timer — EN_CHG_TMR (bit 3)
+    void setEnChgTmr(bool on);
+
+    /// @brief Set fast charge timer setting — CHG_TMR_1:0 (bits 2:1)
+    void setChgTmr(ChgTmr v);
+
+    /// @brief Set 2x timer slowdown during DPM/thermal regulation — TMR2X_EN (bit 0)
+    void setTmr2xEn(bool on);
 
     // -----------------------------------------------------------------------
     // TPS25751Register overrides

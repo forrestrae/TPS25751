@@ -1,4 +1,5 @@
 #include "BQ25798/BQ25798FaultMask1.h"
+#include "BQ25798/BQ25798Encode.h"
 
 namespace BQ25798 {
 
@@ -11,6 +12,16 @@ bool FaultMask1::vsysOvpMask()   const { return extractBits(6, 1) != 0; }
 bool FaultMask1::otgOvpMask()    const { return extractBits(5, 1) != 0; }
 bool FaultMask1::otgUvpMask()    const { return extractBits(4, 1) != 0; }
 bool FaultMask1::tshutMask()     const { return extractBits(2, 1) != 0; }
+
+// ---------------------------------------------------------------------------
+// Field setters (read-modify-write; sibling/reserved bits preserved)
+// ---------------------------------------------------------------------------
+
+void FaultMask1::setVsysShortMask(bool masked) { if (!isValid()) return; BQ25798::setField8(_raw, 7, 1, masked ? 1 : 0); }
+void FaultMask1::setVsysOvpMask(bool masked)   { if (!isValid()) return; BQ25798::setField8(_raw, 6, 1, masked ? 1 : 0); }
+void FaultMask1::setOtgOvpMask(bool masked)    { if (!isValid()) return; BQ25798::setField8(_raw, 5, 1, masked ? 1 : 0); }
+void FaultMask1::setOtgUvpMask(bool masked)    { if (!isValid()) return; BQ25798::setField8(_raw, 4, 1, masked ? 1 : 0); }
+void FaultMask1::setTshutMask(bool masked)     { if (!isValid()) return; BQ25798::setField8(_raw, 2, 1, masked ? 1 : 0); }
 
 // ---------------------------------------------------------------------------
 // debugPrint

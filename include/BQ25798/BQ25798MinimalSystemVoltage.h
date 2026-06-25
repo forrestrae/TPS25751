@@ -28,6 +28,9 @@ namespace BQ25798 {
 class MinimalSystemVoltage : public TPS25751Register
 {
 public:
+    /// @brief Register address — single source of register identity for typed writes.
+    static constexpr Registers::Address kAddress = Registers::Address::MINIMAL_SYSTEM_VOLTAGE;
+
     // -----------------------------------------------------------------------
     // Constructors
     // -----------------------------------------------------------------------
@@ -66,6 +69,25 @@ public:
      * @return Voltage in mV; 0 if not valid
      */
     uint16_t millivolts() const;
+
+    // -----------------------------------------------------------------------
+    // Field setters (read-modify-write — each touches only its own field)
+    // -----------------------------------------------------------------------
+
+    /**
+     * @brief Set raw VSYSMIN field — VSYSMIN_5:0 (bits 5:0)
+     * @param value 6-bit raw value (masked to 6 bits)
+     */
+    void setVsysminRaw(uint8_t value);
+
+    /**
+     * @brief Set minimal system voltage from millivolts
+     *
+     * Inverts mV = 2500 + (VSYSMIN * 250): VSYSMIN = (mV - 2500) / 250.
+     * Values below the 2500 mV offset clamp to 0.
+     * @param mV Voltage in millivolts
+     */
+    void setMillivolts(uint16_t mV);
 
     // -----------------------------------------------------------------------
     // TPS25751Register overrides

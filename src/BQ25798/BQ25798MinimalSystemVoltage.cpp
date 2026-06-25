@@ -1,4 +1,5 @@
 #include "BQ25798/BQ25798MinimalSystemVoltage.h"
+#include "BQ25798/BQ25798Encode.h"
 
 namespace BQ25798 {
 
@@ -16,6 +17,26 @@ uint16_t MinimalSystemVoltage::millivolts() const
 {
     if (!isValid()) return 0;
     return static_cast<uint16_t>(kOffsetMv + static_cast<uint16_t>(vsysminRaw()) * kLsbMv);
+}
+
+// ---------------------------------------------------------------------------
+// Field setters (read-modify-write; reserved bits preserved)
+// ---------------------------------------------------------------------------
+
+void MinimalSystemVoltage::setVsysminRaw(uint8_t value)
+{
+    if (!isValid()) return;
+    // VSYSMIN_5:0 — 6-bit field starting at bit 0 of byte 0
+    BQ25798::setField8(_raw, 0, 6, value);
+}
+
+void MinimalSystemVoltage::setMillivolts(uint16_t mV)
+{
+    if (!isValid()) return;
+    // Invert mV = 2500 + (VSYSMIN * 250); guard against unsigned underflow.
+    const uint16_t code = (mV <= kOffsetMv) ? 0
+                          : static_cast<uint16_t>((mV - kOffsetMv) / kLsbMv);
+    BQ25798::setField8(_raw, 0, 6, static_cast<uint8_t>(code));
 }
 
 // ---------------------------------------------------------------------------

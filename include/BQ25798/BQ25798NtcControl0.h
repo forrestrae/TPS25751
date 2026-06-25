@@ -29,6 +29,9 @@ namespace BQ25798 {
 class NtcControl0 : public TPS25751Register
 {
 public:
+    /// @brief Register address — single source of register identity for typed writes.
+    static constexpr Registers::Address kAddress = Registers::Address::NTC_CONTROL_0;
+
     // -----------------------------------------------------------------------
     // JEITA_VSET enum — hot-range charge voltage adjustment (bits 7:5)
     // -----------------------------------------------------------------------
@@ -124,6 +127,20 @@ public:
      * @return JeitaIsetc enum value
      */
     JeitaIsetc jeitaIsetc() const;
+
+    // -----------------------------------------------------------------------
+    // Field setters (read-modify-write — each touches only its own field;
+    // reserved bit 0 is never written)
+    // -----------------------------------------------------------------------
+
+    /// @brief Set JEITA hot-range voltage setting — JEITA_VSET_2:0 (bits 7:5)
+    void setJeitaVset(JeitaVset v);
+
+    /// @brief Set JEITA hot-range current setting — JEITA_ISETH_1:0 (bits 4:3)
+    void setJeitaIseth(JeitaIseth v);
+
+    /// @brief Set JEITA cool-range current setting — JEITA_ISETC_1:0 (bits 2:1)
+    void setJeitaIsetc(JeitaIsetc v);
 
     // -----------------------------------------------------------------------
     // TPS25751Register overrides

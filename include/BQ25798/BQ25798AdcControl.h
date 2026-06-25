@@ -33,6 +33,9 @@ namespace BQ25798 {
 class AdcControl : public TPS25751Register
 {
 public:
+    /// @brief Register address — single source of register identity for typed writes.
+    static constexpr Registers::Address kAddress = Registers::Address::ADC_CONTROL;
+
     // -----------------------------------------------------------------------
     // ADC_SAMPLE_1:0 resolution enum (bits 5:4)
     // -----------------------------------------------------------------------
@@ -105,6 +108,25 @@ public:
      *         false = start from existing register value
      */
     bool adcAvgInit() const;
+
+    // -----------------------------------------------------------------------
+    // Field setters (read-modify-write — each touches only its own field)
+    // -----------------------------------------------------------------------
+
+    /// @brief Set ADC enable — ADC_EN (bit 7)
+    void setAdcEnabled(bool on);
+
+    /// @brief Set ADC conversion rate — ADC_RATE (bit 6); true = one-shot, false = continuous
+    void setAdcOneShot(bool on);
+
+    /// @brief Set ADC sample resolution — ADC_SAMPLE_1:0 (bits 5:4)
+    void setAdcSampleResolution(SampleResolution v);
+
+    /// @brief Set ADC averaging mode — ADC_AVG (bit 3); true = running average
+    void setAdcAveraging(bool on);
+
+    /// @brief Set ADC average initial value control — ADC_AVG_INIT (bit 2)
+    void setAdcAvgInit(bool on);
 
     // -----------------------------------------------------------------------
     // TPS25751Register overrides

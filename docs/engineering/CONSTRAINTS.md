@@ -728,10 +728,12 @@ field counts the register-offset byte + payload (`payload_len + 1`)** — see
 
 ---
 
-## BQ25798 Downstream Device Decode Conventions
+## BQ25798 Downstream Device Decode & Encode Conventions
 
 These apply to all BQ25798 register classes and, by analogy, to any downstream
-device whose registers are big-endian.
+device whose registers are big-endian. Conventions 1–3 cover **decode** (read);
+conventions 4–6 cover **encode** (write) of the R/W registers (see ADR-009 in
+[ARCHITECTURE.md](ARCHITECTURE.md)).
 
 ### 1. 16-Bit Registers Are Big-Endian — Do Not Use `extractBits16`
 
@@ -785,6 +787,44 @@ datasheet (SLUSE02, Table 9-xx for each ADC channel):
 | TDIE | 0.5 °C | Signed |
 
 Hardcoding the wrong LSB (e.g. 1.0 for TDIE) produces silently wrong physical values.
+
+### 4. Encode Is Read-Modify-Write — Preserve Reserved Bits
+
+Field setters on R/W registers mutate **only their field's bits** in the register's own
+raw buffer (`TPS25751Register::raw()`); reserved and sibling-field bits are preserved by
+construction. Never reassemble the whole register from a subset of fields (that risks
+zeroing reserved bits the device expects to read back unchanged). The encode helpers
+`setField8` / `setField16BE` (`include/BQ25798/BQ25798Encode.h`) do this read-modify-write
+and mask the value to the field width.
+
+### 5. Field Placement Is Big-Endian on Encode Too — Use `setField16BE`
+
+The encode side mirrors convention 1: for 16-bit registers, `setField16BE` writes the
+high byte to `raw[0]` (big-endian), matching the decode-side `(raw[0]<<8)|raw[1]`
+assembly. Never use a little-endian helper to encode a downstream 16-bit field — it
+byte-swaps the value just as `extractBits16` does on decode.
+
+### 6. Inverse Unit Conversion Reuses the Class's Own Decode Constant
+
+An engineering-unit setter (e.g. `setMillivolts`) inverts the same LSB/offset constant
+its decode accessor uses, so encode and decode can never drift apart. Where decode adds
+an offset, the inverse must **guard against unsigned underflow** (clamp inputs below the
+offset to 0 before subtracting):
+
+```cpp
+// decode: mV = kOffsetMv + code * kLsbMv
+// encode (with underflow guard):
+const uint16_t code = (mV <= kOffsetMv) ? 0
+                      : static_cast<uint16_t>((mV - kOffsetMv) / kLsbMv);
+```
+
+### Encode Reuses the Existing I2Cw Framing
+
+Typed writes (`Device::writeRegister<T>()`) ride the same I2Cw 4CC task as the raw write
+path, so the framing constraints from the [4CC Command Interface](#4cc-command-interface--i2cc-downstream-device-proxy-trm-sec-442443)
+section apply unchanged: payload `len ≤ 11`, and `Length = payload + 1` (counts the
+register-offset byte). Self-clearing command bits (REG_RST, WD_RST, FORCE_*) are written
+as a `setX(true)`; the device clears them in hardware, so a subsequent read returns 0.
 
 ---
 

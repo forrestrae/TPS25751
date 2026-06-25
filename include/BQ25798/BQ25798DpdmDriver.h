@@ -22,6 +22,9 @@ namespace BQ25798 {
 class DpdmDriver : public TPS25751Register
 {
 public:
+    /// @brief Register address — single source of register identity for typed writes.
+    static constexpr Registers::Address kAddress = Registers::Address::DPDM_DRIVER;
+
     // -----------------------------------------------------------------------
     // Enumerations
     // -----------------------------------------------------------------------
@@ -91,6 +94,17 @@ public:
      * @return DminusDac enum value
      */
     DminusDac dminusDac() const;
+
+    // -----------------------------------------------------------------------
+    // Field setters (read-modify-write — each touches only its own field)
+    // Reserved bits 1:0 have no setter.
+    // -----------------------------------------------------------------------
+
+    /// @brief Set D+ output driver setting — DPLUS_DAC_2:0 (bits 7:5)
+    void setDplusDac(DplusDac v);
+
+    /// @brief Set D- output driver setting — DMINUS_DAC_2:0 (bits 4:2)
+    void setDminusDac(DminusDac v);
 
     // -----------------------------------------------------------------------
     // TPS25751Register overrides

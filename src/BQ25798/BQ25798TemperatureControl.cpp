@@ -1,4 +1,5 @@
 #include "BQ25798/BQ25798TemperatureControl.h"
+#include "BQ25798/BQ25798Encode.h"
 
 namespace BQ25798 {
 
@@ -48,6 +49,52 @@ bool TemperatureControl::bkupAcfet1On() const
 {
     // BKUP_ACFET1_ON — bit 0
     return extractBits(0, 1) != 0;
+}
+
+// ---------------------------------------------------------------------------
+// Field setters (read-modify-write; siblings/reserved bits preserved)
+// ---------------------------------------------------------------------------
+
+void TemperatureControl::setTreg(Treg v)
+{
+    if (!isValid()) return;
+    // TREG_1:0 — 2-bit field, bits 7:6 (bit position 6, width 2)
+    BQ25798::setField8(_raw, 6, 2, static_cast<uint8_t>(v));
+}
+
+void TemperatureControl::setTshut(Tshut v)
+{
+    if (!isValid()) return;
+    // TSHUT_1:0 — 2-bit field, bits 5:4 (bit position 4, width 2)
+    BQ25798::setField8(_raw, 4, 2, static_cast<uint8_t>(v));
+}
+
+void TemperatureControl::setVbusPdEn(bool on)
+{
+    if (!isValid()) return;
+    // VBUS_PD_EN — bit 3
+    BQ25798::setField8(_raw, 3, 1, on ? 1 : 0);
+}
+
+void TemperatureControl::setVac1PdEn(bool on)
+{
+    if (!isValid()) return;
+    // VAC1_PD_EN — bit 2
+    BQ25798::setField8(_raw, 2, 1, on ? 1 : 0);
+}
+
+void TemperatureControl::setVac2PdEn(bool on)
+{
+    if (!isValid()) return;
+    // VAC2_PD_EN — bit 1
+    BQ25798::setField8(_raw, 1, 1, on ? 1 : 0);
+}
+
+void TemperatureControl::setBkupAcfet1On(bool on)
+{
+    if (!isValid()) return;
+    // BKUP_ACFET1_ON — bit 0
+    BQ25798::setField8(_raw, 0, 1, on ? 1 : 0);
 }
 
 // ---------------------------------------------------------------------------

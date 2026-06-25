@@ -27,6 +27,9 @@ namespace BQ25798 {
 class ChargerControl3 : public TPS25751Register
 {
 public:
+    /// @brief Register address — single source of register identity for typed writes.
+    static constexpr Registers::Address kAddress = Registers::Address::CHARGER_CONTROL_3;
+
     // -----------------------------------------------------------------------
     // Constructors
     // -----------------------------------------------------------------------
@@ -99,6 +102,35 @@ public:
      * @return true if OOA is disabled in forward mode
      */
     bool disFwdOoa() const;
+
+    // -----------------------------------------------------------------------
+    // Field setters (read-modify-write — each touches only its own field)
+    // -----------------------------------------------------------------------
+
+    /// @brief Disable both ACDRV gate drivers — DIS_ACDRV (bit 7)
+    void setDisAcdrv(bool on);
+
+    /// @brief Enable OTG mode — EN_OTG (bit 6)
+    void setEnOtg(bool on);
+
+    /// @brief Disable PFM in OTG mode — PFM_OTG_DIS (bit 5)
+    void setPfmOtgDis(bool on);
+
+    /// @brief Disable PFM in forward mode — PFM_FWD_DIS (bit 4)
+    void setPfmFwdDis(bool on);
+
+    /// @brief Set wake-up-from-ship-mode QON pull-low duration — WKUP_DLY (bit 3).
+    /// true = 15 ms; false = 1 s (default).
+    void setWkupDly(bool on);
+
+    /// @brief Disable BATFET LDO mode in pre-charge — DIS_LDO (bit 2)
+    void setDisLdo(bool on);
+
+    /// @brief Disable OOA in OTG mode — DIS_OTG_OOA (bit 1)
+    void setDisOtgOoa(bool on);
+
+    /// @brief Disable OOA in forward mode — DIS_FWD_OOA (bit 0)
+    void setDisFwdOoa(bool on);
 
     // -----------------------------------------------------------------------
     // TPS25751Register overrides

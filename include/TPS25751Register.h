@@ -35,7 +35,13 @@ public:
      * @return true if _raw is not null and _len > 0
      */
     bool isValid() const { return _raw != nullptr && _len > 0; }
-    
+
+    /// @brief Pointer to the raw register bytes (for writing the buffer back). Null if uninitialised.
+    const uint8_t* raw() const { return _raw; }
+
+    /// @brief Register buffer length in bytes.
+    size_t size() const { return _len; }
+
     /**
      * @brief Validates register size matches expected size
      * @param expectedSize Expected size in bytes

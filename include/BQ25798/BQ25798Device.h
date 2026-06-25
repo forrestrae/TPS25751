@@ -99,6 +99,128 @@ public:
     {}
 
     // -----------------------------------------------------------------------
+    // Typed register writes
+    // -----------------------------------------------------------------------
+
+    // Keep the inherited raw writeRegister(uint8_t, const uint8_t*, size_t)
+    // visible for unqualified calls; the typed template below would otherwise
+    // hide it via name lookup. They overload cleanly (distinct signatures).
+    using TPS25751DownstreamDevice::writeRegister;
+
+    /**
+     * @brief Generic typed write: writes @p reg back to its own register address.
+     *
+     * Sends reg.raw()/reg.size() to T::kAddress via the inherited raw I2Cw path.
+     *
+     * @tparam T Register decoder type exposing a static T::kAddress and raw()/size().
+     * @param reg Register value object to write.
+     * @return true if the I2Cw task reported success (queued).
+     */
+    template<typename T>
+    bool writeRegister(const T& reg) const {
+        return TPS25751DownstreamDevice::writeRegister(
+            static_cast<uint8_t>(T::kAddress), reg.raw(), reg.size());
+    }
+
+    /**
+     * @brief Read-modify-write: read T live, apply @p mutate, write it back.
+     *
+     * @tparam T  Register decoder type with a static T::kAddress.
+     * @tparam Fn Callable invoked as mutate(T&).
+     * @param mutate Mutator applied to the freshly read register before write-back.
+     * @return false on any I/O failure (read or write), true otherwise.
+     */
+    template<typename T, typename Fn>
+    bool updateRegister(Fn&& mutate) const {
+        T reg;
+        const uint8_t addr = static_cast<uint8_t>(T::kAddress);
+        const size_t  sz   = Registers::getRegisterSize(T::kAddress);
+        if (!readRegister(addr, reg, sz)) return false;
+        mutate(reg);
+        return writeRegister(reg);
+    }
+
+    // -----------------------------------------------------------------------
+    // Convenience setters (L3) — one-call read-modify-write helpers
+    // -----------------------------------------------------------------------
+
+    /**
+     * @brief Enable or disable charging — ChargerControl0 EN_CHG (bit 5).
+     *
+     * One-call read-modify-write: reads ChargerControl0 live, sets EN_CHG to
+     * @p on, and writes the register back (all other bits preserved).
+     *
+     * @param on true to enable charging, false to disable.
+     * @return false on any I/O failure, true otherwise.
+     */
+    bool enableCharging(bool on) const;
+
+    /**
+     * @brief Enable or disable HIZ mode — ChargerControl0 EN_HIZ (bit 2).
+     * @param on true to enter HIZ (input current to zero), false to exit.
+     * @return false on any I/O failure, true otherwise.
+     */
+    bool enableHiz(bool on) const;
+
+    /**
+     * @brief Enable or disable the ADC — AdcControl ADC_EN (bit 7).
+     * @param on true to enable the ADC, false to disable.
+     * @return false on any I/O failure, true otherwise.
+     */
+    bool enableADC(bool on) const;
+
+    /**
+     * @brief Kick the I2C watchdog — ChargerControl1 WD_RST (bit 3, self-clearing).
+     *
+     * Sets WD_RST=1; the BQ25798 resets the watchdog timer and clears the bit in
+     * hardware, so a subsequent read reports 0.
+     * @return false on any I/O failure, true otherwise.
+     */
+    bool kickWatchdog() const;
+
+    /**
+     * @brief Set the watchdog timer period — ChargerControl1 WATCHDOG_2:0 (bits 2:0).
+     * @param v Watchdog enum value (Disable, 0.5s … 160s).
+     * @return false on any I/O failure, true otherwise.
+     */
+    bool setWatchdog(ChargerControl1::Watchdog v) const;
+
+    /**
+     * @brief Set the fast-charge current limit — ChargeCurrentLimit ICHG (10 mA/LSB).
+     * @param milliamps Target current in mA (rounded down to the 10 mA step).
+     * @return false on any I/O failure, true otherwise.
+     */
+    bool setChargeCurrentLimit(uint16_t milliamps) const;
+
+    /**
+     * @brief Set the battery voltage regulation limit — ChargeVoltageLimit VREG (10 mV/LSB).
+     * @param millivolts Target voltage in mV (rounded down to the 10 mV step).
+     * @return false on any I/O failure, true otherwise.
+     */
+    bool setChargeVoltageLimit(uint16_t millivolts) const;
+
+    /**
+     * @brief Set the input current limit — InputCurrentLimit IINDPM (10 mA/LSB).
+     * @param milliamps Target current in mA (rounded down to the 10 mA step).
+     * @return false on any I/O failure, true otherwise.
+     */
+    bool setInputCurrentLimit(uint16_t milliamps) const;
+
+    /**
+     * @brief Set the input voltage (VINDPM) limit — InputVoltageLimit VINDPM (100 mV/LSB).
+     * @param millivolts Target voltage in mV (rounded down to the 100 mV step).
+     * @return false on any I/O failure, true otherwise.
+     */
+    bool setInputVoltageLimit(uint16_t millivolts) const;
+
+    /**
+     * @brief Enable or disable OTG (boost) mode — ChargerControl3 EN_OTG (bit 6).
+     * @param on true to enable OTG sourcing, false to disable.
+     * @return false on any I/O failure, true otherwise.
+     */
+    bool enableOTG(bool on) const;
+
+    // -----------------------------------------------------------------------
     // Typed register accessors
     // Each method reads the register via I2Cr, constructs the typed object,
     // and optionally verifies isSemanticallyValid() before returning.

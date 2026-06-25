@@ -22,6 +22,9 @@ namespace BQ25798 {
 class MpptControl : public TPS25751Register
 {
 public:
+    /// @brief Register address — single source of register identity for typed writes.
+    static constexpr Registers::Address kAddress = Registers::Address::MPPT_CONTROL;
+
     // -----------------------------------------------------------------------
     // Enumerations
     // -----------------------------------------------------------------------
@@ -108,6 +111,22 @@ public:
      * @return true if MPPT is enabled
      */
     bool enMppt() const;
+
+    // -----------------------------------------------------------------------
+    // Field setters (read-modify-write — each touches only its own field)
+    // -----------------------------------------------------------------------
+
+    /// @brief Set VINDPM percentage of open-circuit voltage — VOC_PCT_2:0 (bits 7:5)
+    void setVocPct(VocPct v);
+
+    /// @brief Set delay before VOC measurement — VOC_DLY_1:0 (bits 4:3)
+    void setVocDly(VocDly v);
+
+    /// @brief Set interval between VOC measurements — VOC_RATE_1:0 (bits 2:1)
+    void setVocRate(VocRate v);
+
+    /// @brief Set enable MPPT — EN_MPPT (bit 0)
+    void setEnMppt(bool on);
 
     // -----------------------------------------------------------------------
     // TPS25751Register overrides

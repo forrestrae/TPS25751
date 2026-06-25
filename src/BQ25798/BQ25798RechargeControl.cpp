@@ -1,4 +1,5 @@
 #include "BQ25798/BQ25798RechargeControl.h"
+#include "BQ25798/BQ25798Encode.h"
 
 namespace BQ25798 {
 
@@ -36,6 +37,40 @@ uint16_t RechargeControl::millivoltsBelowVreg() const
 {
     // 50 mV/LSB, 50 mV minimum offset
     return static_cast<uint16_t>(vrechgRaw()) * 50u + 50u;
+}
+
+// ---------------------------------------------------------------------------
+// Field setters (read-modify-write; siblings/reserved bits preserved)
+// ---------------------------------------------------------------------------
+
+void RechargeControl::setCell(Cell v)
+{
+    if (!isValid()) return;
+    // CELL_1:0 — 2-bit field, bits 7:6 (bit position 6, width 2)
+    BQ25798::setField8(_raw, 6, 2, static_cast<uint8_t>(v));
+}
+
+void RechargeControl::setTrechg(Trechg v)
+{
+    if (!isValid()) return;
+    // TRECHG_1:0 — 2-bit field, bits 5:4 (bit position 4, width 2)
+    BQ25798::setField8(_raw, 4, 2, static_cast<uint8_t>(v));
+}
+
+void RechargeControl::setVrechgRaw(uint8_t raw)
+{
+    if (!isValid()) return;
+    // VRECHG_3:0 — 4-bit field, bits 3:0 (bit position 0, width 4)
+    BQ25798::setField8(_raw, 0, 4, raw);
+}
+
+void RechargeControl::setMillivoltsBelowVreg(uint16_t mv)
+{
+    if (!isValid()) return;
+    // Invert millivoltsBelowVreg() = VRECHG * 50 + 50  ->  VRECHG = (mv - 50) / 50
+    // Guard unsigned underflow for offsets at or below the 50 mV minimum.
+    const uint8_t code = (mv <= 50u) ? 0u : static_cast<uint8_t>((mv - 50u) / 50u);
+    BQ25798::setField8(_raw, 0, 4, code);
 }
 
 // ---------------------------------------------------------------------------

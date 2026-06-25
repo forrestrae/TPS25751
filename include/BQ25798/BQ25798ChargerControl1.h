@@ -23,6 +23,9 @@ namespace BQ25798 {
 class ChargerControl1 : public TPS25751Register
 {
 public:
+    /// @brief Register address — single source of register identity for typed writes.
+    static constexpr Registers::Address kAddress = Registers::Address::CHARGER_CONTROL_1;
+
     // -----------------------------------------------------------------------
     // Enumerations
     // -----------------------------------------------------------------------
@@ -109,6 +112,23 @@ public:
      * @return Watchdog enum value
      */
     Watchdog watchdog() const;
+
+    // -----------------------------------------------------------------------
+    // Field setters (read-modify-write — each touches only its own field)
+    // -----------------------------------------------------------------------
+
+    /// @brief Set backup mode VBUS threshold — VBUS_BACKUP_1:0 (bits 7:6)
+    void setVbusBackup(VbusBackup v);
+
+    /// @brief Set VAC overvoltage protection threshold — VAC_OVP_1:0 (bits 5:4)
+    void setVacOvp(VacOvp v);
+
+    /// @brief Request I2C watchdog timer reset — WD_RST (bit 3).
+    /// The bit self-clears in hardware after the watchdog timer resets.
+    void setWdRst(bool on);
+
+    /// @brief Set watchdog timer setting — WATCHDOG_2:0 (bits 2:0)
+    void setWatchdog(Watchdog v);
 
     // -----------------------------------------------------------------------
     // TPS25751Register overrides

@@ -170,12 +170,17 @@ Serial.println(F("String in flash"));                // Use F() macro
 - **`BQ25798::Device`**: Typed driver for the BQ25798 buck-boost charger on the
   I2Cc bus; inherits `TPS25751DownstreamDevice` and adds 57 typed
   `read<Register>(bool validate=true)` accessors returning
-  `std::unique_ptr<BQ25798::<RegisterClass>>`. Lives under `include/BQ25798/` and
+  `std::unique_ptr<BQ25798::<RegisterClass>>`, plus a typed **write** tier: a generic
+  `writeRegister<T>()` (keyed on `T::kAddress`), an `updateRegister<T>()`
+  read-modify-write helper, and 10 L3 convenience setters (`enableCharging`,
+  `setChargeCurrentLimit`, …). Lives under `include/BQ25798/` and
   `src/BQ25798/`; uses its own `BQ25798::Registers::Address` enum,
   `BQ25798::RegisterInfo` table, and per-device factory (`BQ25798::Factory` /
   `BQ25798::RegisterFactoryImpl`) mirroring the host-side pattern. All 57 BQ25798
-  register classes are decode-only and reuse `TPS25751Register` as their decoder
-  base — see ADR-008 in [ARCHITECTURE.md](docs/engineering/ARCHITECTURE.md)
+  register classes reuse `TPS25751Register` as their decoder base; the ~31 R/W
+  registers also carry a `kAddress` + field setters (encode via
+  `BQ25798/BQ25798Encode.h`), while read-only registers stay decode-only — see ADR-008
+  and ADR-009 in [ARCHITECTURE.md](docs/engineering/ARCHITECTURE.md)
 
 ### Register Classes
 
@@ -233,18 +238,30 @@ identical in style to the host TPS25751 class:
 ```cpp
 BQ25798::Device charger(tps, 0x6B);
 auto info = charger.readPartInfo();   // returns unique_ptr<BQ25798::PartInfo>
-auto adc  = charger.readADCIBUS();    // returns unique_ptr<BQ25798::ADCIBUS>
+auto adc  = charger.readIbusAdc();    // returns unique_ptr<BQ25798::IbusAdc>
+
+// Typed write tier (read-modify-write value objects):
+charger.setChargeVoltageLimit(8400);  // L3 convenience setter (mV)
+charger.enableCharging(true);         // EN_CHG, preserves all other bits
+charger.updateRegister<BQ25798::ChargerControl0>(   // generic RMW
+    [](BQ25798::ChargerControl0& r){ r.setEnHiz(false); });
 ```
 
 Key correctness conventions established for all downstream device register classes:
-- **16-bit registers are big-endian**: assemble as `(raw[0] << 8) | raw[1]`, NOT via
+- **16-bit registers are big-endian**: assemble as `(raw[0] << 8) | raw[1]` on decode,
+  and encode with `setField16BE` (high byte first), NOT via
   `TPS25751BitUtils::extractBits16` (which is little-endian and will byte-swap them).
 - **Signed ADC channels** (IBUS, IBAT, TDIE): raw value is 2's-complement; reinterpret
   via `int16_t` after assembly.
 - **ADC LSB step sizes** come from the BQ25798 datasheet (SLUSE02), not from the MCP
   register definitions — use the datasheet values for unit conversions.
+- **Write encoders are read-modify-write**: each field setter touches only its own
+  field's bits (reserved + sibling bits preserved) and inverts the class's *own* decode
+  LSB/offset constant, so encode and decode can never disagree. R/W registers expose a
+  `static constexpr Registers::Address kAddress`; read-only registers (Status, Flags,
+  ADC results, IcoCurrentLimit, PartInfo) have no setters.
 
-For the full design rationale see ADR-008 in
+For the full design rationale see ADR-008 (decode) and ADR-009 (write encoders) in
 [docs/engineering/ARCHITECTURE.md](docs/engineering/ARCHITECTURE.md) and the review
 traps in [docs/engineering/CONSTRAINTS.md](docs/engineering/CONSTRAINTS.md)
 ("BQ25798 Downstream Device Decode Conventions").

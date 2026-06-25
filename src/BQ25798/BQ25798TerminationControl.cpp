@@ -1,4 +1,5 @@
 #include "BQ25798/BQ25798TerminationControl.h"
+#include "BQ25798/BQ25798Encode.h"
 
 namespace BQ25798 {
 
@@ -28,6 +29,39 @@ uint16_t TerminationControl::milliamps() const
 {
     if (!isValid()) return 0;
     return static_cast<uint16_t>(static_cast<uint16_t>(itermRaw()) * kLsbMa);
+}
+
+// ---------------------------------------------------------------------------
+// Field setters (read-modify-write; siblings/reserved bits preserved)
+// ---------------------------------------------------------------------------
+
+void TerminationControl::setRegRst(bool on)
+{
+    if (!isValid()) return;
+    // REG_RST — bit 6 of byte 0
+    BQ25798::setField8(_raw, 6, 1, on ? 1 : 0);
+}
+
+void TerminationControl::setStopWdChg(bool on)
+{
+    if (!isValid()) return;
+    // STOP_WD_CHG — bit 5 of byte 0
+    BQ25798::setField8(_raw, 5, 1, on ? 1 : 0);
+}
+
+void TerminationControl::setItermRaw(uint8_t raw)
+{
+    if (!isValid()) return;
+    // ITERM_4:0 — 5-bit field starting at bit 0 of byte 0
+    BQ25798::setField8(_raw, 0, 5, raw);
+}
+
+void TerminationControl::setMilliamps(uint16_t ma)
+{
+    if (!isValid()) return;
+    // Invert milliamps() = ITERM * 40 mA  ->  ITERM = ma / 40
+    const uint8_t code = static_cast<uint8_t>(ma / kLsbMa);
+    BQ25798::setField8(_raw, 0, 5, code);
 }
 
 // ---------------------------------------------------------------------------

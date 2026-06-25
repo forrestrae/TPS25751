@@ -27,6 +27,9 @@ namespace BQ25798 {
 class ChargerMask1 : public TPS25751Register
 {
 public:
+    /// @brief Register address — single source of register identity for typed writes.
+    static constexpr Registers::Address kAddress = Registers::Address::CHARGER_MASK_1;
+
     // -----------------------------------------------------------------------
     // Constructors
     // -----------------------------------------------------------------------
@@ -58,6 +61,18 @@ public:
     bool tregMask()        const;  ///< bit 2
     bool vbatPresentMask() const;  ///< bit 1
     bool bc12DoneMask()    const;  ///< bit 0
+
+    // -----------------------------------------------------------------------
+    // Field setters (read-modify-write — true = Masked / no INT)
+    // Reserved bits 5 and 3 have no setter.
+    // -----------------------------------------------------------------------
+
+    void setChgMask(bool masked);          ///< @brief Set CHG_MASK (bit 7)
+    void setIcoMask(bool masked);          ///< @brief Set ICO_MASK (bit 6)
+    void setVbusMask(bool masked);         ///< @brief Set VBUS_MASK (bit 4)
+    void setTregMask(bool masked);         ///< @brief Set TREG_MASK (bit 2)
+    void setVbatPresentMask(bool masked);  ///< @brief Set VBAT_PRESENT_MASK (bit 1)
+    void setBc12DoneMask(bool masked);     ///< @brief Set BC12_DONE_MASK (bit 0)
 
     // -----------------------------------------------------------------------
     // TPS25751Register overrides

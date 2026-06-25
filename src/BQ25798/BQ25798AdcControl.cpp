@@ -1,4 +1,5 @@
 #include "BQ25798/BQ25798AdcControl.h"
+#include "BQ25798/BQ25798Encode.h"
 
 namespace BQ25798 {
 
@@ -38,6 +39,45 @@ bool AdcControl::adcAvgInit() const
 {
     // ADC_AVG_INIT — bit 2 of byte 0 (1 = start from new conversion)
     return extractBits(2, 1) != 0;
+}
+
+// ---------------------------------------------------------------------------
+// Field setters (read-modify-write; siblings/reserved bits preserved)
+// ---------------------------------------------------------------------------
+
+void AdcControl::setAdcEnabled(bool on)
+{
+    if (!isValid()) return;
+    // ADC_EN — bit 7 of byte 0
+    BQ25798::setField8(_raw, 7, 1, on ? 1 : 0);
+}
+
+void AdcControl::setAdcOneShot(bool on)
+{
+    if (!isValid()) return;
+    // ADC_RATE — bit 6 of byte 0 (1 = one-shot, 0 = continuous)
+    BQ25798::setField8(_raw, 6, 1, on ? 1 : 0);
+}
+
+void AdcControl::setAdcSampleResolution(SampleResolution v)
+{
+    if (!isValid()) return;
+    // ADC_SAMPLE_1:0 — 2-bit field, bits 5:4 (bit position 4, width 2)
+    BQ25798::setField8(_raw, 4, 2, static_cast<uint8_t>(v));
+}
+
+void AdcControl::setAdcAveraging(bool on)
+{
+    if (!isValid()) return;
+    // ADC_AVG — bit 3 of byte 0 (1 = running average)
+    BQ25798::setField8(_raw, 3, 1, on ? 1 : 0);
+}
+
+void AdcControl::setAdcAvgInit(bool on)
+{
+    if (!isValid()) return;
+    // ADC_AVG_INIT — bit 2 of byte 0 (1 = start from new conversion)
+    BQ25798::setField8(_raw, 2, 1, on ? 1 : 0);
 }
 
 // ---------------------------------------------------------------------------

@@ -1,4 +1,5 @@
 #include "BQ25798/BQ25798FaultMask0.h"
+#include "BQ25798/BQ25798Encode.h"
 
 namespace BQ25798 {
 
@@ -14,6 +15,19 @@ bool FaultMask0::ibatOcpMask()  const { return extractBits(3, 1) != 0; }
 bool FaultMask0::convOcpMask()  const { return extractBits(2, 1) != 0; }
 bool FaultMask0::vac2OvpMask()  const { return extractBits(1, 1) != 0; }
 bool FaultMask0::vac1OvpMask()  const { return extractBits(0, 1) != 0; }
+
+// ---------------------------------------------------------------------------
+// Field setters (read-modify-write; sibling bits preserved)
+// ---------------------------------------------------------------------------
+
+void FaultMask0::setIbatRegMask(bool masked) { if (!isValid()) return; BQ25798::setField8(_raw, 7, 1, masked ? 1 : 0); }
+void FaultMask0::setVbusOvpMask(bool masked) { if (!isValid()) return; BQ25798::setField8(_raw, 6, 1, masked ? 1 : 0); }
+void FaultMask0::setVbatOvpMask(bool masked) { if (!isValid()) return; BQ25798::setField8(_raw, 5, 1, masked ? 1 : 0); }
+void FaultMask0::setIbusOcpMask(bool masked) { if (!isValid()) return; BQ25798::setField8(_raw, 4, 1, masked ? 1 : 0); }
+void FaultMask0::setIbatOcpMask(bool masked) { if (!isValid()) return; BQ25798::setField8(_raw, 3, 1, masked ? 1 : 0); }
+void FaultMask0::setConvOcpMask(bool masked) { if (!isValid()) return; BQ25798::setField8(_raw, 2, 1, masked ? 1 : 0); }
+void FaultMask0::setVac2OvpMask(bool masked) { if (!isValid()) return; BQ25798::setField8(_raw, 1, 1, masked ? 1 : 0); }
+void FaultMask0::setVac1OvpMask(bool masked) { if (!isValid()) return; BQ25798::setField8(_raw, 0, 1, masked ? 1 : 0); }
 
 // ---------------------------------------------------------------------------
 // debugPrint

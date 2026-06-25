@@ -1,4 +1,5 @@
 #include "BQ25798/BQ25798VotgRegulation.h"
+#include "BQ25798/BQ25798Encode.h"
 
 namespace BQ25798 {
 
@@ -22,6 +23,26 @@ uint16_t VotgRegulation::millivolts() const
 {
     // 10 mV/LSB, 2800 mV offset
     return static_cast<uint16_t>(votgRaw() * 10u + 2800u);
+}
+
+// ---------------------------------------------------------------------------
+// Field setters (read-modify-write; reserved bits preserved)
+// ---------------------------------------------------------------------------
+
+void VotgRegulation::setVotgRaw(uint16_t value)
+{
+    if (!isValid()) return;
+    // VOTG_10:0 — bits 10:0 of the 16-bit big-endian value
+    BQ25798::setField16BE(_raw, 0, 11, value);
+}
+
+void VotgRegulation::setMillivolts(uint16_t mV)
+{
+    if (!isValid()) return;
+    // Invert mV = (VOTG * 10) + 2800; guard against unsigned underflow.
+    const uint16_t code = (mV <= 2800u) ? 0
+                          : static_cast<uint16_t>((mV - 2800u) / 10u);
+    BQ25798::setField16BE(_raw, 0, 11, code);
 }
 
 // ---------------------------------------------------------------------------

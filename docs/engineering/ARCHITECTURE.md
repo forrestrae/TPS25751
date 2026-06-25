@@ -107,12 +107,17 @@ This document describes the system architecture and design patterns of the TPS25
 
 **BQ25798 Downstream Device Driver Layer:**
 - `BQ25798::Device` — typed driver for the BQ25798 buck-boost charger; inherits
-  `TPS25751DownstreamDevice`, adds 57 typed `read<Register>()` accessors
+  `TPS25751DownstreamDevice`, adds 57 typed `read<Register>()` accessors and a typed
+  write tier: generic `writeRegister<T>()` / `updateRegister<T>()` (read-modify-write)
+  plus 10 L3 convenience setters (`enableCharging`, `setChargeCurrentLimit`, …)
 - `BQ25798::Registers::Address` enum + `RegisterInfo` table (mirrors host pattern)
 - `BQ25798::RegisterFactory` / `BQ25798::RegisterFactoryImpl` / `BQ25798::Factory`
   singleton — per-device factory with the same switch-on-Address pattern as the host
-- All 57 BQ25798 register classes extend `TPS25751Register` (decode-only); live under
-  `include/BQ25798/` and `src/BQ25798/`
+- All 57 BQ25798 register classes extend `TPS25751Register` and live under
+  `include/BQ25798/` and `src/BQ25798/`. The ~31 R/W registers add a
+  `static constexpr Registers::Address kAddress` and field setters (read-modify-write
+  via `BQ25798/BQ25798Encode.h`); read-only registers (Status, Flags, ADC results,
+  IcoCurrentLimit, PartInfo) remain decode-only
 
 **Utility Layer:**
 - Bit manipulation helpers
@@ -566,7 +571,8 @@ TPS25751Register (abstract base — shared decoder base for ALL register classes
 ├── TPS25751PDStatus
 ├── TPS25751Command           (COMMAND, 0x08 — 4CC command-task control)
 ├── TPS25751Data              (DATA, 0x09 — generic 4CC task payload)
-├── BQ25798::REG00h … BQ25798::REG48h  (57 BQ25798 register classes, decode-only;
+├── BQ25798::REG00h … BQ25798::REG48h  (57 BQ25798 register classes; R/W ones add
+│                                        kAddress + field setters, RO ones decode-only;
 │                                        live in include/BQ25798/ + src/BQ25798/)
 └── ... (any future downstream device register classes extend this same base)
 
@@ -585,7 +591,8 @@ TPS25751 (main controller)
 
 TPS25751DownstreamDevice (I2Cc proxy; composes a TPS25751 host, not a subclass)
 └── BQ25798::Device (typed driver; inherits TPS25751DownstreamDevice, adds 57 typed
-                     read<Register>() accessors for all BQ25798 registers)
+                     read<Register>() accessors plus the typed write tier —
+                     writeRegister<T>() / updateRegister<T>() + L3 convenience setters)
 
 TPS25751BitUtils (utility, all static)
 
@@ -761,6 +768,40 @@ Superseded sketch (kept for reference; not the real API
    - Read back and compare
 ```
 
+### Downstream-Device Typed Write Flow (BQ25798, ADR-009)
+
+The typed write tier is a **read-modify-write of a value object** layered on the I2Cw
+proxy. The convenience setters and `updateRegister<T>()` follow the read → mutate →
+write path; `writeRegister<T>()` is the write-back leg on its own:
+
+```
+1. Application calls a convenience setter:
+   - charger.setChargeVoltageLimit(8400)   // mV
+        │
+        ▼
+2. updateRegister<ChargeVoltageLimit>(mutate):
+   - readRegister(kAddress, reg, size)      // live read via I2Cr
+        │
+        ▼
+3. mutate(reg) applies one field setter:
+   - reg.setMillivolts(8400)
+       → inverts the class's own kLsbMv (VREG = mV / 10)
+       → setField16BE(_raw, 0, 11, code)    // big-endian, masks to 11 bits,
+                                              // touches ONLY VREG; reserved [15:11] kept
+        │
+        ▼
+4. writeRegister<ChargeVoltageLimit>(reg):
+   - keys on T::kAddress
+   - sends reg.raw()/reg.size() via inherited TPS25751DownstreamDevice::writeRegister()
+     → encodes an I2Cw 4CC task (len ≤ 11, Length = payload + 1; see ADR-007)
+        │
+        ▼
+5. Returns false on any I/O failure (read or write), true otherwise
+```
+
+Self-clearing command bits (e.g. WD_RST via `kickWatchdog()`) use the same path with a
+plain `setX(true)`; the device clears the bit in hardware, so a later read reports 0.
+
 ### Factory Creation Flow
 
 ```
@@ -821,8 +862,9 @@ its layout when adding a new downstream device.
    each inheriting `TPS25751Register`. Follow the same mandatory template as
    host-side registers: default constructor + `(const uint8_t*, size_t)` constructor,
    three-tier validation (`isSemanticallyValid()`, or `validateBasic/Data/Semantic`
-   as appropriate), `debugPrint()` with `F()`. Keep classes decode-only unless write
-   support is explicitly required.
+   as appropriate), `debugPrint()` with `F()`. Keep read-only registers decode-only;
+   for R/W registers add a `static constexpr Registers::Address kAddress` and field
+   setters following the write-encoder pattern (ADR-009, STANDARDS.md).
    - **Multi-byte (16-bit) registers on big-endian downstream devices**: assemble
      `(raw[0] << 8) | raw[1]`, NOT `TPS25751BitUtils::extractBits16` (little-endian;
      will silently byte-swap the value).
@@ -837,8 +879,10 @@ its layout when adding a new downstream device.
 5. **Create `<Device>::Device : public TPS25751DownstreamDevice`** in
    `include/<Device>/<Device>Device.h`. Add one typed `read<Register>()` method per
    register (calls the inherited `readRegister<T>()` template; returns
-   `std::unique_ptr<T>`). The inherited `writeRegister(devReg, data, len)` is
-   available for write-capable registers.
+   `std::unique_ptr<T>`). For write-capable registers, add the typed write tier:
+   a generic `writeRegister<T>()` (keyed on `T::kAddress`, sends `reg.raw()/reg.size()`
+   via the inherited raw `writeRegister(addr, data, len)`), an `updateRegister<T>()`
+   read-modify-write helper, and optional L3 convenience setters (see ADR-009).
 6. **Respect the TRM's 5-second minimum spacing** between consecutive I2Cr (or
    consecutive I2Cw) commands — `TPS25751DownstreamDevice` warns via
    `DEBUG_CAT_TASK` if violated but does not block the call.
@@ -1133,9 +1177,10 @@ coupling the host TPS25751 factory to a third-party device.
 - Each downstream device maintains its own `Address` enum, `RegisterInfo` table, and
   factory (`<Device>::RegisterFactory` / `RegisterFactoryImpl` / `Factory` singleton),
   **mirroring the host-side pattern exactly**. The host factory is not modified.
-- Downstream device register classes are **decode-only** and reuse `TPS25751Register`
-  as their decoder base — they look and behave identically to host-side registers from
-  the caller's perspective.
+- Downstream device register classes reuse `TPS25751Register` as their decoder base —
+  they look and behave identically to host-side registers from the caller's
+  perspective. Read-only registers stay decode-only; R/W registers also carry field
+  setters and a `kAddress` for the typed write tier (see ADR-009).
 - Writes go through the inherited `TPS25751DownstreamDevice::writeRegister()`, or
   driver-specific setter methods that validate and encode before calling it.
 **Consequences:**
@@ -1151,6 +1196,48 @@ coupling the host TPS25751 factory to a third-party device.
 - The BQ25798 implementation (57 registers, 4 example sketches) is the canonical
   reference for future downstream device drivers.
 
+### ADR-009: Downstream-Device Write Encoders
+**Status:** Accepted
+**Date:** 2026-06
+**Context:** ADR-008 established the decode (read) tier for downstream devices and
+left field-level encoders deferred. Callers now need to *write* the ~31 R/W BQ25798
+registers (charge/voltage/current limits, enables, watchdog, …) with the same typed,
+field-level ergonomics as the read tier — without re-reading-and-clobbering reserved
+or sibling bits.
+**Decision:**
+- **Read-modify-write value-object model.** A register object owns its raw bytes
+  (`TPS25751Register::raw()` / `size()`, exposed on the base for this purpose). A field
+  setter mutates only its field's bits in that buffer; everything else (reserved bits,
+  sibling fields) is preserved by construction. The whole buffer is then written back.
+- **Encode helpers** (`include/BQ25798/BQ25798Encode.h`): `setField8()` and
+  `setField16BE()` are the inverse of the decode-side extraction. They read-modify-write
+  only the field's bits and mask the value to the field width. `setField16BE()` is
+  **big-endian** (`raw[0]=MSB`), matching the read side's `(raw[0]<<8)|raw[1]`.
+- **Generic typed write** — `Device::writeRegister<T>(const T&)` keys on the register's
+  `static constexpr T::kAddress` (the single source of register identity) and sends
+  `reg.raw()/reg.size()` through the inherited raw I2Cw path. A
+  `using TPS25751DownstreamDevice::writeRegister;` keeps the inherited raw overload
+  visible alongside the template.
+- **`Device::updateRegister<T>(Fn&& mutate)`** — read `T` live, apply the mutator, write
+  it back; one-call read-modify-write. The 10 L3 convenience setters
+  (`enableCharging`, `setChargeCurrentLimit`, …) are thin `updateRegister<T>` wrappers.
+- **Field setters invert the class's *own* decode constants.** An engineering-unit
+  setter (e.g. `setMillivolts`) reuses the same `kLsbMv`/`kOffsetMv` the decode accessor
+  uses, so encode and decode can never disagree. Offset conversions guard against
+  unsigned underflow (clamp to 0 below the offset). Every setter is guarded
+  `if (!isValid()) return;`.
+**Consequences:**
+- Reserved bits are preserved automatically — there is no separate "reassemble the whole
+  register" step that could drop or zero them.
+- Cross-references ADR-008 (decode tier): the same big-endian and own-constant rules now
+  apply symmetrically on encode. The I2Cw framing constraints (`len ≤ 11`,
+  `Length = payload + 1`) from ADR-007 are unchanged and apply to typed writes.
+- Read-only registers (Status, Flags, ADC results, IcoCurrentLimit, PartInfo) get no
+  `kAddress` and no setters, so they cannot be written by mistake.
+- Canonical examples: `BQ25798ChargerControl0` (single-bit), `BQ25798ChargeVoltageLimit`
+  (16-bit BE + unit inversion), `BQ25798MinimalSystemVoltage` (offset inversion with
+  underflow guard).
+
 ---
 
 ## Revision History
@@ -1160,6 +1247,7 @@ coupling the host TPS25751 factory to a third-party device.
 | 1.0 | 2025-10-20 | Claude Code | Initial architecture document |
 | 1.1 | 2026-06-22 | Claude Code | Added 4CC command-task layer, I2Cc downstream-device proxy (ADR-007), register write flow |
 | 1.2 | 2026-06-24 | Claude Code | Added BQ25798 downstream device driver tier (ADR-008), updated inheritance tree, extension-point recipe |
+| 1.3 | 2026-06-24 | Claude Code | Added downstream-device write encoders (ADR-009), typed write flow; updated ADR-008/driver-layer to note R/W setters + kAddress |
 
 ---
 

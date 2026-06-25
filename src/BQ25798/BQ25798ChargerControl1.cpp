@@ -1,4 +1,5 @@
 #include "BQ25798/BQ25798ChargerControl1.h"
+#include "BQ25798/BQ25798Encode.h"
 
 namespace BQ25798 {
 
@@ -40,6 +41,38 @@ ChargerControl1::Watchdog ChargerControl1::watchdog() const
         static_cast<uint8_t>(Watchdog::S160),  // max valid = 7
         Watchdog::S40                           // default on out-of-range
     );
+}
+
+// ---------------------------------------------------------------------------
+// Field setters (read-modify-write; siblings/reserved bits preserved)
+// ---------------------------------------------------------------------------
+
+void ChargerControl1::setVbusBackup(VbusBackup v)
+{
+    if (!isValid()) return;
+    // VBUS_BACKUP_1:0 — bits 7:6 (bit position 6, width 2)
+    BQ25798::setField8(_raw, 6, 2, static_cast<uint8_t>(v));
+}
+
+void ChargerControl1::setVacOvp(VacOvp v)
+{
+    if (!isValid()) return;
+    // VAC_OVP_1:0 — bits 5:4 (bit position 4, width 2)
+    BQ25798::setField8(_raw, 4, 2, static_cast<uint8_t>(v));
+}
+
+void ChargerControl1::setWdRst(bool on)
+{
+    if (!isValid()) return;
+    // WD_RST — bit 3 of byte 0 (self-clears after the watchdog timer resets)
+    BQ25798::setField8(_raw, 3, 1, on ? 1 : 0);
+}
+
+void ChargerControl1::setWatchdog(Watchdog v)
+{
+    if (!isValid()) return;
+    // WATCHDOG_2:0 — bits 2:0 (bit position 0, width 3)
+    BQ25798::setField8(_raw, 0, 3, static_cast<uint8_t>(v));
 }
 
 // ---------------------------------------------------------------------------

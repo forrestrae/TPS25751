@@ -29,6 +29,9 @@ namespace BQ25798 {
 class InputVoltageLimit : public TPS25751Register
 {
 public:
+    /// @brief Register address — single source of register identity for typed writes.
+    static constexpr Registers::Address kAddress = Registers::Address::INPUT_VOLTAGE_LIMIT;
+
     // -----------------------------------------------------------------------
     // Constructors
     // -----------------------------------------------------------------------
@@ -67,6 +70,24 @@ public:
      * @return Voltage in mV; 0 if not valid
      */
     uint16_t millivolts() const;
+
+    // -----------------------------------------------------------------------
+    // Field setters (read-modify-write — each touches only its own field)
+    // -----------------------------------------------------------------------
+
+    /**
+     * @brief Set raw VINDPM field — VINDPM_7:0 (bits 7:0)
+     * @param value 8-bit raw value
+     */
+    void setVindpmRaw(uint8_t value);
+
+    /**
+     * @brief Set absolute VINDPM threshold from millivolts
+     *
+     * Inverts mV = VINDPM * 100: VINDPM = mV / 100.
+     * @param mV Voltage in millivolts
+     */
+    void setMillivolts(uint16_t mV);
 
     // -----------------------------------------------------------------------
     // TPS25751Register overrides

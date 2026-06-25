@@ -1,4 +1,5 @@
 #include "BQ25798/BQ25798PrechargeControl.h"
+#include "BQ25798/BQ25798Encode.h"
 
 namespace BQ25798 {
 
@@ -26,6 +27,32 @@ uint16_t PrechargeControl::milliamps() const
 {
     if (!isValid()) return 0;
     return static_cast<uint16_t>(static_cast<uint16_t>(iprechgRaw()) * kLsbMa);
+}
+
+// ---------------------------------------------------------------------------
+// Field setters (read-modify-write; siblings/reserved bits preserved)
+// ---------------------------------------------------------------------------
+
+void PrechargeControl::setVbatLowv(VbatLowv v)
+{
+    if (!isValid()) return;
+    // VBAT_LOWV_1:0 — 2-bit field at bits 7:6
+    BQ25798::setField8(_raw, 6, 2, static_cast<uint8_t>(v));
+}
+
+void PrechargeControl::setIprechgRaw(uint8_t raw)
+{
+    if (!isValid()) return;
+    // IPRECHG_5:0 — 6-bit field starting at bit 0 of byte 0
+    BQ25798::setField8(_raw, 0, 6, raw);
+}
+
+void PrechargeControl::setMilliamps(uint16_t ma)
+{
+    if (!isValid()) return;
+    // Invert milliamps() = IPRECHG * 40 mA  ->  IPRECHG = ma / 40
+    const uint8_t code = static_cast<uint8_t>(ma / kLsbMa);
+    BQ25798::setField8(_raw, 0, 6, code);
 }
 
 // ---------------------------------------------------------------------------

@@ -196,8 +196,8 @@ Register classes for downstream devices (e.g. `BQ25798::REG00h`) follow the **sa
 mandatory template** as host-side registers: default constructor + `(const uint8_t*,
 size_t)` constructor, three-tier validation (or the equivalent `isSemanticallyValid()`
 chain), `debugPrint()` using `F()`. They inherit `TPS25751Register` — not any
-TPS25751-specific subclass — and are decoded-only unless write support is explicitly
-required.
+TPS25751-specific subclass. Read-only registers are decode-only; read/write registers
+add field setters and a `kAddress` per the **Write-encoder pattern** below.
 
 The per-device factory mirrors the host factory exactly: `<Device>::RegisterFactory`
 (abstract interface) → `<Device>::RegisterFactoryImpl` (switch on
@@ -225,6 +225,39 @@ For signed ADC channels (e.g. BQ25798 IBUS/IBAT/TDIE), reinterpret the assembled
 ```cpp
 int16_t current_raw = static_cast<int16_t>(raw16);
 ```
+
+#### Write-encoder pattern (read/write downstream registers)
+
+A read/write downstream register adds *encode* support alongside its decode accessors.
+The model is **read-modify-write of a value object**: the register owns its raw bytes
+(`TPS25751Register::raw()` / `size()`), a setter mutates only its field's bits, and the
+whole buffer is written back via `Device::writeRegister<T>()`. See ADR-009 in
+[ARCHITECTURE.md](ARCHITECTURE.md). Rules:
+
+- **Add `static constexpr Registers::Address kAddress`** to the class — the single
+  source of register identity that `writeRegister<T>()` / `updateRegister<T>()` key on.
+- **One setter per decode accessor (1:1).** Mirror the read API: a `fooRaw()` decoder
+  gets `setFooRaw(...)`; a `millivolts()` decoder gets `setMillivolts(...)`. Use the
+  `set<DecoderName>` naming so the pair is obvious.
+- **Guard `if (!isValid()) return;`** at the top of every setter (matches the decoders'
+  validity discipline).
+- **Use `setField8` / `setField16BE`** (`include/BQ25798/BQ25798Encode.h`) — never write
+  the raw byte directly. They read-modify-write only the field's bits (reserved and
+  sibling bits preserved) and mask the value to the field width. `setField16BE` is
+  **big-endian** to match the decode-side `(raw[0]<<8)|raw[1]` assembly — never a
+  little-endian helper.
+- **Invert the class's *own* decode constant.** An engineering-unit setter reuses the
+  same `kLsbMv` / `kOffsetMv` its decode accessor uses (e.g. `VREG = mV / kLsbMv`), so
+  encode and decode can never drift apart.
+- **Guard unsigned underflow on offset conversions.** Where decode adds an offset
+  (`mV = kOffset + code * kLsb`), the inverse must clamp inputs below the offset to 0
+  before subtracting (e.g. `(mV <= kOffsetMv) ? 0 : (mV - kOffsetMv) / kLsbMv`).
+- **Self-clearing command bits** (e.g. `WD_RST`, `REG_RST`, `FORCE_*`) get a plain
+  `setX(bool)` that sets the bit; the device clears it in hardware, so it reads back 0.
+
+Canonical examples: `BQ25798ChargerControl0` (single-bit setters),
+`BQ25798ChargeVoltageLimit` (16-bit big-endian + unit inversion),
+`BQ25798MinimalSystemVoltage` (offset inversion with underflow guard).
 
 ---
 

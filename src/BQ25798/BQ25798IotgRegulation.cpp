@@ -1,4 +1,5 @@
 #include "BQ25798/BQ25798IotgRegulation.h"
+#include "BQ25798/BQ25798Encode.h"
 
 namespace BQ25798 {
 
@@ -26,6 +27,31 @@ uint16_t IotgRegulation::milliamps() const
 {
     // 40 mA/LSB, no offset
     return static_cast<uint16_t>(iotgRaw()) * 40u;
+}
+
+// ---------------------------------------------------------------------------
+// Field setters (read-modify-write; other fields preserved)
+// ---------------------------------------------------------------------------
+
+void IotgRegulation::setPrechgTmr(PrechgTmr value)
+{
+    if (!isValid()) return;
+    // PRECHG_TMR — bit 7 (bit position 7, width 1)
+    BQ25798::setField8(_raw, 7, 1, static_cast<uint8_t>(value));
+}
+
+void IotgRegulation::setIotgRaw(uint8_t value)
+{
+    if (!isValid()) return;
+    // IOTG_6:0 — 7-bit field, bits 6:0 (bit position 0, width 7)
+    BQ25798::setField8(_raw, 0, 7, value);
+}
+
+void IotgRegulation::setMilliamps(uint16_t mA)
+{
+    if (!isValid()) return;
+    // Invert mA = IOTG * 40
+    BQ25798::setField8(_raw, 0, 7, static_cast<uint8_t>(mA / 40u));
 }
 
 // ---------------------------------------------------------------------------

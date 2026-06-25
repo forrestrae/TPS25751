@@ -28,6 +28,9 @@ namespace BQ25798 {
 class NtcControl1 : public TPS25751Register
 {
 public:
+    /// @brief Register address — single source of register identity for typed writes.
+    static constexpr Registers::Address kAddress = Registers::Address::NTC_CONTROL_1;
+
     // -----------------------------------------------------------------------
     // TS_COOL enum — JEITA VT2 rising threshold (bits 7:6)
     // -----------------------------------------------------------------------
@@ -130,6 +133,25 @@ public:
      * @return true if NTC monitoring is bypassed (charger treats TS as always good)
      */
     bool tsIgnore() const;
+
+    // -----------------------------------------------------------------------
+    // Field setters (read-modify-write — each touches only its own field)
+    // -----------------------------------------------------------------------
+
+    /// @brief Set JEITA VT2 (cool) threshold — TS_COOL_1:0 (bits 7:6)
+    void setTsCool(TsCool v);
+
+    /// @brief Set JEITA VT3 (warm) threshold — TS_WARM_1:0 (bits 5:4)
+    void setTsWarm(TsWarm v);
+
+    /// @brief Set OTG mode TS HOT threshold — BHOT_1:0 (bits 3:2)
+    void setBhot(Bhot v);
+
+    /// @brief Set OTG mode TS COLD threshold — BCOLD (bit 1); true = -20°C, false = -10°C
+    void setBcold(bool on);
+
+    /// @brief Set TS ignore flag — TS_IGNORE (bit 0); true bypasses NTC monitoring
+    void setTsIgnore(bool on);
 
     // -----------------------------------------------------------------------
     // TPS25751Register overrides

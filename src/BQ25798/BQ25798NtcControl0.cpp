@@ -1,4 +1,5 @@
 #include "BQ25798/BQ25798NtcControl0.h"
+#include "BQ25798/BQ25798Encode.h"
 
 namespace BQ25798 {
 
@@ -34,6 +35,31 @@ NtcControl0::JeitaIsetc NtcControl0::jeitaIsetc() const
         static_cast<uint8_t>(JeitaIsetc::IchgUnchanged),  // max valid = 3
         JeitaIsetc::Ichg20Pct                              // default on out-of-range
     );
+}
+
+// ---------------------------------------------------------------------------
+// Field setters (read-modify-write; siblings/reserved bits preserved)
+// ---------------------------------------------------------------------------
+
+void NtcControl0::setJeitaVset(JeitaVset v)
+{
+    if (!isValid()) return;
+    // JEITA_VSET_2:0 — 3-bit field at bits 7:5 (bit position 5, width 3)
+    BQ25798::setField8(_raw, 5, 3, static_cast<uint8_t>(v));
+}
+
+void NtcControl0::setJeitaIseth(JeitaIseth v)
+{
+    if (!isValid()) return;
+    // JEITA_ISETH_1:0 — 2-bit field at bits 4:3 (bit position 3, width 2)
+    BQ25798::setField8(_raw, 3, 2, static_cast<uint8_t>(v));
+}
+
+void NtcControl0::setJeitaIsetc(JeitaIsetc v)
+{
+    if (!isValid()) return;
+    // JEITA_ISETC_1:0 — 2-bit field at bits 2:1 (bit position 1, width 2)
+    BQ25798::setField8(_raw, 1, 2, static_cast<uint8_t>(v));
 }
 
 // ---------------------------------------------------------------------------

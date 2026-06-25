@@ -3,6 +3,70 @@
 namespace BQ25798 {
 
 // ---------------------------------------------------------------------------
+// Convenience setters
+// ---------------------------------------------------------------------------
+
+bool Device::enableCharging(bool on) const
+{
+    return updateRegister<ChargerControl0>(
+        [on](ChargerControl0& r) { r.setEnChg(on); });
+}
+
+bool Device::enableHiz(bool on) const
+{
+    return updateRegister<ChargerControl0>(
+        [on](ChargerControl0& r) { r.setEnHiz(on); });
+}
+
+bool Device::enableADC(bool on) const
+{
+    return updateRegister<AdcControl>(
+        [on](AdcControl& r) { r.setAdcEnabled(on); });
+}
+
+bool Device::kickWatchdog() const
+{
+    return updateRegister<ChargerControl1>(
+        [](ChargerControl1& r) { r.setWdRst(true); });
+}
+
+bool Device::setWatchdog(ChargerControl1::Watchdog v) const
+{
+    return updateRegister<ChargerControl1>(
+        [v](ChargerControl1& r) { r.setWatchdog(v); });
+}
+
+bool Device::setChargeCurrentLimit(uint16_t milliamps) const
+{
+    return updateRegister<ChargeCurrentLimit>(
+        [milliamps](ChargeCurrentLimit& r) { r.setMilliamps(milliamps); });
+}
+
+bool Device::setChargeVoltageLimit(uint16_t millivolts) const
+{
+    return updateRegister<ChargeVoltageLimit>(
+        [millivolts](ChargeVoltageLimit& r) { r.setMillivolts(millivolts); });
+}
+
+bool Device::setInputCurrentLimit(uint16_t milliamps) const
+{
+    return updateRegister<InputCurrentLimit>(
+        [milliamps](InputCurrentLimit& r) { r.setMilliamps(milliamps); });
+}
+
+bool Device::setInputVoltageLimit(uint16_t millivolts) const
+{
+    return updateRegister<InputVoltageLimit>(
+        [millivolts](InputVoltageLimit& r) { r.setMillivolts(millivolts); });
+}
+
+bool Device::enableOTG(bool on) const
+{
+    return updateRegister<ChargerControl3>(
+        [on](ChargerControl3& r) { r.setEnOtg(on); });
+}
+
+// ---------------------------------------------------------------------------
 // readPartInfo
 // ---------------------------------------------------------------------------
 

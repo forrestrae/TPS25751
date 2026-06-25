@@ -1,4 +1,5 @@
 #include "BQ25798/BQ25798ChargerControl5.h"
+#include "BQ25798/BQ25798Encode.h"
 
 namespace BQ25798 {
 
@@ -44,6 +45,52 @@ bool ChargerControl5::enBatoc() const
 {
     // EN_BATOC — bit 0 of byte 0
     return extractBits(0, 1) != 0;
+}
+
+// ---------------------------------------------------------------------------
+// Field setters (read-modify-write; siblings/reserved bits preserved)
+// ---------------------------------------------------------------------------
+
+void ChargerControl5::setSfetPresent(bool on)
+{
+    if (!isValid()) return;
+    // SFET_PRESENT — bit 7 of byte 0
+    BQ25798::setField8(_raw, 7, 1, on ? 1 : 0);
+}
+
+void ChargerControl5::setEnIbat(bool on)
+{
+    if (!isValid()) return;
+    // EN_IBAT — bit 5 of byte 0
+    BQ25798::setField8(_raw, 5, 1, on ? 1 : 0);
+}
+
+void ChargerControl5::setIbatReg(IbatReg v)
+{
+    if (!isValid()) return;
+    // IBAT_REG_1:0 — bits 4:3 (bit position 3, width 2)
+    BQ25798::setField8(_raw, 3, 2, static_cast<uint8_t>(v));
+}
+
+void ChargerControl5::setEnIindpm(bool on)
+{
+    if (!isValid()) return;
+    // EN_IINDPM — bit 2 of byte 0
+    BQ25798::setField8(_raw, 2, 1, on ? 1 : 0);
+}
+
+void ChargerControl5::setEnExtilim(bool on)
+{
+    if (!isValid()) return;
+    // EN_EXTILIM — bit 1 of byte 0
+    BQ25798::setField8(_raw, 1, 1, on ? 1 : 0);
+}
+
+void ChargerControl5::setEnBatoc(bool on)
+{
+    if (!isValid()) return;
+    // EN_BATOC — bit 0 of byte 0
+    BQ25798::setField8(_raw, 0, 1, on ? 1 : 0);
 }
 
 // ---------------------------------------------------------------------------

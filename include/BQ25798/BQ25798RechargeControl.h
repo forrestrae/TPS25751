@@ -26,6 +26,9 @@ namespace BQ25798 {
 class RechargeControl : public TPS25751Register
 {
 public:
+    /// @brief Register address — single source of register identity for typed writes.
+    static constexpr Registers::Address kAddress = Registers::Address::RECHARGE_CONTROL;
+
     // -----------------------------------------------------------------------
     // Enumerations
     // -----------------------------------------------------------------------
@@ -98,6 +101,23 @@ public:
      * @return Offset in mV: (VRECHG_3:0 * 50) + 50
      */
     uint16_t millivoltsBelowVreg() const;
+
+    // -----------------------------------------------------------------------
+    // Field setters (read-modify-write — each touches only its own field)
+    // -----------------------------------------------------------------------
+
+    /// @brief Set battery cell count — CELL_1:0 (bits 7:6)
+    void setCell(Cell v);
+
+    /// @brief Set recharge debounce time — TRECHG_1:0 (bits 5:4)
+    void setTrechg(Trechg v);
+
+    /// @brief Set raw VRECHG field — VRECHG_3:0 (bits 3:0)
+    void setVrechgRaw(uint8_t raw);
+
+    /// @brief Set recharge threshold offset below VREG in millivolts — VRECHG_3:0 (bits 3:0)
+    /// @param mv Offset in mV; encoded as VRECHG = (mv - 50) / 50 (50 mV/LSB, 50 mV min)
+    void setMillivoltsBelowVreg(uint16_t mv);
 
     // -----------------------------------------------------------------------
     // TPS25751Register overrides

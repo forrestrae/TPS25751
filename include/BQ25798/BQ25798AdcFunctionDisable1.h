@@ -34,6 +34,9 @@ namespace BQ25798 {
 class AdcFunctionDisable1 : public TPS25751Register
 {
 public:
+    /// @brief Register address — single source of register identity for typed writes.
+    static constexpr Registers::Address kAddress = Registers::Address::ADC_FUNCTION_DISABLE_1;
+
     // -----------------------------------------------------------------------
     // Constructors
     // -----------------------------------------------------------------------
@@ -82,6 +85,23 @@ public:
      * @return true if the VAC1 ADC channel is disabled
      */
     bool vac1AdcDisabled() const;
+
+    // -----------------------------------------------------------------------
+    // Field setters (read-modify-write — each touches only its own field)
+    // Each setter DISABLES the channel when @p disabled is true (matches decode).
+    // -----------------------------------------------------------------------
+
+    /// @brief Set DP_ADC_DIS — D+ voltage ADC disable (bit 7)
+    void setDpAdcDisabled(bool disabled);
+
+    /// @brief Set DM_ADC_DIS — D- voltage ADC disable (bit 6)
+    void setDmAdcDisabled(bool disabled);
+
+    /// @brief Set VAC2_ADC_DIS — VAC2 voltage ADC disable (bit 5)
+    void setVac2AdcDisabled(bool disabled);
+
+    /// @brief Set VAC1_ADC_DIS — VAC1 voltage ADC disable (bit 4)
+    void setVac1AdcDisabled(bool disabled);
 
     // -----------------------------------------------------------------------
     // TPS25751Register overrides

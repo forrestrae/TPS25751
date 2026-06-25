@@ -1,4 +1,5 @@
 #include "BQ25798/BQ25798AdcFunctionDisable0.h"
+#include "BQ25798/BQ25798Encode.h"
 
 namespace BQ25798 {
 
@@ -46,6 +47,59 @@ bool AdcFunctionDisable0::tdieAdcDisabled() const
 {
     // TDIE_ADC_DIS — bit 1 of byte 0
     return extractBits(1, 1) != 0;
+}
+
+// ---------------------------------------------------------------------------
+// Field setters (read-modify-write; siblings/reserved bits preserved)
+// ---------------------------------------------------------------------------
+
+void AdcFunctionDisable0::setIbusAdcDisabled(bool disabled)
+{
+    if (!isValid()) return;
+    // IBUS_ADC_DIS — bit 7 of byte 0
+    BQ25798::setField8(_raw, 7, 1, disabled ? 1 : 0);
+}
+
+void AdcFunctionDisable0::setIbatAdcDisabled(bool disabled)
+{
+    if (!isValid()) return;
+    // IBAT_ADC_DIS — bit 6 of byte 0
+    BQ25798::setField8(_raw, 6, 1, disabled ? 1 : 0);
+}
+
+void AdcFunctionDisable0::setVbusAdcDisabled(bool disabled)
+{
+    if (!isValid()) return;
+    // VBUS_ADC_DIS — bit 5 of byte 0
+    BQ25798::setField8(_raw, 5, 1, disabled ? 1 : 0);
+}
+
+void AdcFunctionDisable0::setVbatAdcDisabled(bool disabled)
+{
+    if (!isValid()) return;
+    // VBAT_ADC_DIS — bit 4 of byte 0
+    BQ25798::setField8(_raw, 4, 1, disabled ? 1 : 0);
+}
+
+void AdcFunctionDisable0::setVsysAdcDisabled(bool disabled)
+{
+    if (!isValid()) return;
+    // VSYS_ADC_DIS — bit 3 of byte 0
+    BQ25798::setField8(_raw, 3, 1, disabled ? 1 : 0);
+}
+
+void AdcFunctionDisable0::setTsAdcDisabled(bool disabled)
+{
+    if (!isValid()) return;
+    // TS_ADC_DIS — bit 2 of byte 0
+    BQ25798::setField8(_raw, 2, 1, disabled ? 1 : 0);
+}
+
+void AdcFunctionDisable0::setTdieAdcDisabled(bool disabled)
+{
+    if (!isValid()) return;
+    // TDIE_ADC_DIS — bit 1 of byte 0
+    BQ25798::setField8(_raw, 1, 1, disabled ? 1 : 0);
 }
 
 // ---------------------------------------------------------------------------

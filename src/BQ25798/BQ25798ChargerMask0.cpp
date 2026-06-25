@@ -1,4 +1,5 @@
 #include "BQ25798/BQ25798ChargerMask0.h"
+#include "BQ25798/BQ25798Encode.h"
 
 namespace BQ25798 {
 
@@ -14,6 +15,19 @@ bool ChargerMask0::pgMask()          const { return extractBits(3, 1) != 0; }
 bool ChargerMask0::ac2PresentMask()  const { return extractBits(2, 1) != 0; }
 bool ChargerMask0::ac1PresentMask()  const { return extractBits(1, 1) != 0; }
 bool ChargerMask0::vbusPresentMask() const { return extractBits(0, 1) != 0; }
+
+// ---------------------------------------------------------------------------
+// Field setters (read-modify-write; sibling bits preserved)
+// ---------------------------------------------------------------------------
+
+void ChargerMask0::setIindpmMask(bool masked)      { if (!isValid()) return; BQ25798::setField8(_raw, 7, 1, masked ? 1 : 0); }
+void ChargerMask0::setVindpmMask(bool masked)      { if (!isValid()) return; BQ25798::setField8(_raw, 6, 1, masked ? 1 : 0); }
+void ChargerMask0::setWdMask(bool masked)          { if (!isValid()) return; BQ25798::setField8(_raw, 5, 1, masked ? 1 : 0); }
+void ChargerMask0::setPoorsrcMask(bool masked)     { if (!isValid()) return; BQ25798::setField8(_raw, 4, 1, masked ? 1 : 0); }
+void ChargerMask0::setPgMask(bool masked)          { if (!isValid()) return; BQ25798::setField8(_raw, 3, 1, masked ? 1 : 0); }
+void ChargerMask0::setAc2PresentMask(bool masked)  { if (!isValid()) return; BQ25798::setField8(_raw, 2, 1, masked ? 1 : 0); }
+void ChargerMask0::setAc1PresentMask(bool masked)  { if (!isValid()) return; BQ25798::setField8(_raw, 1, 1, masked ? 1 : 0); }
+void ChargerMask0::setVbusPresentMask(bool masked) { if (!isValid()) return; BQ25798::setField8(_raw, 0, 1, masked ? 1 : 0); }
 
 // ---------------------------------------------------------------------------
 // debugPrint

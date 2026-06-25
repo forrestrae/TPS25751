@@ -27,6 +27,9 @@ namespace BQ25798 {
 class FaultMask0 : public TPS25751Register
 {
 public:
+    /// @brief Register address — single source of register identity for typed writes.
+    static constexpr Registers::Address kAddress = Registers::Address::FAULT_MASK_0;
+
     // -----------------------------------------------------------------------
     // Constructors
     // -----------------------------------------------------------------------
@@ -60,6 +63,19 @@ public:
     bool convOcpMask()  const;  ///< bit 2
     bool vac2OvpMask()  const;  ///< bit 1
     bool vac1OvpMask()  const;  ///< bit 0
+
+    // -----------------------------------------------------------------------
+    // Field setters (read-modify-write — true = Masked / no INT)
+    // -----------------------------------------------------------------------
+
+    void setIbatRegMask(bool masked);  ///< @brief Set IBAT_REG_MASK (bit 7)
+    void setVbusOvpMask(bool masked);  ///< @brief Set VBUS_OVP_MASK (bit 6)
+    void setVbatOvpMask(bool masked);  ///< @brief Set VBAT_OVP_MASK (bit 5)
+    void setIbusOcpMask(bool masked);  ///< @brief Set IBUS_OCP_MASK (bit 4)
+    void setIbatOcpMask(bool masked);  ///< @brief Set IBAT_OCP_MASK (bit 3)
+    void setConvOcpMask(bool masked);  ///< @brief Set CONV_OCP_MASK (bit 2)
+    void setVac2OvpMask(bool masked);  ///< @brief Set VAC2_OVP_MASK (bit 1)
+    void setVac1OvpMask(bool masked);  ///< @brief Set VAC1_OVP_MASK (bit 0)
 
     // -----------------------------------------------------------------------
     // TPS25751Register overrides

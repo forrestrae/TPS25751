@@ -36,6 +36,9 @@ namespace BQ25798 {
 class AdcFunctionDisable0 : public TPS25751Register
 {
 public:
+    /// @brief Register address — single source of register identity for typed writes.
+    static constexpr Registers::Address kAddress = Registers::Address::ADC_FUNCTION_DISABLE_0;
+
     // -----------------------------------------------------------------------
     // Constructors
     // -----------------------------------------------------------------------
@@ -102,6 +105,32 @@ public:
      * @return true if the TDIE ADC channel is disabled
      */
     bool tdieAdcDisabled() const;
+
+    // -----------------------------------------------------------------------
+    // Field setters (read-modify-write — each touches only its own field)
+    // Each setter DISABLES the channel when @p disabled is true (matches decode).
+    // -----------------------------------------------------------------------
+
+    /// @brief Set IBUS_ADC_DIS — bus current ADC disable (bit 7)
+    void setIbusAdcDisabled(bool disabled);
+
+    /// @brief Set IBAT_ADC_DIS — battery current ADC disable (bit 6)
+    void setIbatAdcDisabled(bool disabled);
+
+    /// @brief Set VBUS_ADC_DIS — bus voltage ADC disable (bit 5)
+    void setVbusAdcDisabled(bool disabled);
+
+    /// @brief Set VBAT_ADC_DIS — battery voltage ADC disable (bit 4)
+    void setVbatAdcDisabled(bool disabled);
+
+    /// @brief Set VSYS_ADC_DIS — system voltage ADC disable (bit 3)
+    void setVsysAdcDisabled(bool disabled);
+
+    /// @brief Set TS_ADC_DIS — temperature sensor ADC disable (bit 2)
+    void setTsAdcDisabled(bool disabled);
+
+    /// @brief Set TDIE_ADC_DIS — die temperature ADC disable (bit 1)
+    void setTdieAdcDisabled(bool disabled);
 
     // -----------------------------------------------------------------------
     // TPS25751Register overrides

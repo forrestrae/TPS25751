@@ -1,4 +1,5 @@
 #include "BQ25798/BQ25798ChargeVoltageLimit.h"
+#include "BQ25798/BQ25798Encode.h"
 
 namespace BQ25798 {
 
@@ -23,6 +24,24 @@ uint16_t ChargeVoltageLimit::millivolts() const
 {
     if (!isValid()) return 0;
     return static_cast<uint16_t>(vregRaw() * kLsbMv);
+}
+
+// ---------------------------------------------------------------------------
+// Field setters (read-modify-write; reserved bits preserved)
+// ---------------------------------------------------------------------------
+
+void ChargeVoltageLimit::setVregRaw(uint16_t value)
+{
+    if (!isValid()) return;
+    // VREG_10:0 — bits 10:0 of the 16-bit big-endian value
+    BQ25798::setField16BE(_raw, 0, 11, value);
+}
+
+void ChargeVoltageLimit::setMillivolts(uint16_t mV)
+{
+    if (!isValid()) return;
+    // Invert mV = VREG * 10
+    BQ25798::setField16BE(_raw, 0, 11, static_cast<uint16_t>(mV / kLsbMv));
 }
 
 // ---------------------------------------------------------------------------

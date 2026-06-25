@@ -1,4 +1,5 @@
 #include "BQ25798/BQ25798ChargerControl0.h"
+#include "BQ25798/BQ25798Encode.h"
 
 namespace BQ25798 {
 
@@ -52,6 +53,66 @@ bool ChargerControl0::enBackup() const
 {
     // EN_BACKUP — bit 0 of byte 0
     return extractBits(0, 1) != 0;
+}
+
+// ---------------------------------------------------------------------------
+// Field setters (single-bit read-modify-write; siblings/reserved bits preserved)
+// ---------------------------------------------------------------------------
+
+void ChargerControl0::setEnAutoIbatDis(bool on)
+{
+    if (!isValid()) return;
+    // EN_AUTO_IBATDIS — bit 7 of byte 0
+    BQ25798::setField8(_raw, 7, 1, on ? 1 : 0);
+}
+
+void ChargerControl0::setForceIbatDis(bool on)
+{
+    if (!isValid()) return;
+    // FORCE_IBATDIS — bit 6 of byte 0
+    BQ25798::setField8(_raw, 6, 1, on ? 1 : 0);
+}
+
+void ChargerControl0::setEnChg(bool on)
+{
+    if (!isValid()) return;
+    // EN_CHG — bit 5 of byte 0
+    BQ25798::setField8(_raw, 5, 1, on ? 1 : 0);
+}
+
+void ChargerControl0::setEnIco(bool on)
+{
+    if (!isValid()) return;
+    // EN_ICO — bit 4 of byte 0
+    BQ25798::setField8(_raw, 4, 1, on ? 1 : 0);
+}
+
+void ChargerControl0::setForceIco(bool on)
+{
+    if (!isValid()) return;
+    // FORCE_ICO — bit 3 of byte 0
+    BQ25798::setField8(_raw, 3, 1, on ? 1 : 0);
+}
+
+void ChargerControl0::setEnHiz(bool on)
+{
+    if (!isValid()) return;
+    // EN_HIZ — bit 2 of byte 0
+    BQ25798::setField8(_raw, 2, 1, on ? 1 : 0);
+}
+
+void ChargerControl0::setEnTerm(bool on)
+{
+    if (!isValid()) return;
+    // EN_TERM — bit 1 of byte 0
+    BQ25798::setField8(_raw, 1, 1, on ? 1 : 0);
+}
+
+void ChargerControl0::setEnBackup(bool on)
+{
+    if (!isValid()) return;
+    // EN_BACKUP — bit 0 of byte 0
+    BQ25798::setField8(_raw, 0, 1, on ? 1 : 0);
 }
 
 // ---------------------------------------------------------------------------

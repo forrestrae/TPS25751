@@ -32,6 +32,9 @@ namespace BQ25798 {
 class TerminationControl : public TPS25751Register
 {
 public:
+    /// @brief Register address — single source of register identity for typed writes.
+    static constexpr Registers::Address kAddress = Registers::Address::TERMINATION_CONTROL;
+
     // -----------------------------------------------------------------------
     // Constructors
     // -----------------------------------------------------------------------
@@ -86,6 +89,24 @@ public:
      * @return Current in mA; 0 if not valid
      */
     uint16_t milliamps() const;
+
+    // -----------------------------------------------------------------------
+    // Field setters (read-modify-write — each touches only its own field;
+    // reserved bit 7 is never written)
+    // -----------------------------------------------------------------------
+
+    /// @brief Set register reset flag — REG_RST (bit 6); write 1 to reset all registers
+    void setRegRst(bool on);
+
+    /// @brief Set watchdog-expiry charge-stop flag — STOP_WD_CHG (bit 5)
+    void setStopWdChg(bool on);
+
+    /// @brief Set raw ITERM field — ITERM_4:0 (bits 4:0)
+    void setItermRaw(uint8_t raw);
+
+    /// @brief Set termination current threshold in milliamps — ITERM_4:0 (bits 4:0)
+    /// @param ma Current in mA; encoded as ITERM = ma / 40 (40 mA/LSB)
+    void setMilliamps(uint16_t ma);
 
     // -----------------------------------------------------------------------
     // TPS25751Register overrides

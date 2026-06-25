@@ -1,4 +1,5 @@
 #include "BQ25798/BQ25798NtcControl1.h"
+#include "BQ25798/BQ25798Encode.h"
 
 namespace BQ25798 {
 
@@ -46,6 +47,45 @@ bool NtcControl1::tsIgnore() const
 {
     // TS_IGNORE — bit 0 of byte 0
     return extractBits(0, 1) != 0;
+}
+
+// ---------------------------------------------------------------------------
+// Field setters (read-modify-write; siblings/reserved bits preserved)
+// ---------------------------------------------------------------------------
+
+void NtcControl1::setTsCool(TsCool v)
+{
+    if (!isValid()) return;
+    // TS_COOL_1:0 — 2-bit field at bits 7:6 (bit position 6, width 2)
+    BQ25798::setField8(_raw, 6, 2, static_cast<uint8_t>(v));
+}
+
+void NtcControl1::setTsWarm(TsWarm v)
+{
+    if (!isValid()) return;
+    // TS_WARM_1:0 — 2-bit field at bits 5:4 (bit position 4, width 2)
+    BQ25798::setField8(_raw, 4, 2, static_cast<uint8_t>(v));
+}
+
+void NtcControl1::setBhot(Bhot v)
+{
+    if (!isValid()) return;
+    // BHOT_1:0 — 2-bit field at bits 3:2 (bit position 2, width 2)
+    BQ25798::setField8(_raw, 2, 2, static_cast<uint8_t>(v));
+}
+
+void NtcControl1::setBcold(bool on)
+{
+    if (!isValid()) return;
+    // BCOLD — bit 1 of byte 0
+    BQ25798::setField8(_raw, 1, 1, on ? 1 : 0);
+}
+
+void NtcControl1::setTsIgnore(bool on)
+{
+    if (!isValid()) return;
+    // TS_IGNORE — bit 0 of byte 0
+    BQ25798::setField8(_raw, 0, 1, on ? 1 : 0);
 }
 
 // ---------------------------------------------------------------------------

@@ -1,4 +1,5 @@
 #include "BQ25798/BQ25798DpdmDriver.h"
+#include "BQ25798/BQ25798Encode.h"
 
 namespace BQ25798 {
 
@@ -24,6 +25,24 @@ DpdmDriver::DminusDac DpdmDriver::dminusDac() const
         static_cast<uint8_t>(DminusDac::Reserved),  // max valid = 7
         DminusDac::HIZ                                // default on out-of-range
     );
+}
+
+// ---------------------------------------------------------------------------
+// Field setters (read-modify-write; sibling/reserved bits preserved)
+// ---------------------------------------------------------------------------
+
+void DpdmDriver::setDplusDac(DplusDac v)
+{
+    if (!isValid()) return;
+    // DPLUS_DAC_2:0 — 3-bit field, bits 7:5 (bit position 5, width 3)
+    BQ25798::setField8(_raw, 5, 3, static_cast<uint8_t>(v));
+}
+
+void DpdmDriver::setDminusDac(DminusDac v)
+{
+    if (!isValid()) return;
+    // DMINUS_DAC_2:0 — 3-bit field, bits 4:2 (bit position 2, width 3)
+    BQ25798::setField8(_raw, 2, 3, static_cast<uint8_t>(v));
 }
 
 // ---------------------------------------------------------------------------

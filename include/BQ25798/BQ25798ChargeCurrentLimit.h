@@ -28,6 +28,9 @@ namespace BQ25798 {
 class ChargeCurrentLimit : public TPS25751Register
 {
 public:
+    /// @brief Register address — single source of register identity for typed writes.
+    static constexpr Registers::Address kAddress = Registers::Address::CHARGE_CURRENT_LIMIT;
+
     // -----------------------------------------------------------------------
     // Constructors
     // -----------------------------------------------------------------------
@@ -72,6 +75,24 @@ public:
      * @return Current in mA; 0 if not valid
      */
     uint16_t milliamps() const;
+
+    // -----------------------------------------------------------------------
+    // Field setters (read-modify-write — each touches only its own field)
+    // -----------------------------------------------------------------------
+
+    /**
+     * @brief Set raw ICHG field — ICHG_8:0 (bits 8:0 of the 16-bit value)
+     * @param value 9-bit raw value (masked to 9 bits)
+     */
+    void setIchgRaw(uint16_t value);
+
+    /**
+     * @brief Set fast-charge current limit from milliamps
+     *
+     * Inverts mA = ICHG * 10: ICHG = mA / 10.
+     * @param mA Current in milliamps
+     */
+    void setMilliamps(uint16_t mA);
 
     // -----------------------------------------------------------------------
     // TPS25751Register overrides

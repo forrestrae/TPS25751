@@ -1,4 +1,5 @@
 #include "BQ25798/BQ25798InputCurrentLimit.h"
+#include "BQ25798/BQ25798Encode.h"
 
 namespace BQ25798 {
 
@@ -23,6 +24,24 @@ uint16_t InputCurrentLimit::milliamps() const
 {
     if (!isValid()) return 0;
     return static_cast<uint16_t>(iindpmRaw() * kLsbMa);
+}
+
+// ---------------------------------------------------------------------------
+// Field setters (read-modify-write; reserved bits preserved)
+// ---------------------------------------------------------------------------
+
+void InputCurrentLimit::setIindpmRaw(uint16_t value)
+{
+    if (!isValid()) return;
+    // IINDPM_8:0 — bits 8:0 of the 16-bit big-endian value
+    BQ25798::setField16BE(_raw, 0, 9, value);
+}
+
+void InputCurrentLimit::setMilliamps(uint16_t mA)
+{
+    if (!isValid()) return;
+    // Invert mA = IINDPM * 10
+    BQ25798::setField16BE(_raw, 0, 9, static_cast<uint16_t>(mA / kLsbMa));
 }
 
 // ---------------------------------------------------------------------------

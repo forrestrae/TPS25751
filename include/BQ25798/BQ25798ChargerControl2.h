@@ -26,6 +26,9 @@ namespace BQ25798 {
 class ChargerControl2 : public TPS25751Register
 {
 public:
+    /// @brief Register address — single source of register identity for typed writes.
+    static constexpr Registers::Address kAddress = Registers::Address::CHARGER_CONTROL_2;
+
     // -----------------------------------------------------------------------
     // Enumerations
     // -----------------------------------------------------------------------
@@ -106,6 +109,32 @@ public:
      * @return true = no 10 s delay; false = add 10 s delay (default)
      */
     bool sdrvDly() const;
+
+    // -----------------------------------------------------------------------
+    // Field setters (read-modify-write — each touches only its own field)
+    // -----------------------------------------------------------------------
+
+    /// @brief Set force D+/D- detection — FORCE_INDET (bit 7).
+    /// The bit self-clears in hardware when detection completes.
+    void setForceIndet(bool on);
+
+    /// @brief Set automatic D+/D- detection enable — AUTO_INDET_EN (bit 6)
+    void setAutoIndetEn(bool on);
+
+    /// @brief Set enable 12 V mode in HVDCP — EN_12V (bit 5)
+    void setEn12v(bool on);
+
+    /// @brief Set enable 9 V mode in HVDCP — EN_9V (bit 4)
+    void setEn9v(bool on);
+
+    /// @brief Set HVDCP handshake enable — HVDCP_EN (bit 3)
+    void setHvdcpEn(bool on);
+
+    /// @brief Set ship FET control mode — SDRV_CTRL_1:0 (bits 2:1)
+    void setSdrvCtrl(SdrvCtrl v);
+
+    /// @brief Set ship FET action delay — SDRV_DLY (bit 0); true = no 10 s delay
+    void setSdrvDly(bool on);
 
     // -----------------------------------------------------------------------
     // TPS25751Register overrides

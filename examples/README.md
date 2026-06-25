@@ -26,6 +26,7 @@ Replace `example-read-registers` with any environment from the table below.
 | [`bq25798-status`](bq25798-status/) | `example-bq25798-status` | Reading all BQ25798 **status and fault** registers (ChargerStatus0–4, ChargerFlag0–3, FaultStatus0–1, FaultFlag0–1) through the typed `BQ25798::Device` driver. |
 | [`bq25798-charge-config`](bq25798-charge-config/) | `example-bq25798-charge-config` | Reading the BQ25798 **charge-configuration** registers (voltage/current limits, precharge/termination, charger control, NTC thresholds). |
 | [`bq25798-telemetry`](bq25798-telemetry/) | `example-bq25798-telemetry` | Reading the BQ25798 **ADC telemetry** channels (VBUS, VBAT, VSYS, VAC1/2, IBUS, IBAT, TS, TDIE) and printing converted engineering units. |
+| [`bq25798-set-charge`](bq25798-set-charge/) | `example-bq25798-set-charge` | The downstream **I2Cw write** path: a guarded, reversible round-trip that toggles ChargerControl0 EN_CHG via `enableCharging()`, verifies only that bit changed, then restores the original value. |
 | [`bq25798-fault-investigator`](bq25798-fault-investigator/) | `example-bq25798-fault-investigator` | **Structured fault diagnostics**: reads BQ25798 status/fault/flag/config/ADC registers, decodes them, runs heuristic checks, and prints a likely-cause report for symptoms like a 1 Hz STAT blink plus inductor whine. Read-only; verbose or CSV output via a compile-time flag. |
 
 > **Note on BQ25798 examples:** the charger sits on the TPS25751's secondary I2Cc

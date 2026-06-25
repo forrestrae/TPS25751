@@ -1,4 +1,5 @@
 #include "BQ25798/BQ25798ChargerControl4.h"
+#include "BQ25798/BQ25798Encode.h"
 
 namespace BQ25798 {
 
@@ -52,6 +53,66 @@ bool ChargerControl4::enIbusOcp() const
 {
     // EN_IBUS_OCP — bit 0 of byte 0
     return extractBits(0, 1) != 0;
+}
+
+// ---------------------------------------------------------------------------
+// Field setters (read-modify-write; siblings/reserved bits preserved)
+// ---------------------------------------------------------------------------
+
+void ChargerControl4::setEnAcdrv2(bool on)
+{
+    if (!isValid()) return;
+    // EN_ACDRV2 — bit 7 of byte 0
+    BQ25798::setField8(_raw, 7, 1, on ? 1 : 0);
+}
+
+void ChargerControl4::setEnAcdrv1(bool on)
+{
+    if (!isValid()) return;
+    // EN_ACDRV1 — bit 6 of byte 0
+    BQ25798::setField8(_raw, 6, 1, on ? 1 : 0);
+}
+
+void ChargerControl4::setPwmFreq(bool on)
+{
+    if (!isValid()) return;
+    // PWM_FREQ — bit 5 of byte 0 (1 = 750 kHz, 0 = 1.5 MHz)
+    BQ25798::setField8(_raw, 5, 1, on ? 1 : 0);
+}
+
+void ChargerControl4::setDisStat(bool on)
+{
+    if (!isValid()) return;
+    // DIS_STAT — bit 4 of byte 0 (1 = STAT pin disabled)
+    BQ25798::setField8(_raw, 4, 1, on ? 1 : 0);
+}
+
+void ChargerControl4::setDisVsysShort(bool on)
+{
+    if (!isValid()) return;
+    // DIS_VSYS_SHORT — bit 3 of byte 0 (1 = protection disabled)
+    BQ25798::setField8(_raw, 3, 1, on ? 1 : 0);
+}
+
+void ChargerControl4::setDisVotgUvp(bool on)
+{
+    if (!isValid()) return;
+    // DIS_VOTG_UVP — bit 2 of byte 0 (1 = protection disabled)
+    BQ25798::setField8(_raw, 2, 1, on ? 1 : 0);
+}
+
+void ChargerControl4::setForceVindpmDet(bool on)
+{
+    if (!isValid()) return;
+    // FORCE_VINDPM_DET — bit 1 of byte 0 (self-clears when detection completes)
+    BQ25798::setField8(_raw, 1, 1, on ? 1 : 0);
+}
+
+void ChargerControl4::setEnIbusOcp(bool on)
+{
+    if (!isValid()) return;
+    // EN_IBUS_OCP — bit 0 of byte 0
+    BQ25798::setField8(_raw, 0, 1, on ? 1 : 0);
 }
 
 // ---------------------------------------------------------------------------

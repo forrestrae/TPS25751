@@ -31,6 +31,9 @@ namespace BQ25798 {
 class PrechargeControl : public TPS25751Register
 {
 public:
+    /// @brief Register address — single source of register identity for typed writes.
+    static constexpr Registers::Address kAddress = Registers::Address::PRECHARGE_CONTROL;
+
     // -----------------------------------------------------------------------
     // VBAT_LOWV enum — precharge-to-fast-charge threshold (bits 7:6)
     // -----------------------------------------------------------------------
@@ -93,6 +96,20 @@ public:
      * @return Current in mA; 0 if not valid
      */
     uint16_t milliamps() const;
+
+    // -----------------------------------------------------------------------
+    // Field setters (read-modify-write — each touches only its own field)
+    // -----------------------------------------------------------------------
+
+    /// @brief Set precharge-to-fast-charge transition threshold — VBAT_LOWV_1:0 (bits 7:6)
+    void setVbatLowv(VbatLowv v);
+
+    /// @brief Set raw IPRECHG field — IPRECHG_5:0 (bits 5:0)
+    void setIprechgRaw(uint8_t raw);
+
+    /// @brief Set precharge current limit in milliamps — IPRECHG_5:0 (bits 5:0)
+    /// @param ma Current in mA; encoded as IPRECHG = ma / 40 (40 mA/LSB)
+    void setMilliamps(uint16_t ma);
 
     // -----------------------------------------------------------------------
     // TPS25751Register overrides

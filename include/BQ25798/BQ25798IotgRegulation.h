@@ -25,6 +25,9 @@ namespace BQ25798 {
 class IotgRegulation : public TPS25751Register
 {
 public:
+    /// @brief Register address — single source of register identity for typed writes.
+    static constexpr Registers::Address kAddress = Registers::Address::IOTG_REGULATION;
+
     // -----------------------------------------------------------------------
     // Enumerations
     // -----------------------------------------------------------------------
@@ -79,6 +82,30 @@ public:
      * @return Current in mA: IOTG_6:0 * 40
      */
     uint16_t milliamps() const;
+
+    // -----------------------------------------------------------------------
+    // Field setters (read-modify-write — each touches only its own field)
+    // -----------------------------------------------------------------------
+
+    /**
+     * @brief Set pre-charge safety timer setting — PRECHG_TMR (bit 7)
+     * @param value PrechgTmr enum value
+     */
+    void setPrechgTmr(PrechgTmr value);
+
+    /**
+     * @brief Set raw IOTG field — IOTG_6:0 (bits 6:0)
+     * @param value 7-bit raw value (masked to 7 bits)
+     */
+    void setIotgRaw(uint8_t value);
+
+    /**
+     * @brief Set OTG current limit from milliamps
+     *
+     * Inverts mA = IOTG * 40: IOTG = mA / 40.
+     * @param mA Current in milliamps
+     */
+    void setMilliamps(uint16_t mA);
 
     // -----------------------------------------------------------------------
     // TPS25751Register overrides

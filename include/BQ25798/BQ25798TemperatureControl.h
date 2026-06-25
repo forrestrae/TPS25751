@@ -25,6 +25,9 @@ namespace BQ25798 {
 class TemperatureControl : public TPS25751Register
 {
 public:
+    /// @brief Register address — single source of register identity for typed writes.
+    static constexpr Registers::Address kAddress = Registers::Address::TEMPERATURE_CONTROL;
+
     // -----------------------------------------------------------------------
     // Enumerations
     // -----------------------------------------------------------------------
@@ -109,6 +112,28 @@ public:
      * @return true if ACFET1 turn-on is requested
      */
     bool bkupAcfet1On() const;
+
+    // -----------------------------------------------------------------------
+    // Field setters (read-modify-write — each touches only its own field)
+    // -----------------------------------------------------------------------
+
+    /// @brief Set thermal regulation threshold — TREG_1:0 (bits 7:6)
+    void setTreg(Treg v);
+
+    /// @brief Set thermal shutdown threshold — TSHUT_1:0 (bits 5:4)
+    void setTshut(Tshut v);
+
+    /// @brief Set enable VBUS pull-down resistor — VBUS_PD_EN (bit 3)
+    void setVbusPdEn(bool on);
+
+    /// @brief Set enable VAC1 pull-down resistor — VAC1_PD_EN (bit 2)
+    void setVac1PdEn(bool on);
+
+    /// @brief Set enable VAC2 pull-down resistor — VAC2_PD_EN (bit 1)
+    void setVac2PdEn(bool on);
+
+    /// @brief Set turn-on ACFET1 in backup mode — BKUP_ACFET1_ON (bit 0)
+    void setBkupAcfet1On(bool on);
 
     // -----------------------------------------------------------------------
     // TPS25751Register overrides

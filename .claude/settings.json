@@ -11,6 +11,7 @@
     ],
     "deny": []
   },
+  "plansDirectory": "./docs/plans",
   "enabledMcpjsonServers": [
     "tps25751-docs",
     "bq25798-docs"

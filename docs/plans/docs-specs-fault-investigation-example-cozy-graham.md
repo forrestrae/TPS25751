@@ -1,212 +1,173 @@
-# Plan: BQ25798 Fault-Investigator Example
+# Plan: BQ25798 Fault-Investigator — Restore Mode (BQ REG_RST → TPS25751 GAID)
 
-## Context
+## Context — current task
 
-A custom 4S Li-ion board built around a BQ25798 charger (input from USB-C PD via a
-TPS25751D, typically a 20 V contract) is misbehaving: the STAT-pin LED shows a
-distinct 1 Hz flash with erratic flicker between flashes, plus audible inductor
-whine. We need a serial-console diagnostic example —
-`examples/bq25798-fault-investigator/` — that does more than dump registers: it
-reads the BQ25798's status/fault/flag/config/ADC registers through the existing
-typed `BQ25798::Device` driver, decodes them, runs heuristic checks, and prints a
-structured fault-investigation report pointing at the likely failure mode (active
-fault, unstable PD source, ILIM/IINDPM cycling, TS qualification, CE/EN_CHG,
-wrong 4S VREG/VSYSMIN, battery OVP/UV, SYS short/OVP, overcurrent,
-watchdog/config reset).
+The restore mode (`RESTORE_CHARGER_DEFAULTS`) is **partly implemented**: it already
+issues a BQ25798 `REG_RST` to return the charger to datasheet POR defaults, then
+idles. (And the `ENABLE_SAFE_DIAGNOSTIC_SETUP` setup-write feature it undoes is
+fully implemented — see "Prior work".)
 
-Spec: `docs/specs/fault-investigation-example-spec.md`.
+**Problem this task solves — REG_RST alone is not a true "restore to original".**
+On this board the BQ25798 is configured by the **TPS25751**, which boots its own
+configuration from an **EEPROM** and acts as the charger's controller over the
+I2Cc bus. So the charger's *intended* (original) configuration is whatever the
+TPS25751/EEPROM applies — not the BQ25798's chip defaults. To truly restore the
+system, the example must also **cold-reset the TPS25751** so it re-reads its EEPROM
+and re-applies the BQ25798 configuration.
 
-### Decisions made with the user (resolving spec vs. codebase tensions)
+**Decision (with the user):** expand the existing `RESTORE_CHARGER_DEFAULTS` mode
+into one ordered sequence:
+1. **BQ25798 `REG_RST`** (clean slate) — must run *first*, while the host is still
+   up, because the BQ is reached *through* the TPS25751's 4CC proxy.
+2. **TPS25751 GAID cold reset** — `pd.executeCommand(TPS25751FourCC::of("GAID"))`.
+   The repo's own docs call `GAID` the destructive "cold reset"; it reboots the
+   controller so it re-reads EEPROM and re-applies the BQ25798 config.
+3. **Poll until comms return** — after GAID, wait then poll `bq.readPartInfo()`
+   (proves the TPS rebooted and is proxying again) with a timeout, then read back a
+   BQ25798 config register (e.g. VREG) as evidence the EEPROM config was re-applied.
+4. Idle.
 
-1. **Read pacing — strict 5 s per read.** The `BQ25798::Device` driver is the only
-   read path and every read is a 4CC I2Cr command-task. The TRM requires ≥5 s
-   between consecutive same-type commands (the driver *warns* via `DEBUG_CAT_TASK`
-   but does not block). Per the user's choice we follow existing examples and
-   `delay(5100)` after every read. **Implication:** a full ~35-register sweep takes
-   ~3 minutes, NOT the spec's "every 5 seconds." The example will therefore rely on
-   the BQ25798's **latched FLAG registers (REG26/27, REG22–25)** to capture
-   transient/intermittent faults that occur *between* slow samples — this is the
-   correct way to catch a 1 Hz intermittent fault over a link we cannot poll fast.
-   The header comment and the periodic banner must state the real sweep cadence.
+### Key API facts (verified)
+- `TPS25751::executeCommand(TPS25751FourCC cmd, const uint8_t* inData=nullptr,
+  size_t inLen=0, uint8_t* outData=nullptr, size_t outLen=0, uint32_t
+  timeoutMs=200) const` — `include/TPS25751.h:307`; `const`, so callable on the
+  example's `const TPS25751 pd`. Types come in via `<TPS25751.h>` (includes
+  `TPS25751Task.h`). Construct the code with `TPS25751FourCC::of("GAID")`.
+- **GAID handshake caveat:** the controller resets mid-command, so `executeCommand`
+  may return `TPS25751TaskStatus::Timeout` (COMMAND never clears) even though the
+  reset *was* accepted. Treat `Success` **or** `Timeout` as "reset issued"; only a
+  `Rejected`/`I2CError` before the device drops is a real failure.
+- **Downstream unavailability:** `BQ25798::Device` (`bq`) reaches the charger only
+  through `pd`'s I2Cr/I2Cw tasks, so the BQ is unreachable from GAID until the host
+  finishes booting — hence the poll-`readPartInfo()` recovery loop.
+- BQ `REG_RST` via `updateRegister<BQ25798::TerminationControl>()` is already wired.
 
-2. **Read-only only — no setup-write mode.** The typed driver is decode-only (no
-   setters; only the inherited raw `TPS25751DownstreamDevice::writeRegister()`).
-   Per the user's choice we omit `ENABLE_SAFE_DIAGNOSTIC_SETUP` entirely and keep
-   the example purely read-only/non-destructive (matches the `examples/` convention).
-   The startup banner prints a one-line note that configuration changes are out of
-   scope and would require typed setters not yet in the driver.
+### Prior work (already done — do not redo)
+- `ENABLE_SAFE_DIAGNOSTIC_SETUP` setup-write feature: gate,
+  `applySafeDiagnosticSetup()` with `confirmOrSet*` helpers, three-way banner,
+  README row. All build combos pass.
+- `RESTORE_CHARGER_DEFAULTS` gate, `restoreChargerDefaults()` doing the BQ
+  `REG_RST` + evidence read-backs + loop-idle guard + precedence `#warning`.
 
-3. **Output mode — compile-time flag.** Select verbose vs. CSV via a `#define`
-   (e.g. `#define OUTPUT_CSV 0`), matching existing examples (none read serial
-   input). No runtime serial-command handling.
+Spec: `docs/specs/fault-investigation-example-spec.md`. The example:
+`examples/bq25798-fault-investigator/src/main.cpp`.
 
-## Approach
+> **Note — gate name kept.** `RESTORE_CHARGER_DEFAULTS` is retained (not renamed)
+> for continuity even though it now also resets the host; its doc comment is
+> updated to say so.
 
-New example mirroring the existing `bq25798-status` / `bq25798-telemetry` pattern
-exactly. Single translation unit (`src/main.cpp`) with grouped helper functions,
-as the spec's "Code organization" section requests.
+> **Hardware caveat to surface in the banner:** GAID drops the PD contract, so
+> VBUS may momentarily collapse. If the Teensy is powered from a TPS25751-gated
+> rail it could brown-out/reset too. Warn the user.
 
-### Files to create / modify
+---
 
-| File | Change |
-|---|---|
-| `examples/bq25798-fault-investigator/src/main.cpp` | **New** — the sketch (see structure below). |
-| `examples/bq25798-fault-investigator/platformio.ini` | **New, optional** — standalone build config; copy verbatim from `examples/bq25798-telemetry/platformio.ini`. |
-| `platformio.ini` (library root) | Add `[env:example-bq25798-fault-investigator]` with `build_src_filter = +<*> +<../examples/bq25798-fault-investigator/src>`, mirroring existing `[env:example-bq25798-*]` entries. |
-| `examples/README.md` | Add a row to the "Available Examples" table (folder linked, env name, one-line description). |
+## New work: extend Restore mode to also cold-reset the host
 
-Follow `examples/AGENTS.md` "Adding a New Example" steps and the Doxygen
-`@file/@brief/@section` header from `docs/engineering/DOCUMENTATION.md`.
+### Approach
+The `RESTORE_CHARGER_DEFAULTS` gate, its `setup()` wiring, the `loop()` idle guard,
+and the precedence `#warning` are **already implemented**. When set, `setup()`
+currently does only the BQ `REG_RST` then idles. This task extends
+`restoreChargerDefaults()` so it runs **REG_RST → GAID host cold-reset →
+poll-for-recovery**, then idles. Also refresh the gate doc comment / banner / docs
+to describe the host reset (they currently say only "REG_RST"). The mode still
+takes precedence over `ENABLE_SAFE_DIAGNOSTIC_SETUP`.
 
-### `main.cpp` structure
+### `main.cpp` edits — extend `restoreChargerDefaults()`
 
-Includes / globals / setup (copy from `bq25798-telemetry/src/main.cpp`):
+The function already does steps (a)–(b). **Add steps (c)–(e)** after the existing
+evidence read-backs, plus a couple of tunable constants near the restore gate:
 ```cpp
-#include <Arduino.h>
-#include <TPS25751.h>
-#include <BQ25798/BQ25798.h>
-
-const TPS25751  pd;        // host on primary I2Ct bus
-BQ25798::Device bq(pd);    // typed BQ25798 driver over 4CC I2Cr tasks
-```
-- `setup()`: Serial @115200 with the `while (!Serial && millis() < 3000)` wait;
-  `TPS25751::setDebugLevel(DEBUG_LEVEL_WARN)`;
-  `TPS25751::setDebugCategories(DEBUG_CAT_I2C | DEBUG_CAT_TASK)`; `pd.begin()`.
-- **Startup banner** (`printBanner()`): example name; board assumptions (4S,
-  VREG 16.8 V, VSYSMIN 12.0 V, expected ~20 V PD VBUS); I2C bus + BQ25798 addr
-  (`BQ25798::kDefaultI2CAddress` = 0x6B); **READ-ONLY** mode note + real sweep
-  cadence note; output mode (verbose/CSV).
-- **Comm check** (`verifyComms()`): `bq.readPartInfo(true)`; on `nullptr` print a
-  clear failure message (device not ACKing @0x6B / pull-ups / offset-1 decode); on
-  success print PN/DEV_REV. (Validation confirms PN = 011b → BQ25798.)
-
-#### Compile-time config block
-```cpp
-#define OUTPUT_CSV         0      // 0 = verbose annotated, 1 = compact CSV line
-#define HISTORY_DEPTH      4      // rolling snapshots kept for change/event detection
-// Board expectations (spec Assumptions)
-static const uint16_t kVregExpectedMv    = 16800;
-static const uint16_t kVsysminExpectedMv = 12000;
-static const uint16_t kVbusPdExpectedMv  = 20000;
-static const uint16_t kVbat4sMinMv = 11600, kVbat4sMaxMv = 16800;
+static const uint32_t kGaidRecoveryTimeoutMs = 15000;  // max wait for host reboot
+static const uint32_t kGaidSettleMs          = 2000;   // initial settle before polling
 ```
 
-#### Snapshot type
-A POD `Snapshot` struct holding: timestamp (`millis()`), the decoded values we run
-heuristics on (raw bytes + key bools/enums + ADC engineering values), and a
-"valid" flag per field (so a failed read is distinguishable from zero). Keep a
-`Snapshot history[HISTORY_DEPTH]` ring buffer for change detection and the
-fault-event block.
+(a) **BQ `REG_RST`** — already implemented (`updateRegister<TerminationControl>`),
+   paced. Keep. (Clean slate while the host is still up.)
+(b) **Post-REG_RST evidence read-back** — already implemented (`adcEnabled()`,
+   `millivolts()`). Keep.
+(c) **GAID cold-reset the host** (NEW):
+```cpp
+Serial.println(F("Cold-resetting TPS25751 (GAID) so it re-reads EEPROM..."));
+auto r = pd.executeCommand(TPS25751FourCC::of("GAID"), nullptr, 0, nullptr, 0,
+                           /*timeoutMs=*/500);
+// Controller resets mid-command; Timeout is expected & not a failure.
+const bool issued = (r.status == TPS25751TaskStatus::Success ||
+                     r.status == TPS25751TaskStatus::Timeout);
+Serial.print(F("  GAID: "));
+Serial.println(issued ? F("issued (controller resetting)") : F("REJECTED/ERROR"));
+```
+(d) **Poll until comms return** (NEW): wait `kGaidSettleMs`, then loop
+   `bq.readPartInfo(false)` every `kReadSpacingMs` until non-null or
+   `kGaidRecoveryTimeoutMs` elapses; print "host back" / "timed out waiting for
+   host". On recovery, read back a BQ config register (`readChargeVoltageLimit()
+   ->millivolts()`) as evidence the EEPROM-driven config was re-applied.
+(e) **Final message** (UPDATE the existing one): "System restored: BQ25798 reset
+   and TPS25751 cold-reset; the controller re-applied the charger config from
+   EEPROM."
 
-#### Registers read each sweep (each via its typed accessor; `delay(5100)` after each)
-Use `validate=false` so raw/anomalous data still prints (mirrors `bq25798-status`).
-- **Status:** `readChargerStatus0..4` (REG1B–1F) — VBUS/AC present, PG, WD,
-  chgStat/vbusStat enums, DPM/thermal/TS state.
-- **Fault status (live):** `readFaultStatus0/1` (REG20/21) — all OVP/OCP/short/
-  tshut bits.
-- **Fault flags (latched):** `readFaultFlag0/1` (REG26/27).
-- **Charger flags (latched):** `readChargerFlag0..3` (REG22–25) — incl. poorsrc,
-  IINDPM/VINDPM, WD, PG flags.
-- **ADC:** `readVbusAdc, readVac1Adc, readVac2Adc, readVbatAdc, readVsysAdc,
-  readIbusAdc, readIbatAdc, readTsAdc, readTdieAdc` — engineering units already
-  provided by the classes (`millivolts()`, `milliamps()` signed, `percent()`,
-  `celsius()`); plus `readAdcControl` to report whether ADC_EN is on.
-- **Config sanity:** `readChargeVoltageLimit` (VREG mV), `readChargeCurrentLimit`
-  (ICHG mA), `readMinimalSystemVoltage` (VSYSMIN mV), `readInputCurrentLimit`
-  (IINDPM mA), `readInputVoltageLimit` (VINDPM mV), `readChargerControl0`
-  (enChg/enHiz/enTerm), `readChargerControl1..5` (EN_EXTILIM, EN_IINDPM, watchdog,
-  switching frequency), `readTimerControl`, `readNtcControl0/1`.
-  > During implementation, use the `bq25798-docs` MCP (`get_register`/
-  > `explain_bitfield`) **and the actual header getters** in `include/BQ25798/` to
-  > confirm which ChargerControl register exposes EN_EXTILIM / EN_IINDPM /
-  > watchdog / switching-frequency before referencing fields. Do not invent getter
-  > names — read the headers.
+Steps (a)/(b) print "clean slate" wording; the closing message reflects the full
+sequence. Wiring into `setup()` (`#if RESTORE_CHARGER_DEFAULTS … return;`) and the
+`loop()` idle guard are **already in place** — no change.
 
-#### Helper functions (spec "Code organization")
-- `readSnapshot(Snapshot&)` — performs all reads with pacing, fills the struct.
-- `printRawBlock(const Snapshot&)` — hex of key status/fault/config raw bytes
-  (use each register's `raw8`/`raw16`/`debugPrint`; show hex alongside decoded).
-- `printDecoded(const Snapshot&)` — human-readable status/fault/config fields.
-- `printAdc(const Snapshot&)` — labelled ADC values with units + in-range checks
-  (reuse the `printMv`-style helper from `bq25798-telemetry`).
-- `printCsvLine(const Snapshot&)` — one CSV row (timestamp + key numeric fields +
-  fault bitmasks) for logging while reproducing the fault.
-- `trackChanges(prev, cur)` — diff latched flags/fault bits; return what's new.
-- `runHeuristics(const Snapshot&, const History&)` — the diagnostic checks below.
-- `printFaultEvent(...)` — the event block (time, active faults, new flags, V/I/TS
-  values, top-3 likely causes).
-- `printSummary(...)` — concise, de-duplicated periodic summary (suppress identical
-  consecutive messages).
+### Banner / docs (UPDATE existing wording)
+- Banner RESTORE branch: change "resetting charger to POR defaults, then idle" →
+  "RESTORE — REG_RST the charger, then GAID cold-reset the TPS25751 so it re-reads
+  EEPROM and re-applies the charger config; then idle." Add the **VBUS-drop / Teensy
+  brown-out caveat** line.
+- `@section notes` / `@section troubleshooting`: update the `RESTORE_CHARGER_DEFAULTS`
+  lines to mention the GAID host reset + EEPROM reconfig (currently they say only
+  "REG_RST"). Update the `RESTORE_CHARGER_DEFAULTS` gate doc comment likewise.
+- `examples/README.md` row: mention "REG_RST + TPS25751 GAID (re-applies config from
+  EEPROM)".
 
-#### Heuristic checks (`runHeuristics`) — implement spec items 1–12
-1. **STAT correlation:** active fault bits → "STAT blink explained by active fault
-   bits."; else latched flags present → "may be intermittent; inspect latched
-   flags/time correlation."; else → "not explained by digital fault registers;
-   inspect STAT LED circuit/pullup/sink/noise."
-2. **Input path:** compare VBUS vs VAC1/VAC2; flag VBUS < expected PD when 20 V
-   contract expected; flag VBUS/VAC OVP; flag IINDPM/VINDPM regulation; detect
-   adapter/PD collapse (VBUS droops while IBUS rises / converter cycles — over
-   history).
-3. **ILIM_HIZ:** report EN_EXTILIM; note actual ILIM = min(pin, IINDPM) when
-   external ILIM enabled; warn ILIM_HIZ near HiZ threshold can stop switching;
-   print explicit "measure ILIM_HIZ with DMM/scope" instruction (MCU can't read it).
-4. **Charge-enable:** report EN_CHG; remind CE pin is active-low and must not
-   float; if disabled-but-expected, attribute to register/CE/TS/fault/WD/termination.
-5. **TS/thermistor:** decode TS status (cold/cool/warm/hot/suspend); if out of
-   charge range say charging suspended by temperature; remind to verify REGN→TS→GND
-   NTC divider physically.
-6. **Battery / 4S:** check VBAT vs 11.6–16.8 V; warn if VREG ≠ 16.8 V; warn if
-   VSYSMIN ≠ 12.0 V; warn VBAT above regulation / below UV; report charge phase
-   (precharge/fast/taper/topoff/termination/disabled) from chgStat enum.
-7. **SYS rail:** report VSYS; compare to VSYSMIN; flag VSYS short/OVP; if VSYS
-   repeatedly dips near VSYSMIN with faults → suggest pulsed/LED load, SYS caps,
-   supplement behavior, input power limit.
-8. **Overcurrent:** decode IBUS_OCP/IBAT_OCP/CONV_OCP/IBAT-reg; correlate with
-   IBUS/IBAT ADC; on CONV_OCP/whine print hardware checklist (inductor sat current,
-   SW1/SW2 layout/ringing, PMID/SYS/BAT cap placement, shorted/excess load, LED
-   transients, wrong ICHG/IINDPM config).
-9. **Poor-source pattern (over history):** VBUS appears/disappears, VBUS droops
-   below VINDPM, IBUS spikes/falls, repeating flags → print "possible poor-source /
-   PD-contract / input-current-limit cycling."
-10. **Watchdog / reset:** detect WD expiration (status/flag); detect config reverting
-    to defaults across samples; warn if config appears to reset during the fault cycle.
-11. **Event history:** rolling last-N snapshots; on new fault/flag print a fault-event
-    block (time, active faults, new flags, VBUS/VAC/VBAT/VSYS/IBUS/IBAT/TS, top-3
-    likely causes).
-12. **Summary:** every sweep print "No active faults" or "Active faults: ..." plus a
-    "Likely cause category: input path / battery path / temperature / overcurrent /
-    system rail / configuration / unknown"; suppress identical repeats.
+### Out of scope (this task)
+- "Restore exact pre-example values" (needs NVM — not chosen).
+- Any change to `applySafeDiagnosticSetup()`, the heuristics, or `readSnapshot()`.
+- A separate host-reset gate (folded into the one `RESTORE_CHARGER_DEFAULTS` mode).
+- Polling `readBootFlags()`/`patchConfigSource()` for recovery — the simpler
+  `readPartInfo()` liveness poll is used instead (also proves I2Cc proxying works).
 
-`loop()` = `readSnapshot()` → (verbose: raw + decoded + ADC blocks / CSV: one line)
-→ `trackChanges()` → `runHeuristics()` → `printFaultEvent()` if new → `printSummary()`
-→ store snapshot in history.
+---
 
-### Error handling
-Every read returns `std::unique_ptr<T>`; null = I2C/4CC failure or validation
-failure. Mark that field invalid in the `Snapshot` and print `[read failed]`; never
-dereference a null pointer. Reuse the `readAndPrint` template idiom from
-`bq25798-status/src/main.cpp` for verbose dumps.
+## Prior-work reference (already implemented — context only, do not redo)
+
+The setup-write feature lives in `examples/bq25798-fault-investigator/src/main.cpp`:
+- Gate `#define ENABLE_SAFE_DIAGNOSTIC_SETUP 0`; targets `kSetupChargeCurrentMa`
+  (200 mA), `kSetupInputCurrentMa` (1000 mA); VREG/VSYSMIN reuse
+  `kVregExpectedMv`/`kVsysminExpectedMv`.
+- `applySafeDiagnosticSetup()` confirm-or-set helpers (`confirmOrSetU16` /
+  `confirmOrSetBool`) writing ADC-on, VREG, VSYSMIN, ICHG, IINDPM, OTG-off,
+  backup-off via the L3 setters + `updateRegister<>` RMW, each paced
+  `delay(kReadSpacingMs)`.
+- Three-way-ready banner and the README row already mention the setup mode.
 
 ## Verification
 
-1. **Compiles (primary acceptance criterion):**
+1. **Compiles — restore-mode build matrix** (primary acceptance criterion):
    ```bash
-   cd /Users/frae/.../TPS25751-i2ct-test/lib/TPS25751
+   cd /Users/frae/Development/hardware/components/PJRC/examples/TPS25751-i2ct-test/lib/TPS25751
    pio run -e example-bq25798-fault-investigator
    ```
-   Build both `OUTPUT_CSV` settings to confirm both paths compile.
-2. **Static review against spec acceptance criteria** (read-only; identifies REG20/21
-   active fault bits; prints ADC for VBUS/VAC1/VAC2/VBAT/VSYS/IBUS/IBAT/TS; emits the
-   listed likely-cause warnings).
-3. **Hardware (if available):** `pio run -e example-bq25798-fault-investigator -t upload`
-   then `pio device monitor` @115200 — confirm comm check passes, a full sweep prints,
-   and heuristics fire (induce a fault, e.g. TS out of range, to see the event block
-   and STAT-correlation message). Note the ~3 min full-sweep cadence from strict 5 s
-   pacing.
-4. **Confirm registration:** new env appears in `pio project config`; README table row
-   present and accurate.
-
-## Out of scope
-- Setup/configuration writes (read-only by decision).
-- Adding typed setters to `BQ25798::Device` (would belong in the library, not an example).
-- Sub-5 s polling / faster sweep (TRM-compliant strict pacing chosen).
+   Build `RESTORE_CHARGER_DEFAULTS` ∈ {0,1} × `ENABLE_SAFE_DIAGNOSTIC_SETUP` ∈ {0,1}
+   (OUTPUT_CSV=0):
+   - 0/0 default read-only — links no write/reset code.
+   - 0/1 setup-write — unchanged, still builds.
+   - 1/0 restore-only — `restoreChargerDefaults()` compiles, loop idles.
+   - 1/1 — compiles, emits the precedence `#warning`, restore wins.
+   Restore all three defines to 0 afterward.
+2. **Static review:** with `RESTORE_CHARGER_DEFAULTS=0` no reset/`REG_RST`/GAID code
+   is linked; with `=1`, `setup()` runs REG_RST → GAID → poll-recovery in order and
+   the loop performs no sweeps/writes; `Timeout` from GAID is treated as success;
+   banner states "RESTORE" mode and the VBUS/brown-out caveat.
+3. **Hardware (if available):** flash with `RESTORE_CHARGER_DEFAULTS=1`; confirm the
+   comm check passes, REG_RST reports OK, GAID prints "issued (controller
+   resetting)", the recovery loop reports the host coming back (or a clear timeout),
+   the post-recovery VREG read-back shows the EEPROM-applied value, and the sketch
+   then idles:
+   ```bash
+   pio run -e example-bq25798-fault-investigator -t upload && pio device monitor
+   ```
+   Note: GAID drops the PD contract — expect a VBUS glitch; ensure the Teensy is not
+   browned out by it.
+4. **README:** the fault-investigator row mentions the REG_RST + GAID restore.

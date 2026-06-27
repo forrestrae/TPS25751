@@ -36,9 +36,22 @@
  *   with a likely-cause category.
  *
  * @section notes Important Notes
- * - READ-ONLY: this sketch never writes charger configuration. The BQ25798 typed
- *   driver is decode-only; configuration changes would require typed setters not
- *   yet in the driver, so a "safe setup" mode is intentionally out of scope.
+ * - ALWAYS-ON ADC: the sketch always enables the BQ25798 ADC at startup (a single
+ *   ADC_CONTROL write, in every mode except restore) so the telemetry channels read
+ *   live data. This is the only write performed in the read-only default build.
+ * - READ-ONLY BY DEFAULT (aside from the ADC enable above): this sketch never
+ *   writes charger *configuration* unless the compile-time gate
+ *   ENABLE_SAFE_DIAGNOSTIC_SETUP is set to 1. When enabled,
+ *   setup() applies a conservative, one-time diagnostic configuration (ADC on,
+ *   VREG 16.8 V, VSYSMIN 12.0 V, low ICHG, conservative IINDPM, OTG & backup off)
+ *   via the BQ25798 typed write API; loop() remains read-only thereafter.
+ * - UNDO: those writes are not self-reverting. Build with
+ *   RESTORE_CHARGER_DEFAULTS=1 to restore the system in setup(): REG_RST the
+ *   BQ25798 to a clean slate, then GAID cold-reset the TPS25751 so it re-reads its
+ *   EEPROM and re-applies the charger's real configuration (on this board the
+ *   TPS25751 is the BQ25798's controller, so its EEPROM config — not the chip
+ *   defaults — is the true original state); then poll until the host reboots and
+ *   idle. CAUTION: GAID drops the PD contract (VBUS may glitch).
  * - PACING: every register read is a 4CC I2Cr command-task. The TRM mandates
  *   >=5 s between consecutive same-type commands, so a 5.1 s delay follows every
  *   read. A full sweep therefore takes a few MINUTES, not 5 s. We rely on the
@@ -48,8 +61,12 @@
  * @section troubleshooting Troubleshooting
  * - "device not ACKing": check the BQ25798 is present @0x6B on I2Cc and bus
  *   pull-ups; confirm the TPS25751 host came up.
- * - All ADC channels read 0: the ADC must be enabled (ADC_CONTROL ENADC=1) in
- *   hardware; this read-only sketch does not enable it.
+ * - All ADC channels read 0: the ADC must be enabled (ADC_CONTROL ENADC=1). The
+ *   sketch enables it automatically at startup in every mode except restore; if
+ *   channels still read 0, the enable write likely failed — check comms.
+ * - Charger stuck with the safe-setup values after diagnosing: build with
+ *   RESTORE_CHARGER_DEFAULTS=1 once to REG_RST back to POR defaults, then re-flash
+ *   your production firmware.
  *
  * Wiring: BQ25798 on TPS25751 I2Cc bus (7-bit address 0x6B).
  */
@@ -64,6 +81,43 @@
 
 #define OUTPUT_CSV     0    ///< 0 = verbose annotated output, 1 = compact CSV line
 #define HISTORY_DEPTH  4    ///< rolling snapshots kept for change/event detection
+
+/// Read the VAC1 (REG37) and VAC2 (REG39) ADC channels. On this board VAC1/VAC2
+/// are tied to VBUS (the ACFET/RBFET input paths are unused), so these reads are
+/// redundant with VBUS and are disabled by default. Set to 1 to re-enable them
+/// (and their summary/CSV/heuristic output) for a future board that uses VAC.
+#define READ_VAC1_VAC2 0
+
+/// 0 = read-only (default, non-destructive); 1 = apply a conservative safe
+/// diagnostic configuration once in setup() (spec section 3). loop() is always
+/// read-only regardless of this gate.
+#define ENABLE_SAFE_DIAGNOSTIC_SETUP 0
+
+/// 1 = restore the system in setup(), then idle. Use this to UNDO the
+/// ENABLE_SAFE_DIAGNOSTIC_SETUP writes when you are finished diagnosing. The
+/// sequence is: (1) REG_RST the BQ25798 to a clean slate, then (2) GAID cold-reset
+/// the TPS25751 so it re-reads its EEPROM and re-applies the charger's real
+/// configuration (on this board the TPS25751 is the BQ25798's controller, so its
+/// EEPROM config — not the BQ25798 chip defaults — is the true "original" state),
+/// then (3) poll until the host reboots and the downstream path is alive again.
+/// Takes precedence over ENABLE_SAFE_DIAGNOSTIC_SETUP (the setup writes are
+/// skipped). CAUTION: GAID drops the active PD contract, so VBUS may momentarily
+/// collapse — if the Teensy is powered from a TPS25751-gated rail it could
+/// brown-out/reset too.
+#define RESTORE_CHARGER_DEFAULTS 0
+
+#if RESTORE_CHARGER_DEFAULTS && ENABLE_SAFE_DIAGNOSTIC_SETUP
+#warning "RESTORE_CHARGER_DEFAULTS overrides ENABLE_SAFE_DIAGNOSTIC_SETUP; setup writes are skipped."
+#endif
+
+// Restore-mode timing — only used when RESTORE_CHARGER_DEFAULTS=1.
+static const uint32_t kGaidSettleMs          = 2000;   ///< settle before polling for host reboot
+static const uint32_t kGaidRecoveryTimeoutMs = 15000;  ///< max wait for the host to come back
+
+// Conservative setup targets — only written when ENABLE_SAFE_DIAGNOSTIC_SETUP=1.
+// VREG/VSYSMIN reuse the board expectations below (kVregExpectedMv / kVsysminExpectedMv).
+static const uint16_t kSetupChargeCurrentMa = 200;   ///< low ICHG (spec: 100-250 mA)
+static const uint16_t kSetupInputCurrentMa  = 1000;  ///< conservative IINDPM
 
 // Board expectations (from the spec's Assumptions section).
 static const uint16_t kVregExpectedMv    = 16800;  ///< 4S Li-ion full-charge target
@@ -357,8 +411,10 @@ static void readSnapshot(Snapshot& s, bool verbose)
 
     // --- ADC results ---
     { auto r = bq.readVbusAdc(false); if (r) { s.vbusValid = true; s.vbusMv = r->millivolts(); } dumpReg(F("VBUS ADC (REG35h)"), r, verbose); delay(kReadSpacingMs); }
+#if READ_VAC1_VAC2
     { auto r = bq.readVac1Adc(false); if (r) { s.vac1Valid = true; s.vac1Mv = r->millivolts(); } dumpReg(F("VAC1 ADC (REG37h)"), r, verbose); delay(kReadSpacingMs); }
     { auto r = bq.readVac2Adc(false); if (r) { s.vac2Valid = true; s.vac2Mv = r->millivolts(); } dumpReg(F("VAC2 ADC (REG39h)"), r, verbose); delay(kReadSpacingMs); }
+#endif
     { auto r = bq.readVbatAdc(false); if (r) { s.vbatValid = true; s.vbatMv = r->millivolts(); } dumpReg(F("VBAT ADC (REG3Bh)"), r, verbose); delay(kReadSpacingMs); }
     { auto r = bq.readVsysAdc(false); if (r) { s.vsysValid = true; s.vsysMv = r->millivolts(); } dumpReg(F("VSYS ADC (REG3Dh)"), r, verbose); delay(kReadSpacingMs); }
     { auto r = bq.readIbusAdc(false); if (r) { s.ibusValid = true; s.ibusMa = r->milliamps(); } dumpReg(F("IBUS ADC (REG31h)"), r, verbose); delay(kReadSpacingMs); }
@@ -404,8 +460,10 @@ static void printAdcSummary(const Snapshot& s)
         Serial.println(F("  ADC_CONTROL: ADC DISABLED (ENADC=0) -> readings below are not live"));
     }
     if (s.vbusValid) printMv(F("  VBUS : "), s.vbusMv, 30000); else Serial.println(F("  VBUS : [read failed]"));
+#if READ_VAC1_VAC2
     if (s.vac1Valid) printMv(F("  VAC1 : "), s.vac1Mv, 30000); else Serial.println(F("  VAC1 : [read failed]"));
     if (s.vac2Valid) printMv(F("  VAC2 : "), s.vac2Mv, 30000); else Serial.println(F("  VAC2 : [read failed]"));
+#endif
     if (s.vbatValid) printMv(F("  VBAT : "), s.vbatMv, 20000); else Serial.println(F("  VBAT : [read failed]"));
     if (s.vsysValid) printMv(F("  VSYS : "), s.vsysMv, 20000); else Serial.println(F("  VSYS : [read failed]"));
     if (s.ibusValid) { Serial.print(F("  IBUS : ")); Serial.print(s.ibusMa); Serial.println(F(" mA")); } else Serial.println(F("  IBUS : [read failed]"));
@@ -414,12 +472,17 @@ static void printAdcSummary(const Snapshot& s)
     if (s.tdieValid) { Serial.print(F("  TDIE : ")); Serial.print(s.tdieC, 1); Serial.println(F(" degC")); } else Serial.println(F("  TDIE : [read failed]"));
 }
 
+#if OUTPUT_CSV
 // ===========================================================================
 // printCsvLine — compact one-line row for logging while reproducing the fault
 // ===========================================================================
 static void printCsvHeader()
 {
-    Serial.println(F("CSV,t_ms,commsOk,vbusMv,vac1Mv,vac2Mv,vbatMv,vsysMv,ibusMa,ibatMa,tsPct,tdieC,"
+    Serial.print(F("CSV,t_ms,commsOk,vbusMv,"));
+#if READ_VAC1_VAC2
+    Serial.print(F("vac1Mv,vac2Mv,"));
+#endif
+    Serial.println(F("vbatMv,vsysMv,ibusMa,ibatMa,tsPct,tdieC,"
                      "activeFault,latchedFlag,chgStat,vbusStat,enChg,enHiz,vregMv,ichgMa,vsysminMv,iindpmMa,vindpmMv,wdExpired"));
 }
 
@@ -429,8 +492,10 @@ static void printCsvLine(const Snapshot& s)
     Serial.print(s.tMs);          Serial.print(',');
     Serial.print(s.commsOk);      Serial.print(',');
     Serial.print(s.vbusValid ? s.vbusMv : -1); Serial.print(',');
+#if READ_VAC1_VAC2
     Serial.print(s.vac1Valid ? s.vac1Mv : -1); Serial.print(',');
     Serial.print(s.vac2Valid ? s.vac2Mv : -1); Serial.print(',');
+#endif
     Serial.print(s.vbatValid ? s.vbatMv : -1); Serial.print(',');
     Serial.print(s.vsysValid ? s.vsysMv : -1); Serial.print(',');
     if (s.ibusValid) Serial.print(s.ibusMa); else Serial.print(F("NA")); Serial.print(',');
@@ -451,6 +516,7 @@ static void printCsvLine(const Snapshot& s)
     Serial.print(s.wdExpired);
     Serial.println();
 }
+#endif
 
 // ===========================================================================
 // trackChanges — report latched flags newly set since the previous sample
@@ -601,6 +667,7 @@ static void runHeuristics(const Snapshot& s)
     }
 
     // 2. Input-path checks
+#if READ_VAC1_VAC2
     if (s.vbusValid && s.vac1Valid && s.vac2Valid) {
         // Without an external ACFET/RBFET path VAC should track VBUS.
         const int32_t dv1 = (int32_t)s.vac1Mv - s.vbusMv;
@@ -609,6 +676,7 @@ static void runHeuristics(const Snapshot& s)
             Serial.println(F("  [INPUT] VAC1/VAC2 do not track VBUS (>1.5 V apart) — expected to track if no external ACFET/RBFET path."));
         }
     }
+#endif
     if (s.vbusValid && s.vbusPresent && s.vbusMv < kVbusPdMinOkMv) {
         Serial.print(F("  [INPUT] VBUS ")); Serial.print(s.vbusMv);
         Serial.print(F(" mV is below expected PD (~")); Serial.print(kVbusPdExpectedMv);
@@ -716,8 +784,10 @@ static void printFaultEvent(const Snapshot& s)
 
     Serial.print(F("  Rails: "));
     if (s.vbusValid) { Serial.print(F("VBUS=")); Serial.print(s.vbusMv); Serial.print(F("mV ")); }
+#if READ_VAC1_VAC2
     if (s.vac1Valid) { Serial.print(F("VAC1=")); Serial.print(s.vac1Mv); Serial.print(F("mV ")); }
     if (s.vac2Valid) { Serial.print(F("VAC2=")); Serial.print(s.vac2Mv); Serial.print(F("mV ")); }
+#endif
     if (s.vbatValid) { Serial.print(F("VBAT=")); Serial.print(s.vbatMv); Serial.print(F("mV ")); }
     if (s.vsysValid) { Serial.print(F("VSYS=")); Serial.print(s.vsysMv); Serial.print(F("mV ")); }
     if (s.ibusValid) { Serial.print(F("IBUS=")); Serial.print(s.ibusMa); Serial.print(F("mA ")); }
@@ -786,6 +856,246 @@ static void pushHistory(const Snapshot& s)
 }
 
 // ===========================================================================
+// Optional safe diagnostic setup (spec section 3)
+//
+// Compiled only when ENABLE_SAFE_DIAGNOSTIC_SETUP=1 so the default read-only
+// build links in no write code. Each helper follows a "confirm-or-set" pattern:
+// read the current value, skip the write when it already matches the target
+// (rounded to the field LSB), otherwise write and read back to verify. Every I2C
+// transaction is paced kReadSpacingMs apart per the TRM same-type spacing rule.
+// ===========================================================================
+#if ENABLE_SAFE_DIAGNOSTIC_SETUP
+
+// Confirm-or-set a uint16_t engineering-unit setting (mV/mA). readCur() returns
+// the current value or -1 on read failure; writeVal(target) returns false on
+// write failure. Returns true on success or when already set.
+template <typename ReadFn, typename WriteFn>
+static bool confirmOrSetU16(const __FlashStringHelper* label,
+                            uint16_t target, uint16_t lsb,
+                            const __FlashStringHelper* unit,
+                            ReadFn readCur, WriteFn writeVal)
+{
+    const uint16_t want = static_cast<uint16_t>((target / lsb) * lsb);
+
+    Serial.print(F("  ")); Serial.print(label); Serial.print(F(": "));
+    int cur = readCur();
+    delay(kReadSpacingMs);
+    if (cur < 0) {
+        Serial.println(F("[read failed]"));
+        return false;
+    }
+    if (static_cast<uint16_t>(cur) == want) {
+        Serial.print(want); Serial.print(unit); Serial.println(F("  [already set]"));
+        return true;
+    }
+
+    Serial.print(cur); Serial.print(unit);
+    Serial.print(F(" -> ")); Serial.print(want); Serial.print(unit);
+    if (!writeVal(want)) {
+        Serial.println(F("  WRITE FAILED"));
+        return false;
+    }
+    delay(kReadSpacingMs);
+    int back = readCur();
+    delay(kReadSpacingMs);
+    const bool ok = (back >= 0 && static_cast<uint16_t>(back) == want);
+    Serial.println(ok ? F("  PASS") : F("  FAIL (verify)"));
+    return ok;
+}
+
+// Confirm-or-set a boolean setting. readCur() returns 0/1 or -1 on read failure;
+// writeVal(target) returns false on write failure.
+template <typename ReadFn, typename WriteFn>
+static bool confirmOrSetBool(const __FlashStringHelper* label, bool target,
+                             ReadFn readCur, WriteFn writeVal)
+{
+    Serial.print(F("  ")); Serial.print(label); Serial.print(F(": "));
+    int cur = readCur();
+    delay(kReadSpacingMs);
+    if (cur < 0) {
+        Serial.println(F("[read failed]"));
+        return false;
+    }
+    if ((cur != 0) == target) {
+        Serial.print(target ? F("on") : F("off")); Serial.println(F("  [already set]"));
+        return true;
+    }
+
+    Serial.print(cur ? F("on") : F("off"));
+    Serial.print(F(" -> ")); Serial.print(target ? F("on") : F("off"));
+    if (!writeVal(target)) {
+        Serial.println(F("  WRITE FAILED"));
+        return false;
+    }
+    delay(kReadSpacingMs);
+    int back = readCur();
+    delay(kReadSpacingMs);
+    const bool ok = (back >= 0 && ((back != 0) == target));
+    Serial.println(ok ? F("  PASS") : F("  FAIL (verify)"));
+    return ok;
+}
+
+// Apply the conservative diagnostic configuration once. Never enables OTG or
+// backup mode (spec); loop() stays read-only after this returns.
+static void applySafeDiagnosticSetup()
+{
+    Serial.println();
+    Serial.println(F("Applying SAFE diagnostic setup (one-time; loop stays read-only)..."));
+
+    // 1. ADC on — handled unconditionally by ensureAdcEnabled() in setup() before
+    //    this runs (the ADC is enabled in every mode except restore), so it is not
+    //    repeated here.
+
+    // 2. VREG = 16.8 V (4S full-charge target). 10 mV/LSB.
+    confirmOrSetU16(F("VREG"), kVregExpectedMv, 10, F(" mV"),
+        []() -> int { auto r = bq.readChargeVoltageLimit(false);
+                      return r ? static_cast<int>(r->millivolts()) : -1; },
+        [](uint16_t mv) { return bq.setChargeVoltageLimit(mv); });
+
+    // 3. VSYSMIN = 12.0 V. 250 mV/LSB. No L3 setter -> generic RMW.
+    confirmOrSetU16(F("VSYSMIN"), kVsysminExpectedMv, 250, F(" mV"),
+        []() -> int { auto r = bq.readMinimalSystemVoltage(false);
+                      return r ? static_cast<int>(r->millivolts()) : -1; },
+        [](uint16_t mv) {
+            return bq.updateRegister<BQ25798::MinimalSystemVoltage>(
+                [mv](BQ25798::MinimalSystemVoltage& r) { r.setMillivolts(mv); });
+        });
+
+    // 4. Low charge current. 10 mA/LSB.
+    confirmOrSetU16(F("ICHG"), kSetupChargeCurrentMa, 10, F(" mA"),
+        []() -> int { auto r = bq.readChargeCurrentLimit(false);
+                      return r ? static_cast<int>(r->milliamps()) : -1; },
+        [](uint16_t ma) { return bq.setChargeCurrentLimit(ma); });
+
+    // 5. Conservative input current limit. 10 mA/LSB.
+    confirmOrSetU16(F("IINDPM"), kSetupInputCurrentMa, 10, F(" mA"),
+        []() -> int { auto r = bq.readInputCurrentLimit(false);
+                      return r ? static_cast<int>(r->milliamps()) : -1; },
+        [](uint16_t ma) { return bq.setInputCurrentLimit(ma); });
+
+    // 6. Ensure OTG and backup mode are OFF (spec: do not enable them).
+    confirmOrSetBool(F("OTG (force off)"), false,
+        []() -> int { auto r = bq.readChargerControl3(false);
+                      return r ? (r->enOtg() ? 1 : 0) : -1; },
+        [](bool on) { return bq.enableOTG(on); });
+
+    confirmOrSetBool(F("Backup (force off)"), false,
+        []() -> int { auto r = bq.readChargerControl0(false);
+                      return r ? (r->enBackup() ? 1 : 0) : -1; },
+        [](bool on) {
+            return bq.updateRegister<BQ25798::ChargerControl0>(
+                [on](BQ25798::ChargerControl0& r) { r.setEnBackup(on); });
+        });
+
+    Serial.println(F("Safe diagnostic setup complete."));
+}
+
+#endif  // ENABLE_SAFE_DIAGNOSTIC_SETUP
+
+// ===========================================================================
+// Restore the system (undo ENABLE_SAFE_DIAGNOSTIC_SETUP)
+//
+// Compiled only when RESTORE_CHARGER_DEFAULTS=1. Runs an ordered sequence:
+//   1. BQ25798 REG_RST (REG09_TERMINATION_CONTROL bit 6) — clean slate, done first
+//      while the host is still up (the BQ is reached THROUGH the TPS25751 proxy).
+//   2. TPS25751 GAID cold reset — reboots the controller so it re-reads its EEPROM
+//      and re-applies the BQ25798 configuration (the board's true "original" state).
+//   3. Poll until comms return — the BQ is unreachable until the host finishes
+//      booting; readPartInfo() succeeding proves the TPS is back and proxying.
+// The sketch idles afterward; loop() runs no diagnostic sweeps.
+// ===========================================================================
+#if RESTORE_CHARGER_DEFAULTS
+
+static void restoreChargerDefaults()
+{
+    Serial.println();
+    Serial.println(F("[1/3] BQ25798 REG_RST (REG09 bit6) — clean slate..."));
+
+    // REG_RST is self-clearing; the read-modify-write reads REG09, sets bit6, and
+    // writes it back — the controller then resets ALL registers to default.
+    const bool ok = bq.updateRegister<BQ25798::TerminationControl>(
+        [](BQ25798::TerminationControl& r) { r.setRegRst(true); });
+    Serial.print(F("  REG_RST write: "));
+    Serial.println(ok ? F("OK") : F("FAILED"));
+    delay(kReadSpacingMs);
+
+    // Evidence read-back (post-reset state). Not a strict pass/fail, but ADC_EN
+    // defaults to off, so it is a useful confirmation that the reset took effect.
+    {
+        auto adc = bq.readAdcControl(/*validate=*/false);
+        Serial.print(F("  ADC_EN now: "));
+        if (adc) Serial.println(adc->adcEnabled() ? F("on") : F("off (expected after reset)"));
+        else     Serial.println(F("[read failed]"));
+        delay(kReadSpacingMs);
+    }
+
+    // 2. Cold-reset the host so it re-reads EEPROM and re-applies the charger config.
+    Serial.println(F("[2/3] Cold-resetting TPS25751 (GAID) so it re-reads EEPROM..."));
+    const TPS25751TaskResult r = pd.executeCommand(
+        TPS25751FourCC::of("GAID"), nullptr, 0, nullptr, 0, /*timeoutMs=*/500);
+    // The controller resets mid-command, so the COMMAND-clear handshake often does
+    // not complete: Timeout is EXPECTED here and is not a failure.
+    const bool issued = (r.status == TPS25751TaskStatus::Success ||
+                         r.status == TPS25751TaskStatus::Timeout);
+    Serial.print(F("  GAID: "));
+    Serial.println(issued ? F("issued (controller resetting)")
+                          : F("REJECTED/ERROR — controller did not accept GAID"));
+
+    // 3. Wait for the host to reboot, then poll until the downstream path is alive.
+    Serial.println(F("[3/3] Waiting for TPS25751 to reboot and re-apply config..."));
+    delay(kGaidSettleMs);
+    bool recovered = false;
+    const uint32_t deadline = millis() + kGaidRecoveryTimeoutMs;
+    while ((int32_t)(millis() - deadline) < 0) {
+        if (bq.readPartInfo(/*validate=*/false)) { recovered = true; break; }
+        delay(kReadSpacingMs);
+    }
+
+    if (recovered) {
+        Serial.println(F("  Host back — BQ25798 reachable again over I2Cc."));
+        auto vreg = bq.readChargeVoltageLimit(/*validate=*/false);
+        Serial.print(F("  VREG now (EEPROM-applied config): "));
+        if (vreg) { Serial.print(vreg->millivolts()); Serial.println(F(" mV")); }
+        else      Serial.println(F("[read failed]"));
+        delay(kReadSpacingMs);
+        Serial.println(F("System restored: BQ25798 reset and TPS25751 cold-reset;"));
+        Serial.println(F("the controller re-applied the charger config from EEPROM."));
+    } else {
+        Serial.println(F("  TIMED OUT waiting for the host to come back."));
+        Serial.println(F("  Check: TPS25751 powered, EEPROM present, I2Ct pull-ups."));
+    }
+}
+
+#endif  // RESTORE_CHARGER_DEFAULTS
+
+// ===========================================================================
+// Always-on ADC enable
+//
+// The BQ25798 ADC must be on or every *_ADC channel reads 0. This sketch always
+// enables it at startup — a single write, performed even in the otherwise
+// read-only default build — so the telemetry is meaningful regardless of
+// ENABLE_SAFE_DIAGNOSTIC_SETUP. Not compiled in restore mode (which resets the
+// charger anyway).
+// ===========================================================================
+#if !RESTORE_CHARGER_DEFAULTS
+static void ensureAdcEnabled()
+{
+    Serial.println(F("Enabling BQ25798 ADC (ADC_EN) at 15-bit resolution for telemetry..."));
+    // Single read-modify-write: set ADC_EN and ADC_SAMPLE=15-bit together so the
+    // telemetry channels come up at the highest effective resolution (the chip's
+    // POR default for ADC_SAMPLE is 12-bit). Preserves all other ADC_CONTROL bits.
+    const bool ok = bq.updateRegister<BQ25798::AdcControl>(
+        [](BQ25798::AdcControl& r) {
+            r.setAdcEnabled(true);
+            r.setAdcSampleResolution(BQ25798::AdcControl::SampleResolution::Bits15);
+        });
+    Serial.print(F("  ADC enable (15-bit): "));
+    Serial.println(ok ? F("OK") : F("FAILED (telemetry channels may read 0)"));
+    delay(kReadSpacingMs);
+}
+#endif
+
+// ===========================================================================
 // setup / loop
 // ===========================================================================
 void setup()
@@ -815,9 +1125,27 @@ void setup()
 #else
     Serial.println(F(" Output mode: VERBOSE (interactive)"));
 #endif
-    Serial.println(F(" Mode: READ-ONLY (no charger configuration is written)"));
-    Serial.println(F("   Note: configuration changes are out of scope; they would"));
-    Serial.println(F("   require typed setters not yet in the BQ25798 driver."));
+#if RESTORE_CHARGER_DEFAULTS
+    Serial.println(F(" Mode: RESTORE — REG_RST the charger, then GAID cold-reset the"));
+    Serial.println(F("   TPS25751 so it re-reads EEPROM and re-applies the charger"));
+    Serial.println(F("   config; then idle. Undoes ENABLE_SAFE_DIAGNOSTIC_SETUP writes."));
+    Serial.println(F("   CAUTION: GAID drops the PD contract — VBUS may glitch; a"));
+    Serial.println(F("   TPS25751-gated Teensy rail could brown-out/reset."));
+#elif ENABLE_SAFE_DIAGNOSTIC_SETUP
+    Serial.println(F(" Mode: SAFE SETUP-WRITE — applying conservative config once:"));
+    Serial.println(F("   ADC on, VREG 16.8 V, VSYSMIN 12.0 V, ICHG 200 mA,"));
+    Serial.println(F("   IINDPM 1000 mA, OTG & backup off. loop() is read-only after."));
+    Serial.println(F("   (one-time setup is paced; it may take up to ~90 s)"));
+    Serial.println(F("   To undo later: build with RESTORE_CHARGER_DEFAULTS=1."));
+#else
+    Serial.println(F(" Mode: READ-ONLY (only the ADC is enabled; no charger"));
+    Serial.println(F("   configuration is written)"));
+    Serial.println(F("   Build with ENABLE_SAFE_DIAGNOSTIC_SETUP=1 to apply a"));
+    Serial.println(F("   conservative safe config once at startup."));
+#endif
+#if !RESTORE_CHARGER_DEFAULTS
+    Serial.println(F(" ADC: enabled at startup so telemetry channels read live data."));
+#endif
     Serial.println(F(" Pacing: 5.1 s per read (TRM >=5 s between same-type I2Cr)."));
     Serial.println(F("   A full sweep takes a few MINUTES; latched FLAG registers"));
     Serial.println(F("   capture transient faults missed between slow samples."));
@@ -837,6 +1165,17 @@ void setup()
     }
     delay(kReadSpacingMs);
 
+#if RESTORE_CHARGER_DEFAULTS
+    restoreChargerDefaults();     // one-time reset; sketch idles afterward
+    Serial.println(F("Restore complete — idling (no diagnostic sweeps)."));
+    return;
+#else
+    ensureAdcEnabled();           // always-on ADC (a write, even in read-only mode)
+#if ENABLE_SAFE_DIAGNOSTIC_SETUP
+    applySafeDiagnosticSetup();   // one-time; loop() remains read-only
+#endif
+#endif
+
 #if OUTPUT_CSV
     printCsvHeader();
 #endif
@@ -846,6 +1185,11 @@ void setup()
 
 void loop()
 {
+#if RESTORE_CHARGER_DEFAULTS
+    delay(1000);    // restore-only build: charger was reset in setup(); nothing to sweep
+    return;
+#endif
+
     Snapshot cur;
 
 #if OUTPUT_CSV
@@ -890,4 +1234,5 @@ void loop()
     gHavePrev = true;
 
     // Loop pacing is provided by the per-read 5.1 s delays inside readSnapshot.
+    delay(20000);
 }

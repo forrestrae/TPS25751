@@ -108,9 +108,8 @@ changes — new register classes must follow the established architecture.
 
 ## License
 
-Copyright (c) 2025 Forrest Rae
+Copyright (c) 2025-2026 Forrest Rae
 
-Licensed under the **Polyform Noncommercial License 1.0.0**. You may use, copy,
-modify, and redistribute this software for non-commercial purposes. Commercial use
-requires a separate written agreement with the author. See [`LICENSE`](LICENSE) for
-full terms.
+Licensed under the **Apache License, Version 2.0**. You may use, copy, modify, and
+redistribute this software, including for commercial purposes, subject to the terms
+of the license. See [`LICENSE`](LICENSE) for full terms.

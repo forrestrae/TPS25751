@@ -22,7 +22,15 @@ namespace {
 }
 
 TPS25751DownstreamDevice::TPS25751DownstreamDevice(const TPS25751& host, uint8_t deviceAddress)
-    : _host(host), _deviceAddress(static_cast<uint8_t>(deviceAddress & kAddressMask)),
+    : _host(&host), _wire(nullptr), _direct(false),
+      _deviceAddress(static_cast<uint8_t>(deviceAddress & kAddressMask)),
+      _lastI2CrMs(0), _lastI2CwMs(0)
+{
+}
+
+TPS25751DownstreamDevice::TPS25751DownstreamDevice(TwoWire& wire, uint8_t deviceAddress)
+    : _host(nullptr), _wire(&wire), _direct(true),
+      _deviceAddress(static_cast<uint8_t>(deviceAddress & kAddressMask)),
       _lastI2CrMs(0), _lastI2CwMs(0)
 {
 }
@@ -43,6 +51,11 @@ void TPS25751DownstreamDevice::enforceSpacing(uint32_t& lastMs, const char* task
 
 bool TPS25751DownstreamDevice::readRegister(uint8_t devReg, uint8_t* buf, size_t len) const
 {
+    return _direct ? readDirect(devReg, buf, len) : readProxied(devReg, buf, len);
+}
+
+bool TPS25751DownstreamDevice::readProxied(uint8_t devReg, uint8_t* buf, size_t len) const
+{
     if (buf == nullptr || len == 0 || len > kI2CrMaxReadLen) {
         TPS_DEBUG_ERROR(DEBUG_CAT_TASK, "TPS25751DownstreamDevice::readRegister: invalid len=%u", (unsigned)len);
         return false;
@@ -58,7 +71,7 @@ bool TPS25751DownstreamDevice::readRegister(uint8_t devReg, uint8_t* buf, size_t
     };
 
     uint8_t raw[kI2CrMaxReadLen + 1] = {0}; // DATA[0]=return code, DATA[1..]=read bytes
-    TPS25751TaskResult result = _host.executeCommand(
+    TPS25751TaskResult result = _host->executeCommand(
         TPS25751FourCC::of("I2Cr"), in, sizeof(in), raw, sizeof(raw));
 
     if (result.status != TPS25751TaskStatus::Success) {
@@ -77,6 +90,11 @@ bool TPS25751DownstreamDevice::readRegister(uint8_t devReg, uint8_t* buf, size_t
 }
 
 bool TPS25751DownstreamDevice::writeRegister(uint8_t devReg, const uint8_t* data, size_t len) const
+{
+    return _direct ? writeDirect(devReg, data, len) : writeProxied(devReg, data, len);
+}
+
+bool TPS25751DownstreamDevice::writeProxied(uint8_t devReg, const uint8_t* data, size_t len) const
 {
     if (data == nullptr || len == 0 || len > kI2CwMaxPayloadLen) {
         TPS_DEBUG_ERROR(DEBUG_CAT_TASK, "TPS25751DownstreamDevice::writeRegister: invalid len=%u", (unsigned)len);
@@ -101,7 +119,7 @@ bool TPS25751DownstreamDevice::writeRegister(uint8_t devReg, const uint8_t* data
     const size_t inLen = kI2CwHeaderLen + len;
 
     uint8_t raw[1] = {0}; // DATA[0]=task return code (write queued, not necessarily completed)
-    TPS25751TaskResult result = _host.executeCommand(
+    TPS25751TaskResult result = _host->executeCommand(
         TPS25751FourCC::of("I2Cw"), in, inLen, raw, sizeof(raw));
 
     if (result.status != TPS25751TaskStatus::Success) {
@@ -114,5 +132,55 @@ bool TPS25751DownstreamDevice::writeRegister(uint8_t devReg, const uint8_t* data
         return false;
     }
 
+    return true;
+}
+
+bool TPS25751DownstreamDevice::readDirect(uint8_t devReg, uint8_t* buf, size_t len) const
+{
+    if (buf == nullptr || len == 0) {
+        TPS_DEBUG_ERROR(DEBUG_CAT_I2C, "TPS25751DownstreamDevice::readRegister(direct): invalid len=%u", (unsigned)len);
+        return false;
+    }
+
+    // Standard I2C register read: write the register pointer, repeated-start, then
+    // burst-read `len` bytes (the device auto-increments its pointer). No 4CC relay
+    // and no TRM 5 s spacing -- this is the part's own I2C, not the I2Cc proxy.
+    _wire->beginTransmission(_deviceAddress);
+    _wire->write(devReg);
+    const uint8_t txResult = _wire->endTransmission(false); // false = repeated start, no STOP
+    if (txResult != 0) {
+        TPS_DEBUG_WARN(DEBUG_CAT_I2C, "TPS25751DownstreamDevice::readRegister(direct): endTransmission=%u", (unsigned)txResult);
+        return false;
+    }
+
+    const size_t received = _wire->requestFrom(_deviceAddress, static_cast<uint8_t>(len));
+    if (received != len) {
+        TPS_DEBUG_WARN(DEBUG_CAT_I2C, "TPS25751DownstreamDevice::readRegister(direct): requested %u, got %u",
+                        (unsigned)len, (unsigned)received);
+        return false;
+    }
+
+    for (size_t i = 0; i < len; ++i) {
+        buf[i] = static_cast<uint8_t>(_wire->read());
+    }
+    return true;
+}
+
+bool TPS25751DownstreamDevice::writeDirect(uint8_t devReg, const uint8_t* data, size_t len) const
+{
+    if (data == nullptr || len == 0) {
+        TPS_DEBUG_ERROR(DEBUG_CAT_I2C, "TPS25751DownstreamDevice::writeRegister(direct): invalid len=%u", (unsigned)len);
+        return false;
+    }
+
+    // Standard I2C register write: register pointer followed by the payload, STOP.
+    _wire->beginTransmission(_deviceAddress);
+    _wire->write(devReg);
+    _wire->write(data, len);
+    const uint8_t txResult = _wire->endTransmission(true); // true = STOP
+    if (txResult != 0) {
+        TPS_DEBUG_WARN(DEBUG_CAT_I2C, "TPS25751DownstreamDevice::writeRegister(direct): endTransmission=%u", (unsigned)txResult);
+        return false;
+    }
     return true;
 }

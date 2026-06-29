@@ -166,9 +166,13 @@ Serial.println(F("String in flash"));                // Use F() macro
 - **`TPS25751Factory`**: Singleton pattern for global factory access
 - **`TPS25751DownstreamDevice`**: Proxies register access to a device on the
   TPS25751's secondary I2Cc bus (e.g. a BQ25798 charger) via the I2Cr/I2Cw 4CC
-  command-tasks; composes a `TPS25751` host rather than subclassing it
-- **`BQ25798::Device`**: Typed driver for the BQ25798 buck-boost charger on the
-  I2Cc bus; inherits `TPS25751DownstreamDevice` and adds 57 typed
+  command-tasks; composes a `TPS25751` host rather than subclassing it. An alternate
+  `(TwoWire&, addr)` constructor selects a **direct** (non-proxied) transport — plain
+  Arduino-`Wire` register transactions for a part on the MCU's own bus, with none of
+  the proxy constraints (no TRM 5 s spacing, no 63/11-byte caps); see ADR-010
+- **`BQ25798::Device`**: Typed driver for the BQ25798 buck-boost charger, reachable
+  either proxied over the TPS25751 I2Cc bus (`Device(host, addr)`) or **directly** on a
+  `TwoWire` bus (`Device(wire, addr)`); inherits `TPS25751DownstreamDevice` and adds 57 typed
   `read<Register>(bool validate=true)` accessors returning
   `std::unique_ptr<BQ25798::<RegisterClass>>`, plus a typed **write** tier: a generic
   `writeRegister<T>()` (keyed on `T::kAddress`), an `updateRegister<T>()`

@@ -64,12 +64,16 @@
 namespace BQ25798 {
 
 /**
- * @brief BQ25798 charger driver — typed register access over the TPS25751 I2Cc bus
+ * @brief BQ25798 charger driver — typed register access, proxied or direct
  *
- * This class is the BQ25798 analog of TPS25751: it owns no I2C bus directly.
- * All transactions are relayed through the TPS25751 host's executeCommand()
- * via the inherited TPS25751DownstreamDevice::readRegister() /
- * writeRegister() interface (I2Cr / I2Cw 4CC tasks).
+ * The driver can reach the charger two ways, selected by which constructor is
+ * used; the typed API below is identical either way:
+ *   - **Proxied** (Device(host, addr)): relayed through the TPS25751 host's
+ *     executeCommand() via the inherited TPS25751DownstreamDevice interface
+ *     (I2Cr / I2Cw 4CC tasks) — for a charger on the TPS25751's I2Cc bus.
+ *   - **Direct** (Device(wire, addr)): plain Arduino-`Wire` register transactions
+ *     straight to the part on the MCU's own I2C bus — for bench/bring-up. None of
+ *     the proxy constraints (TRM 5 s spacing, 63/11-byte caps) apply.
  *
  * Design:
  *   - Inherits TPS25751DownstreamDevice (composition-by-inheritance, exactly
@@ -96,6 +100,23 @@ public:
     explicit Device(const TPS25751& host,
                     uint8_t addr = BQ25798::kDefaultI2CAddress)
         : TPS25751DownstreamDevice(host, addr)
+    {}
+
+    /**
+     * @brief Construct a BQ25798 driver that talks to the part **directly** on @p wire
+     *
+     * Direct (non-proxied) transport: register reads/writes are plain Arduino-`Wire`
+     * transactions to the charger on the MCU's own I2C bus, with no TPS25751 relay.
+     * For bench/bring-up where the BQ25798 is wired to @p wire rather than the
+     * TPS25751's I2Cc bus. The typed accessors and write tier are identical to the
+     * proxied constructor.
+     *
+     * @param wire I2C bus the BQ25798 is wired to (caller is responsible for wire.begin())
+     * @param addr 7-bit I2C address of the BQ25798 (default: kDefaultI2CAddress)
+     */
+    explicit Device(TwoWire& wire,
+                    uint8_t addr = BQ25798::kDefaultI2CAddress)
+        : TPS25751DownstreamDevice(wire, addr)
     {}
 
     // -----------------------------------------------------------------------

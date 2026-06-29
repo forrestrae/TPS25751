@@ -47,6 +47,18 @@
  * DEBUG_CAT_TASK warning if a call arrives sooner than that -- it does **not**
  * hard-block the call, since the caller may already be managing the timing
  * (e.g. across multiple downstream-device instances sharing one host).
+ *
+ * ## Direct (non-proxied) transport
+ *
+ * For bench bring-up, validation, or boards where the downstream part is wired
+ * straight to the MCU's own I2C bus (rather than behind the TPS25751 on I2Cc),
+ * the alternate `TPS25751DownstreamDevice(TwoWire&, addr)` constructor selects a
+ * **direct** transport. In that mode reads/writes are plain Arduino-`Wire`
+ * register transactions against the part -- no 4CC relay, so none of the
+ * proxy-path constraints apply: there is **no** TRM 5 s spacing and **no** I2Cr/
+ * I2Cw payload cap (63 B read / 11 B write); the only limit is the `TwoWire`
+ * buffer. The transport is fixed at construction; the typed-read shape and every
+ * caller above readRegister()/writeRegister() are identical either way.
  */
 class TPS25751DownstreamDevice
 {
@@ -57,6 +69,20 @@ public:
      * @param deviceAddress 7-bit I2C address of the downstream device (bit 7 is masked off)
      */
     TPS25751DownstreamDevice(const TPS25751& host, uint8_t deviceAddress);
+
+    /**
+     * @brief Construct a driver that talks to the device **directly** on @p wire
+     *
+     * Selects the direct (non-proxied) transport: readRegister()/writeRegister()
+     * issue plain Arduino-`Wire` register transactions against @p deviceAddress on
+     * @p wire, with no 4CC relay through a TPS25751. None of the proxy-path
+     * constraints apply (no TRM 5 s spacing, no 63/11-byte payload caps). Intended
+     * for bench/bring-up where the part is on the MCU's own bus.
+     *
+     * @param wire          I2C bus the downstream device is wired to (caller calls begin())
+     * @param deviceAddress 7-bit I2C address of the downstream device (bit 7 is masked off)
+     */
+    TPS25751DownstreamDevice(TwoWire& wire, uint8_t deviceAddress);
 
     /**
      * @brief Read @p len bytes from downstream register @p devReg via I2Cr
@@ -101,7 +127,9 @@ public:
     }
 
 private:
-    const TPS25751& _host;
+    const TPS25751* _host;   ///< Proxied transport host; nullptr in direct mode
+    TwoWire* _wire;          ///< Direct transport bus; nullptr in proxied mode
+    bool _direct;            ///< true: direct Wire transport; false: I2Cr/I2Cw proxy
     uint8_t _deviceAddress;
     mutable uint32_t _lastI2CrMs;
     mutable uint32_t _lastI2CwMs;
@@ -115,6 +143,14 @@ private:
      * @param taskName "I2Cr" or "I2Cw", for the warning message
      */
     void enforceSpacing(uint32_t& lastMs, const char* taskName) const;
+
+    /// Proxied transport: relay the read/write through the host's I2Cr/I2Cw 4CC tasks.
+    bool readProxied(uint8_t devReg, uint8_t* buf, size_t len) const;
+    bool writeProxied(uint8_t devReg, const uint8_t* data, size_t len) const;
+
+    /// Direct transport: plain Arduino-`Wire` register read/write against the part.
+    bool readDirect(uint8_t devReg, uint8_t* buf, size_t len) const;
+    bool writeDirect(uint8_t devReg, const uint8_t* data, size_t len) const;
 };
 
 #endif // TPS25751DOWNSTREAMDEVICE_H

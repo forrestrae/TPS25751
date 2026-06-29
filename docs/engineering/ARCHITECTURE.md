@@ -1238,6 +1238,39 @@ or sibling bits.
   (16-bit BE + unit inversion), `BQ25798MinimalSystemVoltage` (offset inversion with
   underflow guard).
 
+### ADR-010: Dual-Transport Downstream Devices — Optional Direct I2C
+**Status:** Accepted
+**Date:** 2026-06
+**Context:** `TPS25751DownstreamDevice` (and thus `BQ25798::Device`) could only reach a
+part *through* the TPS25751, encoding every access as an I2Cr/I2Cw 4CC task (ADR-007).
+That is correct for the production topology (charger on the TPS25751's I2Cc bus) but
+unusable for bench bring-up, validation, or boards where the part is wired straight to
+the MCU's own I2C bus. The TRM 5 s spacing and the 63-byte read / 11-byte write payload
+caps are artifacts of the proxy path, not of the part.
+**Decision:**
+- **Transport is selected at construction, branched at one chokepoint.** A second
+  constructor `TPS25751DownstreamDevice(TwoWire&, addr)` selects a **direct** transport;
+  the existing `(const TPS25751&, addr)` constructor keeps the **proxied** transport. The
+  host member becomes a nullable `const TPS25751*` and a `TwoWire*` is added; a `_direct`
+  flag picks the path. The two raw methods `readRegister()` / `writeRegister()` branch to
+  `readDirect`/`writeDirect` (plain Arduino-`Wire` register transactions) or
+  `readProxied`/`writeProxied` (the unchanged I2Cr/I2Cw bodies).
+- **Everything above the chokepoint is untouched.** All 50+ `BQ25798::Device` typed
+  accessors, the generic `writeRegister<T>`/`updateRegister<T>`, and the L3 setters funnel
+  through those two raw methods, so they work identically in either transport with no code
+  change. `BQ25798::Device` just gains a forwarding `Device(TwoWire&, addr)` constructor.
+- **Direct mode is standard I2C.** Read = write register pointer, repeated-start,
+  burst-read N bytes (the part auto-increments its pointer); write = register pointer +
+  payload + STOP. This is the part's own protocol, *not* the TPS25751's length-byte
+  register protocol and *not* the 4CC task path.
+**Consequences:**
+- Direct mode has **no** TRM 5 s spacing and **no** 63/11-byte caps — the only bound is
+  the `TwoWire` buffer. It requires the part to actually be on the passed bus.
+- Any future downstream-device driver built on `TPS25751DownstreamDevice` inherits direct
+  mode for free.
+- The big-endian decode/encode conventions (ADR-008/009) are unchanged: burst reads/writes
+  carry multi-byte registers identically over either transport.
+
 ---
 
 ## Revision History
@@ -1248,6 +1281,7 @@ or sibling bits.
 | 1.1 | 2026-06-22 | Claude Code | Added 4CC command-task layer, I2Cc downstream-device proxy (ADR-007), register write flow |
 | 1.2 | 2026-06-24 | Claude Code | Added BQ25798 downstream device driver tier (ADR-008), updated inheritance tree, extension-point recipe |
 | 1.3 | 2026-06-24 | Claude Code | Added downstream-device write encoders (ADR-009), typed write flow; updated ADR-008/driver-layer to note R/W setters + kAddress |
+| 1.4 | 2026-06-26 | Claude Code | Added dual-transport downstream devices (ADR-010): optional direct-I2C constructor on TPS25751DownstreamDevice / BQ25798::Device |
 
 ---
 

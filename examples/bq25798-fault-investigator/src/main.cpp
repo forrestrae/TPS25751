@@ -110,6 +110,20 @@
 #warning "RESTORE_CHARGER_DEFAULTS overrides ENABLE_SAFE_DIAGNOSTIC_SETUP; setup writes are skipped."
 #endif
 
+/// 1 = access the BQ25798 DIRECTLY over the MCU's own I2C bus using the alternate
+/// BQ25798::Device(TwoWire&, addr) constructor, instead of proxying every access
+/// through the TPS25751 4CC I2Cr/I2Cw path. Direct mode is plain I2C with NONE of
+/// the proxy constraints — in particular there is no TRM 5 s same-type spacing, so
+/// kReadSpacingMs collapses to 0 and a full sweep finishes in milliseconds rather
+/// than minutes. Requires the BQ25798 to be wired to BQ_DIRECT_WIRE (the part is on
+/// the MCU bus, NOT the TPS25751's I2Cc bus). The TPS25751 host is still constructed
+/// and begun (it remains the board's PD controller and is used by the
+/// RESTORE_CHARGER_DEFAULTS GAID path).
+#define BQ_DIRECT_I2C 1
+
+/// I2C bus the BQ25798 is wired to when BQ_DIRECT_I2C=1 (Teensy: Wire, Wire1, Wire2…).
+#define BQ_DIRECT_WIRE Wire2
+
 // Restore-mode timing — only used when RESTORE_CHARGER_DEFAULTS=1.
 static const uint32_t kGaidSettleMs          = 2000;   ///< settle before polling for host reboot
 static const uint32_t kGaidRecoveryTimeoutMs = 15000;  ///< max wait for the host to come back
@@ -128,14 +142,23 @@ static const uint16_t kVbat4sMinMv       = 11600;  ///< approx valid 4S system l
 static const uint16_t kVbat4sMaxMv       = 16800;  ///< 4S regulation ceiling
 static const bool     kExpectCharging    = true;   ///< board normally charges when input present
 
+#if BQ_DIRECT_I2C
+static const uint32_t kReadSpacingMs     = 0;      ///< direct I2C: no TRM same-type spacing
+#else
 static const uint32_t kReadSpacingMs     = 5100;   ///< TRM: >=5 s between same-type I2Cr
+#endif
 
 // ===========================================================================
 // Globals
 // ===========================================================================
 
 const TPS25751  pd;       // host on the primary I2Ct bus
+#if BQ_DIRECT_I2C
+// Direct (TwoWire&) constructor — plain I2C straight to the charger, no 4CC proxy.
+BQ25798::Device bq(BQ_DIRECT_WIRE, BQ25798::kDefaultI2CAddress);
+#else
 BQ25798::Device bq(pd);   // typed BQ25798 driver over I2Cr/I2Cw 4CC tasks
+#endif
 
 // ---------------------------------------------------------------------------
 // Snapshot: one full set of decoded readings used by the heuristics, CSV
@@ -1108,6 +1131,12 @@ void setup()
     TPS25751::setDebugLevel(DEBUG_LEVEL_WARN);
     TPS25751::setDebugCategories(DEBUG_CAT_I2C | DEBUG_CAT_TASK);
 
+#if BQ_DIRECT_I2C
+    // Direct mode: the BQ25798 is on the MCU's own bus — bring it up ourselves.
+    BQ_DIRECT_WIRE.begin();
+    BQ_DIRECT_WIRE.setClock(400000);
+#endif
+
     Serial.println(F("Initializing TPS25751 host..."));
     pd.begin();
 
@@ -1118,7 +1147,11 @@ void setup()
     Serial.println(F("=========================================================="));
     Serial.println(F(" Board assumptions: 4S Li-ion; VREG 16.8 V; VSYSMIN 12.0 V"));
     Serial.println(F(" Input: USB-C PD via TPS25751D, typically ~20 V contract"));
+#if BQ_DIRECT_I2C
+    Serial.print  (F(" BQ25798 DIRECT on the MCU's own I2C bus @ 7-bit 0x"));
+#else
     Serial.print  (F(" BQ25798 on TPS25751 I2Cc bus @ 7-bit 0x"));
+#endif
     Serial.println(BQ25798::kDefaultI2CAddress, HEX);
 #if OUTPUT_CSV
     Serial.println(F(" Output mode: CSV (logging)"));
@@ -1146,9 +1179,15 @@ void setup()
 #if !RESTORE_CHARGER_DEFAULTS
     Serial.println(F(" ADC: enabled at startup so telemetry channels read live data."));
 #endif
+#if BQ_DIRECT_I2C
+    Serial.println(F(" Pacing: none (direct I2C — no TRM same-type spacing)."));
+    Serial.println(F("   A full sweep finishes in milliseconds; latched FLAG registers"));
+    Serial.println(F("   still capture transient faults occurring between sweeps."));
+#else
     Serial.println(F(" Pacing: 5.1 s per read (TRM >=5 s between same-type I2Cr)."));
     Serial.println(F("   A full sweep takes a few MINUTES; latched FLAG registers"));
     Serial.println(F("   capture transient faults missed between slow samples."));
+#endif
     Serial.println(F("=========================================================="));
 
     // --- Communication check ---
@@ -1234,5 +1273,5 @@ void loop()
     gHavePrev = true;
 
     // Loop pacing is provided by the per-read 5.1 s delays inside readSnapshot.
-    delay(20000);
+    delay(1000);
 }

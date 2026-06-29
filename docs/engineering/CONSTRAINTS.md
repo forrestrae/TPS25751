@@ -296,6 +296,18 @@ issue time of each task type via `millis()` and emits a `DEBUG_CAT_TASK` warning
 if called sooner — it does **not** hard-block, since callers may already be
 managing the timing themselves.
 
+> **Direct (non-proxied) transport bypasses all of the above.** Constructing
+> `TPS25751DownstreamDevice` / `BQ25798::Device` with the `(TwoWire&, addr)`
+> constructor instead of `(const TPS25751&, addr)` selects a **direct** transport:
+> reads/writes are plain Arduino-`Wire` register transactions to the part on the
+> MCU's own bus, with no 4CC relay. Because there is no I2Cr/I2Cw, **none** of the
+> proxy constraints apply — no TRM 5 s spacing, no 63-byte read / 11-byte write
+> payload cap (the only limit is the `TwoWire` buffer), and the I2Cr-vs-I2Cw
+> asymmetry is irrelevant. The trade-off: direct mode requires the part to actually
+> be wired to the bus you pass (it is *not* on the TPS25751's I2Cc bus), and the
+> caller must `wire.begin()` it. Use it for bench/bring-up; use the proxied
+> constructor for the production I2Cc topology. See ADR-010 in ARCHITECTURE.md.
+
 ### Maximum Read Sizes
 
 Different registers have different maximum sizes:

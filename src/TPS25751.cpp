@@ -447,6 +447,50 @@ std::unique_ptr<TPS25751Data> TPS25751::readDataRegister(bool validate) const {
     return nullptr;
 }
 
+// PBM raw burst write (SLVAFV8A Table 3-3 / §4.1 step 10)
+bool TPS25751::burstWrite(uint8_t targetAddr, const uint8_t* data, size_t length,
+                          size_t chunk, uint16_t interChunkDelayUs) const
+{
+    TPS_DEBUG_TRACE(DEBUG_CAT_TASK,
+        "burstWrite: target=0x%02X, length=%u, chunk=%u, delay=%u us",
+        targetAddr, (unsigned)length, (unsigned)chunk, (unsigned)interChunkDelayUs);
+
+    size_t offset = 0;
+    while (offset < length) {
+        size_t thisChunk = (chunk < (length - offset)) ? chunk : (length - offset);
+
+        _wire.beginTransmission(targetAddr);
+        size_t written = _wire.write(data + offset, thisChunk);
+        if (written != thisChunk) {
+            TPS_DEBUG_ERROR(DEBUG_CAT_TASK,
+                "burstWrite: write() short at offset %u: expected %u, wrote %u",
+                (unsigned)offset, (unsigned)thisChunk, (unsigned)written);
+            TPS_REPORT_I2C_ERROR(targetAddr, 0x00, "burstWrite::write", (int)written);
+            _wire.endTransmission(true);  // release bus
+            return false;
+        }
+
+        uint8_t result = _wire.endTransmission(true);
+        if (result != 0) {
+            TPS_DEBUG_ERROR(DEBUG_CAT_TASK,
+                "burstWrite: endTransmission failed at offset %u (err=%u)",
+                (unsigned)offset, (unsigned)result);
+            TPS_REPORT_I2C_ERROR(targetAddr, 0x00, "burstWrite::endTransmission", result);
+            return false;
+        }
+
+        offset += thisChunk;
+
+        if (interChunkDelayUs > 0 && offset < length) {
+            delayMicroseconds(interChunkDelayUs);
+        }
+    }
+
+    TPS_DEBUG_INFO(DEBUG_CAT_TASK,
+        "burstWrite: complete, %u bytes sent to 0x%02X", (unsigned)length, targetAddr);
+    return true;
+}
+
 // 4CC command-task executor (TRM Sec 4.4.2)
 TPS25751TaskStatus TPS25751::waitForCommandClear(uint32_t timeoutMs) const
 {

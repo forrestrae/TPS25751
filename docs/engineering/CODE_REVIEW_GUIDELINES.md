@@ -26,6 +26,39 @@ The most critical review category for this codebase. Many bugs here cause silent
 - **Downstream factory switch completeness**: Every value in `<Device>::Registers::Address` must have a `case` in all three `createRegister()` overloads; a missing `case` silently returns `nullptr` and causes a null-dereference at the call site
 - **ADC LSB unit-conversion sourced from datasheet, not MCP**: The `bq25798-docs` MCP server does not carry ADC step sizes. Conversion factors (e.g. TDIE: 0.5 °C/LSB, IBUS/IBAT: 1 mA/LSB) must be taken from the BQ25798 datasheet (SLUSE02); using the wrong LSB produces silently wrong physical values
 
+### Patch Burst Mode (PBM) Traps (ADR-011)
+
+Review these when touching `TPS25751PatchLoader`, `TPS25751::burstWrite()`, or
+any code that directly implements the SLVAFV8A PBM sequence:
+
+- **`bundleSize` must be little-endian in the 6-byte PBMs config**: bytes 0-3 are
+  `length[0..3]` LSB first.  Big-endian encoding silently sends the wrong size,
+  causing `PatchStartStatus == 0x04 (BadBundleSize)` with no other indication.
+- **The raw burst has NO register number and NO byte-count byte**: `burstWrite()`
+  calls `beginTransmission(0x30) / write(data, N) / endTransmission(true)` with
+  nothing before the image bytes.  Adding a regNum or length prefix corrupts the
+  image at offset 0 and every subsequent byte is shifted.
+- **Final short chunk must be bounded correctly**: the loop condition must be
+  `thisChunk = min(chunk, remaining)` (not `chunk`), so the last transaction does
+  not read past the end of the image array.
+- **PatchStartStatus codes must map to distinct `PatchLoadStatus` values**:
+  `0x04 → BadBundleSize`, `0x05 → BadTargetAddress`, `0x06 → BadTimeout`.
+  Collapsing them all to a single "PBMs failed" hides which config byte was wrong.
+- **`0x30` is a 7-bit I2C device address, not a TPS25751 register offset**: pass it
+  to `beginTransmission()` / `burstWrite()`; do not confuse it with the
+  `TPS25751Registers::Address::RECEIVED_SOURCE_CAPABILITIES` register (which
+  coincidentally has the same numeric value as a register *offset*).
+- **PBMc timeout must be generous**: `executeCommand(PBMc, …, 5000)` is typical;
+  the device may need several seconds to verify the bundle before clearing COMMAND.
+  Using the default 200 ms `executeCommand` timeout risks a spurious `CommandTimeout`.
+- **Step 16 DATA read-back is a separate call after the delay**: do not use
+  `pbmcResult.returnCode` alone to confirm the apply — a separate `readDataRegister()`
+  after `delay(PATCH_APPLY_DELAY_MS)` is required (the spec says "read DATA, confirm
+  PatchStartStatus cleared").
+- **`TPS25751PatchLoader` is not a register class**: do not expect it to inherit
+  `TPS25751Register`, implement three-tier validation, or appear in the factory.  It
+  is a sequencer; applying register-class review criteria to it is incorrect.
+
 ### Downstream-Device Write-Path Traps (ADR-009)
 
 Review these when a downstream R/W register class adds field setters or a driver adds typed writes:

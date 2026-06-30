@@ -16,6 +16,9 @@ Designed for **Teensy 4.x** (ARM Cortex-M7) and the Arduino framework.
   named accessors instead of raw bit-twiddling.
 - **Downstream device support** — talk to chips on the TPS25751's I2Cc bus (e.g. a
   BQ25798 charger) via the same typed style.
+- **Patch-bundle loading** — `TPS25751PatchLoader` implements the EEPROM-less
+  PTCH → APP bring-up path (Patch Burst Mode, TI app note SLVAFV8A), streaming
+  a firmware image directly over I2Ct in Wire-buffer-sized chunks.
 - **Validation and debug** — optional per-read validation and runtime-configurable,
   category-filtered debug output.
 - **Embedded-friendly** — RAII / `std::unique_ptr` ownership, no RTTI, no exceptions.

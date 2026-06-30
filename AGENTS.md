@@ -170,6 +170,13 @@ Serial.println(F("String in flash"));                // Use F() macro
   `(TwoWire&, addr)` constructor selects a **direct** (non-proxied) transport — plain
   Arduino-`Wire` register transactions for a part on the MCU's own bus, with none of
   the proxy constraints (no TRM 5 s spacing, no 63/11-byte caps); see ADR-010
+- **`TPS25751PatchLoader`**: Sequences the 17-step Patch Burst Mode (PBM) flow from
+  TI app note SLVAFV8A to load a firmware/configuration image directly into the
+  TPS25751 when no EEPROM is present (PTCH → APP bring-up path). **Not a register
+  class** — does not inherit `TPS25751Register` and is not wired into the factory.
+  Builds entirely on `TPS25751::executeCommand()` (for the PBMs/PBMc 4CC handshakes)
+  and `TPS25751::burstWrite()` (raw chunked burst to I2C address 0x30); see ADR-011
+  in [ARCHITECTURE.md](docs/engineering/ARCHITECTURE.md)
 - **`BQ25798::Device`**: Typed driver for the BQ25798 buck-boost charger, reachable
   either proxied over the TPS25751 I2Cc bus (`Device(host, addr)`) or **directly** on a
   `TwoWire` bus (`Device(wire, addr)`); inherits `TPS25751DownstreamDevice` and adds 57 typed
@@ -231,6 +238,36 @@ COMMAND (success) or writes `"!CMD"` (rejected); results are read back from DATA
 See [docs/engineering/ARCHITECTURE.md](docs/engineering/ARCHITECTURE.md) (ADR-007)
 and [docs/engineering/CONSTRAINTS.md](docs/engineering/CONSTRAINTS.md) ("4CC Command
 Interface & I2Cc Downstream-Device Proxy") for full details.
+
+### Patch Loading (PBM) — EEPROM-less PTCH → APP Bring-up
+
+A second consumer of `executeCommand()` is `TPS25751PatchLoader`
+(`include/TPS25751PatchLoader.h`, `src/TPS25751PatchLoader.cpp`), which sequences
+the Patch Burst Mode (PBM) flow from TI application note **SLVAFV8A** ("Using an
+Embedded Controller (EC) to Load a Patch Bundle Directly to the TPS25751 or
+TPS26750").
+
+When the TPS25751 boots without an EEPROM it powers up in **PTCH** mode and waits
+for the host to push the firmware+configuration image over I2Ct.  The 17-step flow:
+
+1. (Optional) Wait for `I2Ct_IRQ` low.
+2. Read MODE — confirm PTCH.
+3. (IRQ mode) Configure `INT_MASK1` / clear `INT_CLEAR1`.
+4-9. `executeCommand(PBMs, config[6])` — `config` = `bundleSize[4, LE] + 0x30 + 0x31`.
+10. `burstWrite(0x30, image, length)` — raw chunked burst (no reg number, no length byte).
+11. (IRQ mode) Clear `INT_CLEAR1`.
+12-14. `executeCommand(PBMc)` — commit the bundle.
+15. `delay(20)` ms.
+16. Read `DATA[0]` — confirm `PatchStartStatus` == 0.
+17. Read MODE — confirm APP.
+
+Steps 4-9 and 12-14 are each a single `executeCommand()` call; only step 10 uses the
+new `TPS25751::burstWrite()` primitive (the only addition to the core class).
+`PatchLoadStatus` provides one distinct enumerator per failure point.
+
+See ADR-011 in [ARCHITECTURE.md](docs/engineering/ARCHITECTURE.md) and the PBM
+subsection of [CONSTRAINTS.md](docs/engineering/CONSTRAINTS.md) for protocol details
+and correctness traps.
 
 ### BQ25798 Downstream Device Driver
 
@@ -480,26 +517,29 @@ TPS25751-specific traps to add:
 
 ### Building & Testing Your Changes
 
-This directory is a **library**, not a standalone PlatformIO project — there is no
-root `platformio.ini`, and the bundled example does **not** build on its own (its
-`lib_deps = lib/TPS25751` only resolves from a project that actually contains
-`lib/TPS25751`).
-
-In this repo the library lives at `lib/TPS25751` inside the parent PlatformIO
-project (`TPS25751-i2ct-test`, two levels up), which symlinks the example's
-`platformio.ini`, `src/`, and `include/` and provides `lib/TPS25751`. Build from
-**that parent project root**:
+This directory is a **library** with a root `platformio.ini` that defines one
+PlatformIO environment per bundled example (`[env:example-<name>]`).  Each
+environment uses `build_src_filter` to pull the library sources together with the
+example's `src/` directory, so examples build directly from this root.
 
 ```bash
-# From this library root, the parent project is two levels up:
-cd ../..                  # -> TPS25751-i2ct-test (has platformio.ini -> example)
-pio run                   # Compile for Teensy 4.0 (default_envs = teensy40)
-pio run -t upload         # Flash to a connected Teensy
-pio device monitor        # Serial monitor @ 115200
+# From this library root (where platformio.ini lives):
+pio run -e example-read-registers            # compile the read-registers example
+pio run -e example-load-patch-bundle         # compile the PBM patch-loader example
+pio run -e example-read-registers -t upload  # build + flash to Teensy 4.0
+pio device monitor                           # serial monitor @ 115200 baud
+
+# List all available example environments:
+pio project config
 ```
 
-(When consuming this as a published library, copy the example out into your own
-PlatformIO project and add this library under `lib/`.)
+Replace `example-read-registers` with any `example-*` environment name — see
+[`examples/README.md`](examples/README.md) for the full list and a description of
+what each example demonstrates.
+
+> **Older build path** (still valid when consuming as a published library):
+> Copy the example out into your own PlatformIO project and add this library
+> under `lib/`.
 
 > **No unit tests exist yet.** `test/` is a PlatformIO placeholder (README only).
 > The `>90% coverage` target in [TESTING.md](docs/engineering/TESTING.md) and a

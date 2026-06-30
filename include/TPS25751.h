@@ -2,7 +2,7 @@
 #define TPS25751_H
 
 #include <Wire.h>
-#include "TPS25751.h"
+#include "TPS25751.h"  // guard prevents re-entry (intentional no-op self-include)
 #include "TPS25751Mode.h"
 #include "TPS25751Status.h"
 #include "TPS25751PowerPathStatus.h"
@@ -24,6 +24,20 @@
 #include "TPS25751RegisterFactory.h"
 #include "TPS25751Task.h"
 
+
+/**
+ * @brief Default chunk size (bytes) for TPS25751::burstWrite() PBM bursts.
+ *
+ * The TPS25751 Patch Burst Mode pointer auto-increments across I2C START/STOP
+ * boundaries (SLVAFV8A footnote 3), so a single large image can be split into
+ * many small transactions.  This constant sets the default number of image bytes
+ * per transaction.  32 bytes matches the stock Arduino/Teensy Wire TX buffer
+ * (BUFFER_LENGTH); raise it here if your project sets a larger buffer.
+ *
+ * Used as the default for the @p chunk parameter of TPS25751::burstWrite() and
+ * referenced by TPS25751PatchLoader.
+ */
+constexpr size_t PBM_BURST_CHUNK = 32;
 
 /*
  * I2C Default Target Address for I2Ct_SCL/SDA
@@ -310,6 +324,34 @@ public:
         uint8_t* outData = nullptr, size_t outLen = 0,
         uint32_t timeoutMs = 200) const;
 
+    /**
+     * @brief Raw chunked burst write to an arbitrary I2C target address (PBM path)
+     *
+     * Sends @p data to @p targetAddr in chunks of at most @p chunk bytes.  Each
+     * chunk is its own `beginTransmission / write / endTransmission(true)` cycle.
+     * There is NO register-number byte and NO byte-count (length) byte emitted —
+     * this is the "Table 3-3" raw burst shape from SLVAFV8A, which differs from
+     * every other TPS25751 write (see CONSTRAINTS.md "Patch Burst Mode (PBM)").
+     *
+     * The TPS25751's PBM pointer auto-increments across I2C START/STOP boundaries
+     * (SLVAFV8A footnote 3), so splitting the image across many small transactions
+     * is correct and expected.
+     *
+     * @param targetAddr 7-bit I2C address of the PBM receive port (0x30).
+     *                   This is an I2C device address, not a TPS25751 register offset.
+     * @param data       Pointer to the byte array to send
+     * @param length     Total number of bytes to send
+     * @param chunk      Maximum bytes per transaction (default PBM_BURST_CHUNK)
+     * @param interChunkDelayUs  Optional settle delay between chunks, in microseconds
+     * @return true if every chunk was ACKed successfully; false on first error
+     *
+     * @see TPS25751PatchLoader::loadPatchBundle() for the complete PBM flow
+     * @see SLVAFV8A Table 3-3 and §4.1 step 10
+     */
+    bool burstWrite(uint8_t targetAddr, const uint8_t* data, size_t length,
+                    size_t chunk = PBM_BURST_CHUNK,
+                    uint16_t interChunkDelayUs = 0) const;
+
 private:
     TwoWire &_wire;
     uint8_t _address;
@@ -329,5 +371,10 @@ private:
      */
     TPS25751TaskStatus waitForCommandClear(uint32_t timeoutMs) const;
 };
+
+// Included at the bottom (after TPS25751 is fully defined) so that consumers
+// of TPS25751.h also pick up the patch-loader API without an extra #include.
+// TPS25751PatchLoader.h forward-declares TPS25751 to avoid a circular include.
+#include "TPS25751PatchLoader.h"
 
 #endif // TPS25751_H

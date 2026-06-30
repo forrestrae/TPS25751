@@ -1263,6 +1263,50 @@ caps are artifacts of the proxy path, not of the part.
   burst-read N bytes (the part auto-increments its pointer); write = register pointer +
   payload + STOP. This is the part's own protocol, *not* the TPS25751's length-byte
   register protocol and *not* the 4CC task path.
+
+### ADR-011: Patch Loader — Non-Register PBM Sequencer on `executeCommand()`
+**Status:** Accepted
+**Date:** 2026-06
+**Context:** The TPS25751 can boot in PTCH (patch) mode when no EEPROM is present and
+receive its firmware+configuration image directly over I2Ct via Patch Burst Mode (PBM),
+documented in TI app note SLVAFV8A.  The PBM flow uses two 4CC command-tasks (`PBMs`
+to start the session, `PBMc` to commit it) plus a raw burst write to I2C address `0x30`
+(no register number, no length byte — unlike every other TPS25751 write).
+**Decision:**
+- **`TPS25751PatchLoader` is not a register.** The PBM flow has no fixed register layout
+  and does not benefit from the factory / three-tier validation machinery. The loader
+  deliberately does not inherit `TPS25751Register` and is not wired into
+  `TPS25751RegisterFactory`. Reviewers should not expect the register-class template.
+- **Reuse `executeCommand()` for both 4CC commands.** `PBMs` and `PBMc` are submitted
+  via `TPS25751::executeCommand()` like any other task; DATA staging, COMMAND write,
+  COMMAND polling, `"!CMD"` detection, and DATA read-back are all handled by the executor.
+  The loader supplies only the payload bytes and maps `TPS25751TaskResult` to
+  `PatchLoadStatus`.
+- **One new core primitive: `TPS25751::burstWrite()`.** The raw burst to `0x30` (no
+  register number, no length byte) is the only I2C access shape `executeCommand()` cannot
+  cover. It is implemented as a public method on `TPS25751`, loops
+  `beginTransmission/write/endTransmission(true)` per chunk of `min(chunk, remaining)`
+  bytes, and reuses `TPS_DEBUG_*` / `TPS_REPORT_I2C_ERROR` exactly like `writeRegister`.
+  The default chunk size is `PBM_BURST_CHUNK` (32 bytes, matching the stock Wire TX
+  buffer); the PBM pointer auto-increments across I2C START/STOP so chunking is safe
+  (SLVAFV8A footnote 3).
+- **`PatchLoadStatus` provides one distinct value per failure point** in the 17-step
+  sequence, giving callers a precise diagnostic rather than a boolean.
+- **IRQ-gated inter-command waiting is optional** (`irqPin = -1` defaults to pure
+  polling). Command-completion polling is always done by `executeCommand()`'s internal
+  `waitForCommandClear()`; the IRQ pin is used only for the "Ready-for-Patch" step 1
+  signal, which the polling mode skips.
+**Consequences:**
+- `TPS25751PatchLoader` is a standalone sequencer (`include/TPS25751PatchLoader.h`,
+  `src/TPS25751PatchLoader.cpp`) that composes a `TPS25751&` reference. It forward-
+  declares `TPS25751` in its header to avoid a circular include (TPS25751.h includes
+  TPS25751PatchLoader.h at its end for transparent consumer access).
+- The `0x30` argument to `burstWrite()` is a 7-bit I2C *device address* (the PBM receive
+  port), not a TPS25751 register offset — these happen to share the numeric value with
+  `TPS25751Registers::Address::RECEIVED_SOURCE_CAPABILITIES` but are entirely unrelated.
+- BQ25798 `bundleSize` in the `PBMs` config is **little-endian** (4 bytes, LSB first),
+  consistent with host-register byte order but opposite to BQ25798 downstream registers
+  (which are big-endian). See CONSTRAINTS.md "Patch Burst Mode (PBM)".
 **Consequences:**
 - Direct mode has **no** TRM 5 s spacing and **no** 63/11-byte caps — the only bound is
   the `TwoWire` buffer. It requires the part to actually be on the passed bus.

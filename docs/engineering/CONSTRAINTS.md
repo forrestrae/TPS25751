@@ -308,6 +308,65 @@ managing the timing themselves.
 > caller must `wire.begin()` it. Use it for bench/bring-up; use the proxied
 > constructor for the production I2Cc topology. See ADR-010 in ARCHITECTURE.md.
 
+### Patch Burst Mode (PBM) — Raw Burst to 0x30
+
+When the TPS25751 boots in PTCH mode (no EEPROM) it exposes a special I2C receive
+port at address **`0x30`** that accepts the raw firmware+configuration image during a
+Patch Burst Mode (PBM) session (TI app note SLVAFV8A, §3-4).
+
+**The raw burst write is a fundamentally different access shape from every other
+TPS25751 write:**
+
+| Write type | I2C transaction |
+|---|---|
+| Normal SMBUS register write | `START, addr(W), regNum, byteCount, data..., STOP` |
+| PBM raw burst (Table 3-3) | `START, 0x30(W), imageBytes..., STOP` |
+
+There is **no register number** and **no byte-count (length) byte** in the PBM burst.
+`TPS25751::burstWrite()` implements this shape and MUST NOT emit either prefix.
+
+**The PBM pointer auto-increments and is NOT reset by I2C START/STOP** (SLVAFV8A
+footnote 3).  This means the full image can be split across many small transactions:
+
+```cpp
+// Each chunk is its own transaction, pointer advances through them:
+while (offset < length) {
+    wire.beginTransmission(0x30);          // NO regNum, NO byteCount
+    wire.write(data + offset, thisChunk);
+    wire.endTransmission(true);            // STOP, but pointer keeps going
+    offset += thisChunk;
+}
+```
+
+**Teensy `Wire` TX buffer constraint:** Stock Arduino/Teensy `Wire` has a 32-byte TX
+buffer (`BUFFER_LENGTH`).  `PBM_BURST_CHUNK` (default 32) caps each chunk so it fits.
+Raise it only if your project configures a larger Wire buffer.
+
+**`0x30` is an I2C device address, not a register offset.**  It is the PBM receive
+port's 7-bit I2C address, entirely separate from the TPS25751's own I2C device
+address (0x20-0x23) and from `TPS25751Registers::Address::RECEIVED_SOURCE_CAPABILITIES`
+(which happens to share the value 0x30 as a register *offset* within the TPS25751).
+
+**PBMs config layout (6 bytes, little-endian `bundleSize`):**
+
+```
+config[0] = (length >>  0) & 0xFF  // bundleSize LSB
+config[1] = (length >>  8) & 0xFF
+config[2] = (length >> 16) & 0xFF
+config[3] = (length >> 24) & 0xFF  // bundleSize MSB
+config[4] = 0x30                   // PBM_I2C_TARGET
+config[5] = 0x31                   // PBM_TIMEOUT (~3.1 s)
+```
+
+**PatchStartStatus** (DATA byte 0 after PBMs / PBMc, i.e. `result.returnCode`):
+`0x00` = success; `0x04` = bad bundle size; `0x05` = bad target address; `0x06` =
+bad timeout.  Map each to a distinct `PatchLoadStatus` enumerator (not a generic
+error).
+
+See `TPS25751PatchLoader` (`include/TPS25751PatchLoader.h`, `src/TPS25751PatchLoader.cpp`)
+for the complete 17-step implementation, and ADR-011 in ARCHITECTURE.md for the
+design rationale.
+
 ### Maximum Read Sizes
 
 Different registers have different maximum sizes:

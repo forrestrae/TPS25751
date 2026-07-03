@@ -2,7 +2,7 @@
   "mcpServers": {
     "tps25751-docs": {
       "command": "uv",
-      "args": ["run", "../device-register-docs/server.py"],
+      "args": ["run", "../device-register-mcp-server/server.py"],
       "env": { "DEVICE_CONFIG": "devices/tps25751/device.json" }
     }
   }

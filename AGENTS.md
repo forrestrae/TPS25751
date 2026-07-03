@@ -27,8 +27,8 @@ enabling the 4CC command-task interface and I2Cc downstream-device proxy); see
 **IMPORTANT**: When working with TPS25751 registers, use the `tps25751-docs`
 register-docs MCP server for accurate register information extracted from the TI
 manuals. The generic server engine **and all device definitions** live in the
-sibling **`lib/device-register-docs`** repository; this repo's `.mcp.json` invokes
-it cross-repo (`uv run ../device-register-docs/server.py` with
+sibling **`lib/device-register-mcp-server`** repository; this repo's `.mcp.json` invokes
+it cross-repo (`uv run ../device-register-mcp-server/server.py` with
 `DEVICE_CONFIG=devices/tps25751/device.json` — a relative `DEVICE_CONFIG` resolves
 against `server.py`'s own directory). This relies on the side-by-side `lib/`
 checkout layout.
@@ -49,7 +49,7 @@ in the server repo by a `device.json` manifest plus its registers JSON and JSON
 schema. Onboard a new device with the `/add-register-device` skill **in the server
 repo**, then point an MCP server entry at it from the consuming repo's `.mcp.json`.
 
-**Detailed documentation:** See `../device-register-docs/AGENTS.md` (sibling repo) for complete usage instructions and examples.
+**Detailed documentation:** See `../device-register-mcp-server/AGENTS.md` (sibling repo) for complete usage instructions and examples.
 
 ### Configuring the MCP Servers Per Tool
 
@@ -386,7 +386,7 @@ Sibling repositories (side-by-side in the parent project's `lib/`):
 
 ```
 ../BQ25798/                 # BQ25798 charger driver (depends on this library)
-../device-register-docs/    # Generic register-docs MCP server + all device definitions
+../device-register-mcp-server/    # Generic register-docs MCP server + all device definitions
 ```
 
 **Navigation:**
@@ -397,7 +397,7 @@ Sibling repositories (side-by-side in the parent project's `lib/`):
 - **Writing Tests:** See [TESTING.md](docs/engineering/TESTING.md)
 - **Reviewing Code:** See [CODE_REVIEW_GUIDELINES.md](docs/engineering/CODE_REVIEW_GUIDELINES.md)
 - **Current Roadmap:** See [Implementation Plan](docs/plans/plan-impl-v01.md)
-- **MCP Servers:** See `../device-register-docs/AGENTS.md` (sibling repo)
+- **MCP Servers:** See `../device-register-mcp-server/AGENTS.md` (sibling repo)
 - **BQ25798 Driver:** See `../BQ25798/AGENTS.md` (sibling repo)
 
 ---
@@ -422,7 +422,7 @@ Sibling repositories (side-by-side in the parent project's `lib/`):
 3. **Third:** Check [CONSTRAINTS.md](docs/engineering/CONSTRAINTS.md) for platform gotchas
 4. **Use the MCP server:**
    - `tps25751-docs` (`search_register`, `explain_bitfield`, `get_register`) for
-     TPS25751 registers (served from the sibling `lib/device-register-docs` repo)
+     TPS25751 registers (served from the sibling `lib/device-register-mcp-server` repo)
 5. **Follow the checklist:** Every register needs:
    - Class inheriting from `TPS25751Register`
    - Factory integration (enum, forward declaration, creation methods)

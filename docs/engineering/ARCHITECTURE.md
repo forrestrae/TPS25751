@@ -852,8 +852,8 @@ needs no changes to any TPS25751 host file.
    consecutive I2Cw) commands — `TPS25751DownstreamDevice` warns via
    `DEBUG_CAT_TASK` if violated but does not block the call.
 7. **Register the device's MCP docs server** in the driver repo's `.mcp.json`,
-   pointing the generic server in the sibling `lib/device-register-docs` repo
-   (`uv run ../device-register-docs/server.py`) at a new `devices/<device>/`
+   pointing the generic server in the sibling `lib/device-register-mcp-server` repo
+   (`uv run ../device-register-mcp-server/server.py`) at a new `devices/<device>/`
    manifest authored there, and update the MCP table in the driver repo's
    `AGENTS.md`.
 

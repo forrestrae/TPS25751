@@ -22,19 +22,12 @@ Replace `example-read-registers` with any environment from the table below.
 | Example | Environment | Demonstrates |
 |---|---|---|
 | [`read-registers`](read-registers/) | `example-read-registers` | Reading core TPS25751 **host** registers (STATUS, MODE, POWER_PATH_STATUS, BOOT_FLAGS, PORT_CONFIG, …) and decoding interrupt events via an IRQ pin. The starting point for the host controller. |
-| [`read-downstream-bq25798-reg`](read-downstream-bq25798-reg/) | `example-read-downstream-bq25798-reg` | The minimal **downstream I2Cc** path: reads the BQ25798 Part Information register (REG48h) once per loop over the 4CC I2Cr command-task. Useful for validating the downstream read path against a logic-analyzer capture. |
-| [`bq25798-direct-i2c`](bq25798-direct-i2c/) | `example-bq25798-direct-i2c` | The **direct-bus** variant of the above: constructs `BQ25798::Device` with the `(TwoWire&, addr)` constructor and reads Part Info + a few ADC channels straight over the Teensy's own `Wire` bus — no TPS25751 proxy, plain I2C, no 5 s pacing. For boards/bench setups where the charger is wired to the MCU directly. |
-| [`bq25798-status`](bq25798-status/) | `example-bq25798-status` | Reading all BQ25798 **status and fault** registers (ChargerStatus0–4, ChargerFlag0–3, FaultStatus0–1, FaultFlag0–1) through the typed `BQ25798::Device` driver. |
-| [`bq25798-charge-config`](bq25798-charge-config/) | `example-bq25798-charge-config` | Reading the BQ25798 **charge-configuration** registers (voltage/current limits, precharge/termination, charger control, NTC thresholds). |
-| [`bq25798-telemetry`](bq25798-telemetry/) | `example-bq25798-telemetry` | Reading the BQ25798 **ADC telemetry** channels (VBUS, VBAT, VSYS, VAC1/2, IBUS, IBAT, TS, TDIE) and printing converted engineering units. |
-| [`bq25798-set-charge`](bq25798-set-charge/) | `example-bq25798-set-charge` | The downstream **I2Cw write** path: a guarded, reversible round-trip that toggles ChargerControl0 EN_CHG via `enableCharging()`, verifies only that bit changed, then restores the original value. |
-| [`bq25798-fault-investigator`](bq25798-fault-investigator/) | `example-bq25798-fault-investigator` | **Structured fault diagnostics**: reads BQ25798 status/fault/flag/config/ADC registers, decodes them, runs heuristic checks, and prints a likely-cause report for symptoms like a 1 Hz STAT blink plus inductor whine. Always enables the ADC at startup (the only write in the otherwise read-only default build); an optional compile-time `ENABLE_SAFE_DIAGNOSTIC_SETUP` additionally applies a conservative safe config (VREG 16.8 V, VSYSMIN 12.0 V, low ICHG/IINDPM, OTG/backup off) once, and `RESTORE_CHARGER_DEFAULTS` undoes it (REG_RST the charger, then GAID cold-reset the TPS25751 so it re-applies the charger config from EEPROM). VAC1/VAC2 reads are compiled out by default (`READ_VAC1_VAC2`, they mirror VBUS on this board). Verbose or CSV output via a compile-time flag. |
 | [`load-patch-bundle`](load-patch-bundle/) | `example-load-patch-bundle` | **Host-side Patch Burst Mode (PBM)** bring-up: loads a TI patch bundle directly into the TPS25751 over I2Ct when no external EEPROM is present (EEPROM-less PTCH → APP path). Demonstrates `TPS25751PatchLoader` — the 17-step PBM sequencing from TI app note SLVAFV8A §4.1 — and prints the `PatchLoadStatus` outcome. Requires replacing `patch_bundle.h` with the real low-region binary from TI's USBCPD Application Customization Tool; ships with a placeholder array so the example compiles as-is. |
 
-> **Note on BQ25798 examples:** the charger sits on the TPS25751's secondary I2Cc
-> bus and is reached through 4CC command-tasks. The TRM requires ≥5 s between
-> consecutive I2Cr commands of the same type, so these sketches pace themselves with
-> a delay between reads.
+> **BQ25798 downstream-device examples** (status, charge-config, telemetry,
+> set-charge, fault-investigator, direct-i2c, read-downstream-bq25798-reg) moved to
+> the sibling [BQ25798 repo](https://github.com/forrestrae/BQ25798)'s `examples/`
+> (checked out side-by-side as `lib/BQ25798` during development).
 
 ## Further Reading
 

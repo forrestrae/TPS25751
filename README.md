@@ -5,8 +5,10 @@ Delivery controller, driven over I2C. It provides type-safe, per-register classe
 with named accessors, three-tier validation, and configurable debug output.
 
 The library also reaches devices on the TPS25751's secondary I2Cc bus through the
-controller's 4CC command-task interface — including a complete typed driver for the
-**BQ25798** buck-boost charger.
+controller's 4CC command-task interface. A complete typed driver for the **BQ25798**
+buck-boost charger builds on this and lives in the sibling
+[BQ25798 repository](https://github.com/forrestrae/BQ25798) (checked out
+side-by-side as `lib/BQ25798` during development).
 
 Designed for **Teensy 4.x** (ARM Cortex-M7) and the Arduino framework.
 
@@ -14,8 +16,9 @@ Designed for **Teensy 4.x** (ARM Cortex-M7) and the Arduino framework.
 
 - **Type-safe register access** — each register decodes into a dedicated class with
   named accessors instead of raw bit-twiddling.
-- **Downstream device support** — talk to chips on the TPS25751's I2Cc bus (e.g. a
-  BQ25798 charger) via the same typed style.
+- **Downstream device support** — talk to chips on the TPS25751's I2Cc bus via
+  `TPS25751DownstreamDevice`; typed per-device drivers (e.g. the BQ25798 charger
+  driver in the sibling `lib/BQ25798` repo) build on it.
 - **Patch-bundle loading** — `TPS25751PatchLoader` implements the EEPROM-less
   PTCH → APP bring-up path (Patch Burst Mode, TI app note SLVAFV8A), streaming
   a firmware image directly over I2Ct in Wire-buffer-sized chunks.
@@ -56,7 +59,8 @@ void loop() {
 
 Read methods return a `std::unique_ptr` to the decoded register, or `nullptr` on
 failure. See the [examples](examples/) for runnable sketches covering the host
-controller and the downstream BQ25798 charger.
+controller (downstream-charger examples live with the BQ25798 driver in the
+sibling `lib/BQ25798` repo).
 
 ## Running the Examples
 
@@ -74,7 +78,7 @@ pio device monitor          # 115200 baud
 ```
 
 Substitute any `example-*` environment name — for instance
-`example-bq25798-telemetry`. See [`examples/README.md`](examples/README.md) for a
+`example-load-patch-bundle`. See [`examples/README.md`](examples/README.md) for a
 description of what each example demonstrates.
 
 ## Documentation

@@ -297,7 +297,8 @@ if called sooner — it does **not** hard-block, since callers may already be
 managing the timing themselves.
 
 > **Direct (non-proxied) transport bypasses all of the above.** Constructing
-> `TPS25751DownstreamDevice` / `BQ25798::Device` with the `(TwoWire&, addr)`
+> `TPS25751DownstreamDevice` (or a driver built on it, e.g. `BQ25798::Device` in
+> the sibling `lib/BQ25798` repo) with the `(TwoWire&, addr)`
 > constructor instead of `(const TPS25751&, addr)` selects a **direct** transport:
 > reads/writes are plain Arduino-`Wire` register transactions to the part on the
 > MCU's own bus, with no 4CC relay. Because there is no I2Cr/I2Cw, **none** of the
@@ -799,103 +800,24 @@ field counts the register-offset byte + payload (`payload_len + 1`)** — see
 
 ---
 
-## BQ25798 Downstream Device Decode & Encode Conventions
+## Downstream-Device Decode & Encode Conventions (moved to lib/BQ25798)
 
-These apply to all BQ25798 register classes and, by analogy, to any downstream
-device whose registers are big-endian. Conventions 1–3 cover **decode** (read);
-conventions 4–6 cover **encode** (write) of the R/W registers (see ADR-009 in
-[ARCHITECTURE.md](ARCHITECTURE.md)).
+The decode/encode conventions established for the BQ25798 downstream charger
+driver — big-endian 16-bit assembly (never `extractBits16`), signed ADC channels
+via `int16_t`, datasheet-sourced ADC LSB step sizes, read-modify-write field
+setters that preserve reserved bits — moved with the driver to the sibling
+**`lib/BQ25798`** repository; see `docs/engineering/CONVENTIONS.md` there. They
+apply, by analogy, to any downstream device whose registers are big-endian.
 
-### 1. 16-Bit Registers Are Big-Endian — Do Not Use `extractBits16`
+Two things remain true on the host side regardless of the device driver:
 
-`TPS25751BitUtils::extractBits16` assembles `raw[0]` as the **LSB** (little-endian).
-BQ25798 stores 16-bit registers with `raw[0]` as the **MSB** (big-endian). Using
-`extractBits16` silently byte-swaps every 16-bit value.
-
-**Wrong:**
-```cpp
-uint16_t v = TPS25751BitUtils::extractBits16(data_.data(), 0, 16, 0); // byte-swapped!
-```
-
-**Right:**
-```cpp
-uint16_t v = (static_cast<uint16_t>(data_[0]) << 8) | data_[1];
-```
-
-### 2. Signed ADC Channels — Reinterpret as `int16_t`
-
-The BQ25798 IBUS, IBAT, and TDIE ADC registers return 2's-complement signed
-values. After big-endian assembly, reinterpret as `int16_t`:
-
-**Wrong:**
-```cpp
-uint16_t raw = (static_cast<uint16_t>(data_[0]) << 8) | data_[1];
-float ibus_mA = raw * 1.0f;   // wrong sign for negative currents
-```
-
-**Right:**
-```cpp
-uint16_t raw = (static_cast<uint16_t>(data_[0]) << 8) | data_[1];
-int16_t signed_raw = static_cast<int16_t>(raw);
-float ibus_mA = signed_raw * lsb_mA;  // correct sign
-```
-
-### 3. ADC LSB Step Sizes Come from the Datasheet, Not the MCP Definitions
-
-The `bq25798-docs` MCP server provides register field descriptions but does **not**
-carry unit-conversion factors (ADC LSB step sizes). Source these from the BQ25798
-datasheet (SLUSE02, Table 9-xx for each ADC channel):
-
-| Channel | LSB | Notes |
-|---------|-----|-------|
-| IBUS | 1 mA | Signed |
-| IBAT | 1 mA | Signed |
-| VBUS | 1 mV | Unsigned |
-| VAC1/VAC2 | 1 mV | Unsigned |
-| VBAT | 1 mV | Unsigned |
-| VSYS | 1 mV | Unsigned |
-| TS | 0.09765625 % | Unsigned (NTC ratio) |
-| TDIE | 0.5 °C | Signed |
-
-Hardcoding the wrong LSB (e.g. 1.0 for TDIE) produces silently wrong physical values.
-
-### 4. Encode Is Read-Modify-Write — Preserve Reserved Bits
-
-Field setters on R/W registers mutate **only their field's bits** in the register's own
-raw buffer (`TPS25751Register::raw()`); reserved and sibling-field bits are preserved by
-construction. Never reassemble the whole register from a subset of fields (that risks
-zeroing reserved bits the device expects to read back unchanged). The encode helpers
-`setField8` / `setField16BE` (`include/BQ25798/BQ25798Encode.h`) do this read-modify-write
-and mask the value to the field width.
-
-### 5. Field Placement Is Big-Endian on Encode Too — Use `setField16BE`
-
-The encode side mirrors convention 1: for 16-bit registers, `setField16BE` writes the
-high byte to `raw[0]` (big-endian), matching the decode-side `(raw[0]<<8)|raw[1]`
-assembly. Never use a little-endian helper to encode a downstream 16-bit field — it
-byte-swaps the value just as `extractBits16` does on decode.
-
-### 6. Inverse Unit Conversion Reuses the Class's Own Decode Constant
-
-An engineering-unit setter (e.g. `setMillivolts`) inverts the same LSB/offset constant
-its decode accessor uses, so encode and decode can never drift apart. Where decode adds
-an offset, the inverse must **guard against unsigned underflow** (clamp inputs below the
-offset to 0 before subtracting):
-
-```cpp
-// decode: mV = kOffsetMv + code * kLsbMv
-// encode (with underflow guard):
-const uint16_t code = (mV <= kOffsetMv) ? 0
-                      : static_cast<uint16_t>((mV - kOffsetMv) / kLsbMv);
-```
-
-### Encode Reuses the Existing I2Cw Framing
-
-Typed writes (`Device::writeRegister<T>()`) ride the same I2Cw 4CC task as the raw write
-path, so the framing constraints from the [4CC Command Interface](#4cc-command-interface--i2cc-downstream-device-proxy-trm-sec-442443)
-section apply unchanged: payload `len ≤ 11`, and `Length = payload + 1` (counts the
-register-offset byte). Self-clearing command bits (REG_RST, WD_RST, FORCE_*) are written
-as a `setX(true)`; the device clears them in hardware, so a subsequent read returns 0.
+- The generic I2Cr/I2Cw framing rules in the [4CC Command Interface](#4cc-command-interface--i2cc-downstream-device-proxy-trm-sec-442443)
+  section above apply unchanged to *typed* downstream writes — payload `len ≤ 11`,
+  `Length = payload + 1` (counts the register-offset byte) — because they ride the
+  same I2Cw task as raw writes.
+- `TPS25751BitUtils::extractBits16` is **little-endian** by design (matches the
+  TPS25751's own registers); big-endian downstream devices must assemble
+  multi-byte fields manually.
 
 ---
 
@@ -970,6 +892,7 @@ void foo() {
 |---------|------|--------|---------|
 | 1.0 | 2025-10-20 | Claude Code | Initial constraints document extracted from implementation plan |
 | 1.1 | 2026-06-24 | Claude Code | Added BQ25798 downstream device decode conventions (big-endian, signed ADC, LSB sources) |
+| 1.2 | 2026-07-02 | Claude Code | BQ25798 decode/encode conventions moved to the sibling lib/BQ25798 repo with the driver; generic I2Cr/I2Cw framing rules retained here |
 
 ---
 

@@ -192,7 +192,8 @@ task code.
 
 ### Downstream Device Register Classes
 
-Register classes for downstream devices (e.g. `BQ25798::REG00h`) follow the **same
+Register classes for downstream devices (e.g. `BQ25798::REG00h` in the sibling
+`lib/BQ25798` repo, the reference implementation) follow the **same
 mandatory template** as host-side registers: default constructor + `(const uint8_t*,
 size_t)` constructor, three-tier validation (or the equivalent `isSemanticallyValid()`
 chain), `debugPrint()` using `F()`. They inherit `TPS25751Register` — not any
@@ -241,7 +242,7 @@ whole buffer is written back via `Device::writeRegister<T>()`. See ADR-009 in
   `set<DecoderName>` naming so the pair is obvious.
 - **Guard `if (!isValid()) return;`** at the top of every setter (matches the decoders'
   validity discipline).
-- **Use `setField8` / `setField16BE`** (`include/BQ25798/BQ25798Encode.h`) — never write
+- **Use `setField8` / `setField16BE`** (`include/BQ25798/BQ25798Encode.h`, `lib/BQ25798` repo) — never write
   the raw byte directly. They read-modify-write only the field's bits (reserved and
   sibling bits preserved) and mask the value to the field width. `setField16BE` is
   **big-endian** to match the decode-side `(raw[0]<<8)|raw[1]` assembly — never a
@@ -255,9 +256,9 @@ whole buffer is written back via `Device::writeRegister<T>()`. See ADR-009 in
 - **Self-clearing command bits** (e.g. `WD_RST`, `REG_RST`, `FORCE_*`) get a plain
   `setX(bool)` that sets the bit; the device clears it in hardware, so it reads back 0.
 
-Canonical examples: `BQ25798ChargerControl0` (single-bit setters),
-`BQ25798ChargeVoltageLimit` (16-bit big-endian + unit inversion),
-`BQ25798MinimalSystemVoltage` (offset inversion with underflow guard).
+Canonical examples (sibling `lib/BQ25798` repo): `BQ25798ChargerControl0`
+(single-bit setters), `BQ25798ChargeVoltageLimit` (16-bit big-endian + unit
+inversion), `BQ25798MinimalSystemVoltage` (offset inversion with underflow guard).
 
 ---
 

@@ -9,7 +9,7 @@ directory. `CLAUDE.md` is a symlink to this file — edit `AGENTS.md`.
 
 This directory holds runnable example sketches for the TPS25751 library. Each
 example is a self-contained folder with a `src/main.cpp` that demonstrates one
-focused capability (host register reads, downstream BQ25798 reads, telemetry, etc.).
+focused capability (host register reads, patch-bundle loading, etc.).
 
 For library development itself (register classes, factory, validation, architecture),
 see the library developer guide at [`../AGENTS.md`](../AGENTS.md). This file is scoped
@@ -68,8 +68,8 @@ consumption and are not the primary build path used in this repo.
   `setup()`.
 - Debug output is configured via `TPS25751::setDebugLevel()` /
   `setDebugCategories()` rather than build flags.
-- BQ25798 (downstream I2Cc) examples pace consecutive same-type I2Cr commands ≥5 s
-  apart per the TRM.
+- BQ25798 downstream-device examples now live in the sibling `lib/BQ25798` repo
+  (see its `examples/AGENTS.md` for the I2Cc pacing convention).
 
 ---
 

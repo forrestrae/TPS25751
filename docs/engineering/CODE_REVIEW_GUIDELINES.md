@@ -22,9 +22,12 @@ The most critical review category for this codebase. Many bugs here cause silent
 - **I2Cr/I2Cw target address must be 7-bit**: Bit 7 of the target-address byte in the I2Cr/I2Cw input payload is reserved and must be 0. Passing a raw 8-bit address (e.g. one that already has a R/W bit baked in) corrupts the target device lookup
 - **`executeCommand()` 5-second spacing is not enforced by the executor**: The TRM's 5 s minimum spacing between consecutive I2Cr (or consecutive I2Cw) commands is tracked by `TPS25751DownstreamDevice`, not `TPS25751::executeCommand()` itself. Code that calls `executeCommand()` directly with `"I2Cr"`/`"I2Cw"` (bypassing `TPS25751DownstreamDevice`) gets no spacing protection at all
 - **Downstream 16-bit registers are big-endian — `extractBits16` byte-swaps them**: `TPS25751BitUtils::extractBits16` assembles `raw[0]` as LSB. Downstream devices (e.g. BQ25798) store 16-bit registers big-endian (`raw[0]` = MSB). Always assemble downstream 16-bit fields manually: `(static_cast<uint16_t>(raw[0]) << 8) | raw[1]`
-- **Signed downstream ADC channels**: BQ25798 IBUS, IBAT, and TDIE ADC values are 2's-complement signed. After big-endian assembly, reinterpret as `int16_t` before converting to physical units; treating as `uint16_t` produces wrong sign for negative currents
+- **Signed downstream ADC channels**: some downstream ADC values (e.g. BQ25798 IBUS/IBAT/TDIE) are 2's-complement signed. After big-endian assembly, reinterpret as `int16_t` before converting to physical units; treating as `uint16_t` produces wrong sign for negative currents
 - **Downstream factory switch completeness**: Every value in `<Device>::Registers::Address` must have a `case` in all three `createRegister()` overloads; a missing `case` silently returns `nullptr` and causes a null-dereference at the call site
-- **ADC LSB unit-conversion sourced from datasheet, not MCP**: The `bq25798-docs` MCP server does not carry ADC step sizes. Conversion factors (e.g. TDIE: 0.5 °C/LSB, IBUS/IBAT: 1 mA/LSB) must be taken from the BQ25798 datasheet (SLUSE02); using the wrong LSB produces silently wrong physical values
+- **ADC LSB unit-conversion sourced from datasheet, not MCP**: The register-docs MCP servers do not carry ADC step sizes; conversion factors must come from the device datasheet. Using the wrong LSB produces silently wrong physical values
+
+Reviewing BQ25798 driver code? That driver lives in the sibling `lib/BQ25798` repo —
+see its `docs/engineering/CONVENTIONS.md` for the device-specific review traps.
 
 ### Patch Burst Mode (PBM) Traps (ADR-011)
 

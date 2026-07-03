@@ -24,33 +24,36 @@ enabling the 4CC command-task interface and I2Cc downstream-device proxy); see
 
 ## Device Register Documentation (MCP)
 
-**IMPORTANT**: When working with device registers, use the register-docs MCP servers
-for accurate register information extracted from the TI manuals. **Two servers are
-configured**, both backed by one generic server (`docs/mcp-servers/device-register-docs/server.py`)
-pointed at different device definitions:
+**IMPORTANT**: When working with TPS25751 registers, use the `tps25751-docs`
+register-docs MCP server for accurate register information extracted from the TI
+manuals. The generic server engine **and all device definitions** live in the
+sibling **`lib/device-register-docs`** repository; this repo's `.mcp.json` invokes
+it cross-repo (`uv run ../device-register-docs/server.py` with
+`DEVICE_CONFIG=devices/tps25751/device.json` — a relative `DEVICE_CONFIG` resolves
+against `server.py`'s own directory). This relies on the side-by-side `lib/`
+checkout layout.
 
 | MCP server | Tool prefix | Device | Use for |
 |---|---|---|---|
 | `tps25751-docs` | `mcp__tps25751-docs__*` | TPS25751 USB-C PD controller (27 registers) | The host PD controller's own registers (STATUS, MODE, COMMAND/DATA, …) |
-| `bq25798-docs` | `mcp__bq25798-docs__*` | BQ25798 buck-boost charger (57 registers) | The downstream charger reached over I2Cc (REG00–REG48, ADC, charge control, …) |
 
-**Pick by device:** TPS25751 register → `mcp__tps25751-docs__*`; BQ25798 charger
-register → `mcp__bq25798-docs__*`. Both expose the same tools.
+(The BQ25798 charger's `bq25798-docs` server is configured in the sibling
+`lib/BQ25798` driver repo, backed by the same server engine.)
 
-**Available tools (each server):** `search_register`, `explain_bitfield`, `get_register`.
-Each server provides register definitions with addresses, bit fields, enumerated value
+**Available tools:** `search_register`, `explain_bitfield`, `get_register`.
+The server provides register definitions with addresses, bit fields, enumerated value
 meanings, and access types ([R], [R/W], [W]).
 
-The server is **device-generic**: each device is defined under
-`docs/mcp-servers/device-register-docs/devices/<device>/` by a `device.json` manifest
-plus its registers JSON and JSON schema. Add a new device with the `/add-register-device`
-skill, then register it as another MCP server in `.mcp.json`.
+The server is **device-generic**: each device is defined under `devices/<device>/`
+in the server repo by a `device.json` manifest plus its registers JSON and JSON
+schema. Onboard a new device with the `/add-register-device` skill **in the server
+repo**, then point an MCP server entry at it from the consuming repo's `.mcp.json`.
 
-**Detailed documentation:** See [docs/mcp-servers/device-register-docs/AGENTS.md](docs/mcp-servers/device-register-docs/AGENTS.md) for complete usage instructions and examples.
+**Detailed documentation:** See `../device-register-docs/AGENTS.md` (sibling repo) for complete usage instructions and examples.
 
 ### Configuring the MCP Servers Per Tool
 
-The register-docs MCP servers use the standard MCP protocol and work with any compatible AI coding assistant. Tool-specific config files (each defining both `tps25751-docs` and `bq25798-docs`) are included in this repo:
+The register-docs MCP server uses the standard MCP protocol and works with any compatible AI coding assistant. Tool-specific config files (each defining `tps25751-docs` against the sibling server repo) are included in this repo:
 
 | Tool | Config File | Notes |
 |---|---|---|
@@ -177,21 +180,12 @@ Serial.println(F("String in flash"));                // Use F() macro
   Builds entirely on `TPS25751::executeCommand()` (for the PBMs/PBMc 4CC handshakes)
   and `TPS25751::burstWrite()` (raw chunked burst to I2C address 0x30); see ADR-011
   in [ARCHITECTURE.md](docs/engineering/ARCHITECTURE.md)
-- **`BQ25798::Device`**: Typed driver for the BQ25798 buck-boost charger, reachable
-  either proxied over the TPS25751 I2Cc bus (`Device(host, addr)`) or **directly** on a
-  `TwoWire` bus (`Device(wire, addr)`); inherits `TPS25751DownstreamDevice` and adds 57 typed
-  `read<Register>(bool validate=true)` accessors returning
-  `std::unique_ptr<BQ25798::<RegisterClass>>`, plus a typed **write** tier: a generic
-  `writeRegister<T>()` (keyed on `T::kAddress`), an `updateRegister<T>()`
-  read-modify-write helper, and 10 L3 convenience setters (`enableCharging`,
-  `setChargeCurrentLimit`, …). Lives under `include/BQ25798/` and
-  `src/BQ25798/`; uses its own `BQ25798::Registers::Address` enum,
-  `BQ25798::RegisterInfo` table, and per-device factory (`BQ25798::Factory` /
-  `BQ25798::RegisterFactoryImpl`) mirroring the host-side pattern. All 57 BQ25798
-  register classes reuse `TPS25751Register` as their decoder base; the ~31 R/W
-  registers also carry a `kAddress` + field setters (encode via
-  `BQ25798/BQ25798Encode.h`), while read-only registers stay decode-only — see ADR-008
-  and ADR-009 in [ARCHITECTURE.md](docs/engineering/ARCHITECTURE.md)
+> **BQ25798 driver:** the typed driver for the BQ25798 buck-boost charger
+> (`BQ25798::Device`) now lives in the sibling **`lib/BQ25798`** repository — it is
+> the reference implementation of the downstream-device driver tier defined by
+> ADR-008/009/010 in [ARCHITECTURE.md](docs/engineering/ARCHITECTURE.md). It
+> depends on this library (via `TPS25751Register` and `TPS25751DownstreamDevice`);
+> nothing here depends on it.
 
 ### Register Classes
 
@@ -269,43 +263,16 @@ See ADR-011 in [ARCHITECTURE.md](docs/engineering/ARCHITECTURE.md) and the PBM
 subsection of [CONSTRAINTS.md](docs/engineering/CONSTRAINTS.md) for protocol details
 and correctness traps.
 
-### BQ25798 Downstream Device Driver
+### Downstream Device Drivers (external)
 
-`BQ25798::Device` is the first complete downstream device driver built on
-`TPS25751DownstreamDevice`. It lives entirely under its own namespace and
-directories (`include/BQ25798/`, `src/BQ25798/`) and exposes a typed API
-identical in style to the host TPS25751 class:
-
-```cpp
-BQ25798::Device charger(tps, 0x6B);
-auto info = charger.readPartInfo();   // returns unique_ptr<BQ25798::PartInfo>
-auto adc  = charger.readIbusAdc();    // returns unique_ptr<BQ25798::IbusAdc>
-
-// Typed write tier (read-modify-write value objects):
-charger.setChargeVoltageLimit(8400);  // L3 convenience setter (mV)
-charger.enableCharging(true);         // EN_CHG, preserves all other bits
-charger.updateRegister<BQ25798::ChargerControl0>(   // generic RMW
-    [](BQ25798::ChargerControl0& r){ r.setEnHiz(false); });
-```
-
-Key correctness conventions established for all downstream device register classes:
-- **16-bit registers are big-endian**: assemble as `(raw[0] << 8) | raw[1]` on decode,
-  and encode with `setField16BE` (high byte first), NOT via
-  `TPS25751BitUtils::extractBits16` (which is little-endian and will byte-swap them).
-- **Signed ADC channels** (IBUS, IBAT, TDIE): raw value is 2's-complement; reinterpret
-  via `int16_t` after assembly.
-- **ADC LSB step sizes** come from the BQ25798 datasheet (SLUSE02), not from the MCP
-  register definitions — use the datasheet values for unit conversions.
-- **Write encoders are read-modify-write**: each field setter touches only its own
-  field's bits (reserved + sibling bits preserved) and inverts the class's *own* decode
-  LSB/offset constant, so encode and decode can never disagree. R/W registers expose a
-  `static constexpr Registers::Address kAddress`; read-only registers (Status, Flags,
-  ADC results, IcoCurrentLimit, PartInfo) have no setters.
-
-For the full design rationale see ADR-008 (decode) and ADR-009 (write encoders) in
-[docs/engineering/ARCHITECTURE.md](docs/engineering/ARCHITECTURE.md) and the review
-traps in [docs/engineering/CONSTRAINTS.md](docs/engineering/CONSTRAINTS.md)
-("BQ25798 Downstream Device Decode Conventions").
+Typed drivers for parts on the TPS25751's I2Cc bus are **separate libraries** built
+on `TPS25751DownstreamDevice` — each keeps its own namespace, `Address` enum, and
+per-device factory, and reuses `TPS25751Register` as its decoder base (the
+extension-point contract is ADR-008/009/010 in
+[docs/engineering/ARCHITECTURE.md](docs/engineering/ARCHITECTURE.md); the recipe is
+in its "Adding a Downstream Device Driver" section). The reference implementation
+is the **BQ25798 charger driver in the sibling `lib/BQ25798` repository**; see that
+repo's `AGENTS.md` for its API, decode/encode conventions, and examples.
 
 ### Key Design Patterns
 
@@ -403,7 +370,7 @@ auto statusReg = tps.readStatusRegister(true);  // with validation
 ├── src/                                # Implementation files
 ├── examples/                           # Example sketches
 └── docs/
-    ├── AGENTS.md                       # MCP server documentation
+    ├── AGENTS.md                       # Pointer to the register-docs MCP server repo
     ├── engineering/                    # Engineering standards (REQUIRED READING)
     │   ├── STANDARDS.md                # Implementation standards
     │   ├── CONSTRAINTS.md              # Platform constraints
@@ -411,15 +378,15 @@ auto statusReg = tps.readStatusRegister(true);  // with validation
     │   ├── TESTING.md                  # Testing requirements
     │   ├── DOCUMENTATION.md            # Documentation standards
     │   └── CODE_REVIEW_GUIDELINES.md   # Review checklist (embedded C++ / TPS25751-specific)
-    ├── plans/
-    │   └── plan-impl-v01.md            # Implementation plan (12 registers remaining)
-    └── mcp-servers/
-        └── device-register-docs/       # Generic register-docs MCP server (serves both devices)
-            ├── server.py               # One server; device chosen via DEVICE_CONFIG
-            ├── AGENTS.md               # MCP server usage guide
-            └── devices/
-                ├── tps25751/           # device.json + registers JSON + schema (→ tps25751-docs)
-                └── bq25798/            # device.json + registers JSON + schema (→ bq25798-docs)
+    └── plans/
+        └── plan-impl-v01.md            # Implementation plan (12 registers remaining)
+```
+
+Sibling repositories (side-by-side in the parent project's `lib/`):
+
+```
+../BQ25798/                 # BQ25798 charger driver (depends on this library)
+../device-register-docs/    # Generic register-docs MCP server + all device definitions
 ```
 
 **Navigation:**
@@ -430,7 +397,8 @@ auto statusReg = tps.readStatusRegister(true);  // with validation
 - **Writing Tests:** See [TESTING.md](docs/engineering/TESTING.md)
 - **Reviewing Code:** See [CODE_REVIEW_GUIDELINES.md](docs/engineering/CODE_REVIEW_GUIDELINES.md)
 - **Current Roadmap:** See [Implementation Plan](docs/plans/plan-impl-v01.md)
-- **MCP Servers:** See [docs/mcp-servers/device-register-docs/AGENTS.md](docs/mcp-servers/device-register-docs/AGENTS.md)
+- **MCP Servers:** See `../device-register-docs/AGENTS.md` (sibling repo)
+- **BQ25798 Driver:** See `../BQ25798/AGENTS.md` (sibling repo)
 
 ---
 
@@ -452,9 +420,9 @@ auto statusReg = tps.readStatusRegister(true);  // with validation
 1. **First:** Read existing register classes (e.g., `TPS25751Status.h`) to understand the architecture
 2. **Second:** Read [STANDARDS.md](docs/engineering/STANDARDS.md) - It has the complete template
 3. **Third:** Check [CONSTRAINTS.md](docs/engineering/CONSTRAINTS.md) for platform gotchas
-4. **Use the MCP servers:**
-   - `tps25751-docs` (`search_register`, `explain_bitfield`, `get_register`) for TPS25751 registers;
-     `bq25798-docs` for BQ25798 charger registers
+4. **Use the MCP server:**
+   - `tps25751-docs` (`search_register`, `explain_bitfield`, `get_register`) for
+     TPS25751 registers (served from the sibling `lib/device-register-docs` repo)
 5. **Follow the checklist:** Every register needs:
    - Class inheriting from `TPS25751Register`
    - Factory integration (enum, forward declaration, creation methods)
@@ -496,7 +464,7 @@ TPS25751-specific traps to add:
 
 1. Check [CONSTRAINTS.md](docs/engineering/CONSTRAINTS.md) - Most issues are platform-specific
 2. Look at existing register implementations as examples (STATUS, MODE, etc.)
-3. Use the `tps25751-docs` MCP server for TPS25751 register details (`bq25798-docs` for the charger)
+3. Use the `tps25751-docs` MCP server for TPS25751 register details
 4. Reference [Implementation Plan](docs/plans/plan-impl-v01.md) for detailed requirements
 5. Check TI TPS25751 Technical Reference Manual for register specifications
 

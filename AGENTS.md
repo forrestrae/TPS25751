@@ -516,9 +516,23 @@ what each example demonstrates.
 
 ### Publishing the Library
 
-The library is currently maintained as a local library. Future plans include:
-- Publishing to PlatformIO Library Registry
-- Standalone repository with CI/CD
-- Additional platform support (ESP32, RP2040)
+Publishing to the PlatformIO Registry is automated by
+`.github/workflows/publish.yml` (design notes in
+[docs/plans/platformio-pkg-publish.md](docs/plans/platformio-pkg-publish.md)):
+
+- **Every push to `main`** bumps the patch version in `library.json` **and**
+  `library.properties` (via `scripts/bump_version.py` — the single source of truth
+  for bumps; never edit the version fields by hand), commits the bump back as
+  `chore(release): vX.Y.Z [skip ci]`, tags `vX.Y.Z`, and runs
+  `pio pkg publish --no-interactive`.
+- Include `#minor` or `#major` in the commit message to raise the bump level
+  (default is patch).
+- The registry tarball is filtered by the `export.exclude` list in `library.json`
+  (dev tooling, IDE configs, `docs/plans/`, `platformio.ini`, `scripts/`, `test/`
+  are not shipped). Check what would be published with `pio pkg pack`.
+- Auth: the workflow needs a `PLATFORMIO_AUTH_TOKEN` repository secret
+  (generate with `pio account token`).
+
+Future plans: additional platform support (ESP32, RP2040).
 
 ---

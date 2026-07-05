@@ -525,8 +525,9 @@ Publishing to the PlatformIO Registry is automated by
   for bumps; never edit the version fields by hand), commits the bump back as
   `chore(release): vX.Y.Z [skip ci]`, tags `vX.Y.Z`, and runs
   `pio pkg publish --no-interactive`.
-- Include `#minor` or `#major` in the commit message to raise the bump level
-  (default is patch).
+- Include `#minor` or `#major` as a whitespace-delimited token in the commit
+  **subject line** to raise the bump level (default is patch). The body is
+  never scanned, so prose mentioning the tokens is safe.
 - The registry tarball is filtered by the `export.exclude` list in `library.json`
   (dev tooling, IDE configs, `docs/plans/`, `platformio.ini`, `scripts/`, `test/`
   are not shipped). Check what would be published with `pio pkg pack`.

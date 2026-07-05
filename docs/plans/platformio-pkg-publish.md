@@ -22,8 +22,10 @@ Current state (verified):
 Decisions (user was away when asked; these are the recommended defaults and easy to
 change before implementation):
 1. **Trigger strategy: auto-bump on every push to `main`.** Default bump is patch;
-   commit messages containing `#minor` or `#major` raise the bump level. The bump
-   commit uses `[skip ci]` so it doesn't retrigger the workflow.
+   a whitespace-delimited `#minor` or `#major` token in the commit **subject line**
+   raises the bump level (the body is deliberately not scanned — prose mentioning
+   the tokens caused an accidental v2.0.0 bump). The bump commit uses `[skip ci]`
+   so it doesn't retrigger the workflow.
 2. **Add an `export.exclude` filter to `library.json`** so the published package
    contains only sources, examples, README, LICENSE, engineering docs, and manifests.
 
@@ -81,11 +83,15 @@ jobs:
         env:
           COMMIT_MSG: ${{ github.event.head_commit.message }}   # via env, never inline-interpolated (script-injection guard)
         run: |
+          # Only whitespace-delimited tokens in the subject line count —
+          # prose in the commit body must never trigger a bump (v2.0.0 lesson).
+          SUBJECT="${COMMIT_MSG%%$'\n'*}"
           LEVEL=patch
-          case "$COMMIT_MSG" in
-            *"#major"*) LEVEL=major ;;
-            *"#minor"*) LEVEL=minor ;;
-          esac
+          if grep -qE '(^|[[:space:]])#major([[:space:]]|$)' <<< "$SUBJECT"; then
+            LEVEL=major
+          elif grep -qE '(^|[[:space:]])#minor([[:space:]]|$)' <<< "$SUBJECT"; then
+            LEVEL=minor
+          fi
           echo "version=$(python3 scripts/bump_version.py "$LEVEL")" >> "$GITHUB_OUTPUT"
       - name: Commit bump and tag
         run: |

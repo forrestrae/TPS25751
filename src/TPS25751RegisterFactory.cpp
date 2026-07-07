@@ -14,6 +14,8 @@
 #include "TPS25751ActiveRDOContract.h"
 #include "TPS25751ReceivedSourceCaps.h"
 #include "TPS25751ReceivedSinkCaps.h"
+#include "TPS25751TransmitSourceCaps.h"
+#include "TPS25751TransmitSinkCaps.h"
 #include "TPS25751Command.h"
 #include "TPS25751Data.h"
 #include "TPS25751SleepControl.h"
@@ -61,6 +63,10 @@ std::unique_ptr<TPS25751Register> TPS25751RegisterFactoryImpl::createRegister(TP
             return createReceivedSourceCapsRegister();
         case TPS25751Registers::Address::RECEIVED_SINK_CAPABILITIES:
             return createReceivedSinkCapsRegister();
+        case TPS25751Registers::Address::TRANSMIT_SOURCE_CAPABILITIES:
+            return createTransmitSourceCapsRegister();
+        case TPS25751Registers::Address::TRANSMIT_SINK_CAPABILITIES:
+            return createTransmitSinkCapsRegister();
         case TPS25751Registers::Address::COMMAND:
             return createCommandRegister();
         case TPS25751Registers::Address::DATA:
@@ -121,6 +127,10 @@ std::unique_ptr<TPS25751Register> TPS25751RegisterFactoryImpl::createRegister(TP
             return createReceivedSourceCapsRegister(data, length);
         case TPS25751Registers::Address::RECEIVED_SINK_CAPABILITIES:
             return createReceivedSinkCapsRegister(data, length);
+        case TPS25751Registers::Address::TRANSMIT_SOURCE_CAPABILITIES:
+            return createTransmitSourceCapsRegister(data, length);
+        case TPS25751Registers::Address::TRANSMIT_SINK_CAPABILITIES:
+            return createTransmitSinkCapsRegister(data, length);
         case TPS25751Registers::Address::COMMAND:
             return createCommandRegister(data, length);
         case TPS25751Registers::Address::DATA:
@@ -176,6 +186,10 @@ std::unique_ptr<TPS25751Register> TPS25751RegisterFactoryImpl::createRegister(co
             return std::make_unique<TPS25751ReceivedSourceCaps>(regInfo);
         case TPS25751Registers::Address::RECEIVED_SINK_CAPABILITIES:
             return std::make_unique<TPS25751ReceivedSinkCaps>(regInfo);
+        case TPS25751Registers::Address::TRANSMIT_SOURCE_CAPABILITIES:
+            return std::make_unique<TPS25751TransmitSourceCaps>(regInfo);
+        case TPS25751Registers::Address::TRANSMIT_SINK_CAPABILITIES:
+            return std::make_unique<TPS25751TransmitSinkCaps>(regInfo);
         case TPS25751Registers::Address::COMMAND:
             return std::make_unique<TPS25751Command>(regInfo);
         case TPS25751Registers::Address::DATA:
@@ -316,6 +330,22 @@ std::unique_ptr<TPS25751Register> TPS25751RegisterFactoryImpl::createReceivedSin
 
 std::unique_ptr<TPS25751Register> TPS25751RegisterFactoryImpl::createReceivedSinkCapsRegister(const uint8_t* data, size_t length) const {
     return std::make_unique<TPS25751ReceivedSinkCaps>(data, length);
+}
+
+std::unique_ptr<TPS25751Register> TPS25751RegisterFactoryImpl::createTransmitSourceCapsRegister() const {
+    return std::make_unique<TPS25751TransmitSourceCaps>();
+}
+
+std::unique_ptr<TPS25751Register> TPS25751RegisterFactoryImpl::createTransmitSourceCapsRegister(const uint8_t* data, size_t length) const {
+    return std::make_unique<TPS25751TransmitSourceCaps>(data, length);
+}
+
+std::unique_ptr<TPS25751Register> TPS25751RegisterFactoryImpl::createTransmitSinkCapsRegister() const {
+    return std::make_unique<TPS25751TransmitSinkCaps>();
+}
+
+std::unique_ptr<TPS25751Register> TPS25751RegisterFactoryImpl::createTransmitSinkCapsRegister(const uint8_t* data, size_t length) const {
+    return std::make_unique<TPS25751TransmitSinkCaps>(data, length);
 }
 
 std::unique_ptr<TPS25751Register> TPS25751RegisterFactoryImpl::createCommandRegister() const {

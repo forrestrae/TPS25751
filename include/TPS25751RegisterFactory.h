@@ -20,6 +20,8 @@ class TPS25751ActivePDOContract;
 class TPS25751ActiveRDOContract;
 class TPS25751ReceivedSourceCaps;
 class TPS25751ReceivedSinkCaps;
+class TPS25751TransmitSourceCaps;
+class TPS25751TransmitSinkCaps;
 class TPS25751Command;
 class TPS25751Data;
 class TPS25751SleepControl;
@@ -89,6 +91,8 @@ private:
     std::unique_ptr<TPS25751Register> createActiveRDOContractRegister() const;
     std::unique_ptr<TPS25751Register> createReceivedSourceCapsRegister() const;
     std::unique_ptr<TPS25751Register> createReceivedSinkCapsRegister() const;
+    std::unique_ptr<TPS25751Register> createTransmitSourceCapsRegister() const;
+    std::unique_ptr<TPS25751Register> createTransmitSinkCapsRegister() const;
     std::unique_ptr<TPS25751Register> createCommandRegister() const;
     std::unique_ptr<TPS25751Register> createDataRegister() const;
     std::unique_ptr<TPS25751Register> createSleepControlRegister() const;
@@ -112,6 +116,8 @@ private:
     std::unique_ptr<TPS25751Register> createActiveRDOContractRegister(const uint8_t* data, size_t length) const;
     std::unique_ptr<TPS25751Register> createReceivedSourceCapsRegister(const uint8_t* data, size_t length) const;
     std::unique_ptr<TPS25751Register> createReceivedSinkCapsRegister(const uint8_t* data, size_t length) const;
+    std::unique_ptr<TPS25751Register> createTransmitSourceCapsRegister(const uint8_t* data, size_t length) const;
+    std::unique_ptr<TPS25751Register> createTransmitSinkCapsRegister(const uint8_t* data, size_t length) const;
     std::unique_ptr<TPS25751Register> createCommandRegister(const uint8_t* data, size_t length) const;
     std::unique_ptr<TPS25751Register> createDataRegister(const uint8_t* data, size_t length) const;
     std::unique_ptr<TPS25751Register> createSleepControlRegister(const uint8_t* data, size_t length) const;

@@ -18,6 +18,8 @@
 #include "TPS25751ActiveRDOContract.h"
 #include "TPS25751ReceivedSourceCaps.h"
 #include "TPS25751ReceivedSinkCaps.h"
+#include "TPS25751TransmitSourceCaps.h"
+#include "TPS25751TransmitSinkCaps.h"
 #include "TPS25751Command.h"
 #include "TPS25751Data.h"
 #include "TPS25751SleepControl.h"
@@ -78,6 +80,21 @@ public:
     bool readActiveRDOContract(TPS25751ActiveRDOContract &rdoContract) const;
     bool readReceivedSourceCaps(TPS25751ReceivedSourceCaps &sourceCaps) const;
     bool readReceivedSinkCaps(TPS25751ReceivedSinkCaps &sinkCaps) const;
+
+    /**
+     * @brief Read the Transmit Source Capabilities register (0x32)
+     * @param sourceCaps Register object to populate
+     * @return true if the read succeeded
+     */
+    bool readTransmitSourceCaps(TPS25751TransmitSourceCaps &sourceCaps) const;
+
+    /**
+     * @brief Read the Transmit Sink Capabilities register (0x33)
+     * @param sinkCaps Register object to populate
+     * @return true if the read succeeded
+     */
+    bool readTransmitSinkCaps(TPS25751TransmitSinkCaps &sinkCaps) const;
+
     bool readSleepControl(TPS25751SleepControl &sleepControl) const;
     bool readCustomerUse(TPS25751CustomerUse &customerUse) const;
 
@@ -107,6 +124,22 @@ public:
      *         otherwise the result of the underlying I2C write
      */
     bool writeSleepControl(const TPS25751SleepControl &sleepControl) const;
+
+    /**
+     * @brief Write the Transmit Source Capabilities register (0x32)
+     * @param sourceCaps Register object holding the bytes to write
+     * @return false if @p sourceCaps is not valid or not the expected size;
+     *         otherwise the result of the underlying I2C write
+     */
+    bool writeTransmitSourceCaps(const TPS25751TransmitSourceCaps &sourceCaps) const;
+
+    /**
+     * @brief Write the Transmit Sink Capabilities register (0x33)
+     * @param sinkCaps Register object holding the bytes to write
+     * @return false if @p sinkCaps is not valid or not the expected size;
+     *         otherwise the result of the underlying I2C write
+     */
+    bool writeTransmitSinkCaps(const TPS25751TransmitSinkCaps &sinkCaps) const;
 
     /**
      * @brief Write the Customer Use register (0x06)
@@ -382,6 +415,20 @@ public:
      * @return Unique pointer to Received Sink Capabilities register (nullptr if failed)
      */
     std::unique_ptr<TPS25751ReceivedSinkCaps> readReceivedSinkCapsRegister(bool validate = true) const;
+
+    /**
+     * @brief Read Transmit Source Capabilities register using factory pattern
+     * @param validate Whether to validate the register after reading
+     * @return Unique pointer to Transmit Source Capabilities register (nullptr if failed)
+     */
+    std::unique_ptr<TPS25751TransmitSourceCaps> readTransmitSourceCapsRegister(bool validate = true) const;
+
+    /**
+     * @brief Read Transmit Sink Capabilities register using factory pattern
+     * @param validate Whether to validate the register after reading
+     * @return Unique pointer to Transmit Sink Capabilities register (nullptr if failed)
+     */
+    std::unique_ptr<TPS25751TransmitSinkCaps> readTransmitSinkCapsRegister(bool validate = true) const;
 
     /**
      * @brief Read Command register (0x08) using factory pattern

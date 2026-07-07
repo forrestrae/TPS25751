@@ -144,6 +144,18 @@ void print_contracts()
         Serial.println(F("Failed to create/read Received Sink Capabilities register via factory"));
 
 
+    if (const auto txSourceCaps = pd.readTransmitSourceCapsRegister(true))
+        txSourceCaps->debugPrint();
+    else
+        Serial.println(F("Failed to create/read Transmit Source Capabilities register via factory"));
+
+
+    if (const auto txSinkCaps = pd.readTransmitSinkCapsRegister(true))
+        txSinkCaps->debugPrint();
+    else
+        Serial.println(F("Failed to create/read Transmit Sink Capabilities register via factory"));
+
+
     if (const auto pdoContract = pd.readActivePDOContractRegister(true))
         pdoContract->debugPrint();
     else

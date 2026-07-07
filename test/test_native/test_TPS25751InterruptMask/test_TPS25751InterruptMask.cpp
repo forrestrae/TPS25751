@@ -141,6 +141,7 @@ void test_decode_multi_bit_pattern()
     TEST_ASSERT_TRUE(reg.i2cControllerNacked());  // bit 82
 
     // Spot-check a handful of bits that must NOT be set by this pattern.
+    TEST_ASSERT_FALSE(reg.plugInsertOrRemoval());        // bit 3
     TEST_ASSERT_FALSE(reg.powerSwapComplete());          // bit 4
     TEST_ASSERT_FALSE(reg.dataSwapComplete());           // bit 5
     TEST_ASSERT_FALSE(reg.newContractAsConsumer());      // bit 12
@@ -191,6 +192,21 @@ void test_set_pd_hardreset_preserves_other_bits()
     // Neighbouring bits/bytes untouched.
     TEST_ASSERT_TRUE(reg.overcurrent());          // byte 1 untouched
     TEST_ASSERT_EQUAL_UINT8(0xFF, reg.raw()[1]);
+}
+
+void test_set_plug_insert_or_removal_round_trip_and_preserves_other_bits()
+{
+    TPS25751InterruptMask reg;  // starts all-zero
+    reg.setPlugInsertOrRemoval(true);  // bit 3, byte 0
+    TEST_ASSERT_TRUE(reg.plugInsertOrRemoval());
+    TEST_ASSERT_EQUAL_UINT8(0x08, reg.raw()[0]);
+
+    // On an all-ones buffer, clearing bit 3 must leave byte0's other bits set.
+    TPS25751InterruptMask ones(ALL_ONES_DATA);
+    ones.setPlugInsertOrRemoval(false);
+    TEST_ASSERT_EQUAL_UINT8(0xF7, ones.raw()[0]);  // 1111_0111
+    TEST_ASSERT_FALSE(ones.plugInsertOrRemoval());
+    TEST_ASSERT_TRUE(ones.pdHardreset());  // bit 1, same byte, untouched
 }
 
 void test_set_overcurrent_preserves_other_bits()
@@ -287,6 +303,7 @@ int main(int, char **)
 
     RUN_TEST(test_set_pd_hardreset_round_trip);
     RUN_TEST(test_set_pd_hardreset_preserves_other_bits);
+    RUN_TEST(test_set_plug_insert_or_removal_round_trip_and_preserves_other_bits);
     RUN_TEST(test_set_overcurrent_preserves_other_bits);
     RUN_TEST(test_set_liquid_detection_preserves_other_bits);
     RUN_TEST(test_set_i2c_controller_nacked_preserves_other_bits);

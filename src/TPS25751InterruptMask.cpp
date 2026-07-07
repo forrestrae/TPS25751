@@ -87,7 +87,7 @@ bool TPS25751InterruptMask::deviceIncompatibleError() const
     return extractBits(32, 1);
 }
 
-// Plug detection (bits 42-43)
+// Plug detection (bits 3, 42-43)
 bool TPS25751InterruptMask::plugEarlyNotification() const
 {
     return extractBits(43, 1);
@@ -96,6 +96,11 @@ bool TPS25751InterruptMask::plugEarlyNotification() const
 bool TPS25751InterruptMask::sinkTransitionCompleted() const
 {
     return extractBits(42, 1);
+}
+
+bool TPS25751InterruptMask::plugInsertOrRemoval() const
+{
+    return extractBits(3, 1);
 }
 
 // Command completion (bit 30)
@@ -217,6 +222,7 @@ void TPS25751InterruptMask::setDeviceIncompatibleError(bool enabled) { setBits(3
 
 void TPS25751InterruptMask::setPlugEarlyNotification(bool enabled) { setBits(43, 1, enabled ? 1u : 0u); }
 void TPS25751InterruptMask::setSinkTransitionCompleted(bool enabled) { setBits(42, 1, enabled ? 1u : 0u); }
+void TPS25751InterruptMask::setPlugInsertOrRemoval(bool enabled) { setBits(3, 1, enabled ? 1u : 0u); }
 
 void TPS25751InterruptMask::setCmd1Complete(bool enabled) { setBits(30, 1, enabled ? 1u : 0u); }
 
@@ -276,6 +282,7 @@ uint8_t TPS25751InterruptMask::getEnabledCount() const
     if (deviceIncompatibleError()) count++;
     if (plugEarlyNotification()) count++;
     if (sinkTransitionCompleted()) count++;
+    if (plugInsertOrRemoval()) count++;
     if (cmd1Complete()) count++;
     if (pdStatusUpdated()) count++;
     if (statusUpdated()) count++;
@@ -334,6 +341,7 @@ void TPS25751InterruptMask::debugPrint(Stream &s) const
 
     if (plugEarlyNotification()) s.println(F("  [+] Plug Early Notification"));
     if (sinkTransitionCompleted()) s.println(F("  [+] Sink Transition Completed"));
+    if (plugInsertOrRemoval()) s.println(F("  [+] Plug Insert or Removal"));
 
     if (cmd1Complete()) s.println(F("  [+] CMD1 Complete"));
 

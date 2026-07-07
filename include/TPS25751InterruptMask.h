@@ -76,11 +76,13 @@ public:
     /** @brief Device Incompatible Error source enabled. @see bit 32 */
     bool deviceIncompatibleError() const;
 
-    // Plug detection (bits 42-43)
+    // Plug detection (bits 3, 42-43)
     /** @brief Plug Early Notification source enabled. @see bit 43 */
     bool plugEarlyNotification() const;
     /** @brief Sink Transition Completed source enabled. @see bit 42 */
     bool sinkTransitionCompleted() const;
+    /** @brief Plug Insert or Removal source enabled. @see bit 3 */
+    bool plugInsertOrRemoval() const;
 
     // Command completion (bit 30)
     /** @brief CMD1 Complete source enabled. @see bit 30 */
@@ -159,6 +161,7 @@ public:
 
     void setPlugEarlyNotification(bool enabled);
     void setSinkTransitionCompleted(bool enabled);
+    void setPlugInsertOrRemoval(bool enabled);
 
     void setCmd1Complete(bool enabled);
 

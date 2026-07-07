@@ -84,6 +84,8 @@ public:
     void clearPlugEarlyNotification();
     /** @brief Stage a clear of Sink Transition Completed. @see bit 42 */
     void clearSinkTransitionCompleted();
+    /** @brief Stage a clear of Plug Insert or Removal. @see bit 3 */
+    void clearPlugInsertOrRemoval();
 
     /** @brief Stage a clear of CMD1 Complete. @see bit 30 */
     void clearCmd1Complete();
@@ -135,7 +137,7 @@ public:
     void clear(uint8_t bitPos);
 
     /**
-     * @brief Stage a clear of every named source (all 35 named bits set to 1)
+     * @brief Stage a clear of every named source (all 36 named bits set to 1)
      *
      * Reserved bits are left untouched (0) -- this does NOT memset the buffer
      * to 0xFF, which would also set reserved bits the TRM does not document

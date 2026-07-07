@@ -4,7 +4,7 @@
 
 namespace {
 
-/// @brief {bit, name} table for the 35 named clearable sources, used only by
+/// @brief {bit, name} table for the 36 named clearable sources, used only by
 /// debugPrint() to dump which bits are currently staged in the local buffer.
 struct NamedBit {
     uint8_t bit;
@@ -31,6 +31,7 @@ constexpr NamedBit kNamedBits[] = {
     {32, "Device Incompatible Error"},
     {43, "Plug Early Notification"},
     {42, "Sink Transition Completed"},
+    {3,  "Plug Insert or Removal"},
     {30, "CMD1 Complete"},
     {27, "PD Status Updated"},
     {26, "Status Updated"},
@@ -80,6 +81,7 @@ void TPS25751InterruptClear::clearDeviceIncompatibleError() { setBits(32, 1, 1u)
 
 void TPS25751InterruptClear::clearPlugEarlyNotification() { setBits(43, 1, 1u); }
 void TPS25751InterruptClear::clearSinkTransitionCompleted() { setBits(42, 1, 1u); }
+void TPS25751InterruptClear::clearPlugInsertOrRemoval() { setBits(3, 1, 1u); }
 
 void TPS25751InterruptClear::clearCmd1Complete() { setBits(30, 1, 1u); }
 
@@ -114,7 +116,7 @@ void TPS25751InterruptClear::clear(uint8_t bitPos)
 
 void TPS25751InterruptClear::clearAll()
 {
-    // Set exactly the 35 named bits to 1 via setBits() (never memset(0xFF),
+    // Set exactly the 36 named bits to 1 via setBits() (never memset(0xFF),
     // which would also set undocumented reserved bits). Idempotent: setting
     // an already-set bit is a no-op change.
     for (size_t i = 0; i < kNumNamedBits; ++i) {

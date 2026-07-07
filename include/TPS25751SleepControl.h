@@ -41,6 +41,9 @@ public:
     TPS25751SleepControl(const uint8_t *data, const size_t len) : TPS25751Register(data, len) {}
     explicit TPS25751SleepControl(TPS25751Registers::RegisterInfo regInfo) : TPS25751Register(regInfo.size) {}
 
+    /// @brief Register identity for the typed TPS25751::writeRegister<T>() write path.
+    static constexpr TPS25751Registers::Address kAddress = TPS25751Registers::Address::SLEEP_CONTROL;
+
     /**
      * @brief Get the Sleep Mode Allowed bit
      *
@@ -89,12 +92,9 @@ public:
     bool isSemanticallyValid() const override;
 
 private:
-    static constexpr uint8_t kSleepModeAllowedMask = 0x01;  ///< bit 0
-    static constexpr uint8_t kSleepTimeShift = 1;            ///< bits 2:1 start at bit 1
-    static constexpr uint8_t kSleepTimeBits = 2;              ///< bits 2:1 is a 2-bit field
-    static constexpr uint8_t kSleepTimeValueMask = 0x03;      ///< 2-bit field value mask
-    /// bits 2:1 mask within the byte (0x06) -- derived so it can never drift from the shift/width above
-    static constexpr uint8_t kSleepTimeFieldMask = kSleepTimeValueMask << kSleepTimeShift;
+    static constexpr uint8_t kSleepModeAllowedBit = 0;  ///< bit 0
+    static constexpr uint8_t kSleepTimeShift = 1;       ///< bits 2:1 start at bit 1
+    static constexpr uint8_t kSleepTimeBits = 2;        ///< bits 2:1 is a 2-bit field
 };
 
 // String conversion helper

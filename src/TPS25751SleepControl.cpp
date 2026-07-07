@@ -10,18 +10,13 @@ SleepTime TPS25751SleepControl::sleepTime() const {
 }
 
 void TPS25751SleepControl::setSleepModeAllowed(bool allowed) {
-    if (!isValid()) return;
-    if (allowed) {
-        _raw[0] |= kSleepModeAllowedMask;
-    } else {
-        _raw[0] &= static_cast<uint8_t>(~kSleepModeAllowedMask);
-    }
+    // setBits() guards !isValid(), read-modify-writes only bit 0, and masks the
+    // value to the field width -- see the base-class write primitive.
+    setBits(kSleepModeAllowedBit, 1, allowed ? 1u : 0u);
 }
 
 void TPS25751SleepControl::setSleepTime(SleepTime t) {
-    if (!isValid()) return;
-    const uint8_t value = static_cast<uint8_t>(t) & kSleepTimeValueMask;
-    _raw[0] = static_cast<uint8_t>((_raw[0] & ~kSleepTimeFieldMask) | (value << kSleepTimeShift));
+    setBits(kSleepTimeShift, kSleepTimeBits, static_cast<uint8_t>(t));
 }
 
 void TPS25751SleepControl::debugPrint(Stream &s) const {

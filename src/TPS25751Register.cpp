@@ -115,6 +115,17 @@ uint64_t TPS25751Register::extractBits64(uint8_t bitPos, uint8_t bitLen) const
     return extractBits64(_raw, _len, bitPos, bitLen);
 }
 
+void TPS25751Register::setBits(uint8_t bitPos, uint8_t bitLen, uint32_t value)
+{
+    if (!isValid())
+    {
+        TPS_DEBUG_TRACE(DEBUG_CAT_PARSING, "setBits: invalid register (pos=%u, len=%u)", bitPos, bitLen);
+        return;
+    }
+    setBits(_raw, _len, bitPos, bitLen, value);
+    TPS_DEBUG_TRACE(DEBUG_CAT_PARSING, "setBits: pos=%u, len=%u <- 0x%08lX", bitPos, bitLen, (unsigned long)value);
+}
+
 // Bounds-checked static methods
 uint8_t TPS25751Register::extractBits(const uint8_t *data, size_t dataSize, uint8_t bitPos, uint8_t bitLen)
 {
@@ -215,6 +226,46 @@ uint64_t TPS25751Register::extractBits64(const uint8_t *data, size_t dataSize, u
     uint64_t highBits = extractBits32(data, dataSize, bitPos + 32, bitLen - 32);
 
     return lowBits | (highBits << 32);
+}
+
+void TPS25751Register::setBits(uint8_t *data, size_t dataSize, uint8_t bitPos, uint8_t bitLen, uint32_t value)
+{
+    if (!data || bitLen == 0 || bitLen > 32 || dataSize == 0)
+    {
+        return;
+    }
+
+    uint8_t byteStart = bitPos / 8;
+    uint8_t bitOffset = bitPos % 8;
+    uint8_t bytesNeeded = (bitOffset + bitLen + 7) / 8;
+
+    // Check bounds (matches the extractBits family)
+    if (byteStart >= dataSize || (static_cast<size_t>(byteStart) + bytesNeeded) > dataSize)
+    {
+        return;
+    }
+
+    // Mask the value to the field width so an over-wide value cannot bleed into
+    // neighbouring fields. bitLen is 1..32 here, so (1<<bitLen) needs 64-bit math.
+    const uint64_t widthMask = (bitLen >= 32) ? 0xFFFFFFFFULL : ((1ULL << bitLen) - 1);
+    const uint64_t maskedValue = static_cast<uint64_t>(value) & widthMask;
+
+    // Assemble the affected bytes little-endian (matching extractBits assembly),
+    // read-modify-write the field, then write the bytes back. bitOffset (<=7) +
+    // bitLen (<=32) spans at most 5 bytes, well within the 64-bit window.
+    uint64_t window = 0;
+    for (uint8_t i = 0; i < bytesNeeded; ++i)
+    {
+        window |= static_cast<uint64_t>(data[byteStart + i]) << (i * 8);
+    }
+
+    const uint64_t fieldMask = widthMask << bitOffset;
+    window = (window & ~fieldMask) | (maskedValue << bitOffset);
+
+    for (uint8_t i = 0; i < bytesNeeded; ++i)
+    {
+        data[byteStart + i] = static_cast<uint8_t>((window >> (i * 8)) & 0xFF);
+    }
 }
 
 size_t TPS25751Register::extractArray32(uint16_t startBitPos, uint8_t elementBitLen, size_t numElements, uint32_t *output) const

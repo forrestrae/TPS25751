@@ -39,6 +39,9 @@ public:
     TPS25751CustomerUse(const uint8_t *data, const size_t len) : TPS25751Register(data, len) {}
     explicit TPS25751CustomerUse(TPS25751Registers::RegisterInfo regInfo) : TPS25751Register(regInfo.size) {}
 
+    /// @brief Register identity for the typed TPS25751::writeRegister<T>() write path.
+    static constexpr TPS25751Registers::Address kAddress = TPS25751Registers::Address::CUSTOMER_USE;
+
     /**
      * @brief Get the full 8-byte value assembled little-endian (byte 0 = LSB)
      * @return The 64-bit value, or 0 if the register is invalid

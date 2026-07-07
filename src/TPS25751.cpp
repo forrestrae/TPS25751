@@ -157,18 +157,14 @@ bool TPS25751::readCustomerUse(TPS25751CustomerUse &customerUse) const
 
 bool TPS25751::writeSleepControl(const TPS25751SleepControl &sleepControl) const
 {
-    if (!sleepControl.isValid() || !sleepControl.isValidSize(TPS25751Registers::Registers::SLEEP_CONTROL.size)) {
-        return false;
-    }
-    return writeRegister(TPS25751Registers::Registers::SLEEP_CONTROL, sleepControl.raw());
+    // Delegates to the typed writeRegister<T>() (keyed on kAddress) so there is
+    // a single host write path; the size/validity guard lives there.
+    return writeRegister(sleepControl);
 }
 
 bool TPS25751::writeCustomerUse(const TPS25751CustomerUse &customerUse) const
 {
-    if (!customerUse.isValid() || !customerUse.isValidSize(TPS25751Registers::Registers::CUSTOMER_USE.size)) {
-        return false;
-    }
-    return writeRegister(TPS25751Registers::Registers::CUSTOMER_USE, customerUse.raw());
+    return writeRegister(customerUse);
 }
 
 // Type-safe register reading methods

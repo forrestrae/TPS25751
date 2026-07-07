@@ -102,6 +102,36 @@ public:
     bool writeRegister(TPS25751Registers::Address addr, const uint8_t *data, size_t length) const;
     bool writeRegister(TPS25751Registers::RegisterInfo regInfo, const uint8_t *data) const;
 
+    /**
+     * @brief Type-safe register write keyed on the class's own @c kAddress.
+     *
+     * Writes @p reg 's raw bytes back to the register identified by
+     * @c RegisterT::kAddress. Because the target address comes from the register
+     * class itself, a class can only ever be written to its own register — the
+     * whole class of "same-size register mis-pairing" bugs (e.g. INT_MASK1 vs
+     * LIQUID_DETECTION_CONFIG, both 11 bytes) that the untyped
+     * @c writeRegister(RegisterInfo,...) path cannot catch is unrepresentable
+     * here. Validates @c isValid() and size before touching the bus.
+     *
+     * @tparam RegisterT A host R/W register class exposing @c kAddress
+     * @param reg The register object holding the bytes to write
+     * @return false if @p reg is invalid/wrong-size or the address is unknown;
+     *         otherwise the result of the underlying I2C write
+     */
+    template<typename RegisterT>
+    bool writeRegister(const RegisterT &reg) const
+    {
+        const TPS25751Registers::RegisterInfo *info =
+            TPS25751Registers::getRegisterInfo(RegisterT::kAddress);
+        if (!info) {
+            return false;
+        }
+        if (!reg.isValid() || !reg.isValidSize(info->size)) {
+            return false;
+        }
+        return writeRegister(*info, reg.raw());
+    }
+
     template<typename RegisterT>
     bool readRegister(TPS25751Registers::RegisterInfo regInfo, RegisterT &registerOut) const
     {

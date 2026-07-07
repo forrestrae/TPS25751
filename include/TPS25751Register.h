@@ -100,6 +100,26 @@ protected:
     uint64_t extractBits64(uint8_t bitPos, uint8_t bitLen) const;
 
     /**
+     * @brief Safely writes a bitfield into the register data (read-modify-write).
+     *
+     * The inverse of extractBits(): masks out only the field's bits and ORs in
+     * @p value shifted into position, leaving reserved and sibling bits
+     * untouched. @p value is masked to @p bitLen bits, so an over-wide value
+     * cannot bleed into neighbouring fields. No-op (safe) if the register is
+     * invalid, the field is out of bounds, or @p bitLen is 0 or > 32.
+     *
+     * This is the host-side write primitive symmetric to extractBits(); host
+     * R/W register setters build on it instead of hand-poking @c _raw. Fields
+     * wider than 32 bits have no sub-structure to preserve in this library
+     * (e.g. CUSTOMER_USE) and are written byte-wise by the owning class.
+     *
+     * @param bitPos Bit offset of the field within the buffer
+     * @param bitLen Number of bits in the field (field width, 1..32)
+     * @param value  The value to write; masked to @p bitLen bits before insertion
+     */
+    void setBits(uint8_t bitPos, uint8_t bitLen, uint32_t value);
+
+    /**
      * @brief Extracts a bitfield from a packed byte array with bounds checking.
      *
      * This utility function reads an arbitrary bitfield from a byte-aligned buffer.
@@ -144,6 +164,23 @@ protected:
      * @return The extracted value as an unsigned 64-bit integer, or 0 if out of bounds
      */
     static uint64_t extractBits64(const uint8_t *data, size_t dataSize, uint8_t bitPos, uint8_t bitLen);
+
+    /**
+     * @brief Writes a bitfield into a packed byte array with bounds checking (read-modify-write).
+     *
+     * The static, buffer-taking inverse of the extractBits() family. Masks out
+     * only the field's bits and ORs in @p value shifted into position; reserved
+     * and sibling bits in the affected bytes are preserved. @p value is masked
+     * to @p bitLen bits. No-op if @p data is null, the field is out of bounds,
+     * or @p bitLen is 0 or > 32.
+     *
+     * @param data      Pointer to the raw register buffer
+     * @param dataSize  Size of the data buffer in bytes for bounds checking
+     * @param bitPos    Bit offset of the field within the buffer
+     * @param bitLen    Number of bits in the field (field width, 1..32)
+     * @param value     The value to write; masked to @p bitLen bits before insertion
+     */
+    static void setBits(uint8_t *data, size_t dataSize, uint8_t bitPos, uint8_t bitLen, uint32_t value);
 
     /**
      * @brief Safely converts extracted bits to enum with bounds checking (up to 8 bits)

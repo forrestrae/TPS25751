@@ -260,33 +260,41 @@ Canonical examples (sibling `lib/BQ25798` repo): `BQ25798ChargerControl0`
 (single-bit setters), `BQ25798ChargeVoltageLimit` (16-bit big-endian + unit
 inversion), `BQ25798MinimalSystemVoltage` (offset inversion with underflow guard).
 
-### Host-register write path (interim — Batch A onward)
+### Host-register write path (Batch B onward)
 
 The write-encoder pattern above was written for **downstream** device registers,
-whose `setField8`/`setField16BE` helpers live in the `lib/BQ25798` repo. Batch A
-(`TPS25751SleepControl`, `TPS25751CustomerUse`) introduced the first **host**
-register write path, and the host side does **not yet have an equivalent shared
-primitive**. Until it does, host R/W register setters follow these rules, matching
-`TPS25751SleepControl`:
+whose `setField8`/`setField16BE` helpers live in the `lib/BQ25798` repo. Host R/W
+registers (`TPS25751SleepControl`, `TPS25751CustomerUse`, and the Batch B+
+interrupt registers) use the host side's own equivalents, landed before Batch B:
 
-- Guard `if (!isValid()) return;` at the top of every setter.
-- Read-modify-write **only** the field's bits in `_raw[...]` (mask out the field,
-  OR in the shifted, width-masked value) — never assign a whole byte; reserved and
-  sibling bits are preserved.
-- Field masks/shifts are named `static constexpr`; **derive** a field-position
-  mask from the value-mask and shift (`valueMask << shift`) rather than restating
-  it, so the two cannot drift.
-- Add one setter per decode accessor (1:1), named `set<DecoderName>`.
-- The `TPS25751::write<Register>()` convenience method validates
-  `isValid()` + `isValidSize()` and delegates to
-  `writeRegister(RegisterInfo, raw())`.
+- **`TPS25751Register::setBits(bitPos, bitLen, value)`** — the base-class write
+  primitive, symmetric to `extractBits()`. It guards `!isValid()`,
+  read-modify-writes **only** the field's bits (reserved and sibling bits
+  preserved), and masks `value` to `bitLen` bits so an over-wide value cannot
+  bleed into a neighbour. **Every host bitfield setter builds on it** instead of
+  hand-poking `_raw[...]`; there are no per-class field masks to keep in sync, so
+  the "hand-restated field-position mask drifts" defect class is designed out.
+  Fields with no sub-structure to preserve (e.g. CUSTOMER_USE's opaque 8 bytes)
+  are written byte-wise by the owning class instead.
+- **`static constexpr TPS25751Registers::Address kAddress`** on every host R/W
+  register class — the single source of register identity.
+- **`TPS25751::writeRegister<T>(const T&)`** (keyed on `T::kAddress`) is the write
+  path: it validates `isValid()` + `isValidSize()` and writes the raw bytes back
+  to the register the class *is*. Because the address comes from the class, a
+  class can only be written to its own register — same-size mis-pairing (INT_MASK1
+  0x16 vs LIQUID_DETECTION_CONFIG 0x98, both 11 B) is unrepresentable. Any
+  `TPS25751::write<Register>()` convenience method is a thin forwarder to it.
 
-> **Planned (owed before Batch B, orchestrator task):** a base-class
-> `setBits(bitPos, bitLen, value)` primitive symmetric to `extractBits()`, plus a
-> typed `TPS25751::writeRegister<T>()` keyed on a class-level `kAddress`. See the
-> Pilot Retrospective & Plan Amendments in
-> [docs/plans/plan-impl-v01.md](../plans/plan-impl-v01.md). Once it lands, migrate
-> the Batch A setters and this subsection to mandate it (as the downstream side does).
+Setter rules (unchanged in spirit, now enforced by the primitive):
+
+- Guard `if (!isValid()) return;` — `setBits()` already does this, so a setter
+  that is *only* a `setBits()` call inherits the guard.
+- One setter per decode accessor (1:1), named `set<DecoderName>`.
+- Never assign a whole byte from one field.
+
+`TPS25751SleepControl` is the worked example: `setSleepModeAllowed()` /
+`setSleepTime()` are one `setBits()` call each, and `writeSleepControl()` forwards
+to `writeRegister<TPS25751SleepControl>()`.
 
 ---
 

@@ -22,6 +22,8 @@
 #include "TPS25751Data.h"
 #include "TPS25751SleepControl.h"
 #include "TPS25751CustomerUse.h"
+#include "TPS25751InterruptMask.h"
+#include "TPS25751InterruptClear.h"
 #include "TPS25751RegisterAddress.h"
 #include "TPS25751RegisterFactory.h"
 #include "TPS25751Task.h"
@@ -79,6 +81,13 @@ public:
     bool readCustomerUse(TPS25751CustomerUse &customerUse) const;
 
     /**
+     * @brief Read the Interrupt Mask register (0x16)
+     * @param interruptMask Register object to populate
+     * @return true if the read succeeded
+     */
+    bool readInterruptMask(TPS25751InterruptMask &interruptMask) const;
+
+    /**
      * @brief Write the Sleep Control register (0x70)
      * @param sleepControl Register object holding the bytes to write
      * @return false if @p sleepControl is not valid or not the expected size;
@@ -93,6 +102,25 @@ public:
      *         otherwise the result of the underlying I2C write
      */
     bool writeCustomerUse(const TPS25751CustomerUse &customerUse) const;
+
+    /**
+     * @brief Write the Interrupt Mask register (0x16)
+     * @param interruptMask Register object holding the bytes to write
+     * @return false if @p interruptMask is not valid or not the expected
+     *         size; otherwise the result of the underlying I2C write
+     */
+    bool writeInterruptMask(const TPS25751InterruptMask &interruptMask) const;
+
+    /**
+     * @brief Write the Interrupt Clear register (0x18)
+     *
+     * INT_CLEAR1 is write-only: there is no corresponding readInterruptClear().
+     *
+     * @param interruptClear Register object holding the staged clear bits to write
+     * @return false if @p interruptClear is not valid or not the expected
+     *         size; otherwise the result of the underlying I2C write
+     */
+    bool writeInterruptClear(const TPS25751InterruptClear &interruptClear) const;
 
     // Type-safe register reading methods
     bool readRegister(TPS25751Registers::RegisterInfo regInfo, uint8_t *buffer) const;

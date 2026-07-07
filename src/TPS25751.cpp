@@ -155,6 +155,11 @@ bool TPS25751::readCustomerUse(TPS25751CustomerUse &customerUse) const
     return readRegister(TPS25751Registers::Registers::CUSTOMER_USE, customerUse);
 }
 
+bool TPS25751::readInterruptMask(TPS25751InterruptMask &interruptMask) const
+{
+    return readRegister(TPS25751Registers::Registers::INT_MASK1, interruptMask);
+}
+
 bool TPS25751::writeSleepControl(const TPS25751SleepControl &sleepControl) const
 {
     // Delegates to the typed writeRegister<T>() (keyed on kAddress) so there is
@@ -165,6 +170,18 @@ bool TPS25751::writeSleepControl(const TPS25751SleepControl &sleepControl) const
 bool TPS25751::writeCustomerUse(const TPS25751CustomerUse &customerUse) const
 {
     return writeRegister(customerUse);
+}
+
+bool TPS25751::writeInterruptMask(const TPS25751InterruptMask &interruptMask) const
+{
+    // Delegates to the typed writeRegister<T>() (keyed on kAddress) so there is
+    // a single host write path; the size/validity guard lives there.
+    return writeRegister(interruptMask);
+}
+
+bool TPS25751::writeInterruptClear(const TPS25751InterruptClear &interruptClear) const
+{
+    return writeRegister(interruptClear);
 }
 
 // Type-safe register reading methods

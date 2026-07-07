@@ -18,6 +18,8 @@
 #include "TPS25751Data.h"
 #include "TPS25751SleepControl.h"
 #include "TPS25751CustomerUse.h"
+#include "TPS25751InterruptMask.h"
+#include "TPS25751InterruptClear.h"
 #include "TPS25751Debug.h"
 
 // Static factory instance
@@ -66,6 +68,10 @@ std::unique_ptr<TPS25751Register> TPS25751RegisterFactoryImpl::createRegister(TP
             return createSleepControlRegister();
         case TPS25751Registers::Address::CUSTOMER_USE:
             return createCustomerUseRegister();
+        case TPS25751Registers::Address::INT_MASK1:
+            return createInterruptMaskRegister();
+        case TPS25751Registers::Address::INT_CLEAR1:
+            return createInterruptClearRegister();
         default:
             TPS_DEBUG_ERROR(DEBUG_CAT_REGISTER, "Unsupported register address: 0x%02X", static_cast<uint8_t>(addr));
             return nullptr;
@@ -120,6 +126,10 @@ std::unique_ptr<TPS25751Register> TPS25751RegisterFactoryImpl::createRegister(TP
             return createSleepControlRegister(data, length);
         case TPS25751Registers::Address::CUSTOMER_USE:
             return createCustomerUseRegister(data, length);
+        case TPS25751Registers::Address::INT_MASK1:
+            return createInterruptMaskRegister(data, length);
+        case TPS25751Registers::Address::INT_CLEAR1:
+            return createInterruptClearRegister(data, length);
         default:
             TPS_DEBUG_ERROR(DEBUG_CAT_REGISTER, "Unsupported register address: 0x%02X", static_cast<uint8_t>(addr));
             return nullptr;
@@ -169,6 +179,10 @@ std::unique_ptr<TPS25751Register> TPS25751RegisterFactoryImpl::createRegister(co
             return std::make_unique<TPS25751SleepControl>(regInfo);
         case TPS25751Registers::Address::CUSTOMER_USE:
             return std::make_unique<TPS25751CustomerUse>(regInfo);
+        case TPS25751Registers::Address::INT_MASK1:
+            return std::make_unique<TPS25751InterruptMask>(regInfo);
+        case TPS25751Registers::Address::INT_CLEAR1:
+            return std::make_unique<TPS25751InterruptClear>(regInfo);
         default:
             TPS_DEBUG_ERROR(DEBUG_CAT_REGISTER, "Unsupported register address: 0x%02X", static_cast<uint8_t>(regInfo.address));
             return nullptr;
@@ -327,6 +341,22 @@ std::unique_ptr<TPS25751Register> TPS25751RegisterFactoryImpl::createCustomerUse
 
 std::unique_ptr<TPS25751Register> TPS25751RegisterFactoryImpl::createCustomerUseRegister(const uint8_t* data, size_t length) const {
     return std::make_unique<TPS25751CustomerUse>(data, length);
+}
+
+std::unique_ptr<TPS25751Register> TPS25751RegisterFactoryImpl::createInterruptMaskRegister() const {
+    return std::make_unique<TPS25751InterruptMask>();
+}
+
+std::unique_ptr<TPS25751Register> TPS25751RegisterFactoryImpl::createInterruptMaskRegister(const uint8_t* data, size_t length) const {
+    return std::make_unique<TPS25751InterruptMask>(data, length);
+}
+
+std::unique_ptr<TPS25751Register> TPS25751RegisterFactoryImpl::createInterruptClearRegister() const {
+    return std::make_unique<TPS25751InterruptClear>();
+}
+
+std::unique_ptr<TPS25751Register> TPS25751RegisterFactoryImpl::createInterruptClearRegister(const uint8_t* data, size_t length) const {
+    return std::make_unique<TPS25751InterruptClear>(data, length);
 }
 
 // Singleton factory instance management

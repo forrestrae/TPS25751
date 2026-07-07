@@ -15,12 +15,14 @@ The TPS25751 library is an object-oriented C++ library for interfacing with the 
 - RAII memory management for embedded systems
 - Platform-optimized for Teensy 4.x (ARM Cortex-M7, no RTTI)
 
-**Last Updated:** 2026-07-06
-**Current Phase:** Active implementation — 19/27 registers done (Batch A added
-SLEEP_CONTROL/CUSTOMER_USE, introducing the library's first host-register write
+**Last Updated:** 2026-07-07
+**Current Phase:** Active implementation — 21/27 registers done (Batch B added
+INT_MASK1/INT_CLEAR1, completing the interrupt-driven story alongside INT_EVENT1
+and adding the base-class `setBits()` write primitive + typed `writeRegister<T>()`;
+Batch A added SLEEP_CONTROL/CUSTOMER_USE, the library's first host-register write
 path; COMMAND/DATA enable the 4CC command-task interface and I2Cc
 downstream-device proxy); native unit-test harness in place (`pio test -e native`,
-Batch 0); see [Implementation Plan](docs/plans/plan-impl-v01.md) for the remaining 8
+Batch 0); see [Implementation Plan](docs/plans/plan-impl-v01.md) for the remaining 6
 
 ---
 
@@ -146,7 +148,7 @@ Serial.println(F("String in flash"));                // Use F() macro
 
 ## Implementation Status
 
-**Implemented Registers:** 19/27
+**Implemented Registers:** 21/27
 - STATUS, MODE, POWER_PATH_STATUS, BOOT_FLAGS, PORT_CONFIG
 - TYPEC_STATE, INTERRUPT_EVENT, POWER_STATUS, PD_STATUS
 - ACTIVE_PDO_CONTRACT, ACTIVE_RDO_CONTRACT, PORT_CONTROL
@@ -155,8 +157,11 @@ Serial.println(F("String in flash"));                // Use F() macro
   see `TPS25751::executeCommand()` and `TPS25751DownstreamDevice`
 - SLEEP_CONTROL, CUSTOMER_USE (Batch A, 2026-07-06) — the first R/W host registers
   with field setters and `writeSleepControl()`/`writeCustomerUse()` write paths
+- INT_MASK1, INT_CLEAR1 (Batch B, 2026-07-07) — interrupt enable-mask and
+  event-clear registers mirroring INT_EVENT1's 36-source bit map; built on the new
+  base-class `setBits()` write primitive and typed `TPS25751::writeRegister<T>()`
 
-**In Progress:** Planning remaining 8 registers
+**In Progress:** Planning remaining 6 registers
 - See [Implementation Plan v0.1](docs/plans/plan-impl-v01.md) for prioritized roadmap
 
 ---
@@ -213,6 +218,8 @@ Each register has its own class inheriting from `TPS25751Register`:
 - `TPS25751Data`: DATA register (0x09) — generic 64-byte 4CC task payload (no fixed layout)
 - `TPS25751SleepControl`: SLEEP_CONTROL register (0x70) — sleep-mode enable + sleep-time; R/W with field setters
 - `TPS25751CustomerUse`: CUSTOMER_USE register (0x06) — opaque 8-byte application blob; R/W raw/64-bit accessors
+- `TPS25751InterruptMask`: INT_MASK1 register (0x16) — per-source interrupt enable mask mirroring INT_EVENT1's 36-bit map; R/W with `set<Source>(bool)` setters (a 1 unmasks/enables that source)
+- `TPS25751InterruptClear`: INT_CLEAR1 register (0x18) — write-only event-clear staging buffer; `clear<Source>()` / `clear(bitPos)` / `clearAll()` helpers (write a 1 to acknowledge that INT_EVENT1 source)
 
 ### 4CC Command-Task Interface & I2Cc Downstream-Device Proxy
 

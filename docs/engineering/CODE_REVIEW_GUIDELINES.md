@@ -114,6 +114,7 @@ Review these when a downstream R/W register class adds field setters or a driver
 - **Incomplete Rule of Five**: If any of copy constructor, copy assignment, move constructor, move assignment, or destructor is user-defined, all five must be considered — missing one leads to double-free or shallow copies
 - **Signed/unsigned comparison warnings**: Comparing `int` loop indices against `size_t` lengths can wrap; use consistent types
 - **PDO count vs data length mismatch**: In capability registers, verify that `getPDOCount()` * bytes-per-PDO + header never exceeds the actual data buffer size
+- **Incomplete transcription of a mirrored register's bit set** *(caught in Batch B)*: When a register mirrors another's layout (INT_MASK1/INT_CLEAR1 mirror INT_EVENT1), a *dropped* named source compiles cleanly and passes every round-trip/preservation test — the missing bit is simply absent, so nothing fails. Spot-checking a few bit offsets will not catch it. **Count the named accessors/setters against the reference class** (e.g. `grep -c extractBits` on both) and reconcile the total, and prefer the granular reference register (INT_EVENT1) over the terser MCP MASK/CLEAR field tables, which may lump maskable bits into "Reserved". Root cause is usually an incomplete bit list in the delegated work order (see plan amendment 3) — the review gate, not the compiler, is the only thing that catches it.
 
 ---
 

@@ -1,9 +1,9 @@
 # TPS25751 Register Implementation Plan v0.6
 
 * **Date:** 2025-10-20
-* **Last Updated:** 2026-07-06
+* **Last Updated:** 2026-07-07
 * **Project:** TPS25751 USB-C PD Controller Library
-* **Status:** 19/27 registers complete — Batch 0 (test harness) and Batch A (SLEEP_CONTROL, CUSTOMER_USE) **done 2026-07-06**; Batches B–F (8 registers) remain
+* **Status:** 21/27 registers complete — Batch 0 (test harness) and Batch A (SLEEP_CONTROL, CUSTOMER_USE) **done 2026-07-06**, Batch B (INT_MASK1, INT_CLEAR1) **done 2026-07-07**; Batches C–F (6 registers) remain
 
 ---
 
@@ -19,9 +19,9 @@ lowest-risk registers first, then ascend in complexity toward the PDO-encoding
 registers. To start execution, see [Launching the Plan](#launching-the-plan).
 
 **Total Registers:** 27 *(was 26 — ADC_RESULTS 0x6A added to scope in v0.4)*
-**Currently Implemented:** 19
-**Remaining to Implement:** 8
-**Remaining Batches:** 5 (B–F = registers; Batch 0 test harness and Batch A pilot completed 2026-07-06)
+**Currently Implemented:** 21
+**Remaining to Implement:** 6
+**Remaining Batches:** 4 (C–F = registers; Batch 0 test harness + Batch A pilot done 2026-07-06, Batch B done 2026-07-07)
 
 **IMPORTANT:** This is a planning document. For implementation details, refer to:
 - **[Implementation Standards](../engineering/STANDARDS.md)** - Class structure, validation, factory integration
@@ -55,7 +55,7 @@ originally slated for old Phase 4, pulled forward to enable
 
 ## Current Implementation Status
 
-### ✅ Implemented Registers (19)
+### ✅ Implemented Registers (21)
 
 | Register | Address | Class Name | Size | Purpose |
 |----------|---------|------------|------|---------|
@@ -64,6 +64,8 @@ originally slated for old Phase 4, pulled forward to enable
 | COMMAND | 0x08 | `TPS25751Command` | 4 | 4CC task code, clear/rejected state |
 | DATA | 0x09 | `TPS25751Data` | 64 | Generic 4CC task payload buffer |
 | INT_EVENT1 | 0x14 | `TPS25751InterruptEvent` | 11 | Interrupt events |
+| INT_MASK1 | 0x16 | `TPS25751InterruptMask` | 11 | Interrupt enable mask (R/W) |
+| INT_CLEAR1 | 0x18 | `TPS25751InterruptClear` | 11 | Interrupt event clear (write-only) |
 | STATUS | 0x1A | `TPS25751Status` | 5 | Connection state, VBUS status, power role |
 | POWER_PATH_STATUS | 0x26 | `TPS25751PowerPathStatus` | 5 | Power path and charging status |
 | PORT_CONFIGURATION | 0x28 | `TPS25751PortConfig` | 17 | Port configuration settings |
@@ -79,7 +81,7 @@ originally slated for old Phase 4, pulled forward to enable
 | SLEEP_CONTROL | 0x70 | `TPS25751SleepControl` | 1 | Sleep-mode enable + sleep-time (R/W) |
 | GPIO_STATUS | 0x72 | `TPS25751GPIOStatus` | 8 | GPIO pin status and direction |
 
-### ❌ Unimplemented Registers (8)
+### ❌ Unimplemented Registers (6)
 
 Sizes below come from the shipped `RegisterInfo` table in
 `include/TPS25751RegisterAddress.h` (the single source of truth), **not** from
@@ -89,22 +91,22 @@ hardware behavior (cf. the ACTIVE_RDO_CONTRACT 16-byte note in the header).
 
 | # | Register | Address | Size | Access | Batch | Planned Class |
 |---|----------|---------|------|--------|-------|---------------|
-| 1 | INT_MASK1 | 0x16 | 11 | R/W | B | `TPS25751InterruptMask` |
-| 2 | INT_CLEAR1 | 0x18 | 11 | W | B | `TPS25751InterruptClear` |
-| 3 | ADC_RESULTS | 0x6A | 13 | R | C | `TPS25751ADCResults` |
-| 4 | TRANSMIT_SOURCE_CAPABILITIES | 0x32 | 63 | R/W | D | `TPS25751TransmitSourceCaps` |
-| 5 | TRANSMIT_SINK_CAPABILITIES | 0x33 | 53 | R/W | D | `TPS25751TransmitSinkCaps` |
-| 6 | AUTONEGOTIATE_SINK | 0x37 | 24 | R/W | E | `TPS25751AutoNegotiateSink` |
-| 7 | IO_CONFIG | 0x5C | 49 | R/W | E | `TPS25751IOConfig` |
-| 8 | LIQUID_DETECTION_CONFIG | 0x98 | 11 | R/W | F | `TPS25751LiquidDetectionConfig` |
+| 1 | ADC_RESULTS | 0x6A | 13 | R | C | `TPS25751ADCResults` |
+| 2 | TRANSMIT_SOURCE_CAPABILITIES | 0x32 | 63 | R/W | D | `TPS25751TransmitSourceCaps` |
+| 3 | TRANSMIT_SINK_CAPABILITIES | 0x33 | 53 | R/W | D | `TPS25751TransmitSinkCaps` |
+| 4 | AUTONEGOTIATE_SINK | 0x37 | 24 | R/W | E | `TPS25751AutoNegotiateSink` |
+| 5 | IO_CONFIG | 0x5C | 49 | R/W | E | `TPS25751IOConfig` |
+| 6 | LIQUID_DETECTION_CONFIG | 0x98 | 11 | R/W | F | `TPS25751LiquidDetectionConfig` |
 
-*(SLEEP_CONTROL 0x70 and CUSTOMER_USE 0x06 moved to Implemented — Batch A, 2026-07-06.)*
+*(SLEEP_CONTROL 0x70 and CUSTOMER_USE 0x06 moved to Implemented — Batch A, 2026-07-06;
+INT_MASK1 0x16 and INT_CLEAR1 0x18 moved to Implemented — Batch B, 2026-07-07.)*
 
-All 10 addresses and sizes are **already present** in
+All 6 remaining addresses and sizes are **already present** in
 `TPS25751Registers::Address` / `RegisterInfo`; per-register work starts at the
-class + factory `case`, not the enum. `TPS25751::writeRegister()` already exists,
-so R/W registers need encode logic and a write-path convenience method, not new
-I2C plumbing.
+class + factory `case`, not the enum. `TPS25751::writeRegister()` already exists
+(and, since Batch B, the base-class `setBits()` write primitive + typed
+`writeRegister<T>()` keyed on a class `kAddress`), so R/W registers need encode
+logic and a write-path convenience method, not new I2C plumbing.
 
 ---
 
@@ -165,7 +167,22 @@ See [Pilot Retrospective & Plan Amendments](#pilot-retrospective--plan-amendment
 - CUSTOMER_USE: generic 8-byte application-defined blob; hex accessor +
   raw read/write; interpretation left to the application.
 
-### Batch B — Interrupt Control (INT_MASK1, INT_CLEAR1)
+### Batch B — Interrupt Control (INT_MASK1, INT_CLEAR1) — ✅ DONE 2026-07-07
+
+**Completed on branch `feat/registers-batch-b`** (delegated to a Sonnet
+`general-purpose` subagent in an isolated worktree, orchestrator-gated). Added
+`TPS25751InterruptMask` (0x16, R/W) and `TPS25751InterruptClear` (0x18,
+write-only), full factory integration, `readInterruptMask` /
+`writeInterruptMask` / `writeInterruptClear` convenience methods, Doxygen, and two
+native Unity suites. **Prerequisite amendments 1 & 2 landed first** (orchestrator,
+not delegated): the base-class `setBits()` write primitive + typed
+`writeRegister<T>()` keyed on a class-level `kAddress`, with `TPS25751SleepControl`
+migrated as the worked example and `TPS25751CustomerUse` retrofitted. Warning-free
+`example-read-registers` build; 103/103 native tests green. The `/code-review high`
+gate (run inline per amendment 4) found **one** correctness issue: the delegated
+implementation omitted bit 3 (Plug Insert or Removal), tracing to an incomplete
+bit list in the orchestrator's work order (the amendment-3 failure mode) — fixed
+directly, all 36 INT_EVENT1 sources now present.
 
 - **Why second:** Highest-value remaining pair; both mirror the existing
   `TPS25751InterruptEvent` bit layout, so the reference implementation is
@@ -348,6 +365,9 @@ gaps. Recorded here so Batches B–F benefit.
    `extractBits*`), migrates `TPS25751SleepControl`'s setters to it as the worked
    example, and documents it in STANDARDS.md. Batch B's work order then points
    subagents at that primitive.
+   **✅ Delivered (Batch B, 2026-07-07):** `TPS25751Register::setBits()` (instance
+   + static, symmetric to `extractBits`), SleepControl setters migrated, STANDARDS.md
+   "Host-register write path (Batch B onward)" section rewritten to mandate it.
 
 2. **Per-register write convenience methods have no typed class↔address coupling.**
    `writeSleepControl`/`writeCustomerUse` are identical size-check-then-write
@@ -358,6 +378,9 @@ gaps. Recorded here so Batches B–F benefit.
    `TPS25751::writeRegister<T>(const T&)` keyed on it, making mis-pairing
    unrepresentable — mirroring the downstream tier's ADR-009 pattern. Fold into
    the amendment-1 orchestrator task. Retrofit the two Batch A classes.
+   **✅ Delivered (Batch B, 2026-07-07):** `kAddress` on SleepControl/CustomerUse
+   (and the new InterruptMask/InterruptClear), templated `TPS25751::writeRegister<T>()`;
+   `writeSleepControl`/`writeCustomerUse` now forward to it.
 
 3. **The work order can carry factual errors into the subagent.** The
    orchestrator's `hasValidData()` description was wrong; the subagent happened to
@@ -569,6 +592,7 @@ data logging. Additional platform support (ESP32, RP2040) tracked in AGENTS.md.
 | 0.5 | 2026-07-06 | Claude Code | Promoted Batch 0 (test harness) from optional to **required prerequisite** before Batch A; added "Launching the Plan" section with pre-flight checks, per-batch kickoff prompts, and merge/release steps |
 | 0.6 | 2026-07-06 | Claude Code | **Batch 0 executed and complete**: native Unity harness (`pio test -e native`) with Arduino stubs in `test/support/native/`, seed suite for TPS25751Status (22 tests green), hardware envs restructured under `[teensy_base]` (behavior unchanged), TESTING.md rewritten to the real workflow; wired the native test command into the per-batch loop |
 | 0.7 | 2026-07-06 | Claude Code | **Batch A executed and complete** (19/27, 8 remaining): `TPS25751SleepControl` (0x70) + `TPS25751CustomerUse` (0x06) via the delegated pipeline (Sonnet subagent, orchestrator-gated) — the library's first host-register write path; added the Pilot Retrospective & Plan Amendments section (shared host-side `setBits()` primitive + typed `writeRegister<T>` owed to the orchestrator before Batch B); moved both registers to Implemented and updated all counts |
+| 0.8 | 2026-07-07 | Claude Code | **Batch B executed and complete** (21/27, 6 remaining): delivered the owed prerequisite amendments 1 & 2 (base-class `setBits()` write primitive + typed `writeRegister<T>()` keyed on `kAddress`; SleepControl migrated, CustomerUse retrofitted; STANDARDS.md rewritten), then `TPS25751InterruptMask` (0x16) + `TPS25751InterruptClear` (0x18) via the delegated pipeline (Sonnet subagent, orchestrator-gated). Quality gate caught one omitted source (bit 3 Plug Insert/Removal, from a work-order bit-list error) — fixed. Moved both registers to Implemented, updated all counts, marked amendments 1 & 2 delivered |
 
 ---
 
@@ -581,8 +605,8 @@ data logging. Additional platform support (ESP32, RP2040) tracked in AGENTS.md.
 | 3 | COMMAND | 0x08 | 4 | W | — | ✅ Done (2026-06) |
 | 4 | DATA | 0x09 | 64 | R/W | — | ✅ Done (2026-06) |
 | 5 | INT_EVENT1 | 0x14 | 11 | R | — | ✅ Done |
-| 6 | INT_MASK1 | 0x16 | 11 | R/W | B | ❌ |
-| 7 | INT_CLEAR1 | 0x18 | 11 | W | B | ❌ |
+| 6 | INT_MASK1 | 0x16 | 11 | R/W | B | ✅ Done (2026-07-07) |
+| 7 | INT_CLEAR1 | 0x18 | 11 | W | B | ✅ Done (2026-07-07) |
 | 8 | STATUS | 0x1A | 5 | R | — | ✅ Done |
 | 9 | POWER_PATH_STATUS | 0x26 | 5 | R | — | ✅ Done |
 | 10 | PORT_CONFIGURATION | 0x28 | 17 | R | — | ✅ Done |

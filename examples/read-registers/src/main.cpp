@@ -7,6 +7,7 @@
 #include <TPS25751PortConfig.h>
 #include <TPS25751RegisterFactory.h>
 #include "TPS25751InterruptEvent.h"
+#include "TPS25751InterruptMask.h"
 #include "TPS25751SleepControl.h"
 #include "TPS25751CustomerUse.h"
 
@@ -184,6 +185,22 @@ void print_sleep_and_customer_use()
         Serial.println(F("Failed to read Customer Use register"));
 }
 
+void print_interrupt_mask()
+{
+    Serial.println();
+    Serial.println("-------------------- print_interrupt_mask --------------------");
+    Serial.println();
+
+    // INT_MASK1 (0x16) is readable; it gates which INT_EVENT1 sources may
+    // assert IRQ. The companion INT_CLEAR1 (0x18) is write-only and so is not
+    // demonstrated here (this sketch is read-only / non-destructive).
+    TPS25751InterruptMask interruptMask;
+    if (pd.readInterruptMask(interruptMask))
+        interruptMask.debugPrint();
+    else
+        Serial.println(F("Failed to read Interrupt Mask register"));
+}
+
 void print_app_mode_status(const std::unique_ptr<TPS25751Mode> &modeReg)
 {
     modeReg->debugPrint();
@@ -194,6 +211,7 @@ void print_app_mode_status(const std::unique_ptr<TPS25751Mode> &modeReg)
     print_power_status();
     print_port_status();
     print_contracts();
+    print_interrupt_mask();
     print_sleep_and_customer_use();
 }
 

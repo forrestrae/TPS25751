@@ -16,15 +16,17 @@ The TPS25751 library is an object-oriented C++ library for interfacing with the 
 - Platform-optimized for Teensy 4.x (ARM Cortex-M7, no RTTI)
 
 **Last Updated:** 2026-07-07
-**Current Phase:** Active implementation — 22/27 registers done (Batch C added
-ADC_RESULTS, the internal-ADC telemetry block — read-only voltage/current
-measurements; Batch B added INT_MASK1/INT_CLEAR1, completing the interrupt-driven
-story alongside INT_EVENT1 and adding the base-class `setBits()` write primitive +
-typed `writeRegister<T>()`; Batch A added SLEEP_CONTROL/CUSTOMER_USE, the library's
-first host-register write path; COMMAND/DATA enable the 4CC command-task interface
-and I2Cc downstream-device proxy); native unit-test harness in place
-(`pio test -e native`, Batch 0); see
-[Implementation Plan](docs/plans/plan-impl-v01.md) for the remaining 5
+**Current Phase:** Active implementation — 24/27 registers done (Batch D added
+TRANSMIT_SOURCE_CAPS/TRANSMIT_SINK_CAPS, the library's first **PDO encode** path —
+R/W advertised source/sink capabilities with typed PDO word builders for all four
+PDO types incl. PPS; Batch C added ADC_RESULTS, the internal-ADC telemetry block —
+read-only voltage/current measurements; Batch B added INT_MASK1/INT_CLEAR1,
+completing the interrupt-driven story alongside INT_EVENT1 and adding the base-class
+`setBits()` write primitive + typed `writeRegister<T>()`; Batch A added
+SLEEP_CONTROL/CUSTOMER_USE, the library's first host-register write path; COMMAND/DATA
+enable the 4CC command-task interface and I2Cc downstream-device proxy); native
+unit-test harness in place (`pio test -e native`, Batch 0); see
+[Implementation Plan](docs/plans/plan-impl-v01.md) for the remaining 3
 
 ---
 
@@ -150,7 +152,7 @@ Serial.println(F("String in flash"));                // Use F() macro
 
 ## Implementation Status
 
-**Implemented Registers:** 22/27
+**Implemented Registers:** 24/27
 - STATUS, MODE, POWER_PATH_STATUS, BOOT_FLAGS, PORT_CONFIG
 - TYPEC_STATE, INTERRUPT_EVENT, POWER_STATUS, PD_STATUS
 - ACTIVE_PDO_CONTRACT, ACTIVE_RDO_CONTRACT, PORT_CONTROL
@@ -166,8 +168,15 @@ Serial.println(F("String in flash"));                // Use F() macro
   voltage (14 mV/LSB; VBUS at 98 mV/LSB) and PP_5V1 current (16.5 mA/LSB) with raw
   + unit-converted accessors. Not updated by the controller in Unconnected-Sleep
   mode (a stale/all-zero read there is expected, not an error)
+- TRANSMIT_SOURCE_CAPS, TRANSMIT_SINK_CAPS (Batch D, 2026-07-07) — R/W advertised
+  capabilities; the library's first **PDO encode** path. Typed static PDO word
+  builders for all four PDO types (Fixed/Battery/Variable/PPS, PPS at 100 mV/50 mA
+  units) plus `setPDO`/`setPDOCount` and (source only) `setPowerPathForPDO`. Note
+  the asymmetric layout: TRANSMIT_SOURCE (63 B) inserts two Power-Path bytes so
+  PDO 1 starts at **byte 3**, while TRANSMIT_SINK (53 B) mirrors the Received-caps
+  layout with PDO 1 at byte 1
 
-**In Progress:** Planning remaining 5 registers
+**In Progress:** Planning remaining 3 registers
 - See [Implementation Plan v0.1](docs/plans/plan-impl-v01.md) for prioritized roadmap
 
 ---
@@ -227,6 +236,8 @@ Each register has its own class inheriting from `TPS25751Register`:
 - `TPS25751InterruptMask`: INT_MASK1 register (0x16) — per-source interrupt enable mask mirroring INT_EVENT1's 36-bit map; R/W with `set<Source>(bool)` setters (a 1 unmasks/enables that source)
 - `TPS25751InterruptClear`: INT_CLEAR1 register (0x18) — write-only event-clear staging buffer; `clear<Source>()` / `clear(bitPos)` / `clearAll()` helpers (write a 1 to acknowledge that INT_EVENT1 source)
 - `TPS25751ADCResults`: ADC_RESULTS register (0x6A) — read-only 13-byte internal-ADC telemetry block; per-pin voltage and PP_5V1 current with `raw*()` + unit-converted (`*Millivolts()`/`*Milliamps()`) accessors. Byte layout is not alphabetical (transcribed from the TRM); not updated in Unconnected-Sleep mode
+- `TPS25751TransmitSourceCaps`: TRANSMIT_SOURCE_CAPABILITIES register (0x32) — R/W 63-byte advertised source capabilities; up to 7 PDOs starting at **byte 3** (bytes 1–2 hold a 2-bit Power-Path selector per PDO). Mirrors `TPS25751ReceivedSourceCaps` decode + adds the encode path: static `build{FixedSupply,Battery,Variable,PPS}PDO()` word builders, `setPDO`/`setPDOCount`, and `get/setPowerPathForPDO`
+- `TPS25751TransmitSinkCaps`: TRANSMIT_SINK_CAPABILITIES register (0x33) — R/W 53-byte advertised sink capabilities; up to 7 PDOs starting at byte 1 (same layout as the Received caps). Mirrors `TPS25751ReceivedSinkCaps` decode (Sink Fixed PDO: bit 28 = Higher Capability, bits 24:23 = Fast-Role-Swap current, a **2-bit** field) + adds the encode path
 
 ### 4CC Command-Task Interface & I2Cc Downstream-Device Proxy
 

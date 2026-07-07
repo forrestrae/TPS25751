@@ -3,7 +3,7 @@
 * **Date:** 2025-10-20
 * **Last Updated:** 2026-07-07
 * **Project:** TPS25751 USB-C PD Controller Library
-* **Status:** 22/27 registers complete — Batch 0 (test harness) and Batch A (SLEEP_CONTROL, CUSTOMER_USE) **done 2026-07-06**, Batch B (INT_MASK1, INT_CLEAR1) and Batch C (ADC_RESULTS) **done 2026-07-07**; Batches D–F (5 registers) remain
+* **Status:** 24/27 registers complete — Batch 0 (test harness) and Batch A (SLEEP_CONTROL, CUSTOMER_USE) **done 2026-07-06**, Batch B (INT_MASK1, INT_CLEAR1), Batch C (ADC_RESULTS), and Batch D (TRANSMIT_SOURCE_CAPS, TRANSMIT_SINK_CAPS) **done 2026-07-07**; Batches E–F (3 registers) remain
 
 ---
 
@@ -19,9 +19,9 @@ lowest-risk registers first, then ascend in complexity toward the PDO-encoding
 registers. To start execution, see [Launching the Plan](#launching-the-plan).
 
 **Total Registers:** 27 *(was 26 — ADC_RESULTS 0x6A added to scope in v0.4)*
-**Currently Implemented:** 22
-**Remaining to Implement:** 5
-**Remaining Batches:** 3 (D–F = registers; Batch 0 test harness + Batch A pilot done 2026-07-06, Batch B + Batch C done 2026-07-07)
+**Currently Implemented:** 24
+**Remaining to Implement:** 3
+**Remaining Batches:** 2 (E–F = registers; Batch 0 test harness + Batch A pilot done 2026-07-06, Batch B + Batch C + Batch D done 2026-07-07)
 
 **IMPORTANT:** This is a planning document. For implementation details, refer to:
 - **[Implementation Standards](../engineering/STANDARDS.md)** - Class structure, validation, factory integration
@@ -55,7 +55,7 @@ originally slated for old Phase 4, pulled forward to enable
 
 ## Current Implementation Status
 
-### ✅ Implemented Registers (22)
+### ✅ Implemented Registers (24)
 
 | Register | Address | Class Name | Size | Purpose |
 |----------|---------|------------|------|---------|
@@ -73,6 +73,8 @@ originally slated for old Phase 4, pulled forward to enable
 | BOOT_STATUS | 0x2D | `TPS25751BootFlags` | 5 | Boot and initialization flags |
 | RECEIVED_SOURCE_CAPABILITIES | 0x30 | `TPS25751ReceivedSourceCaps` | 53 | Source capabilities (up to 7 PDOs) |
 | RECEIVED_SINK_CAPABILITIES | 0x31 | `TPS25751ReceivedSinkCaps` | 53 | Sink capabilities (up to 7 PDOs) |
+| TRANSMIT_SOURCE_CAPABILITIES | 0x32 | `TPS25751TransmitSourceCaps` | 63 | Advertised source capabilities, PDO encode (R/W) |
+| TRANSMIT_SINK_CAPABILITIES | 0x33 | `TPS25751TransmitSinkCaps` | 53 | Advertised sink capabilities, PDO encode (R/W) |
 | ACTIVE_PDO_CONTRACT | 0x34 | `TPS25751ActivePDOContract` | 6 | Active USB PD power contract |
 | ACTIVE_RDO_CONTRACT | 0x35 | `TPS25751ActiveRDOContract` | 16 | Active USB PD request contract |
 | POWER_STATUS | 0x3F | `TPS25751PowerStatus` | 2 | Power status information |
@@ -82,7 +84,7 @@ originally slated for old Phase 4, pulled forward to enable
 | SLEEP_CONTROL | 0x70 | `TPS25751SleepControl` | 1 | Sleep-mode enable + sleep-time (R/W) |
 | GPIO_STATUS | 0x72 | `TPS25751GPIOStatus` | 8 | GPIO pin status and direction |
 
-### ❌ Unimplemented Registers (5)
+### ❌ Unimplemented Registers (3)
 
 Sizes below come from the shipped `RegisterInfo` table in
 `include/TPS25751RegisterAddress.h` (the single source of truth), **not** from
@@ -92,15 +94,15 @@ hardware behavior (cf. the ACTIVE_RDO_CONTRACT 16-byte note in the header).
 
 | # | Register | Address | Size | Access | Batch | Planned Class |
 |---|----------|---------|------|--------|-------|---------------|
-| 1 | TRANSMIT_SOURCE_CAPABILITIES | 0x32 | 63 | R/W | D | `TPS25751TransmitSourceCaps` |
-| 2 | TRANSMIT_SINK_CAPABILITIES | 0x33 | 53 | R/W | D | `TPS25751TransmitSinkCaps` |
-| 3 | AUTONEGOTIATE_SINK | 0x37 | 24 | R/W | E | `TPS25751AutoNegotiateSink` |
-| 4 | IO_CONFIG | 0x5C | 49 | R/W | E | `TPS25751IOConfig` |
-| 5 | LIQUID_DETECTION_CONFIG | 0x98 | 11 | R/W | F | `TPS25751LiquidDetectionConfig` |
+| 1 | AUTONEGOTIATE_SINK | 0x37 | 24 | R/W | E | `TPS25751AutoNegotiateSink` |
+| 2 | IO_CONFIG | 0x5C | 49 | R/W | E | `TPS25751IOConfig` |
+| 3 | LIQUID_DETECTION_CONFIG | 0x98 | 11 | R/W | F | `TPS25751LiquidDetectionConfig` |
 
 *(SLEEP_CONTROL 0x70 and CUSTOMER_USE 0x06 moved to Implemented — Batch A, 2026-07-06;
 INT_MASK1 0x16 and INT_CLEAR1 0x18 moved to Implemented — Batch B, 2026-07-07;
-ADC_RESULTS 0x6A moved to Implemented — Batch C, 2026-07-07.)*
+ADC_RESULTS 0x6A moved to Implemented — Batch C, 2026-07-07;
+TRANSMIT_SOURCE_CAPABILITIES 0x32 and TRANSMIT_SINK_CAPABILITIES 0x33 moved to
+Implemented — Batch D, 2026-07-07.)*
 
 All 6 remaining addresses and sizes are **already present** in
 `TPS25751Registers::Address` / `RegisterInfo`; per-register work starts at the
@@ -217,7 +219,32 @@ GPIO ordering (GPIO4/5/0/2) transcribed cleanly.
   note in the class docs that the controller does **not** update this register
   in Unconnected-Sleep mode (stale reads are not an error).
 
-### Batch D — Capability Encoding (TRANSMIT_SOURCE_CAPS, TRANSMIT_SINK_CAPS)
+### Batch D — Capability Encoding (TRANSMIT_SOURCE_CAPS, TRANSMIT_SINK_CAPS) — ✅ DONE 2026-07-07
+
+**Completed on branch `feat/registers-batch-d`** (delegated to a Sonnet
+`general-purpose` subagent in an isolated worktree, orchestrator-gated per the
+Batch-D Tightening rules). Added `TPS25751TransmitSourceCaps` (0x32, 63 B, R/W) and
+`TPS25751TransmitSinkCaps` (0x33, 53 B, R/W) — the library's first **PDO encode**
+path: pure static `build{FixedSupply,Battery,Variable,PPS}PDO()` word builders for
+all four PDO types plus `setPDO`/`setPDOCount`/typed setters and (source only)
+`get/setPowerPathForPDO`, full factory integration,
+`read/writeTransmitSourceCaps` + `read/writeTransmitSinkCaps` convenience methods,
+Doxygen, and two native Unity suites (23 tests each; 175/175 total green).
+Warning-free `example-read-registers` build. The work order pasted the full,
+hardware-verified PDO bit map (mirroring the Received-caps decode `.cpp`, which
+overrode two imprecise PPS bit ranges in CONSTRAINTS.md) and the byte-offset
+difference (source PDO 1 at byte 3 vs sink at byte 1). The inline `/code-review high`
+gate (run inline per amendment 4) found **no correctness findings**; the manual
+per-PDO re-derivation and bit-offset cross-check both passed. The subagent also
+surfaced a **latent pre-existing bug** in the shipped read-only
+`TPS25751ReceivedSinkCaps::getFixedFastRoleSwapCurrent()` (returns `bool` for a
+2-bit field, truncating 2/3→1); it correctly modeled the new R/W sink getter as
+`uint8_t` and the trap was fed into CODE_REVIEW_GUIDELINES.md + CONSTRAINTS.md.
+The anticipated shared PDO encode/decode utility was **deliberately not extracted**
+(an architecture refactor of two working decode classes right before an
+auto-publish release; deferred as an optional future cleanup — the two new classes
+mirror decode self-contained, matching the existing Received Source/Sink
+duplication precedent).
 
 - **Why fourth (and not delegated blindly):** This is the hardest remaining
   work — it introduces the library's first **PDO encode** path (Received*Caps
@@ -606,6 +633,7 @@ data logging. Additional platform support (ESP32, RP2040) tracked in AGENTS.md.
 | 0.7 | 2026-07-06 | Claude Code | **Batch A executed and complete** (19/27, 8 remaining): `TPS25751SleepControl` (0x70) + `TPS25751CustomerUse` (0x06) via the delegated pipeline (Sonnet subagent, orchestrator-gated) — the library's first host-register write path; added the Pilot Retrospective & Plan Amendments section (shared host-side `setBits()` primitive + typed `writeRegister<T>` owed to the orchestrator before Batch B); moved both registers to Implemented and updated all counts |
 | 0.8 | 2026-07-07 | Claude Code | **Batch B executed and complete** (21/27, 6 remaining): delivered the owed prerequisite amendments 1 & 2 (base-class `setBits()` write primitive + typed `writeRegister<T>()` keyed on `kAddress`; SleepControl migrated, CustomerUse retrofitted; STANDARDS.md rewritten), then `TPS25751InterruptMask` (0x16) + `TPS25751InterruptClear` (0x18) via the delegated pipeline (Sonnet subagent, orchestrator-gated). Quality gate caught one omitted source (bit 3 Plug Insert/Removal, from a work-order bit-list error) — fixed. Moved both registers to Implemented, updated all counts, marked amendments 1 & 2 delivered |
 | 0.9 | 2026-07-07 | Claude Code | **Batch C executed and complete** (22/27, 5 remaining): `TPS25751ADCResults` (0x6A, read-only internal-ADC telemetry) via the delegated pipeline (Sonnet subagent, orchestrator-gated) — raw + unit-converted (14/98 mV, 16.5 mA per LSB) accessors, `readADCResults` / `readADCResultsRegister`, 23-test native suite. Work order pasted the full byte→field map (incl. the non-alphabetical GPIO4/5/0/2 ordering); the inline `/code-review high` gate found no correctness or cleanup findings. Added the Unconnected-Sleep stale-read caveat to CONSTRAINTS.md. Moved ADC_RESULTS to Implemented, updated all counts |
+| 1.0 | 2026-07-07 | Claude Code | **Batch D executed and complete** (24/27, 3 remaining): `TPS25751TransmitSourceCaps` (0x32, 63 B) + `TPS25751TransmitSinkCaps` (0x33, 53 B) via the delegated pipeline (Sonnet subagent, orchestrator-gated, Batch-D Tightening applied) — the library's first **PDO encode** path: static `build*PDO()` word builders for all four PDO types (PPS at 100 mV/50 mA), `setPDO`/`setPDOCount`, source-side `get/setPowerPathForPDO`, `read/writeTransmit{Source,Sink}Caps`, two 23-test native suites (175/175 green). Work order pasted the hardware-verified PDO bit map + the source-vs-sink byte-offset difference (PDO 1 at byte 3 vs byte 1). Inline `/code-review high` gate + manual per-PDO re-derivation found **no correctness findings**. Gate surfaced a latent `bool`-truncation bug in the pre-existing read-only `TPS25751ReceivedSinkCaps` FRS getter (left unchanged; fed into CODE_REVIEW_GUIDELINES.md + CONSTRAINTS.md as a follow-up); corrected two imprecise PPS bit ranges in CONSTRAINTS.md. Shared PDO codec extraction deliberately deferred. Moved both registers to Implemented, updated all counts |
 
 ---
 
@@ -627,8 +655,8 @@ data logging. Additional platform support (ESP32, RP2040) tracked in AGENTS.md.
 | 12 | BOOT_STATUS | 0x2D | 5 | R | — | ✅ Done |
 | 13 | RECEIVED_SOURCE_CAPABILITIES | 0x30 | 53 | R | — | ✅ Done (Phase 1) |
 | 14 | RECEIVED_SINK_CAPABILITIES | 0x31 | 53 | R | — | ✅ Done (Phase 1) |
-| 15 | TRANSMIT_SOURCE_CAPABILITIES | 0x32 | 63 | R/W | D | ❌ |
-| 16 | TRANSMIT_SINK_CAPABILITIES | 0x33 | 53 | R/W | D | ❌ |
+| 15 | TRANSMIT_SOURCE_CAPABILITIES | 0x32 | 63 | R/W | D | ✅ Done (2026-07-07) |
+| 16 | TRANSMIT_SINK_CAPABILITIES | 0x33 | 53 | R/W | D | ✅ Done (2026-07-07) |
 | 17 | ACTIVE_PDO_CONTRACT | 0x34 | 6 | R | — | ✅ Done (Phase 1) |
 | 18 | ACTIVE_RDO_CONTRACT | 0x35 | 16 | R | — | ✅ Done (Phase 1) |
 | 19 | AUTONEGOTIATE_SINK | 0x37 | 24 | R/W | E | ❌ |
@@ -645,4 +673,4 @@ data logging. Additional platform support (ESP32, RP2040) tracked in AGENTS.md.
 
 ---
 
-*End of Implementation Plan v0.7*
+*End of Implementation Plan v1.0*

@@ -558,14 +558,19 @@ Bits 9-0:   Maximum current in 10mA units
 
 ```
 Bits 31-30: 11 (Augmented)
-Bits 29-28: 00 (PPS)
-Bits 27:    PPS Power Limited
-Bits 26-17: Maximum Voltage in 100mV units  ← Different unit!
-Bits 16-8:  Minimum Voltage in 100mV units  ← Different unit!
-Bits 7-0:   Maximum Current in 50mA units   ← Different unit!
+Bits 29-28: 00 (SPR PPS APDO subtype)
+Bit  27:    PPS Power Limited (Source only; the Sink PPS PDO has no such bit)
+Bits 24-17: Maximum Voltage in 100mV units  ← 8-bit field, different unit!
+Bits 15-8:  Minimum Voltage in 100mV units  ← 8-bit field, different unit!
+Bits 6-0:   Maximum Current in 50mA units   ← 7-bit field, different unit!
 ```
 
-**Note:** PPS uses **different units** than other PDO types!
+**Note:** PPS uses **different units** than other PDO types! The max/min
+voltage fields are **8 bits** at offsets 24:17 / 15:8 and the current is **7
+bits** at 6:0 — verified against the hardware-tested decode in
+`src/TPS25751ReceivedSourceCaps.cpp`. (Earlier revisions of this section wrongly
+listed "Bits 26-17" / "Bits 16-8"; the decode `.cpp` is the source of truth —
+corrected in Batch D when the encode inverse was added.)
 
 ### PDO Parsing Strategy
 
@@ -627,6 +632,37 @@ for (uint8_t i = 0; i < pdoCount; i++) {
     parsePDO(pdo, i);
 }
 ```
+
+> **The byte-1 PDO offset above is NOT universal.** It holds for
+> RECEIVED_SOURCE/SINK_CAPS (0x30/0x31) and TRANSMIT_SINK_CAPS (0x33), but
+> **TRANSMIT_SOURCE_CAPS (0x32)** inserts two *Power-Path* bytes after the count
+> byte: bits 9:8 = Power Path for PDO 1, 11:10 = PDO 2, … 21:20 = PDO 7 (bits
+> 23:22 reserved), so **PDO 1 starts at byte 3** and PDO *n* at `3 + (n-1)*4`.
+> Always check the specific register's field table before assuming the offset.
+
+### Transmit Capabilities encode quirks (Batch D)
+
+TRANSMIT_SOURCE_CAPS (0x32, 63 B) and TRANSMIT_SINK_CAPS (0x33, 53 B) are the
+first registers with a PDO *encode* path (`TPS25751TransmitSourceCaps` /
+`TPS25751TransmitSinkCaps`). Traps specific to encoding:
+
+- **Mask every field to its bit width when building a PDO word**, so an
+  over-range input (e.g. a voltage that overflows the 10-bit field) cannot bleed
+  into the neighbouring or type-select bits. The `build*PDO()` helpers do this;
+  hand-assembled words must too.
+- **Set the PPS subtype bits.** An Augmented (PPS) PDO must have bits 31:30 = 11
+  **and** bits 29:28 = 00; leaving 29:28 unset is correct, but do not assume the
+  buffer was zeroed if you are editing in place.
+- **Round-trip is only exact for exact-multiple inputs** because of the LSB
+  quantization (÷50, ÷100, ÷250, ÷10). Unit tests must use values that are exact
+  multiples of the field's LSB, or assert against the quantized value.
+- **The Sink Fixed PDO differs from the Source Fixed PDO** (bit 28 = Higher
+  Capability not USB Suspend; bits 24:23 = Fast-Role-Swap current, a 2-bit
+  field; no Unchunked bit). Model that 2-bit field as `uint8_t`, not `bool`.
+  *(Follow-up: the shipped read-only `TPS25751ReceivedSinkCaps::getFixedFastRoleSwapCurrent()`
+  returns `bool` and silently truncates values 2/3 to 1 — a latent decode bug
+  the Batch-D gate surfaced. Left unchanged in Batch D to keep the batch scoped
+  to the TRANSMIT registers; worth a dedicated follow-up fix.)*
 
 ### USB PD Specification Reference
 

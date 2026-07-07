@@ -3,7 +3,7 @@
 * **Date:** 2025-10-20
 * **Last Updated:** 2026-07-07
 * **Project:** TPS25751 USB-C PD Controller Library
-* **Status:** 21/27 registers complete — Batch 0 (test harness) and Batch A (SLEEP_CONTROL, CUSTOMER_USE) **done 2026-07-06**, Batch B (INT_MASK1, INT_CLEAR1) **done 2026-07-07**; Batches C–F (6 registers) remain
+* **Status:** 22/27 registers complete — Batch 0 (test harness) and Batch A (SLEEP_CONTROL, CUSTOMER_USE) **done 2026-07-06**, Batch B (INT_MASK1, INT_CLEAR1) and Batch C (ADC_RESULTS) **done 2026-07-07**; Batches D–F (5 registers) remain
 
 ---
 
@@ -19,9 +19,9 @@ lowest-risk registers first, then ascend in complexity toward the PDO-encoding
 registers. To start execution, see [Launching the Plan](#launching-the-plan).
 
 **Total Registers:** 27 *(was 26 — ADC_RESULTS 0x6A added to scope in v0.4)*
-**Currently Implemented:** 21
-**Remaining to Implement:** 6
-**Remaining Batches:** 4 (C–F = registers; Batch 0 test harness + Batch A pilot done 2026-07-06, Batch B done 2026-07-07)
+**Currently Implemented:** 22
+**Remaining to Implement:** 5
+**Remaining Batches:** 3 (D–F = registers; Batch 0 test harness + Batch A pilot done 2026-07-06, Batch B + Batch C done 2026-07-07)
 
 **IMPORTANT:** This is a planning document. For implementation details, refer to:
 - **[Implementation Standards](../engineering/STANDARDS.md)** - Class structure, validation, factory integration
@@ -55,7 +55,7 @@ originally slated for old Phase 4, pulled forward to enable
 
 ## Current Implementation Status
 
-### ✅ Implemented Registers (21)
+### ✅ Implemented Registers (22)
 
 | Register | Address | Class Name | Size | Purpose |
 |----------|---------|------------|------|---------|
@@ -78,10 +78,11 @@ originally slated for old Phase 4, pulled forward to enable
 | POWER_STATUS | 0x3F | `TPS25751PowerStatus` | 2 | Power status information |
 | PD_STATUS | 0x40 | `TPS25751PDStatus` | 4 | Power Delivery status |
 | TYPEC_STATE | 0x69 | `TPS25751TypeCState` | 4 | Type-C state machine status |
+| ADC_RESULTS | 0x6A | `TPS25751ADCResults` | 13 | Internal-ADC telemetry: per-pin voltage + PP_5V1 current (R) |
 | SLEEP_CONTROL | 0x70 | `TPS25751SleepControl` | 1 | Sleep-mode enable + sleep-time (R/W) |
 | GPIO_STATUS | 0x72 | `TPS25751GPIOStatus` | 8 | GPIO pin status and direction |
 
-### ❌ Unimplemented Registers (6)
+### ❌ Unimplemented Registers (5)
 
 Sizes below come from the shipped `RegisterInfo` table in
 `include/TPS25751RegisterAddress.h` (the single source of truth), **not** from
@@ -91,15 +92,15 @@ hardware behavior (cf. the ACTIVE_RDO_CONTRACT 16-byte note in the header).
 
 | # | Register | Address | Size | Access | Batch | Planned Class |
 |---|----------|---------|------|--------|-------|---------------|
-| 1 | ADC_RESULTS | 0x6A | 13 | R | C | `TPS25751ADCResults` |
-| 2 | TRANSMIT_SOURCE_CAPABILITIES | 0x32 | 63 | R/W | D | `TPS25751TransmitSourceCaps` |
-| 3 | TRANSMIT_SINK_CAPABILITIES | 0x33 | 53 | R/W | D | `TPS25751TransmitSinkCaps` |
-| 4 | AUTONEGOTIATE_SINK | 0x37 | 24 | R/W | E | `TPS25751AutoNegotiateSink` |
-| 5 | IO_CONFIG | 0x5C | 49 | R/W | E | `TPS25751IOConfig` |
-| 6 | LIQUID_DETECTION_CONFIG | 0x98 | 11 | R/W | F | `TPS25751LiquidDetectionConfig` |
+| 1 | TRANSMIT_SOURCE_CAPABILITIES | 0x32 | 63 | R/W | D | `TPS25751TransmitSourceCaps` |
+| 2 | TRANSMIT_SINK_CAPABILITIES | 0x33 | 53 | R/W | D | `TPS25751TransmitSinkCaps` |
+| 3 | AUTONEGOTIATE_SINK | 0x37 | 24 | R/W | E | `TPS25751AutoNegotiateSink` |
+| 4 | IO_CONFIG | 0x5C | 49 | R/W | E | `TPS25751IOConfig` |
+| 5 | LIQUID_DETECTION_CONFIG | 0x98 | 11 | R/W | F | `TPS25751LiquidDetectionConfig` |
 
 *(SLEEP_CONTROL 0x70 and CUSTOMER_USE 0x06 moved to Implemented — Batch A, 2026-07-06;
-INT_MASK1 0x16 and INT_CLEAR1 0x18 moved to Implemented — Batch B, 2026-07-07.)*
+INT_MASK1 0x16 and INT_CLEAR1 0x18 moved to Implemented — Batch B, 2026-07-07;
+ADC_RESULTS 0x6A moved to Implemented — Batch C, 2026-07-07.)*
 
 All 6 remaining addresses and sizes are **already present** in
 `TPS25751Registers::Address` / `RegisterInfo`; per-register work starts at the
@@ -196,7 +197,18 @@ directly, all 36 INT_EVENT1 sources now present.
   currently touch INT_MASK1/INT_CLEAR1 via raw writes; consider refactoring to
   the new classes only if it doesn't complicate the PBM flow.
 
-### Batch C — Telemetry (ADC_RESULTS)
+### Batch C — Telemetry (ADC_RESULTS) — ✅ DONE 2026-07-07
+
+**Completed on branch `feat/registers-batch-c`** (delegated to a Sonnet
+`general-purpose` subagent in an isolated worktree, orchestrator-gated). Added
+`TPS25751ADCResults` (0x6A, read-only), full factory integration,
+`readADCResults` / `readADCResultsRegister` convenience methods, Doxygen, and a
+native Unity suite (23 tests). Warning-free `example-read-registers` build; 126/126
+native tests green. The `/code-review high` gate (run inline per amendment 4) found
+**no** correctness or cleanup findings — the closest read-only reference
+(`TPS25751GPIOStatus`) made this a near-mechanical transcription, and the
+orchestrator's work order pasted the full byte→field map so the non-alphabetical
+GPIO ordering (GPIO4/5/0/2) transcribed cleanly.
 
 - **Why third:** Read-only decode, immediately useful for hardware debugging
   (VBUS/VIN/temperature measurements), and the newest addition to scope — it was
@@ -593,6 +605,7 @@ data logging. Additional platform support (ESP32, RP2040) tracked in AGENTS.md.
 | 0.6 | 2026-07-06 | Claude Code | **Batch 0 executed and complete**: native Unity harness (`pio test -e native`) with Arduino stubs in `test/support/native/`, seed suite for TPS25751Status (22 tests green), hardware envs restructured under `[teensy_base]` (behavior unchanged), TESTING.md rewritten to the real workflow; wired the native test command into the per-batch loop |
 | 0.7 | 2026-07-06 | Claude Code | **Batch A executed and complete** (19/27, 8 remaining): `TPS25751SleepControl` (0x70) + `TPS25751CustomerUse` (0x06) via the delegated pipeline (Sonnet subagent, orchestrator-gated) — the library's first host-register write path; added the Pilot Retrospective & Plan Amendments section (shared host-side `setBits()` primitive + typed `writeRegister<T>` owed to the orchestrator before Batch B); moved both registers to Implemented and updated all counts |
 | 0.8 | 2026-07-07 | Claude Code | **Batch B executed and complete** (21/27, 6 remaining): delivered the owed prerequisite amendments 1 & 2 (base-class `setBits()` write primitive + typed `writeRegister<T>()` keyed on `kAddress`; SleepControl migrated, CustomerUse retrofitted; STANDARDS.md rewritten), then `TPS25751InterruptMask` (0x16) + `TPS25751InterruptClear` (0x18) via the delegated pipeline (Sonnet subagent, orchestrator-gated). Quality gate caught one omitted source (bit 3 Plug Insert/Removal, from a work-order bit-list error) — fixed. Moved both registers to Implemented, updated all counts, marked amendments 1 & 2 delivered |
+| 0.9 | 2026-07-07 | Claude Code | **Batch C executed and complete** (22/27, 5 remaining): `TPS25751ADCResults` (0x6A, read-only internal-ADC telemetry) via the delegated pipeline (Sonnet subagent, orchestrator-gated) — raw + unit-converted (14/98 mV, 16.5 mA per LSB) accessors, `readADCResults` / `readADCResultsRegister`, 23-test native suite. Work order pasted the full byte→field map (incl. the non-alphabetical GPIO4/5/0/2 ordering); the inline `/code-review high` gate found no correctness or cleanup findings. Added the Unconnected-Sleep stale-read caveat to CONSTRAINTS.md. Moved ADC_RESULTS to Implemented, updated all counts |
 
 ---
 
@@ -623,7 +636,7 @@ data logging. Additional platform support (ESP32, RP2040) tracked in AGENTS.md.
 | 21 | PD_STATUS | 0x40 | 4 | R | — | ✅ Done |
 | 22 | IO_CONFIG | 0x5C | 49 | R/W | E | ❌ |
 | 23 | TYPEC_STATE | 0x69 | 4 | R | — | ✅ Done |
-| 24 | ADC_RESULTS | 0x6A | 13 | R | C | ❌ |
+| 24 | ADC_RESULTS | 0x6A | 13 | R | C | ✅ Done (2026-07-07) |
 | 25 | SLEEP_CONTROL | 0x70 | 1 | R/W | A | ✅ Done (2026-07-06) |
 | 26 | GPIO_STATUS | 0x72 | 8 | R | — | ✅ Done (Phase 1) |
 | 27 | LIQUID_DETECTION_CONFIG | 0x98 | 11 | R/W | F | ❌ |

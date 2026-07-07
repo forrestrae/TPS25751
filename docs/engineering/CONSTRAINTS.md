@@ -414,6 +414,17 @@ bool isReadOnly() const override {
 }
 ```
 
+> **⚠️ Update-frequency caveat (ADC_RESULTS, 0x6A).** Not every read-only
+> register is refreshed on every read. Per the TRM, the PD controller updates
+> the internal-ADC measurement block **only in certain modes** — in particular
+> it does **not** update ADC_RESULTS while in **Unconnected Sleep**. A stale or
+> all-zero ADC read in that state is therefore *expected behavior, not a bus
+> error or a decode bug*. `TPS25751ADCResults::isSemanticallyValid()`
+> deliberately accepts an all-zero buffer for this reason (it still rejects the
+> all-`0xFF` bus-error signature, matching the house convention). Callers that
+> need fresh telemetry must ensure the port is out of Unconnected Sleep before
+> trusting the values.
+
 ### Write-Only Registers (W)
 
 **Examples:** COMMAND, INT_CLEAR1
@@ -904,6 +915,7 @@ void foo() {
 | 1.0 | 2025-10-20 | Claude Code | Initial constraints document extracted from implementation plan |
 | 1.1 | 2026-06-24 | Claude Code | Added BQ25798 downstream device decode conventions (big-endian, signed ADC, LSB sources) |
 | 1.2 | 2026-07-02 | Claude Code | BQ25798 decode/encode conventions moved to the sibling lib/BQ25798 repo with the driver; generic I2Cr/I2Cw framing rules retained here |
+| 1.3 | 2026-07-07 | Claude Code | Batch C: documented the ADC_RESULTS (0x6A) update-frequency caveat — not refreshed in Unconnected Sleep, so a stale/all-zero read is expected, not an error (Read-Only Registers section) |
 
 ---
 

@@ -16,13 +16,15 @@ The TPS25751 library is an object-oriented C++ library for interfacing with the 
 - Platform-optimized for Teensy 4.x (ARM Cortex-M7, no RTTI)
 
 **Last Updated:** 2026-07-07
-**Current Phase:** Active implementation — 21/27 registers done (Batch B added
-INT_MASK1/INT_CLEAR1, completing the interrupt-driven story alongside INT_EVENT1
-and adding the base-class `setBits()` write primitive + typed `writeRegister<T>()`;
-Batch A added SLEEP_CONTROL/CUSTOMER_USE, the library's first host-register write
-path; COMMAND/DATA enable the 4CC command-task interface and I2Cc
-downstream-device proxy); native unit-test harness in place (`pio test -e native`,
-Batch 0); see [Implementation Plan](docs/plans/plan-impl-v01.md) for the remaining 6
+**Current Phase:** Active implementation — 22/27 registers done (Batch C added
+ADC_RESULTS, the internal-ADC telemetry block — read-only voltage/current
+measurements; Batch B added INT_MASK1/INT_CLEAR1, completing the interrupt-driven
+story alongside INT_EVENT1 and adding the base-class `setBits()` write primitive +
+typed `writeRegister<T>()`; Batch A added SLEEP_CONTROL/CUSTOMER_USE, the library's
+first host-register write path; COMMAND/DATA enable the 4CC command-task interface
+and I2Cc downstream-device proxy); native unit-test harness in place
+(`pio test -e native`, Batch 0); see
+[Implementation Plan](docs/plans/plan-impl-v01.md) for the remaining 5
 
 ---
 
@@ -148,7 +150,7 @@ Serial.println(F("String in flash"));                // Use F() macro
 
 ## Implementation Status
 
-**Implemented Registers:** 21/27
+**Implemented Registers:** 22/27
 - STATUS, MODE, POWER_PATH_STATUS, BOOT_FLAGS, PORT_CONFIG
 - TYPEC_STATE, INTERRUPT_EVENT, POWER_STATUS, PD_STATUS
 - ACTIVE_PDO_CONTRACT, ACTIVE_RDO_CONTRACT, PORT_CONTROL
@@ -160,8 +162,12 @@ Serial.println(F("String in flash"));                // Use F() macro
 - INT_MASK1, INT_CLEAR1 (Batch B, 2026-07-07) — interrupt enable-mask and
   event-clear registers mirroring INT_EVENT1's 36-source bit map; built on the new
   base-class `setBits()` write primitive and typed `TPS25751::writeRegister<T>()`
+- ADC_RESULTS (Batch C, 2026-07-07) — read-only internal-ADC telemetry: per-pin
+  voltage (14 mV/LSB; VBUS at 98 mV/LSB) and PP_5V1 current (16.5 mA/LSB) with raw
+  + unit-converted accessors. Not updated by the controller in Unconnected-Sleep
+  mode (a stale/all-zero read there is expected, not an error)
 
-**In Progress:** Planning remaining 6 registers
+**In Progress:** Planning remaining 5 registers
 - See [Implementation Plan v0.1](docs/plans/plan-impl-v01.md) for prioritized roadmap
 
 ---
@@ -220,6 +226,7 @@ Each register has its own class inheriting from `TPS25751Register`:
 - `TPS25751CustomerUse`: CUSTOMER_USE register (0x06) — opaque 8-byte application blob; R/W raw/64-bit accessors
 - `TPS25751InterruptMask`: INT_MASK1 register (0x16) — per-source interrupt enable mask mirroring INT_EVENT1's 36-bit map; R/W with `set<Source>(bool)` setters (a 1 unmasks/enables that source)
 - `TPS25751InterruptClear`: INT_CLEAR1 register (0x18) — write-only event-clear staging buffer; `clear<Source>()` / `clear(bitPos)` / `clearAll()` helpers (write a 1 to acknowledge that INT_EVENT1 source)
+- `TPS25751ADCResults`: ADC_RESULTS register (0x6A) — read-only 13-byte internal-ADC telemetry block; per-pin voltage and PP_5V1 current with `raw*()` + unit-converted (`*Millivolts()`/`*Milliamps()`) accessors. Byte layout is not alphabetical (transcribed from the TRM); not updated in Unconnected-Sleep mode
 
 ### 4CC Command-Task Interface & I2Cc Downstream-Device Proxy
 

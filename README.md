@@ -15,7 +15,9 @@ Designed for **Teensy 4.x** (ARM Cortex-M7) and the Arduino framework.
 ## Highlights
 
 - **Type-safe register access** — each register decodes into a dedicated class with
-  named accessors instead of raw bit-twiddling.
+  named accessors instead of raw bit-twiddling. Read/write registers add field
+  setters and matching `write…()` methods (reserved bits preserved) for
+  read-modify-write configuration.
 - **Downstream device support** — talk to chips on the TPS25751's I2Cc bus via
   `TPS25751DownstreamDevice`; typed per-device drivers (e.g. the BQ25798 charger
   driver in the sibling `lib/BQ25798` repo) build on it.

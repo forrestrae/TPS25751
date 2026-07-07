@@ -3,7 +3,7 @@
 * **Date:** 2025-10-20
 * **Last Updated:** 2026-07-06
 * **Project:** TPS25751 USB-C PD Controller Library
-* **Status:** 17/27 registers complete — Batch 0 (test harness) **done 2026-07-06**; Batches A–F (10 registers) remain
+* **Status:** 19/27 registers complete — Batch 0 (test harness) and Batch A (SLEEP_CONTROL, CUSTOMER_USE) **done 2026-07-06**; Batches B–F (8 registers) remain
 
 ---
 
@@ -19,9 +19,9 @@ lowest-risk registers first, then ascend in complexity toward the PDO-encoding
 registers. To start execution, see [Launching the Plan](#launching-the-plan).
 
 **Total Registers:** 27 *(was 26 — ADC_RESULTS 0x6A added to scope in v0.4)*
-**Currently Implemented:** 17
-**Remaining to Implement:** 10
-**Remaining Batches:** 6 (A–F = registers; Batch 0 test harness completed 2026-07-06)
+**Currently Implemented:** 19
+**Remaining to Implement:** 8
+**Remaining Batches:** 5 (B–F = registers; Batch 0 test harness and Batch A pilot completed 2026-07-06)
 
 **IMPORTANT:** This is a planning document. For implementation details, refer to:
 - **[Implementation Standards](../engineering/STANDARDS.md)** - Class structure, validation, factory integration
@@ -55,11 +55,12 @@ originally slated for old Phase 4, pulled forward to enable
 
 ## Current Implementation Status
 
-### ✅ Implemented Registers (17)
+### ✅ Implemented Registers (19)
 
 | Register | Address | Class Name | Size | Purpose |
 |----------|---------|------------|------|---------|
 | MODE | 0x03 | `TPS25751Mode` | 4 | Operating mode and capabilities |
+| CUSTOMER_USE | 0x06 | `TPS25751CustomerUse` | 8 | Opaque application-defined blob (R/W) |
 | COMMAND | 0x08 | `TPS25751Command` | 4 | 4CC task code, clear/rejected state |
 | DATA | 0x09 | `TPS25751Data` | 64 | Generic 4CC task payload buffer |
 | INT_EVENT1 | 0x14 | `TPS25751InterruptEvent` | 11 | Interrupt events |
@@ -75,9 +76,10 @@ originally slated for old Phase 4, pulled forward to enable
 | POWER_STATUS | 0x3F | `TPS25751PowerStatus` | 2 | Power status information |
 | PD_STATUS | 0x40 | `TPS25751PDStatus` | 4 | Power Delivery status |
 | TYPEC_STATE | 0x69 | `TPS25751TypeCState` | 4 | Type-C state machine status |
+| SLEEP_CONTROL | 0x70 | `TPS25751SleepControl` | 1 | Sleep-mode enable + sleep-time (R/W) |
 | GPIO_STATUS | 0x72 | `TPS25751GPIOStatus` | 8 | GPIO pin status and direction |
 
-### ❌ Unimplemented Registers (10)
+### ❌ Unimplemented Registers (8)
 
 Sizes below come from the shipped `RegisterInfo` table in
 `include/TPS25751RegisterAddress.h` (the single source of truth), **not** from
@@ -87,16 +89,16 @@ hardware behavior (cf. the ACTIVE_RDO_CONTRACT 16-byte note in the header).
 
 | # | Register | Address | Size | Access | Batch | Planned Class |
 |---|----------|---------|------|--------|-------|---------------|
-| 1 | SLEEP_CONTROL | 0x70 | 1 | R/W | A | `TPS25751SleepControl` |
-| 2 | CUSTOMER_USE | 0x06 | 8 | R/W | A | `TPS25751CustomerUse` |
-| 3 | INT_MASK1 | 0x16 | 11 | R/W | B | `TPS25751InterruptMask` |
-| 4 | INT_CLEAR1 | 0x18 | 11 | W | B | `TPS25751InterruptClear` |
-| 5 | ADC_RESULTS | 0x6A | 13 | R | C | `TPS25751ADCResults` |
-| 6 | TRANSMIT_SOURCE_CAPABILITIES | 0x32 | 63 | R/W | D | `TPS25751TransmitSourceCaps` |
-| 7 | TRANSMIT_SINK_CAPABILITIES | 0x33 | 53 | R/W | D | `TPS25751TransmitSinkCaps` |
-| 8 | AUTONEGOTIATE_SINK | 0x37 | 24 | R/W | E | `TPS25751AutoNegotiateSink` |
-| 9 | IO_CONFIG | 0x5C | 49 | R/W | E | `TPS25751IOConfig` |
-| 10 | LIQUID_DETECTION_CONFIG | 0x98 | 11 | R/W | F | `TPS25751LiquidDetectionConfig` |
+| 1 | INT_MASK1 | 0x16 | 11 | R/W | B | `TPS25751InterruptMask` |
+| 2 | INT_CLEAR1 | 0x18 | 11 | W | B | `TPS25751InterruptClear` |
+| 3 | ADC_RESULTS | 0x6A | 13 | R | C | `TPS25751ADCResults` |
+| 4 | TRANSMIT_SOURCE_CAPABILITIES | 0x32 | 63 | R/W | D | `TPS25751TransmitSourceCaps` |
+| 5 | TRANSMIT_SINK_CAPABILITIES | 0x33 | 53 | R/W | D | `TPS25751TransmitSinkCaps` |
+| 6 | AUTONEGOTIATE_SINK | 0x37 | 24 | R/W | E | `TPS25751AutoNegotiateSink` |
+| 7 | IO_CONFIG | 0x5C | 49 | R/W | E | `TPS25751IOConfig` |
+| 8 | LIQUID_DETECTION_CONFIG | 0x98 | 11 | R/W | F | `TPS25751LiquidDetectionConfig` |
+
+*(SLEEP_CONTROL 0x70 and CUSTOMER_USE 0x06 moved to Implemented — Batch A, 2026-07-06.)*
 
 All 10 addresses and sizes are **already present** in
 `TPS25751Registers::Address` / `RegisterInfo`; per-register work starts at the
@@ -140,7 +142,19 @@ TESTING.md rewritten to the real workflow. Run: `pio test -e native`.
 - **Not delegated:** this is infrastructure/architecture work, which the
   workflow section explicitly reserves for the orchestrator.
 
-### Batch A — Pilot: Trivial R/W Registers (SLEEP_CONTROL, CUSTOMER_USE)
+### Batch A — Pilot: Trivial R/W Registers (SLEEP_CONTROL, CUSTOMER_USE) — ✅ DONE 2026-07-06
+
+**Completed on branch `feat/registers-batch-a`** (delegated to a Sonnet
+`general-purpose` subagent in an isolated worktree, orchestrator-gated). Added
+`TPS25751SleepControl` (0x70) and `TPS25751CustomerUse` (0x06), full factory
+integration, `read/writeSleepControl` + `read/writeCustomerUse` convenience
+methods (the library's **first host-register write path**), Doxygen, and two
+native Unity suites (41 tests). Warning-free `example-read-registers` build,
+green native run. The `/code-review high` gate found no correctness bugs; it
+surfaced four altitude/simplification findings, one fixed directly (derived a
+redundant field mask) and three escalated into the plan amendments below (a
+shared host-side `setBits()`/write-encoder primitive is now owed before Batch B).
+See [Pilot Retrospective & Plan Amendments](#pilot-retrospective--plan-amendments-batch-a).
 
 - **Why first register batch:** Smallest possible surface (1 and 8 bytes, no sub-structure to
   speak of). Their purpose here is to *validate the delegated
@@ -291,6 +305,86 @@ workflow weakness, do Batch D orchestrator-implemented instead.
 Do not delegate: factory/architecture refactors, CONSTRAINTS.md/ADR authoring,
 anything requiring hardware interaction, or fix-ups after a failed review (see
 escalation rule). Those stay with the orchestrator.
+
+---
+
+## Pilot Retrospective & Plan Amendments (Batch A)
+
+Batch A was the pilot whose explicit job was to validate the delegated pipeline
+and surface its weaknesses. It succeeded on the first delegated attempt (no
+correctness findings, green build + tests), but running it surfaced concrete
+gaps. Recorded here so Batches B–F benefit.
+
+### What worked
+
+- **Pasting MCP register facts into the work order** (rather than trusting the
+  subagent to query MCP) — the subagent never needed the MCP server and the
+  bit layout was correct. Keep doing this.
+- **Naming the closest reference class** (`TPS25751PortControl`,
+  `TPS25751Data`) and the *real* base-class API (vs the aspirational STANDARDS.md
+  template) up front. Without the explicit "use `isSemanticallyValid()`, not
+  `validateBasic/Data/Semantic`" note the subagent would likely have followed the
+  template and produced non-compiling code.
+- **The orchestrator pre-empting known traps in the work order** (CUSTOMER_USE's
+  all-zero reset vs `hasValidData()`; reserved-bit preservation in setters). The
+  subagent even caught and corrected a factual error in the work order's
+  `hasValidData()` description rather than coding to the wrong spec — a healthy
+  sign, but see amendment 3.
+
+### Weaknesses found & amendments
+
+1. **No shared host-side write-encoder primitive (blocking for Batch B).**
+   Batch A is the library's first host register write path and it hand-rolls
+   read-modify-write bit-poking with per-class masks. STANDARDS.md's
+   write-encoder pattern mandates `setField8`/`setField16BE` helpers, but those
+   live only in the sibling `lib/BQ25798` repo — the host side has no
+   `setBits(bitPos, bitLen, value)` symmetric to the base-class `extractBits()`.
+   For a 1-byte/2-field register this is fine; replicated across INT_MASK1 (11 B,
+   ~30 fields), IO_CONFIG (49 B), AUTONEGOTIATE_SINK (24 B) it is a transcription-
+   error factory on live writes.
+   **Amendment:** before Batch B, the **orchestrator** (this is
+   architecture/base-class work — *not delegated*, per "When Not to Delegate")
+   adds a `setBits*` write primitive to `TPS25751Register` (mirroring
+   `extractBits*`), migrates `TPS25751SleepControl`'s setters to it as the worked
+   example, and documents it in STANDARDS.md. Batch B's work order then points
+   subagents at that primitive.
+
+2. **Per-register write convenience methods have no typed class↔address coupling.**
+   `writeSleepControl`/`writeCustomerUse` are identical size-check-then-write
+   boilerplate; the `isValidSize` guard cannot catch pairing a class with a
+   wrong same-size register (INT_MASK1 and LIQUID_DETECTION_CONFIG are both 11 B).
+   **Amendment:** add a `static constexpr TPS25751Registers::Address kAddress`
+   (or `kRegisterInfo`) to each R/W register class and a single templated
+   `TPS25751::writeRegister<T>(const T&)` keyed on it, making mis-pairing
+   unrepresentable — mirroring the downstream tier's ADR-009 pattern. Fold into
+   the amendment-1 orchestrator task. Retrofit the two Batch A classes.
+
+3. **The work order can carry factual errors into the subagent.** The
+   orchestrator's `hasValidData()` description was wrong; the subagent happened to
+   verify against source and correct it, but a less careful run would have coded
+   to the wrong spec.
+   **Amendment:** work orders must phrase base-class behavioral claims as
+   "verify against `<file>`" rather than as fact, and the review gate must
+   diff the subagent's actual behavior against the *source*, not against the
+   work order's description of it.
+
+4. **`/code-review` finder fan-out is a resource risk.** During the Batch A gate,
+   a session/rate limit killed 7 of 8 review finder sub-agents mid-flight; the
+   orchestrator completed the correctness review inline instead. The gate still
+   held (the orchestrator had the full diff in context), but a review that
+   *depends* on fan-out completing is fragile.
+   **Amendment:** the orchestrator must be prepared to run the correctness pass
+   inline when fan-out is unavailable, and should keep the diff small enough
+   (one batch) that this is feasible. For the larger batches (D, E) budget the
+   review explicitly and prefer the deeper `/code-review ultra` gate the human
+   runs pre-merge.
+
+5. **Worktree branch base.** The subagent's fresh worktree branched from a point
+   behind `main` and it had to rebase onto `main` (to pick up Batch 0's harness)
+   before starting. It handled this correctly, but the work order should state
+   the required base branch explicitly.
+   **Amendment:** work orders name the base commit/branch the worktree must sit
+   on (`main` at or after Batch 0), so the subagent doesn't have to infer it.
 
 ---
 
@@ -474,6 +568,7 @@ data logging. Additional platform support (ESP32, RP2040) tracked in AGENTS.md.
 | 0.4 | 2026-07-06 | Claude Code | Recorded COMMAND/DATA as complete (17 done); added ADC_RESULTS to scope (27 total, 10 remaining); corrected register sizes to match shipped `RegisterInfo` (TRANSMIT caps 63/53 not 29, IO_CONFIG 49 not 48, ACTIVE_RDO 16); replaced phase structure with Batches A–F; added Delegated Implementation Workflow (cheap subagent + `/code-review high` gate); added per-batch Documentation Update Checklist and test-harness prerequisite (Batch 0) |
 | 0.5 | 2026-07-06 | Claude Code | Promoted Batch 0 (test harness) from optional to **required prerequisite** before Batch A; added "Launching the Plan" section with pre-flight checks, per-batch kickoff prompts, and merge/release steps |
 | 0.6 | 2026-07-06 | Claude Code | **Batch 0 executed and complete**: native Unity harness (`pio test -e native`) with Arduino stubs in `test/support/native/`, seed suite for TPS25751Status (22 tests green), hardware envs restructured under `[teensy_base]` (behavior unchanged), TESTING.md rewritten to the real workflow; wired the native test command into the per-batch loop |
+| 0.7 | 2026-07-06 | Claude Code | **Batch A executed and complete** (19/27, 8 remaining): `TPS25751SleepControl` (0x70) + `TPS25751CustomerUse` (0x06) via the delegated pipeline (Sonnet subagent, orchestrator-gated) — the library's first host-register write path; added the Pilot Retrospective & Plan Amendments section (shared host-side `setBits()` primitive + typed `writeRegister<T>` owed to the orchestrator before Batch B); moved both registers to Implemented and updated all counts |
 
 ---
 
@@ -482,7 +577,7 @@ data logging. Additional platform support (ESP32, RP2040) tracked in AGENTS.md.
 | Reg# | Name | Addr | Size | R/W | Batch | Status |
 |------|------|------|------|-----|-------|--------|
 | 1 | MODE | 0x03 | 4 | R | — | ✅ Done |
-| 2 | CUSTOMER_USE | 0x06 | 8 | R/W | A | ❌ |
+| 2 | CUSTOMER_USE | 0x06 | 8 | R/W | A | ✅ Done (2026-07-06) |
 | 3 | COMMAND | 0x08 | 4 | W | — | ✅ Done (2026-06) |
 | 4 | DATA | 0x09 | 64 | R/W | — | ✅ Done (2026-06) |
 | 5 | INT_EVENT1 | 0x14 | 11 | R | — | ✅ Done |
@@ -505,7 +600,7 @@ data logging. Additional platform support (ESP32, RP2040) tracked in AGENTS.md.
 | 22 | IO_CONFIG | 0x5C | 49 | R/W | E | ❌ |
 | 23 | TYPEC_STATE | 0x69 | 4 | R | — | ✅ Done |
 | 24 | ADC_RESULTS | 0x6A | 13 | R | C | ❌ |
-| 25 | SLEEP_CONTROL | 0x70 | 1 | R/W | A | ❌ |
+| 25 | SLEEP_CONTROL | 0x70 | 1 | R/W | A | ✅ Done (2026-07-06) |
 | 26 | GPIO_STATUS | 0x72 | 8 | R | — | ✅ Done (Phase 1) |
 | 27 | LIQUID_DETECTION_CONFIG | 0x98 | 11 | R/W | F | ❌ |
 
@@ -513,4 +608,4 @@ data logging. Additional platform support (ESP32, RP2040) tracked in AGENTS.md.
 
 ---
 
-*End of Implementation Plan v0.5*
+*End of Implementation Plan v0.7*

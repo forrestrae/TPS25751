@@ -474,6 +474,17 @@ portControl->setDataRoleSwapEnabled(true);
 tps.writePortControl(*portControl);
 ```
 
+**Trap — a register's hardware reset value can be semantically invalid.**
+SLEEP_CONTROL (0x70) resets to `0x01`: Sleep Mode Allowed = 1 with Sleep Time =
+`0h` (a *Reserved* code). `TPS25751SleepControl::isSemanticallyValid()` flags
+exactly that combination (sleep allowed while the time field is Reserved), so a
+read of a factory-fresh / just-reset device reports **semantically invalid** even
+though the read succeeded and the bytes are exactly what the TRM specifies. This
+is expected, not an I2C error: do not treat `isSemanticallyValid() == false` on
+SLEEP_CONTROL as a read failure. Configure a real Sleep Time (`1h`/`2h`) before
+relying on the field. (General rule: semantic validation encodes *logical*
+consistency, which the reset state is not obligated to satisfy.)
+
 ---
 
 ## USB Power Delivery Complexity

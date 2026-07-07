@@ -16,10 +16,11 @@ The TPS25751 library is an object-oriented C++ library for interfacing with the 
 - Platform-optimized for Teensy 4.x (ARM Cortex-M7, no RTTI)
 
 **Last Updated:** 2026-07-06
-**Current Phase:** Active implementation — 17/27 registers done (COMMAND/DATA added,
-enabling the 4CC command-task interface and I2Cc downstream-device proxy); native
-unit-test harness in place (`pio test -e native`, Batch 0); see
-[Implementation Plan](docs/plans/plan-impl-v01.md) for the remaining 10
+**Current Phase:** Active implementation — 19/27 registers done (Batch A added
+SLEEP_CONTROL/CUSTOMER_USE, introducing the library's first host-register write
+path; COMMAND/DATA enable the 4CC command-task interface and I2Cc
+downstream-device proxy); native unit-test harness in place (`pio test -e native`,
+Batch 0); see [Implementation Plan](docs/plans/plan-impl-v01.md) for the remaining 8
 
 ---
 
@@ -145,15 +146,17 @@ Serial.println(F("String in flash"));                // Use F() macro
 
 ## Implementation Status
 
-**Implemented Registers:** 17/27
+**Implemented Registers:** 19/27
 - STATUS, MODE, POWER_PATH_STATUS, BOOT_FLAGS, PORT_CONFIG
 - TYPEC_STATE, INTERRUPT_EVENT, POWER_STATUS, PD_STATUS
 - ACTIVE_PDO_CONTRACT, ACTIVE_RDO_CONTRACT, PORT_CONTROL
 - GPIO_STATUS, RECEIVED_SINK_CAPS, RECEIVED_SOURCE_CAPS
 - COMMAND, DATA — the 4CC command-task control/payload registers (TRM Sec 4.4.2);
   see `TPS25751::executeCommand()` and `TPS25751DownstreamDevice`
+- SLEEP_CONTROL, CUSTOMER_USE (Batch A, 2026-07-06) — the first R/W host registers
+  with field setters and `writeSleepControl()`/`writeCustomerUse()` write paths
 
-**In Progress:** Planning remaining 10 registers
+**In Progress:** Planning remaining 8 registers
 - See [Implementation Plan v0.1](docs/plans/plan-impl-v01.md) for prioritized roadmap
 
 ---
@@ -208,6 +211,8 @@ Each register has its own class inheriting from `TPS25751Register`:
 - `TPS25751ReceivedSourceCaps`: Received source capabilities
 - `TPS25751Command`: COMMAND register (0x08) — 4CC task code, clear/rejected state
 - `TPS25751Data`: DATA register (0x09) — generic 64-byte 4CC task payload (no fixed layout)
+- `TPS25751SleepControl`: SLEEP_CONTROL register (0x70) — sleep-mode enable + sleep-time; R/W with field setters
+- `TPS25751CustomerUse`: CUSTOMER_USE register (0x06) — opaque 8-byte application blob; R/W raw/64-bit accessors
 
 ### 4CC Command-Task Interface & I2Cc Downstream-Device Proxy
 

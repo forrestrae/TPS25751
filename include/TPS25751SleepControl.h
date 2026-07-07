@@ -93,7 +93,8 @@ private:
     static constexpr uint8_t kSleepTimeShift = 1;            ///< bits 2:1 start at bit 1
     static constexpr uint8_t kSleepTimeBits = 2;              ///< bits 2:1 is a 2-bit field
     static constexpr uint8_t kSleepTimeValueMask = 0x03;      ///< 2-bit field value mask
-    static constexpr uint8_t kSleepTimeFieldMask = 0x06;      ///< bits 2:1 mask within the byte
+    /// bits 2:1 mask within the byte (0x06) -- derived so it can never drift from the shift/width above
+    static constexpr uint8_t kSleepTimeFieldMask = kSleepTimeValueMask << kSleepTimeShift;
 };
 
 // String conversion helper

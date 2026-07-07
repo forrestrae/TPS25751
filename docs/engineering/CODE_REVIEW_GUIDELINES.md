@@ -62,6 +62,32 @@ any code that directly implements the SLVAFV8A PBM sequence:
   `TPS25751Register`, implement three-tier validation, or appear in the factory.  It
   is a sequencer; applying register-class review criteria to it is incorrect.
 
+### Host-Register Write-Path Traps (Batch A onward)
+
+Review these when a **host** R/W register class (SLEEP_CONTROL, CUSTOMER_USE, and
+the Batch B+ registers) adds field setters or a `TPS25751::writeX()` method:
+
+- **Setters must read-modify-write, never whole-byte assign**: a host setter must
+  mask out only its field and OR in the shifted value, preserving reserved and
+  sibling bits (`_raw[i] = (_raw[i] & ~fieldMask) | (value << shift)`). A setter
+  that assigns the whole byte from one field zeroes reserved bits the controller
+  expects unchanged — the same defect class as the downstream RMW trap below.
+- **Setters guard `!isValid()`**: a moved-from or default-constructed-then-failed
+  register has no buffer; an unguarded setter dereferences null `_raw`.
+- **Derive field-position masks, don't restate them**: a `fieldMask` that is
+  independently written (e.g. `0x06`) instead of derived (`valueMask << shift`)
+  drifts when the class is copied for a field at a different bit position — the
+  setter then clears the wrong bits while decode (using shift+width) still reads
+  correctly, so set-then-get round-trip tests pass and the corruption is
+  write-only. Flag any hand-restated field-position mask.
+- **`writeX()` convenience methods and register-class↔address pairing**: until the
+  planned typed `writeRegister<T>()` (keyed on a class-level `kAddress`) lands, the
+  hand-written `writeSleepControl`/`writeCustomerUse`-style methods pair a class
+  with a `RegisterInfo` by hand. The `isValidSize()` guard cannot catch a wrong
+  **same-size** pairing (INT_MASK1 0x16 and LIQUID_DETECTION_CONFIG 0x98 are both
+  11 bytes; RECEIVED_SINK_CAPS and TRANSMIT_SINK_CAPS are both 53). Verify each
+  `writeX()` names the register whose bytes it actually writes.
+
 ### Downstream-Device Write-Path Traps (ADR-009)
 
 Review these when a downstream R/W register class adds field setters or a driver adds typed writes:

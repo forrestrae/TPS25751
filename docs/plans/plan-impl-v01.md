@@ -1,9 +1,9 @@
-# TPS25751 Register Implementation Plan v0.5
+# TPS25751 Register Implementation Plan v0.6
 
 * **Date:** 2025-10-20
 * **Last Updated:** 2026-07-06
 * **Project:** TPS25751 USB-C PD Controller Library
-* **Status:** 17/27 registers complete — Batch 0 (test harness) then Batches A–F (10 registers)
+* **Status:** 17/27 registers complete — Batch 0 (test harness) **done 2026-07-06**; Batches A–F (10 registers) remain
 
 ---
 
@@ -21,7 +21,7 @@ registers. To start execution, see [Launching the Plan](#launching-the-plan).
 **Total Registers:** 27 *(was 26 — ADC_RESULTS 0x6A added to scope in v0.4)*
 **Currently Implemented:** 17
 **Remaining to Implement:** 10
-**Remaining Batches:** 7 (0 = test harness, A–F = registers)
+**Remaining Batches:** 6 (A–F = registers; Batch 0 test harness completed 2026-07-06)
 
 **IMPORTANT:** This is a planning document. For implementation details, refer to:
 - **[Implementation Standards](../engineering/STANDARDS.md)** - Class structure, validation, factory integration
@@ -113,7 +113,12 @@ before it is trusted with the hard ones, and so that each batch is a coherent,
 independently reviewable and publishable unit (one branch, one review, one merge).
 Batch 0 comes first because every later batch's quality gate depends on it.
 
-### Batch 0 — Test Harness (REQUIRED prerequisite; orchestrator-implemented, not delegated)
+### Batch 0 — Test Harness (REQUIRED prerequisite; orchestrator-implemented, not delegated) — ✅ DONE 2026-07-06
+
+**Completed on branch `feat/registers-batch-0`:** `[env:native]` in
+`platformio.ini` (Unity, host-run, Arduino API stubs in `test/support/native/`),
+seed suite `test/test_native/test_TPS25751Status/` (22 tests, green),
+TESTING.md rewritten to the real workflow. Run: `pio test -e native`.
 
 - **Why first:** `test/` is still a placeholder — the >90% coverage requirement
   in [TESTING.md](../engineering/TESTING.md) is currently aspirational, and
@@ -238,14 +243,18 @@ good fit for that split, for reasons specific to this codebase:
    - Pointers to the closest existing reference class (e.g. "mirror
      `TPS25751InterruptEvent` for INT_MASK1") and to STANDARDS.md /
      CONSTRAINTS.md as required reading;
-   - The build command that must pass: `pio run -e example-read-registers`;
+   - The build command that must pass: `pio run -e example-read-registers`,
+     and the test command that must be green: `pio test -e native` (new decode
+     logic needs a suite under `test/test_native/` per TESTING.md, and its
+     source file added to the native env's `build_src_filter`);
    - The Common Mistakes list from AGENTS.md, verbatim.
 2. **Implementation (subagent).** Spawn with `isolation: "worktree"` so the
    subagent works on an isolated copy; it implements, builds, and reports.
 3. **Quality gate (orchestrator).** On the returned diff:
    - Run **`/code-review` at high effort** — findings adjudicated against
      [CODE_REVIEW_GUIDELINES.md](../engineering/CODE_REVIEW_GUIDELINES.md);
-   - Re-verify the build compiles **without warnings**;
+   - Re-verify the build compiles **without warnings** and `pio test -e native`
+     is green;
    - Spot-check the three-tier validation and debug-print format against
      STANDARDS.md (formulaic sections a reviewer skims are where template
      drift hides);
@@ -464,6 +473,7 @@ data logging. Additional platform support (ESP32, RP2040) tracked in AGENTS.md.
 | 0.3 | 2025-10-22 | Claude Code | Phase 1 complete: 15/26 implemented, 11 remaining |
 | 0.4 | 2026-07-06 | Claude Code | Recorded COMMAND/DATA as complete (17 done); added ADC_RESULTS to scope (27 total, 10 remaining); corrected register sizes to match shipped `RegisterInfo` (TRANSMIT caps 63/53 not 29, IO_CONFIG 49 not 48, ACTIVE_RDO 16); replaced phase structure with Batches A–F; added Delegated Implementation Workflow (cheap subagent + `/code-review high` gate); added per-batch Documentation Update Checklist and test-harness prerequisite (Batch 0) |
 | 0.5 | 2026-07-06 | Claude Code | Promoted Batch 0 (test harness) from optional to **required prerequisite** before Batch A; added "Launching the Plan" section with pre-flight checks, per-batch kickoff prompts, and merge/release steps |
+| 0.6 | 2026-07-06 | Claude Code | **Batch 0 executed and complete**: native Unity harness (`pio test -e native`) with Arduino stubs in `test/support/native/`, seed suite for TPS25751Status (22 tests green), hardware envs restructured under `[teensy_base]` (behavior unchanged), TESTING.md rewritten to the real workflow; wired the native test command into the per-batch loop |
 
 ---
 

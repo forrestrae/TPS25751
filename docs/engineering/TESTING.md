@@ -1,6 +1,6 @@
 # TPS25751 Library - Testing Strategy
 
-**Last Updated:** 2025-10-20
+**Last Updated:** 2026-07-06
 **Status:** Active
 
 ---
@@ -9,7 +9,16 @@
 
 This document defines the comprehensive testing strategy for the TPS25751 library. Our testing approach follows a multi-layered strategy: unit tests, integration tests, and hardware validation.
 
+**The unit-test harness is real and running:** `pio test -e native` executes
+host-run Unity tests (no hardware, no Arduino framework) from
+`test/test_native/`. Every register batch must keep this run green — see the
+[Implementation Plan](../plans/plan-impl-v01.md) per-batch loop. The `test/`
+directory is excluded from the published registry tarball via `export.exclude`
+in `library.json`.
+
 **Quality Target:** >90% code coverage for all register implementations.
+(Automated coverage *measurement* is not wired up yet; the target is enforced
+by review until it is.)
 
 ---
 
@@ -77,382 +86,98 @@ This document defines the comprehensive testing strategy for the TPS25751 librar
 
 ## Unit Testing
 
+### How the Harness Works
+
+Unit tests run **on the host** via PlatformIO's `native` platform — no Teensy,
+no `Wire`, no Arduino framework. The `[env:native]` environment in
+`platformio.ini`:
+
+- uses **Unity** as the test framework (`test_framework = unity`);
+- compiles only the platform-independent library sources it needs via
+  `build_src_filter` (`test_build_src = yes`) — when a test starts exercising a
+  source file that isn't listed there yet, add it to the filter;
+- satisfies the Arduino API symbols those sources reference (`Stream`,
+  `Serial`, `F()`, `millis()`, `strncpy_P`) with the **header-only stubs** in
+  `test/support/native/` (`Arduino.h`, `Stream.h`). The stubs print to stdout;
+  they are just enough surface to compile the decode/encode logic, not an
+  Arduino emulation. Extend them (minimally) if a new source file needs more;
+- only runs suites under `test/test_native/` (`test_filter = test_native/*`).
+
+PlatformIO defines **`PIO_UNIT_TESTING`** during test builds;
+`TPS25751Register.h` uses it to make the protected `extractBits*` /
+`extractEnum*` helpers public so tests can exercise them directly.
+
 ### Test Structure
 
-Each register class has its own test file:
+Each register class gets its own suite directory under `test/test_native/`,
+containing one `.cpp` with its own `main()` (native Unity tests provide their
+own runner):
 
 ```
 test/
-  test_TPS25751Status/
-    test_TPS25751Status.cpp
-  test_TPS25751Mode/
-    test_TPS25751Mode.cpp
-  test_TPS25751PowerPathStatus/
-    test_TPS25751PowerPathStatus.cpp
-  ...
+  support/native/                  # Arduino API stubs (not a test suite)
+  test_native/
+    test_TPS25751Status/
+      test_TPS25751Status.cpp      # seed suite - use as the reference example
+    test_TPS25751<NewClass>/
+      test_TPS25751<NewClass>.cpp
 ```
+
+**`test/test_native/test_TPS25751Status/test_TPS25751Status.cpp` is the
+canonical example** — it was written against the real register API and verified
+green. Pattern-match it rather than inventing structure.
 
 ### Required Test Cases
 
-#### 1. Constructor Tests
+For every register class:
 
-**Test default constructor initialization:**
+1. **Construction** — default ctor (allocates zeroed buffer of the register's
+   `RegisterInfo` size), data ctor (deep-copies the buffer), null-data and
+   wrong-size behavior.
+2. **Validation tiers** — `isValid()` / `isValidSize()` (basic),
+   `hasValidData()` (data; all-`0xFF` is the bus-error signature), and
+   `isSemanticallyValid()` (semantic; one test per logical-consistency rule,
+   both passing and failing).
+3. **Field decode** — at least one hand-packed buffer per meaningful register
+   state, asserting **every** accessor. Pack the bytes from the TRM bit
+   offsets (cross-checked against the `tps25751-docs` MCP server) and comment
+   the packing arithmetic in the test file.
+4. **Encode round-trip** (R/W registers only) — set-field → raw-bytes →
+   re-decode.
+5. **Rule of Five** — copy preserves and deep-copies data; move transfers the
+   buffer and leaves the source `!isValid()`.
+
+Base-class behavior (`extractBits*` bounds checking, cross-byte extraction)
+lives in the STATUS seed suite and does not need repeating per register.
+
+### Test Skeleton
 
 ```cpp
 #include <unity.h>
-#include "TPS25751Status.h"
+#include "TPS25751Status.h"          // the class under test
+#include "TPS25751RegisterAddress.h"
 
-void test_default_constructor() {
-    TPS25751Status status;
-
-    TEST_ASSERT_EQUAL_UINT8(0x1A, status.getAddress());
-    TEST_ASSERT_EQUAL_UINT8(5, status.getExpectedSize());
-    TEST_ASSERT_TRUE(status.isReadOnly());
-    TEST_ASSERT_EQUAL_UINT8(0, status.getDataLength());
-}
-
-void test_data_constructor_valid() {
-    uint8_t data[] = {0x01, 0x02, 0x03, 0x04, 0x05};
-    TPS25751Status status(data, sizeof(data));
-
-    TEST_ASSERT_EQUAL_UINT8(5, status.getDataLength());
-    TEST_ASSERT_TRUE(status.validateBasic());
-}
-
-void test_data_constructor_invalid_length() {
-    uint8_t data[] = {0x01, 0x02, 0x03};  // Wrong length
-    TPS25751Status status(data, sizeof(data));
-
-    TEST_ASSERT_EQUAL_UINT8(3, status.getDataLength());
-    TEST_ASSERT_FALSE(status.validateBasic());  // Should fail
-}
-```
-
-#### 2. Validation Tests
-
-**Test all three validation levels:**
-
-```cpp
-void test_validate_basic_correct_length() {
-    uint8_t data[5] = {0};
-    TPS25751Status status(data, 5);
-    TEST_ASSERT_TRUE(status.validateBasic());
-}
-
-void test_validate_basic_incorrect_length() {
-    uint8_t data[3] = {0};
-    TPS25751Status status(data, 3);
-    TEST_ASSERT_FALSE(status.validateBasic());
-}
-
-void test_validate_data_reserved_bits_zero() {
-    // Data with all reserved bits zero
-    uint8_t data[] = {0x00, 0x00, 0x00, 0x00, 0x00};
-    TPS25751Status status(data, 5);
-    TEST_ASSERT_TRUE(status.validateData());
-}
-
-void test_validate_data_reserved_bits_set() {
-    // Data with reserved bits set (invalid)
-    uint8_t data[] = {0xC0, 0x00, 0x00, 0x00, 0x00};
-    TPS25751Status status(data, 5);
-    TEST_ASSERT_FALSE(status.validateData());
-}
-
-void test_validate_semantic_logical_consistency() {
-    // For registers with inter-field dependencies
-    // Example: PDO count matches actual PDOs
-    uint8_t data[] = {
-        0x03,  // PDO count = 3
-        // ... 3 PDOs worth of data ...
-    };
-    TPS25751ReceivedSourceCaps caps(data, sizeof(data));
-    TEST_ASSERT_TRUE(caps.validateSemantic());
-}
-
-void test_validate_semantic_inconsistent() {
-    uint8_t data[] = {
-        0x05,  // PDO count = 5, but only 3 PDOs of data
-        // ... 3 PDOs worth of data ...
-    };
-    TPS25751ReceivedSourceCaps caps(data, sizeof(data));
-    TEST_ASSERT_FALSE(caps.validateSemantic());
-}
-```
-
-#### 3. Accessor Tests
-
-**Test every public accessor method:**
-
-```cpp
-void test_get_connection_state() {
-    uint8_t data[] = {0x05, 0x00, 0x00, 0x00, 0x00};  // State = 5
-    TPS25751Status status(data, 5);
-
-    TEST_ASSERT_EQUAL_UINT8(5, status.getConnectionState());
-}
-
-void test_get_connection_state_all_values() {
-    for (uint8_t state = 0; state <= 7; state++) {
-        uint8_t data[] = {state, 0x00, 0x00, 0x00, 0x00};
-        TPS25751Status status(data, 5);
-
-        TEST_ASSERT_EQUAL_UINT8(state, status.getConnectionState());
-    }
-}
-
-void test_get_connection_state_string() {
-    struct TestCase {
-        uint8_t state;
-        const char* expected;
-    };
-
-    TestCase cases[] = {
-        {0, "Not Connected"},
-        {1, "Connected.DFP"},
-        {2, "Connected.UFP"},
-        // ... all valid states
-    };
-
-    for (const auto& tc : cases) {
-        uint8_t data[] = {tc.state, 0x00, 0x00, 0x00, 0x00};
-        TPS25751Status status(data, 5);
-
-        TEST_ASSERT_EQUAL_STRING(tc.expected, status.getConnectionStateString());
-    }
-}
-
-void test_vbus_present() {
-    // VBUS bit set
-    uint8_t data1[] = {0x00, 0x01, 0x00, 0x00, 0x00};
-    TPS25751Status status1(data1, 5);
-    TEST_ASSERT_TRUE(status1.isVBUSPresent());
-
-    // VBUS bit clear
-    uint8_t data2[] = {0x00, 0x00, 0x00, 0x00, 0x00};
-    TPS25751Status status2(data2, 5);
-    TEST_ASSERT_FALSE(status2.isVBUSPresent());
-}
-```
-
-#### 4. Edge Case Tests
-
-**Test boundary conditions and extreme values:**
-
-```cpp
-void test_all_bits_zero() {
-    uint8_t data[5] = {0x00, 0x00, 0x00, 0x00, 0x00};
-    TPS25751Status status(data, 5);
-
-    // Verify all getters return expected zero/default values
-    TEST_ASSERT_EQUAL_UINT8(0, status.getConnectionState());
-    TEST_ASSERT_FALSE(status.isVBUSPresent());
-    // ... test all accessors
-}
-
-void test_all_bits_set() {
-    uint8_t data[5] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
-    TPS25751Status status(data, 5);
-
-    // Verify behavior with all bits set
-    // Some fields may have max values, some may be invalid
-    // Document expected behavior
-}
-
-void test_boundary_values() {
-    // Test maximum valid values for each field
-    uint8_t data[] = {
-        0x07,  // Max connection state
-        0xFF,  // All flags set
-        // ... boundary values for each field
-    };
-    TPS25751Status status(data, 5);
-
-    TEST_ASSERT_EQUAL_UINT8(7, status.getConnectionState());
-}
-
-void test_empty_data() {
-    TPS25751Status status(nullptr, 0);
-
-    TEST_ASSERT_EQUAL_UINT8(0, status.getDataLength());
-    TEST_ASSERT_FALSE(status.validateBasic());
-}
-
-void test_oversized_data() {
-    uint8_t data[10] = {0};  // Larger than expected
-    TPS25751Status status(data, 10);
-
-    TEST_ASSERT_EQUAL_UINT8(10, status.getDataLength());
-    TEST_ASSERT_FALSE(status.validateBasic());  // Length mismatch
-}
-```
-
-#### 5. Factory Creation Tests
-
-**Test factory pattern integration:**
-
-```cpp
-void test_factory_create_by_address() {
-    auto reg = TPS25751Factory::getInstance().createRegister(
-        TPS25751Registers::Address::STATUS);
-
-    TEST_ASSERT_NOT_NULL(reg.get());
-    TEST_ASSERT_EQUAL_UINT8(0x1A, reg->getAddress());
-    TEST_ASSERT_EQUAL_UINT8(5, reg->getExpectedSize());
-}
-
-void test_factory_create_with_data() {
-    uint8_t data[] = {0x01, 0x02, 0x03, 0x04, 0x05};
-    auto reg = TPS25751Factory::getInstance().createRegister(
-        TPS25751Registers::Address::STATUS, data, sizeof(data));
-
-    TEST_ASSERT_NOT_NULL(reg.get());
-    TEST_ASSERT_EQUAL_UINT8(5, reg->getDataLength());
-}
-
-void test_factory_unsupported_address_returns_null() {
-    // An address with no decoder class yields nullptr
-    auto reg = TPS25751Factory::getInstance().createRegister(
-        TPS25751Registers::Address::ADC_RESULTS);
-
-    TEST_ASSERT_NULL(reg.get());
-}
-```
-
-#### 6. Copy and Move Tests
-
-**Test Rule of Five implementation:**
-
-```cpp
-void test_copy_constructor() {
-    uint8_t data[] = {0x01, 0x02, 0x03, 0x04, 0x05};
-    TPS25751Status original(data, 5);
-
-    TPS25751Status copy(original);
-
-    TEST_ASSERT_EQUAL_UINT8(original.getAddress(), copy.getAddress());
-    TEST_ASSERT_EQUAL_UINT8(original.getDataLength(), copy.getDataLength());
-    TEST_ASSERT_EQUAL_UINT8(original.getConnectionState(), copy.getConnectionState());
-}
-
-void test_copy_assignment() {
-    uint8_t data[] = {0x01, 0x02, 0x03, 0x04, 0x05};
-    TPS25751Status original(data, 5);
-    TPS25751Status copy;
-
-    copy = original;
-
-    TEST_ASSERT_EQUAL_UINT8(original.getConnectionState(), copy.getConnectionState());
-}
-
-void test_move_constructor() {
-    uint8_t data[] = {0x01, 0x02, 0x03, 0x04, 0x05};
-    TPS25751Status original(data, 5);
-    uint8_t expectedState = original.getConnectionState();
-
-    TPS25751Status moved(std::move(original));
-
-    TEST_ASSERT_EQUAL_UINT8(expectedState, moved.getConnectionState());
-}
-
-void test_move_assignment() {
-    uint8_t data[] = {0x01, 0x02, 0x03, 0x04, 0x05};
-    TPS25751Status original(data, 5);
-    uint8_t expectedState = original.getConnectionState();
-    TPS25751Status moved;
-
-    moved = std::move(original);
-
-    TEST_ASSERT_EQUAL_UINT8(expectedState, moved.getConnectionState());
-}
-```
-
-### Test Template
-
-Use this template for new register tests:
-
-```cpp
-#include <unity.h>
-#include "TPS25751[RegisterName].h"
-#include "TPS25751RegisterFactory.h"
-
-// Test data constants
 namespace {
-    constexpr uint8_t VALID_DATA[] = { /* valid test data */ };
-    constexpr uint8_t INVALID_DATA[] = { /* invalid test data */ };
+constexpr size_t SIZE = TPS25751Registers::Registers::STATUS.size;
+// Hand-packed from TRM bit offsets - comment the arithmetic:
+//   byte0 = 1 | (6 << 1) | (1 << 4) = 0x1D  (plug, state 6, CC2)
+constexpr uint8_t CONNECTED[SIZE] = {0x1D, 0x00, 0xD0, 0x48, 0x00};
 }
 
-// Constructor tests
-void test_default_constructor() { /* ... */ }
-void test_data_constructor_valid() { /* ... */ }
-void test_data_constructor_invalid() { /* ... */ }
+void setUp() {}
+void tearDown() {}
 
-// Validation tests
-void test_validate_basic_correct() { /* ... */ }
-void test_validate_basic_incorrect() { /* ... */ }
-void test_validate_data_valid() { /* ... */ }
-void test_validate_data_invalid() { /* ... */ }
-void test_validate_semantic_consistent() { /* ... */ }
-void test_validate_semantic_inconsistent() { /* ... */ }
-
-// Accessor tests (one per public method)
-void test_get_field1() { /* ... */ }
-void test_get_field2() { /* ... */ }
-// ...
-
-// Edge case tests
-void test_all_bits_zero() { /* ... */ }
-void test_all_bits_set() { /* ... */ }
-void test_boundary_values() { /* ... */ }
-
-// Factory tests
-void test_factory_creation() { /* ... */ }
-
-// Rule of Five tests
-void test_copy_constructor() { /* ... */ }
-void test_move_constructor() { /* ... */ }
-
-// Setup and runner
-void setUp(void) {
-    // Called before each test
+void test_connected_decode()
+{
+    TPS25751Status status(CONNECTED);
+    TEST_ASSERT_TRUE(status.plugPresent());
+    TEST_ASSERT_EQUAL(CONNECTED_NO_RA_DETECTED, status.connectionState());
 }
 
-void tearDown(void) {
-    // Called after each test
-}
-
-int main(int argc, char **argv) {
+int main(int, char **)
+{
     UNITY_BEGIN();
-
-    // Constructor tests
-    RUN_TEST(test_default_constructor);
-    RUN_TEST(test_data_constructor_valid);
-    RUN_TEST(test_data_constructor_invalid);
-
-    // Validation tests
-    RUN_TEST(test_validate_basic_correct);
-    RUN_TEST(test_validate_basic_incorrect);
-    RUN_TEST(test_validate_data_valid);
-    RUN_TEST(test_validate_data_invalid);
-    RUN_TEST(test_validate_semantic_consistent);
-    RUN_TEST(test_validate_semantic_inconsistent);
-
-    // Accessor tests
-    RUN_TEST(test_get_field1);
-    RUN_TEST(test_get_field2);
-
-    // Edge case tests
-    RUN_TEST(test_all_bits_zero);
-    RUN_TEST(test_all_bits_set);
-    RUN_TEST(test_boundary_values);
-
-    // Factory tests
-    RUN_TEST(test_factory_creation);
-
-    // Rule of Five tests
-    RUN_TEST(test_copy_constructor);
-    RUN_TEST(test_move_constructor);
-
+    RUN_TEST(test_connected_decode);
     return UNITY_END();
 }
 ```
@@ -460,6 +185,11 @@ int main(int argc, char **argv) {
 ---
 
 ## Integration Testing
+
+> **Status: design guidance, not yet implemented.** No mock-`Wire` layer or
+> integration suites exist yet; the sketches below are targets for when they
+> are added (they would live under `test/test_native/` and run in the same
+> native env, with the mock replacing the stub transport).
 
 ### I2C Mock Testing
 
@@ -735,26 +465,25 @@ ideally, a logic analyzer on the I2Cc lines:
 
 ```
 test/
-  ├── test_TPS25751Status/
-  │   └── test_TPS25751Status.cpp
-  ├── test_TPS25751Mode/
-  │   └── test_TPS25751Mode.cpp
-  ├── test_TPS25751PowerPathStatus/
-  │   └── test_TPS25751PowerPathStatus.cpp
-  ├── test_TPS25751BootFlags/
-  │   └── test_TPS25751BootFlags.cpp
-  ├── test_TPS25751PortConfig/
-  │   └── test_TPS25751PortConfig.cpp
-  ├── test_Factory/
-  │   └── test_TPS25751RegisterFactory.cpp
-  ├── test_Integration/
-  │   └── test_MultiRegisterSequence.cpp
-  └── README.md
+  ├── support/
+  │   └── native/                       # Arduino API stubs for [env:native]
+  │       ├── Arduino.h
+  │       └── Stream.h
+  ├── test_native/                      # host-run suites: pio test -e native
+  │   ├── test_TPS25751Status/
+  │   │   └── test_TPS25751Status.cpp   # seed suite (reference example)
+  │   └── test_TPS25751<Class>/
+  │       └── test_TPS25751<Class>.cpp
+  └── README
 ```
+
+Directories that do not start with `test_` (like `support/`) are ignored by the
+test runner. Embedded/on-target suites, if ever added, would live in a sibling
+`test_embedded/` tree and a matching test env — none exist today.
 
 ### Naming Conventions
 
-- Test directory: `test_[ClassName]/`
+- Test directory: `test_native/test_[ClassName]/`
 - Test file: `test_[ClassName].cpp`
 - Test function: `test_[what_it_tests]()`
 - Use snake_case for test function names
@@ -766,34 +495,32 @@ test/
 ### Local Testing
 
 ```bash
-# Run all tests
-pio test
+# Run all native unit tests (the standard command)
+pio test -e native
 
-# Run specific test environment
-pio test -e teensy41
+# Run one suite
+pio test -e native -f "test_native/test_TPS25751Status"
 
-# Run specific test
-pio test -f test_TPS25751Status
-
-# Verbose output
-pio test -v
-
-# Run tests and see coverage
-pio test --coverage
+# Verbose output (shows the stubs' stdout, e.g. debugPrint output)
+pio test -e native -v
 ```
+
+`pio test` without `-e native` targets the hardware example environments
+(`default_envs`) and will try to upload to a Teensy — always pass `-e native`
+for unit tests.
 
 ### Test Output
 
-Expected output format:
+Expected output format (from the seed suite):
 
 ```
-test/test_TPS25751Status/test_TPS25751Status.cpp:45:test_default_constructor:PASS
-test/test_TPS25751Status/test_TPS25751Status.cpp:52:test_data_constructor_valid:PASS
-test/test_TPS25751Status/test_TPS25751Status.cpp:60:test_validate_basic:PASS
+test/test_native/test_TPS25751Status/test_TPS25751Status.cpp:285: test_default_constructor_allocates_zeroed_buffer	[PASSED]
 ...
------------------------
-25 Tests 0 Failures 0 Ignored
-OK
+=================================== SUMMARY ===================================
+Environment    Test                             Status    Duration
+-------------  -------------------------------  --------  ------------
+native         test_native/test_TPS25751Status  PASSED    00:00:04.911
+================= 22 test cases: 22 succeeded in 00:00:04.911 =================
 ```
 
 ---
@@ -849,7 +576,7 @@ Run tests before every commit:
 # Add to .git/hooks/pre-commit
 #!/bin/bash
 echo "Running unit tests..."
-pio test
+pio test -e native
 if [ $? -ne 0 ]; then
     echo "Tests failed. Commit aborted."
     exit 1
@@ -858,15 +585,10 @@ fi
 
 ### Test Coverage Tracking
 
-Monitor code coverage over time:
-
-```bash
-# Generate coverage report
-pio test --coverage
-
-# View coverage report
-open .pio/test/coverage/index.html
-```
+**Not implemented yet.** `pio test` has no built-in coverage flag; measuring
+the >90% target will require adding `--coverage`/gcov flags to the native env
+and a report step. Until then, coverage is judged at review against the
+Required Test Cases list above.
 
 ### Regression Testing
 
@@ -879,9 +601,9 @@ Maintain a regression test suite:
 void test_issue_001_status_vbus_parsing() {
     // Issue: VBUS bit was being read from wrong byte
     // Expected: byte 1, bit 0
-    uint8_t data[] = {0x00, 0x01, 0x00, 0x00, 0x00};
+    uint8_t data[] = {0x00, 0x00, 0x10, 0x00, 0x00};  // bit 20 set
     TPS25751Status status(data, 5);
-    TEST_ASSERT_TRUE(status.isVBUSPresent());
+    TEST_ASSERT_EQUAL(VBUS_AT_VSAFE5V, status.vbusStatus());
 }
 ```
 
@@ -906,6 +628,7 @@ Tests are successful when:
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
 | 1.0 | 2025-10-20 | Claude Code | Initial testing strategy document extracted from implementation plan |
+| 1.1 | 2026-07-06 | Claude Code | Batch 0: replaced aspirational unit-test sections with the real, working `pio test -e native` harness (Unity, native env, Arduino stubs in `test/support/native/`, seed suite for TPS25751Status); corrected fictional API in examples; marked coverage tooling as pending |
 
 ---
 

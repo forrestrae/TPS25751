@@ -15,9 +15,10 @@ The TPS25751 library is an object-oriented C++ library for interfacing with the 
 - RAII memory management for embedded systems
 - Platform-optimized for Teensy 4.x (ARM Cortex-M7, no RTTI)
 
-**Last Updated:** 2026-06-22
+**Last Updated:** 2026-07-06
 **Current Phase:** Active implementation — 17/27 registers done (COMMAND/DATA added,
-enabling the 4CC command-task interface and I2Cc downstream-device proxy); see
+enabling the 4CC command-task interface and I2Cc downstream-device proxy); native
+unit-test harness in place (`pio test -e native`, Batch 0); see
 [Implementation Plan](docs/plans/plan-impl-v01.md) for the remaining 10
 
 ---
@@ -509,10 +510,21 @@ what each example demonstrates.
 > Copy the example out into your own PlatformIO project and add this library
 > under `lib/`.
 
-> **No unit tests exist yet.** `test/` is a PlatformIO placeholder (README only).
-> The `>90% coverage` target in [TESTING.md](docs/engineering/TESTING.md) and a
-> `pio test` workflow are the *intended* setup, not a working one — adding the
-> test harness is still pending.
+**Unit tests** run on the host — no hardware required:
+
+```bash
+pio test -e native                                    # all native unit tests
+pio test -e native -f "test_native/test_TPS25751Status"  # one suite
+```
+
+The `[env:native]` environment compiles the platform-independent sources
+against Arduino API stubs in `test/support/native/`; Unity suites live under
+`test/test_native/` (one directory per register class —
+`test_TPS25751Status` is the seed/reference suite). A green native test run is
+a hard gate for every register batch. See
+[TESTING.md](docs/engineering/TESTING.md) for the harness details, required
+test cases, and how to add a suite. (Automated *coverage measurement* toward
+the >90% target is still pending.)
 
 ### Publishing the Library
 

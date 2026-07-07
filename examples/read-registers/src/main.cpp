@@ -10,6 +10,7 @@
 #include "TPS25751InterruptMask.h"
 #include "TPS25751SleepControl.h"
 #include "TPS25751CustomerUse.h"
+#include "TPS25751ADCResults.h"
 
 #define I2CT_IRQ_PIN 17
 
@@ -166,6 +167,18 @@ void print_gpio_status()
         Serial.println(F("Failed to create/read GPIO Status register via factory"));
 }
 
+void print_adc_results()
+{
+    Serial.println();
+    Serial.println("-------------------- print_adc_results --------------------");
+    Serial.println();
+
+    if (const auto adcResults = pd.readADCResultsRegister(true))
+        adcResults->debugPrint();
+    else
+        Serial.println(F("Failed to create/read ADC Results register via factory"));
+}
+
 void print_sleep_and_customer_use()
 {
     Serial.println();
@@ -209,6 +222,7 @@ void print_app_mode_status(const std::unique_ptr<TPS25751Mode> &modeReg)
     print_status_register();
     print_pd_status();
     print_power_status();
+    print_adc_results();
     print_port_status();
     print_contracts();
     print_interrupt_mask();

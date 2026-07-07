@@ -24,6 +24,7 @@
 #include "TPS25751CustomerUse.h"
 #include "TPS25751InterruptMask.h"
 #include "TPS25751InterruptClear.h"
+#include "TPS25751ADCResults.h"
 #include "TPS25751RegisterAddress.h"
 #include "TPS25751RegisterFactory.h"
 #include "TPS25751Task.h"
@@ -79,6 +80,18 @@ public:
     bool readReceivedSinkCaps(TPS25751ReceivedSinkCaps &sinkCaps) const;
     bool readSleepControl(TPS25751SleepControl &sleepControl) const;
     bool readCustomerUse(TPS25751CustomerUse &customerUse) const;
+
+    /**
+     * @brief Read the ADC Results register (0x6A)
+     *
+     * Note: the PD controller does not update ADC_RESULTS while in
+     * Unconnected Sleep mode, so a stale/all-zero read in that state is
+     * expected and not, by itself, an error.
+     *
+     * @param adcResults Register object to populate
+     * @return true if the read succeeded
+     */
+    bool readADCResults(TPS25751ADCResults &adcResults) const;
 
     /**
      * @brief Read the Interrupt Mask register (0x16)
@@ -322,6 +335,18 @@ public:
      * @return Unique pointer to GPIO Status register (nullptr if failed)
      */
     std::unique_ptr<TPS25751GPIOStatus> readGPIOStatusRegister(bool validate = true) const;
+
+    /**
+     * @brief Read ADC Results register using factory pattern
+     *
+     * Note: the PD controller does not update ADC_RESULTS while in
+     * Unconnected Sleep mode, so a stale/all-zero read in that state is
+     * expected and not, by itself, an error.
+     *
+     * @param validate Whether to validate the register after reading
+     * @return Unique pointer to ADC Results register (nullptr if failed)
+     */
+    std::unique_ptr<TPS25751ADCResults> readADCResultsRegister(bool validate = true) const;
 
     /**
      * @brief Read Port Control register using factory pattern

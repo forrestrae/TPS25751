@@ -26,6 +26,7 @@ class TPS25751SleepControl;
 class TPS25751CustomerUse;
 class TPS25751InterruptMask;
 class TPS25751InterruptClear;
+class TPS25751ADCResults;
 
 /**
  * @brief Abstract factory interface for creating register objects
@@ -94,6 +95,7 @@ private:
     std::unique_ptr<TPS25751Register> createCustomerUseRegister() const;
     std::unique_ptr<TPS25751Register> createInterruptMaskRegister() const;
     std::unique_ptr<TPS25751Register> createInterruptClearRegister() const;
+    std::unique_ptr<TPS25751Register> createADCResultsRegister() const;
 
     std::unique_ptr<TPS25751Register> createStatusRegister(const uint8_t* data, size_t length) const;
     std::unique_ptr<TPS25751Register> createModeRegister(const uint8_t* data, size_t length) const;
@@ -116,6 +118,7 @@ private:
     std::unique_ptr<TPS25751Register> createCustomerUseRegister(const uint8_t* data, size_t length) const;
     std::unique_ptr<TPS25751Register> createInterruptMaskRegister(const uint8_t* data, size_t length) const;
     std::unique_ptr<TPS25751Register> createInterruptClearRegister(const uint8_t* data, size_t length) const;
+    std::unique_ptr<TPS25751Register> createADCResultsRegister(const uint8_t* data, size_t length) const;
 };
 
 /**

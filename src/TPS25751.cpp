@@ -155,6 +155,11 @@ bool TPS25751::readCustomerUse(TPS25751CustomerUse &customerUse) const
     return readRegister(TPS25751Registers::Registers::CUSTOMER_USE, customerUse);
 }
 
+bool TPS25751::readADCResults(TPS25751ADCResults &adcResults) const
+{
+    return readRegister(TPS25751Registers::Registers::ADC_RESULTS, adcResults);
+}
+
 bool TPS25751::readInterruptMask(TPS25751InterruptMask &interruptMask) const
 {
     return readRegister(TPS25751Registers::Registers::INT_MASK1, interruptMask);
@@ -405,6 +410,17 @@ std::unique_ptr<TPS25751GPIOStatus> TPS25751::readGPIOStatusRegister(bool valida
     if (reg) {
         TPS25751GPIOStatus* gpioStatusReg = static_cast<TPS25751GPIOStatus*>(reg.release());
         return std::unique_ptr<TPS25751GPIOStatus>(gpioStatusReg);
+    }
+    return nullptr;
+}
+
+std::unique_ptr<TPS25751ADCResults> TPS25751::readADCResultsRegister(bool validate) const {
+    auto reg = readAndValidateRegisterByAddress(TPS25751Registers::Address::ADC_RESULTS, validate);
+    if (!reg) return nullptr;
+
+    if (reg) {
+        TPS25751ADCResults* adcResultsReg = static_cast<TPS25751ADCResults*>(reg.release());
+        return std::unique_ptr<TPS25751ADCResults>(adcResultsReg);
     }
     return nullptr;
 }

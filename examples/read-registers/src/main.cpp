@@ -7,6 +7,8 @@
 #include <TPS25751PortConfig.h>
 #include <TPS25751RegisterFactory.h>
 #include "TPS25751InterruptEvent.h"
+#include "TPS25751SleepControl.h"
+#include "TPS25751CustomerUse.h"
 
 #define I2CT_IRQ_PIN 17
 
@@ -163,6 +165,25 @@ void print_gpio_status()
         Serial.println(F("Failed to create/read GPIO Status register via factory"));
 }
 
+void print_sleep_and_customer_use()
+{
+    Serial.println();
+    Serial.println("-------------------- print_sleep_and_customer_use --------------------");
+    Serial.println();
+
+    TPS25751SleepControl sleepControl;
+    if (pd.readSleepControl(sleepControl))
+        sleepControl.debugPrint();
+    else
+        Serial.println(F("Failed to read Sleep Control register"));
+
+    TPS25751CustomerUse customerUse;
+    if (pd.readCustomerUse(customerUse))
+        customerUse.debugPrint();
+    else
+        Serial.println(F("Failed to read Customer Use register"));
+}
+
 void print_app_mode_status(const std::unique_ptr<TPS25751Mode> &modeReg)
 {
     modeReg->debugPrint();
@@ -173,6 +194,7 @@ void print_app_mode_status(const std::unique_ptr<TPS25751Mode> &modeReg)
     print_power_status();
     print_port_status();
     print_contracts();
+    print_sleep_and_customer_use();
 }
 
 void print_boot_mode_status(const std::unique_ptr<TPS25751Mode> &modeReg)

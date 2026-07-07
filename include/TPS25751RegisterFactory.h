@@ -22,6 +22,8 @@ class TPS25751ReceivedSourceCaps;
 class TPS25751ReceivedSinkCaps;
 class TPS25751Command;
 class TPS25751Data;
+class TPS25751SleepControl;
+class TPS25751CustomerUse;
 
 /**
  * @brief Abstract factory interface for creating register objects
@@ -86,6 +88,8 @@ private:
     std::unique_ptr<TPS25751Register> createReceivedSinkCapsRegister() const;
     std::unique_ptr<TPS25751Register> createCommandRegister() const;
     std::unique_ptr<TPS25751Register> createDataRegister() const;
+    std::unique_ptr<TPS25751Register> createSleepControlRegister() const;
+    std::unique_ptr<TPS25751Register> createCustomerUseRegister() const;
 
     std::unique_ptr<TPS25751Register> createStatusRegister(const uint8_t* data, size_t length) const;
     std::unique_ptr<TPS25751Register> createModeRegister(const uint8_t* data, size_t length) const;
@@ -104,6 +108,8 @@ private:
     std::unique_ptr<TPS25751Register> createReceivedSinkCapsRegister(const uint8_t* data, size_t length) const;
     std::unique_ptr<TPS25751Register> createCommandRegister(const uint8_t* data, size_t length) const;
     std::unique_ptr<TPS25751Register> createDataRegister(const uint8_t* data, size_t length) const;
+    std::unique_ptr<TPS25751Register> createSleepControlRegister(const uint8_t* data, size_t length) const;
+    std::unique_ptr<TPS25751Register> createCustomerUseRegister(const uint8_t* data, size_t length) const;
 };
 
 /**

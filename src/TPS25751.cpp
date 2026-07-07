@@ -145,6 +145,32 @@ bool TPS25751::readReceivedSinkCaps(TPS25751ReceivedSinkCaps &sinkCaps) const
     return readRegister(TPS25751Registers::Registers::RECEIVED_SINK_CAPABILITIES, sinkCaps);
 }
 
+bool TPS25751::readSleepControl(TPS25751SleepControl &sleepControl) const
+{
+    return readRegister(TPS25751Registers::Registers::SLEEP_CONTROL, sleepControl);
+}
+
+bool TPS25751::readCustomerUse(TPS25751CustomerUse &customerUse) const
+{
+    return readRegister(TPS25751Registers::Registers::CUSTOMER_USE, customerUse);
+}
+
+bool TPS25751::writeSleepControl(const TPS25751SleepControl &sleepControl) const
+{
+    if (!sleepControl.isValid() || !sleepControl.isValidSize(TPS25751Registers::Registers::SLEEP_CONTROL.size)) {
+        return false;
+    }
+    return writeRegister(TPS25751Registers::Registers::SLEEP_CONTROL, sleepControl.raw());
+}
+
+bool TPS25751::writeCustomerUse(const TPS25751CustomerUse &customerUse) const
+{
+    if (!customerUse.isValid() || !customerUse.isValidSize(TPS25751Registers::Registers::CUSTOMER_USE.size)) {
+        return false;
+    }
+    return writeRegister(TPS25751Registers::Registers::CUSTOMER_USE, customerUse.raw());
+}
+
 // Type-safe register reading methods
 bool TPS25751::readRegister(TPS25751Registers::RegisterInfo regInfo, uint8_t *buffer) const
 {

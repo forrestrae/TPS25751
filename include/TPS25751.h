@@ -20,6 +20,8 @@
 #include "TPS25751ReceivedSinkCaps.h"
 #include "TPS25751Command.h"
 #include "TPS25751Data.h"
+#include "TPS25751SleepControl.h"
+#include "TPS25751CustomerUse.h"
 #include "TPS25751RegisterAddress.h"
 #include "TPS25751RegisterFactory.h"
 #include "TPS25751Task.h"
@@ -73,6 +75,24 @@ public:
     bool readActiveRDOContract(TPS25751ActiveRDOContract &rdoContract) const;
     bool readReceivedSourceCaps(TPS25751ReceivedSourceCaps &sourceCaps) const;
     bool readReceivedSinkCaps(TPS25751ReceivedSinkCaps &sinkCaps) const;
+    bool readSleepControl(TPS25751SleepControl &sleepControl) const;
+    bool readCustomerUse(TPS25751CustomerUse &customerUse) const;
+
+    /**
+     * @brief Write the Sleep Control register (0x70)
+     * @param sleepControl Register object holding the bytes to write
+     * @return false if @p sleepControl is not valid or not the expected size;
+     *         otherwise the result of the underlying I2C write
+     */
+    bool writeSleepControl(const TPS25751SleepControl &sleepControl) const;
+
+    /**
+     * @brief Write the Customer Use register (0x06)
+     * @param customerUse Register object holding the bytes to write
+     * @return false if @p customerUse is not valid or not the expected size;
+     *         otherwise the result of the underlying I2C write
+     */
+    bool writeCustomerUse(const TPS25751CustomerUse &customerUse) const;
 
     // Type-safe register reading methods
     bool readRegister(TPS25751Registers::RegisterInfo regInfo, uint8_t *buffer) const;

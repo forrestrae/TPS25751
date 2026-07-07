@@ -16,6 +16,8 @@
 #include "TPS25751ReceivedSinkCaps.h"
 #include "TPS25751Command.h"
 #include "TPS25751Data.h"
+#include "TPS25751SleepControl.h"
+#include "TPS25751CustomerUse.h"
 #include "TPS25751Debug.h"
 
 // Static factory instance
@@ -60,6 +62,10 @@ std::unique_ptr<TPS25751Register> TPS25751RegisterFactoryImpl::createRegister(TP
             return createCommandRegister();
         case TPS25751Registers::Address::DATA:
             return createDataRegister();
+        case TPS25751Registers::Address::SLEEP_CONTROL:
+            return createSleepControlRegister();
+        case TPS25751Registers::Address::CUSTOMER_USE:
+            return createCustomerUseRegister();
         default:
             TPS_DEBUG_ERROR(DEBUG_CAT_REGISTER, "Unsupported register address: 0x%02X", static_cast<uint8_t>(addr));
             return nullptr;
@@ -110,6 +116,10 @@ std::unique_ptr<TPS25751Register> TPS25751RegisterFactoryImpl::createRegister(TP
             return createCommandRegister(data, length);
         case TPS25751Registers::Address::DATA:
             return createDataRegister(data, length);
+        case TPS25751Registers::Address::SLEEP_CONTROL:
+            return createSleepControlRegister(data, length);
+        case TPS25751Registers::Address::CUSTOMER_USE:
+            return createCustomerUseRegister(data, length);
         default:
             TPS_DEBUG_ERROR(DEBUG_CAT_REGISTER, "Unsupported register address: 0x%02X", static_cast<uint8_t>(addr));
             return nullptr;
@@ -155,6 +165,10 @@ std::unique_ptr<TPS25751Register> TPS25751RegisterFactoryImpl::createRegister(co
             return std::make_unique<TPS25751Command>(regInfo);
         case TPS25751Registers::Address::DATA:
             return std::make_unique<TPS25751Data>(regInfo);
+        case TPS25751Registers::Address::SLEEP_CONTROL:
+            return std::make_unique<TPS25751SleepControl>(regInfo);
+        case TPS25751Registers::Address::CUSTOMER_USE:
+            return std::make_unique<TPS25751CustomerUse>(regInfo);
         default:
             TPS_DEBUG_ERROR(DEBUG_CAT_REGISTER, "Unsupported register address: 0x%02X", static_cast<uint8_t>(regInfo.address));
             return nullptr;
@@ -297,6 +311,22 @@ std::unique_ptr<TPS25751Register> TPS25751RegisterFactoryImpl::createDataRegiste
 
 std::unique_ptr<TPS25751Register> TPS25751RegisterFactoryImpl::createDataRegister(const uint8_t* data, size_t length) const {
     return std::make_unique<TPS25751Data>(data, length);
+}
+
+std::unique_ptr<TPS25751Register> TPS25751RegisterFactoryImpl::createSleepControlRegister() const {
+    return std::make_unique<TPS25751SleepControl>();
+}
+
+std::unique_ptr<TPS25751Register> TPS25751RegisterFactoryImpl::createSleepControlRegister(const uint8_t* data, size_t length) const {
+    return std::make_unique<TPS25751SleepControl>(data, length);
+}
+
+std::unique_ptr<TPS25751Register> TPS25751RegisterFactoryImpl::createCustomerUseRegister() const {
+    return std::make_unique<TPS25751CustomerUse>();
+}
+
+std::unique_ptr<TPS25751Register> TPS25751RegisterFactoryImpl::createCustomerUseRegister(const uint8_t* data, size_t length) const {
+    return std::make_unique<TPS25751CustomerUse>(data, length);
 }
 
 // Singleton factory instance management

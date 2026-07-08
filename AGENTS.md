@@ -15,9 +15,15 @@ The TPS25751 library is an object-oriented C++ library for interfacing with the 
 - RAII memory management for embedded systems
 - Platform-optimized for Teensy 4.x (ARM Cortex-M7, no RTTI)
 
-**Last Updated:** 2026-07-07
-**Current Phase:** Active implementation — 26/27 registers done (Batch E added
-AUTONEGOTIATE_SINK/IO_CONFIG: AUTONEGOTIATE_SINK is a genuine R/W sink-negotiation
+**Last Updated:** 2026-07-08
+**Current Phase:** Implementation complete — **27/27 registers done** (Batch F added
+LIQUID_DETECTION_CONFIG: a R/W 11-byte liquid/moisture-detection configuration block
+— sleep intervals, ADC sample count/cadence, ADC threshold pairs with hysteresis, and
+the state/enable bits for liquid detection + corrosion mitigation — implemented as a
+straightforward `setBits()`-based R/W register mirroring `TPS25751AutoNegotiateSink`
+(all bit offsets ≤ 82, well within `extractBits()`/`setBits()`'s `uint8_t bitPos`
+range), with a cross-field low ≤ high semantic check on each threshold pair; Batch E
+added AUTONEGOTIATE_SINK/IO_CONFIG: AUTONEGOTIATE_SINK is a genuine R/W sink-negotiation
 config register (voltage window, min power, PPS request parameters) built on the
 Batch B `setBits()` write primitive; IO_CONFIG is a read-only, boot-fixed 49-byte
 GPIO configuration block that is the library's first register whose bit offsets
@@ -31,8 +37,7 @@ completing the interrupt-driven story alongside INT_EVENT1 and adding the base-c
 `setBits()` write primitive + typed `writeRegister<T>()`; Batch A added
 SLEEP_CONTROL/CUSTOMER_USE, the library's first host-register write path; COMMAND/DATA
 enable the 4CC command-task interface and I2Cc downstream-device proxy); native
-unit-test harness in place (`pio test -e native`, Batch 0); see
-[Implementation Plan](docs/plans/plan-impl-v01.md) for the remaining 1
+unit-test harness in place (`pio test -e native`, Batch 0)
 
 ---
 
@@ -158,7 +163,7 @@ Serial.println(F("String in flash"));                // Use F() macro
 
 ## Implementation Status
 
-**Implemented Registers:** 26/27
+**Implemented Registers:** 27/27 — **all registers complete**
 - STATUS, MODE, POWER_PATH_STATUS, BOOT_FLAGS, PORT_CONFIG
 - TYPEC_STATE, INTERRUPT_EVENT, POWER_STATUS, PD_STATUS
 - ACTIVE_PDO_CONTRACT, ACTIVE_RDO_CONTRACT, PORT_CONTROL
@@ -191,9 +196,18 @@ Serial.println(F("String in flash"));                // Use F() macro
   `extractBits()`'s `uint8_t bitPos` range, so it decodes every field by direct
   byte assembly from `_raw[]` (mirroring `TPS25751TransmitSourceCaps::getPDO()`)
   rather than calling `extractBits()`
+- LIQUID_DETECTION_CONFIG (Batch F, 2026-07-08) — R/W 11-byte (0x98)
+  liquid/moisture-detection configuration: with/without-liquid sleep intervals
+  (1000 ms/LSB), ADC sample count and sample-time cadence (10 ms/LSB), the two ADC
+  threshold pairs (14 mV/LSB, each providing hysteresis for exit out of Liquid
+  Detected), and the liquid-detection-state / enable-corrosion-mitigation /
+  enable-liquid-detection bits. A straightforward `setBits()`-based R/W register
+  mirroring `TPS25751AutoNegotiateSink` (all bit offsets ≤ 82, within
+  `extractBits()`/`setBits()`'s `uint8_t bitPos` range) with a cross-field
+  low ≤ high semantic check on each threshold pair. **Completes the register set.**
 
-**In Progress:** Planning remaining 1 register
-- See [Implementation Plan v0.1](docs/plans/plan-impl-v01.md) for prioritized roadmap
+**Status:** All 27 registers implemented.
+- See [Implementation Plan](docs/plans/plan-impl-v01.md) for the completed roadmap
 
 ---
 
@@ -256,6 +270,7 @@ Each register has its own class inheriting from `TPS25751Register`:
 - `TPS25751TransmitSinkCaps`: TRANSMIT_SINK_CAPABILITIES register (0x33) — R/W 53-byte advertised sink capabilities; up to 7 PDOs starting at byte 1 (same layout as the Received caps). Mirrors `TPS25751ReceivedSinkCaps` decode (Sink Fixed PDO: bit 28 = Higher Capability, bits 24:23 = Fast-Role-Swap current, a **2-bit** field) + adds the encode path
 - `TPS25751AutoNegotiateSink`: AUTONEGOTIATE_SINK register (0x37) — R/W 24-byte sink-negotiation configuration (voltage window, minimum required power, capability-mismatch handling, PPS sink request parameters); `setBits()`-based field setters mirroring `TPS25751InterruptMask`'s pattern, plus a cross-field semantic check (host-provided min voltage ≤ host-provided max voltage when neither bound is PD-computed)
 - `TPS25751IOConfig`: IO_CONFIG register (0x5C) — **read-only** 49-byte GPIO configuration block (output/interrupt/pull-up/pull-down/open-drain/initial-value/event-polarity per-GPIO bitmaps, analog-input selection, per-GPIO event mapping); "cannot be modified at run-time" per the TRM, so there are no setters, no write path, and no `kAddress`. Bit offsets run up to 391 (past `extractBits()`'s `uint8_t bitPos` range), so every field is decoded via direct byte assembly from `_raw[]`, mirroring `TPS25751TransmitSourceCaps::getPDO()`
+- `TPS25751LiquidDetectionConfig`: LIQUID_DETECTION_CONFIG register (0x98) — R/W 11-byte liquid/moisture-detection configuration (with/without-liquid sleep intervals at 1000 ms/LSB, ADC sample count + sample-time cadence at 10 ms/LSB, two ADC threshold pairs at 14 mV/LSB providing hysteresis for exit out of Liquid Detected, and the liquid-detection-state / enable-corrosion-mitigation / enable-liquid-detection bits); `setBits()`-based field setters + `kAddress` write path mirroring `TPS25751AutoNegotiateSink` (all bit offsets ≤ 82, within `extractBits()`/`setBits()`'s `uint8_t bitPos` range — no direct byte assembly needed), plus a cross-field semantic check (low ≤ high on each threshold pair). The `numberOfSamples` "must be 2^N" TRM note is intentionally not enforced (reset value 0 is not a power of two)
 
 ### 4CC Command-Task Interface & I2Cc Downstream-Device Proxy
 

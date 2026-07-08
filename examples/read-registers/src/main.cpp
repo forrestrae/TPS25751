@@ -13,6 +13,7 @@
 #include "TPS25751ADCResults.h"
 #include "TPS25751AutoNegotiateSink.h"
 #include "TPS25751IOConfig.h"
+#include "TPS25751LiquidDetectionConfig.h"
 
 #define I2CT_IRQ_PIN 17
 
@@ -257,6 +258,21 @@ void print_io_config()
         Serial.println(F("Failed to create/read IO Config register via factory"));
 }
 
+void print_liquid_detection_config()
+{
+    Serial.println();
+    Serial.println("-------------------- print_liquid_detection_config --------------------");
+    Serial.println();
+
+    // LIQUID_DETECTION_CONFIG (0x98) is R/W, but writing liquid-detection /
+    // corrosion-mitigation config to a live board is a bricking risk -- this
+    // sketch is read-only, so only the read path is demonstrated here.
+    if (const auto liquidDetectionConfig = pd.readLiquidDetectionConfigRegister(true))
+        liquidDetectionConfig->debugPrint();
+    else
+        Serial.println(F("Failed to create/read Liquid Detection Config register via factory"));
+}
+
 void print_app_mode_status(const std::unique_ptr<TPS25751Mode> &modeReg)
 {
     modeReg->debugPrint();
@@ -272,6 +288,7 @@ void print_app_mode_status(const std::unique_ptr<TPS25751Mode> &modeReg)
     print_sleep_and_customer_use();
     print_autonegotiate_sink();
     print_io_config();
+    print_liquid_detection_config();
 }
 
 void print_boot_mode_status(const std::unique_ptr<TPS25751Mode> &modeReg)

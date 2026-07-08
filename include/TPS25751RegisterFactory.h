@@ -31,6 +31,7 @@ class TPS25751InterruptClear;
 class TPS25751ADCResults;
 class TPS25751AutoNegotiateSink;
 class TPS25751IOConfig;
+class TPS25751LiquidDetectionConfig;
 
 /**
  * @brief Abstract factory interface for creating register objects
@@ -104,6 +105,7 @@ private:
     std::unique_ptr<TPS25751Register> createADCResultsRegister() const;
     std::unique_ptr<TPS25751Register> createAutoNegotiateSinkRegister() const;
     std::unique_ptr<TPS25751Register> createIOConfigRegister() const;
+    std::unique_ptr<TPS25751Register> createLiquidDetectionConfigRegister() const;
 
     std::unique_ptr<TPS25751Register> createStatusRegister(const uint8_t* data, size_t length) const;
     std::unique_ptr<TPS25751Register> createModeRegister(const uint8_t* data, size_t length) const;
@@ -131,6 +133,7 @@ private:
     std::unique_ptr<TPS25751Register> createADCResultsRegister(const uint8_t* data, size_t length) const;
     std::unique_ptr<TPS25751Register> createAutoNegotiateSinkRegister(const uint8_t* data, size_t length) const;
     std::unique_ptr<TPS25751Register> createIOConfigRegister(const uint8_t* data, size_t length) const;
+    std::unique_ptr<TPS25751Register> createLiquidDetectionConfigRegister(const uint8_t* data, size_t length) const;
 };
 
 /**

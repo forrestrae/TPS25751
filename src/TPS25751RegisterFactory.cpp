@@ -25,6 +25,7 @@
 #include "TPS25751ADCResults.h"
 #include "TPS25751AutoNegotiateSink.h"
 #include "TPS25751IOConfig.h"
+#include "TPS25751LiquidDetectionConfig.h"
 #include "TPS25751Debug.h"
 
 // Static factory instance
@@ -87,6 +88,8 @@ std::unique_ptr<TPS25751Register> TPS25751RegisterFactoryImpl::createRegister(TP
             return createAutoNegotiateSinkRegister();
         case TPS25751Registers::Address::IO_CONFIG:
             return createIOConfigRegister();
+        case TPS25751Registers::Address::LIQUID_DETECTION_CONFIG:
+            return createLiquidDetectionConfigRegister();
         default:
             TPS_DEBUG_ERROR(DEBUG_CAT_REGISTER, "Unsupported register address: 0x%02X", static_cast<uint8_t>(addr));
             return nullptr;
@@ -155,6 +158,8 @@ std::unique_ptr<TPS25751Register> TPS25751RegisterFactoryImpl::createRegister(TP
             return createAutoNegotiateSinkRegister(data, length);
         case TPS25751Registers::Address::IO_CONFIG:
             return createIOConfigRegister(data, length);
+        case TPS25751Registers::Address::LIQUID_DETECTION_CONFIG:
+            return createLiquidDetectionConfigRegister(data, length);
         default:
             TPS_DEBUG_ERROR(DEBUG_CAT_REGISTER, "Unsupported register address: 0x%02X", static_cast<uint8_t>(addr));
             return nullptr;
@@ -218,6 +223,8 @@ std::unique_ptr<TPS25751Register> TPS25751RegisterFactoryImpl::createRegister(co
             return std::make_unique<TPS25751AutoNegotiateSink>(regInfo);
         case TPS25751Registers::Address::IO_CONFIG:
             return std::make_unique<TPS25751IOConfig>(regInfo);
+        case TPS25751Registers::Address::LIQUID_DETECTION_CONFIG:
+            return std::make_unique<TPS25751LiquidDetectionConfig>(regInfo);
         default:
             TPS_DEBUG_ERROR(DEBUG_CAT_REGISTER, "Unsupported register address: 0x%02X", static_cast<uint8_t>(regInfo.address));
             return nullptr;
@@ -432,6 +439,14 @@ std::unique_ptr<TPS25751Register> TPS25751RegisterFactoryImpl::createIOConfigReg
 
 std::unique_ptr<TPS25751Register> TPS25751RegisterFactoryImpl::createIOConfigRegister(const uint8_t* data, size_t length) const {
     return std::make_unique<TPS25751IOConfig>(data, length);
+}
+
+std::unique_ptr<TPS25751Register> TPS25751RegisterFactoryImpl::createLiquidDetectionConfigRegister() const {
+    return std::make_unique<TPS25751LiquidDetectionConfig>();
+}
+
+std::unique_ptr<TPS25751Register> TPS25751RegisterFactoryImpl::createLiquidDetectionConfigRegister(const uint8_t* data, size_t length) const {
+    return std::make_unique<TPS25751LiquidDetectionConfig>(data, length);
 }
 
 // Singleton factory instance management

@@ -29,6 +29,7 @@
 #include "TPS25751ADCResults.h"
 #include "TPS25751AutoNegotiateSink.h"
 #include "TPS25751IOConfig.h"
+#include "TPS25751LiquidDetectionConfig.h"
 #include "TPS25751RegisterAddress.h"
 #include "TPS25751RegisterFactory.h"
 #include "TPS25751Task.h"
@@ -138,6 +139,13 @@ public:
     bool readIOConfig(TPS25751IOConfig &ioConfig) const;
 
     /**
+     * @brief Read the Liquid Detection Config register (0x98)
+     * @param liquidDetectionConfig Register object to populate
+     * @return true if the read succeeded
+     */
+    bool readLiquidDetectionConfig(TPS25751LiquidDetectionConfig &liquidDetectionConfig) const;
+
+    /**
      * @brief Write the Sleep Control register (0x70)
      * @param sleepControl Register object holding the bytes to write
      * @return false if @p sleepControl is not valid or not the expected size;
@@ -195,6 +203,14 @@ public:
      *         otherwise the result of the underlying I2C write
      */
     bool writeAutoNegotiateSink(const TPS25751AutoNegotiateSink &autoNegSink) const;
+
+    /**
+     * @brief Write the Liquid Detection Config register (0x98)
+     * @param liquidDetectionConfig Register object holding the bytes to write
+     * @return false if @p liquidDetectionConfig is not valid or not the
+     *         expected size; otherwise the result of the underlying I2C write
+     */
+    bool writeLiquidDetectionConfig(const TPS25751LiquidDetectionConfig &liquidDetectionConfig) const;
 
     // Type-safe register reading methods
     bool readRegister(TPS25751Registers::RegisterInfo regInfo, uint8_t *buffer) const;
@@ -426,6 +442,13 @@ public:
      * @return Unique pointer to IO Config register (nullptr if failed)
      */
     std::unique_ptr<TPS25751IOConfig> readIOConfigRegister(bool validate = true) const;
+
+    /**
+     * @brief Read Liquid Detection Config register using factory pattern
+     * @param validate Whether to validate the register after reading
+     * @return Unique pointer to Liquid Detection Config register (nullptr if failed)
+     */
+    std::unique_ptr<TPS25751LiquidDetectionConfig> readLiquidDetectionConfigRegister(bool validate = true) const;
 
     /**
      * @brief Read Port Control register using factory pattern

@@ -27,6 +27,8 @@
 #include "TPS25751InterruptMask.h"
 #include "TPS25751InterruptClear.h"
 #include "TPS25751ADCResults.h"
+#include "TPS25751AutoNegotiateSink.h"
+#include "TPS25751IOConfig.h"
 #include "TPS25751RegisterAddress.h"
 #include "TPS25751RegisterFactory.h"
 #include "TPS25751Task.h"
@@ -118,6 +120,24 @@ public:
     bool readInterruptMask(TPS25751InterruptMask &interruptMask) const;
 
     /**
+     * @brief Read the Autonegotiate Sink register (0x37)
+     * @param autoNegSink Register object to populate
+     * @return true if the read succeeded
+     */
+    bool readAutoNegotiateSink(TPS25751AutoNegotiateSink &autoNegSink) const;
+
+    /**
+     * @brief Read the IO Config register (0x5C)
+     *
+     * IO_CONFIG cannot be modified at run-time -- there is no corresponding
+     * write method.
+     *
+     * @param ioConfig Register object to populate
+     * @return true if the read succeeded
+     */
+    bool readIOConfig(TPS25751IOConfig &ioConfig) const;
+
+    /**
      * @brief Write the Sleep Control register (0x70)
      * @param sleepControl Register object holding the bytes to write
      * @return false if @p sleepControl is not valid or not the expected size;
@@ -167,6 +187,14 @@ public:
      *         size; otherwise the result of the underlying I2C write
      */
     bool writeInterruptClear(const TPS25751InterruptClear &interruptClear) const;
+
+    /**
+     * @brief Write the Autonegotiate Sink register (0x37)
+     * @param autoNegSink Register object holding the bytes to write
+     * @return false if @p autoNegSink is not valid or not the expected size;
+     *         otherwise the result of the underlying I2C write
+     */
+    bool writeAutoNegotiateSink(const TPS25751AutoNegotiateSink &autoNegSink) const;
 
     // Type-safe register reading methods
     bool readRegister(TPS25751Registers::RegisterInfo regInfo, uint8_t *buffer) const;
@@ -380,6 +408,24 @@ public:
      * @return Unique pointer to ADC Results register (nullptr if failed)
      */
     std::unique_ptr<TPS25751ADCResults> readADCResultsRegister(bool validate = true) const;
+
+    /**
+     * @brief Read Autonegotiate Sink register using factory pattern
+     * @param validate Whether to validate the register after reading
+     * @return Unique pointer to Autonegotiate Sink register (nullptr if failed)
+     */
+    std::unique_ptr<TPS25751AutoNegotiateSink> readAutoNegotiateSinkRegister(bool validate = true) const;
+
+    /**
+     * @brief Read IO Config register using factory pattern
+     *
+     * IO_CONFIG cannot be modified at run-time -- there is no corresponding
+     * write method.
+     *
+     * @param validate Whether to validate the register after reading
+     * @return Unique pointer to IO Config register (nullptr if failed)
+     */
+    std::unique_ptr<TPS25751IOConfig> readIOConfigRegister(bool validate = true) const;
 
     /**
      * @brief Read Port Control register using factory pattern

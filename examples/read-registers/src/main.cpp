@@ -11,6 +11,8 @@
 #include "TPS25751SleepControl.h"
 #include "TPS25751CustomerUse.h"
 #include "TPS25751ADCResults.h"
+#include "TPS25751AutoNegotiateSink.h"
+#include "TPS25751IOConfig.h"
 
 #define I2CT_IRQ_PIN 17
 
@@ -226,6 +228,35 @@ void print_interrupt_mask()
         Serial.println(F("Failed to read Interrupt Mask register"));
 }
 
+void print_autonegotiate_sink()
+{
+    Serial.println();
+    Serial.println("-------------------- print_autonegotiate_sink --------------------");
+    Serial.println();
+
+    // AUTONEGOTIATE_SINK (0x37) is R/W, but writing sink-negotiation config to
+    // a live board is a bricking risk -- this sketch is read-only, so only the
+    // read path is demonstrated here.
+    if (const auto autoNegSink = pd.readAutoNegotiateSinkRegister(true))
+        autoNegSink->debugPrint();
+    else
+        Serial.println(F("Failed to create/read Autonegotiate Sink register via factory"));
+}
+
+void print_io_config()
+{
+    Serial.println();
+    Serial.println("-------------------- print_io_config --------------------");
+    Serial.println();
+
+    // IO_CONFIG (0x5C) is read-only -- the TRM states GPIO configuration is
+    // fixed at boot and cannot be modified at run-time.
+    if (const auto ioConfig = pd.readIOConfigRegister(true))
+        ioConfig->debugPrint();
+    else
+        Serial.println(F("Failed to create/read IO Config register via factory"));
+}
+
 void print_app_mode_status(const std::unique_ptr<TPS25751Mode> &modeReg)
 {
     modeReg->debugPrint();
@@ -239,6 +270,8 @@ void print_app_mode_status(const std::unique_ptr<TPS25751Mode> &modeReg)
     print_contracts();
     print_interrupt_mask();
     print_sleep_and_customer_use();
+    print_autonegotiate_sink();
+    print_io_config();
 }
 
 void print_boot_mode_status(const std::unique_ptr<TPS25751Mode> &modeReg)

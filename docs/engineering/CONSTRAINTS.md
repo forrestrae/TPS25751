@@ -377,8 +377,8 @@ Different registers have different maximum sizes:
 | STATUS | 5 bytes | Fixed size |
 | MODE | 4 bytes | Fixed size |
 | DATA | 64 bytes | **Largest register** |
-| RECEIVED_SOURCE_CAPABILITIES | 29 bytes | Variable (1 + 7*4) |
-| IO_CONFIG | 48 bytes | Large configuration |
+| RECEIVED_SOURCE_CAPABILITIES | 53 bytes | Variable (up to 7 PDOs); see `TPS25751Registers::Registers::RECEIVED_SOURCE_CAPABILITIES` |
+| IO_CONFIG | 49 bytes | Large, boot-fixed GPIO configuration; read-only |
 
 **Implication:** Buffers must accommodate largest expected register.
 
@@ -400,7 +400,7 @@ Wire.setClock(400000);  // 400 kHz
 
 ### Read-Only Registers (R)
 
-**Examples:** STATUS, MODE, BOOT_STATUS, RECEIVED_SOURCE_CAPABILITIES
+**Examples:** STATUS, MODE, BOOT_STATUS, RECEIVED_SOURCE_CAPABILITIES, IO_CONFIG
 
 **Characteristics:**
 - Can only be read
@@ -424,6 +424,20 @@ bool isReadOnly() const override {
 > all-`0xFF` bus-error signature, matching the house convention). Callers that
 > need fresh telemetry must ensure the port is out of Unconnected Sleep before
 > trusting the values.
+
+> **⚠️ IO_CONFIG (0x5C) is read-only, despite earlier planning notes calling it
+> R/W.** The TRM/register-docs mark every IO_CONFIG field `[R]` and state:
+> "This register cannot be modified at run-time, the GPIO configurations are
+> set according to the configuration during the boot process." `TPS25751IOConfig`
+> is therefore decode-only — no setters, no write path, no `kAddress`. It is
+> also the library's first register whose bit offsets run past 255 (up to 391
+> for the GPIO12 Mapped Event field), which exceeds the `uint8_t bitPos`
+> parameter of `TPS25751Register::extractBits*()`/`setBits()`. Every field is
+> byte-aligned, so `TPS25751IOConfig` assembles each one directly from `_raw[]`
+> with bounds checks instead — mirroring
+> `TPS25751TransmitSourceCaps::getPDO()`'s byte-assembly pattern — rather than
+> calling `extractBits()` at all. Any future register whose highest bit offset
+> exceeds 255 must use the same technique.
 
 ### Write-Only Registers (W)
 
@@ -457,7 +471,7 @@ tps.writeRegister(cmd);
 
 ### Read/Write Registers (R/W)
 
-**Examples:** PORT_CONTROL, INT_MASK1, IO_CONFIG
+**Examples:** PORT_CONTROL, INT_MASK1, AUTONEGOTIATE_SINK
 
 **Characteristics:**
 - Can be read and written

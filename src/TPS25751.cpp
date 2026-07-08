@@ -175,6 +175,16 @@ bool TPS25751::readInterruptMask(TPS25751InterruptMask &interruptMask) const
     return readRegister(TPS25751Registers::Registers::INT_MASK1, interruptMask);
 }
 
+bool TPS25751::readAutoNegotiateSink(TPS25751AutoNegotiateSink &autoNegSink) const
+{
+    return readRegister(TPS25751Registers::Registers::AUTONEGOTIATE_SINK, autoNegSink);
+}
+
+bool TPS25751::readIOConfig(TPS25751IOConfig &ioConfig) const
+{
+    return readRegister(TPS25751Registers::Registers::IO_CONFIG, ioConfig);
+}
+
 bool TPS25751::writeSleepControl(const TPS25751SleepControl &sleepControl) const
 {
     // Delegates to the typed writeRegister<T>() (keyed on kAddress) so there is
@@ -207,6 +217,13 @@ bool TPS25751::writeInterruptMask(const TPS25751InterruptMask &interruptMask) co
 bool TPS25751::writeInterruptClear(const TPS25751InterruptClear &interruptClear) const
 {
     return writeRegister(interruptClear);
+}
+
+bool TPS25751::writeAutoNegotiateSink(const TPS25751AutoNegotiateSink &autoNegSink) const
+{
+    // Delegates to the typed writeRegister<T>() (keyed on kAddress) so there is
+    // a single host write path; the size/validity guard lives there.
+    return writeRegister(autoNegSink);
 }
 
 // Type-safe register reading methods
@@ -441,6 +458,28 @@ std::unique_ptr<TPS25751ADCResults> TPS25751::readADCResultsRegister(bool valida
     if (reg) {
         TPS25751ADCResults* adcResultsReg = static_cast<TPS25751ADCResults*>(reg.release());
         return std::unique_ptr<TPS25751ADCResults>(adcResultsReg);
+    }
+    return nullptr;
+}
+
+std::unique_ptr<TPS25751AutoNegotiateSink> TPS25751::readAutoNegotiateSinkRegister(bool validate) const {
+    auto reg = readAndValidateRegisterByAddress(TPS25751Registers::Address::AUTONEGOTIATE_SINK, validate);
+    if (!reg) return nullptr;
+
+    if (reg) {
+        TPS25751AutoNegotiateSink* autoNegSinkReg = static_cast<TPS25751AutoNegotiateSink*>(reg.release());
+        return std::unique_ptr<TPS25751AutoNegotiateSink>(autoNegSinkReg);
+    }
+    return nullptr;
+}
+
+std::unique_ptr<TPS25751IOConfig> TPS25751::readIOConfigRegister(bool validate) const {
+    auto reg = readAndValidateRegisterByAddress(TPS25751Registers::Address::IO_CONFIG, validate);
+    if (!reg) return nullptr;
+
+    if (reg) {
+        TPS25751IOConfig* ioConfigReg = static_cast<TPS25751IOConfig*>(reg.release());
+        return std::unique_ptr<TPS25751IOConfig>(ioConfigReg);
     }
     return nullptr;
 }

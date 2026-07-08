@@ -1,7 +1,7 @@
 {
   "$schema": "https://raw.githubusercontent.com/platformio/platformio-core/develop/platformio/assets/schema/library.json",
   "name": "TPS25751",
-  "version": "2.0.1",
+  "version": "2.0.2",
   "description": "Arduino-compatible library for the TPS25751, a USB-C PD controller from Texas Instruments.",
   "keywords": "TPS25751, USBPD, Texas Instruments",
   "repository": {

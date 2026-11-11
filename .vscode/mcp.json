@@ -3,7 +3,7 @@
     "tps25751-docs": {
       "type": "stdio",
       "command": "uv",
-      "args": ["run", "${workspaceFolder}/../device-register-mcp-server/server.py"],
+      "args": ["--directory", "${workspaceFolder}/../device-register-mcp-server", "run", "server.py"],
       "env": { "DEVICE_CONFIG": "devices/tps25751/device.json" }
     }
   }

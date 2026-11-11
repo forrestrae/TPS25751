@@ -8,7 +8,7 @@ in the sibling **`lib/device-register-mcp-server`** repository, alongside the
 
 This repo still *uses* the server: `.mcp.json` (and `.cursor/mcp.json` /
 `.vscode/mcp.json`) define the `tps25751-docs` server as
-`uv run ../device-register-mcp-server/server.py` with
+`uv --directory ../device-register-mcp-server run server.py` with
 `DEVICE_CONFIG=devices/tps25751/device.json` (a relative `DEVICE_CONFIG` resolves
 against `server.py`'s own directory). This relies on the side-by-side `lib/`
 checkout layout.

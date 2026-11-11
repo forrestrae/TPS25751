@@ -853,7 +853,7 @@ needs no changes to any TPS25751 host file.
    `DEBUG_CAT_TASK` if violated but does not block the call.
 7. **Register the device's MCP docs server** in the driver repo's `.mcp.json`,
    pointing the generic server in the sibling `lib/device-register-mcp-server` repo
-   (`uv run ../device-register-mcp-server/server.py`) at a new `devices/<device>/`
+   (`uv --directory ../device-register-mcp-server run server.py`) at a new `devices/<device>/`
    manifest authored there, and update the MCP table in the driver repo's
    `AGENTS.md`.
 

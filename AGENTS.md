@@ -47,7 +47,7 @@ unit-test harness in place (`pio test -e native`, Batch 0)
 register-docs MCP server for accurate register information extracted from the TI
 manuals. The generic server engine **and all device definitions** live in the
 sibling **`lib/device-register-mcp-server`** repository; this repo's `.mcp.json` invokes
-it cross-repo (`uv run ../device-register-mcp-server/server.py` with
+it cross-repo (`uv --directory ../device-register-mcp-server run server.py` with
 `DEVICE_CONFIG=devices/tps25751/device.json` — a relative `DEVICE_CONFIG` resolves
 against `server.py`'s own directory). This relies on the side-by-side `lib/`
 checkout layout.

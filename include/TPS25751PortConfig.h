@@ -18,6 +18,15 @@ enum class TypeCSupportOptions : uint8_t
     Reserved = 3
 };
 
+/**
+ * @brief VBUS OVP Usage (PORT_CONFIGURATION bits 17:16)
+ *
+ * Source: SLVUCR8B (Rev. B, 2026-08), page 29. Rev. B lists 1h = 105% and
+ * 2h = 111% (reset 2h), but 0h = "0.41 V/ms (typical)" and 3h = "3.39 V/ms
+ * (typical)". Slew rates do not fit an OVP trip-point field and look like a TI
+ * transcription error; Rev. A listed 0h = 100% and 3h = 114%, which this enum
+ * keeps until TI clarifies.
+ */
 enum class VbusOVPUsage : uint8_t
 {
     OVP100 = 0,

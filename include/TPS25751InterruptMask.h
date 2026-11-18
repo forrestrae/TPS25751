@@ -65,7 +65,7 @@ public:
     bool messageDataError() const;
     /** @brief Protocol Error source enabled. @see bit 38 */
     bool protocolError() const;
-    /** @brief Missing Get Capabilities Error source enabled. @see bit 36 */
+    /** @brief Missing Get Capabilities Error source enabled. TRM: "Missing Get Capabalities Message Error" (SLVUCR8B p.21). @see bit 36 */
     bool missingGetCapabilitiesError() const;
     /** @brief Power Event Occurred Error source enabled. @see bit 35 */
     bool powerEventOccurredError() const;
@@ -113,7 +113,7 @@ public:
     // PD message reception (bits 14-15)
     /** @brief Sink Cap Message Received source enabled. @see bit 15 */
     bool sinkCapMessageReceived() const;
-    /** @brief Source Cap Message Received source enabled. @see bit 14 */
+    /** @brief Source Cap Message Received source enabled. TRM: "Source Capabalities Message Received" (SLVUCR8B p.21). @see bit 14 */
     bool sourceCapMessageReceived() const;
 
     // Contract negotiation (bits 12-13)

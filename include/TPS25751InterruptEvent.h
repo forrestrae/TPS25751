@@ -48,7 +48,7 @@ public:
     bool unableToSourceError() const;      // bit 46
     bool messageDataError() const;         // bit 39
     bool protocolError() const;            // bit 38
-    bool missingGetCapabilitiesError() const; // bit 36
+    bool missingGetCapabilitiesError() const; // bit 36; TRM: "Missing Get Capabalities Message Error" (SLVUCR8B p.19)
     bool powerEventOccurredError() const;  // bit 35
     bool canProvideVoltageLaterError() const; // bit 34
     bool cannotProvideVoltageError() const; // bit 33
@@ -78,7 +78,7 @@ public:
 
     // PD message reception (bits 14-15)
     bool sinkCapMessageReceived() const;   // bit 15
-    bool sourceCapMessageReceived() const; // bit 14
+    bool sourceCapMessageReceived() const; // bit 14; TRM: "Source Capabalities Message Received" (SLVUCR8B p.20)
 
     // Contract negotiation (bits 12-13)
     bool newContractAsProvider() const;    // bit 13

@@ -35,7 +35,9 @@ public:
     bool giveBackFlag() const;
 
     /**
-     * @brief Get capability mismatch flag
+     * @brief Get capability mismatch flag (bit 26)
+     *
+     * TRM: "Capabality Missmatch" (SLVUCR8B p.39; TI's spelling).
      * @return true if capability mismatch detected
      */
     bool capabilityMismatch() const;

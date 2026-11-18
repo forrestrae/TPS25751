@@ -92,6 +92,8 @@ public:
 
     /**
      * @brief Get the No Capability Mismatch configuration
+     *
+     * TRM: "No Capabality Mismatch" (SLVUCR8B p.41; TI's spelling).
      * @return true if the Capability Mismatch bit in the RDO is always disabled
      * @return false if Capability Mismatch is enabled (asserted when conditions warrant it)
      * @see TI TPS25751 Technical Reference Manual, Table 3-21, bit 3

@@ -69,7 +69,7 @@ public:
     void clearMessageDataError();
     /** @brief Stage a clear of Protocol Error. @see bit 38 */
     void clearProtocolError();
-    /** @brief Stage a clear of Missing Get Capabilities Error. @see bit 36 */
+    /** @brief Stage a clear of Missing Get Capabilities Error. TRM: "Missing Get Capabalities Message Error" (SLVUCR8B p.23). @see bit 36 */
     void clearMissingGetCapabilitiesError();
     /** @brief Stage a clear of Power Event Occurred Error. @see bit 35 */
     void clearPowerEventOccurredError();

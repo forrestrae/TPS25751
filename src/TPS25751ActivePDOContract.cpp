@@ -1,11 +1,15 @@
 #include "TPS25751ActivePDOContract.h"
 
+// Register layout: bits 31:0 Active PDO, bits 41:32 First PDO Control Bits,
+// bits 47:42 reserved. Source: SLVUCR8B (Rev. B, 2026-08), page 38. The fields
+// inside the PDO word follow the USB PD PDO layouts (see CONSTRAINTS.md).
+
 uint32_t TPS25751ActivePDOContract::activePDO() const {
-    return extractBits(0, 32);
+    return extractBits32(0, 32);
 }
 
 uint16_t TPS25751ActivePDOContract::firstPDOControlBits() const {
-    return extractBits(32, 10);
+    return extractBits16(32, 10);  // Bits 41:32
 }
 
 PDOType TPS25751ActivePDOContract::pdoType() const {
@@ -20,12 +24,12 @@ bool TPS25751ActivePDOContract::hasActiveContract() const {
 
 // Fixed Supply PDO (Type 00)
 uint16_t TPS25751ActivePDOContract::fixedVoltage_mV() const {
-    uint16_t voltageBits = extractBits(10, 10);  // Bits 19:10
+    uint16_t voltageBits = extractBits16(10, 10);  // Bits 19:10
     return voltageBits * 50;  // 50mV units
 }
 
 uint16_t TPS25751ActivePDOContract::fixedMaxCurrent_mA() const {
-    uint16_t currentBits = extractBits(0, 10);  // Bits 9:0
+    uint16_t currentBits = extractBits16(0, 10);  // Bits 9:0
     return currentBits * 10;  // 10mA units
 }
 
@@ -55,33 +59,33 @@ bool TPS25751ActivePDOContract::fixedUnchunkedSupported() const {
 
 // Battery PDO (Type 01)
 uint16_t TPS25751ActivePDOContract::batteryMaxVoltage_mV() const {
-    uint16_t voltageBits = extractBits(20, 10);  // Bits 29:20
+    uint16_t voltageBits = extractBits16(20, 10);  // Bits 29:20
     return voltageBits * 50;  // 50mV units
 }
 
 uint16_t TPS25751ActivePDOContract::batteryMinVoltage_mV() const {
-    uint16_t voltageBits = extractBits(10, 10);  // Bits 19:10
+    uint16_t voltageBits = extractBits16(10, 10);  // Bits 19:10
     return voltageBits * 50;  // 50mV units
 }
 
 uint32_t TPS25751ActivePDOContract::batteryMaxPower_mW() const {
-    uint16_t powerBits = extractBits(0, 10);  // Bits 9:0
+    uint16_t powerBits = extractBits16(0, 10);  // Bits 9:0
     return static_cast<uint32_t>(powerBits) * 250;  // 250mW units
 }
 
 // Variable Supply PDO (Type 10)
 uint16_t TPS25751ActivePDOContract::variableMaxVoltage_mV() const {
-    uint16_t voltageBits = extractBits(20, 10);  // Bits 29:20
+    uint16_t voltageBits = extractBits16(20, 10);  // Bits 29:20
     return voltageBits * 50;  // 50mV units
 }
 
 uint16_t TPS25751ActivePDOContract::variableMinVoltage_mV() const {
-    uint16_t voltageBits = extractBits(10, 10);  // Bits 19:10
+    uint16_t voltageBits = extractBits16(10, 10);  // Bits 19:10
     return voltageBits * 50;  // 50mV units
 }
 
 uint16_t TPS25751ActivePDOContract::variableMaxCurrent_mA() const {
-    uint16_t currentBits = extractBits(0, 10);  // Bits 9:0
+    uint16_t currentBits = extractBits16(0, 10);  // Bits 9:0
     return currentBits * 10;  // 10mA units
 }
 
@@ -91,17 +95,21 @@ bool TPS25751ActivePDOContract::ppsPowerLimited() const {
 }
 
 uint16_t TPS25751ActivePDOContract::ppsMaxVoltage_mV() const {
-    uint16_t voltageBits = extractBits(17, 10);  // Bits 26:17
+    // Bits 24:17 (8-bit), matching the hardware-verified PPS decode in
+    // TPS25751ReceivedSourceCaps/TransmitSourceCaps; bits 26:25 are reserved.
+    uint16_t voltageBits = extractBits(17, 8);
     return voltageBits * 100;  // 100mV units for PPS
 }
 
 uint16_t TPS25751ActivePDOContract::ppsMinVoltage_mV() const {
-    uint16_t voltageBits = extractBits(8, 9);  // Bits 16:8
+    // Bits 15:8 (8-bit); bit 16 is reserved.
+    uint16_t voltageBits = extractBits(8, 8);
     return voltageBits * 100;  // 100mV units for PPS
 }
 
 uint16_t TPS25751ActivePDOContract::ppsMaxCurrent_mA() const {
-    uint16_t currentBits = extractBits(0, 8);  // Bits 7:0
+    // Bits 6:0 (7-bit); bit 7 is reserved.
+    uint16_t currentBits = extractBits(0, 7);
     return currentBits * 50;  // 50mA units for PPS
 }
 

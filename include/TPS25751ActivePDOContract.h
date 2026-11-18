@@ -20,6 +20,9 @@ enum class PDOType : uint8_t {
  * This register stores PDO data for the current explicit USB PD contract,
  * or all zeroes if no contract exists.
  *
+ * Layout (SLVUCR8B (Rev. B, 2026-08), page 38): bits 31:0 Active PDO,
+ * bits 41:32 First PDO Control Bits, bits 47:42 reserved.
+ *
  * Register Size: 6 bytes
  * Access: Read-only
  * Address: 0x34
@@ -39,7 +42,11 @@ public:
     uint32_t activePDO() const;
 
     /**
-     * @brief Get First PDO Control Bits (bits 29:20 of first PDO)
+     * @brief Get First PDO Control Bits (register bits 41:32)
+     *
+     * PDO-specific information drawn from the first PDO, whichever PDO was
+     * selected. Source: SLVUCR8B (Rev. B, 2026-08), page 38.
+     *
      * @return 10-bit control value
      */
     uint16_t firstPDOControlBits() const;

@@ -20,6 +20,9 @@
  */
 
 #include <unity.h>
+#include <cstdio>
+#include <string>
+#include <unistd.h>
 
 #include "TPS25751ActiveRDOContract.h"
 #include "TPS25751Register.h"
@@ -45,6 +48,46 @@ constexpr uint8_t ACTIVE_AND_REQUESTED[RDO_SIZE] = {
 constexpr uint8_t ONLY_REQUESTED[RDO_SIZE] = {
     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0x78, 0x56, 0x34, 0x12,
 };
+
+// GiveBack set with Max/Min (200) above Operating Current (100): invalid.
+// Word (2<<28)|(1<<27)|(100<<10)|200 = 0x280190C8.
+constexpr uint8_t GIVEBACK_MIN_ABOVE_OP[RDO_SIZE] = {0xC8, 0x90, 0x01, 0x28};
+
+// Object Position 0 with non-zero currents (100/100): invalid.
+// Word (100<<10)|100 = 0x00019064.
+constexpr uint8_t OBJPOS_ZERO[RDO_SIZE] = {0x64, 0x90, 0x01, 0x00};
+
+// Object Position 1 with both currents zero: invalid. Word 0x10000000.
+constexpr uint8_t ZERO_CURRENTS[RDO_SIZE] = {0x00, 0x00, 0x00, 0x10};
+
+// Runs reg.debugPrint() against the stdout-backed native Stream stub and
+// returns what it printed.
+std::string captureDebugPrint(const TPS25751ActiveRDOContract &reg)
+{
+    fflush(stdout);
+    FILE *tmp = tmpfile();
+    const int saved = dup(fileno(stdout));
+    dup2(fileno(tmp), fileno(stdout));
+
+    reg.debugPrint();
+
+    fflush(stdout);
+    dup2(saved, fileno(stdout));
+    close(saved);
+
+    std::string out;
+    rewind(tmp);
+    char buf[256];
+    size_t n;
+    while ((n = fread(buf, 1, sizeof(buf), tmp)) > 0) out.append(buf, n);
+    fclose(tmp);
+    return out;
+}
+
+bool contains(const std::string &haystack, const char *needle)
+{
+    return haystack.find(needle) != std::string::npos;
+}
 
 }  // namespace
 
@@ -80,11 +123,62 @@ void test_active_rdo_fields_decode_independently_of_requested_rdo()
     TEST_ASSERT_TRUE(reg.noUSBSuspend());
     TEST_ASSERT_FALSE(reg.unchunkedSupported());
 
-    // Not asserted here: operatingCurrent(), maxMinCurrent(), and
-    // hasActiveContract() call TPS25751Register::extractBits() with a field
-    // width above 8 bits, which that 8-bit extractor rejects (returns 0).
-    // That pre-existing defect is unrelated to the Rev. B RequestedRDO field
-    // and is tracked as a separate follow-up.
+    // 10-bit and 32-bit fields: these returned 0 before they moved from
+    // extractBits() to extractBits16()/extractBits32().
+    TEST_ASSERT_EQUAL_UINT16(300, reg.operatingCurrent());
+    TEST_ASSERT_EQUAL_UINT16(3000, reg.operatingCurrent_mA());
+    TEST_ASSERT_EQUAL_UINT16(300, reg.maxMinCurrent());
+    TEST_ASSERT_EQUAL_UINT16(3000, reg.maxMinCurrent_mA());
+    TEST_ASSERT_TRUE(reg.hasActiveContract());
+    TEST_ASSERT_TRUE(reg.isSemanticallyValid());
+}
+
+void test_no_contract_when_active_word_is_zero()
+{
+    TPS25751ActiveRDOContract reg;
+
+    TEST_ASSERT_FALSE(reg.hasActiveContract());
+    TEST_ASSERT_TRUE(reg.isSemanticallyValid());
+    TEST_ASSERT_TRUE(contains(captureDebugPrint(reg), "No active RDO contract"));
+}
+
+void test_giveback_with_min_above_operating_is_semantically_invalid()
+{
+    TPS25751ActiveRDOContract reg(GIVEBACK_MIN_ABOVE_OP);
+
+    TEST_ASSERT_TRUE(reg.giveBackFlag());
+    TEST_ASSERT_EQUAL_UINT16(100, reg.operatingCurrent());
+    TEST_ASSERT_EQUAL_UINT16(200, reg.maxMinCurrent());
+    TEST_ASSERT_FALSE(reg.isSemanticallyValid());
+}
+
+void test_object_position_zero_is_semantically_invalid()
+{
+    TPS25751ActiveRDOContract reg(OBJPOS_ZERO);
+
+    TEST_ASSERT_TRUE(reg.hasActiveContract());
+    TEST_ASSERT_EQUAL_UINT8(0, reg.objectPosition());
+    TEST_ASSERT_FALSE(reg.isSemanticallyValid());
+}
+
+void test_zero_currents_with_contract_is_semantically_invalid()
+{
+    TPS25751ActiveRDOContract reg(ZERO_CURRENTS);
+
+    TEST_ASSERT_TRUE(reg.hasActiveContract());
+    TEST_ASSERT_EQUAL_UINT8(1, reg.objectPosition());
+    TEST_ASSERT_FALSE(reg.isSemanticallyValid());
+}
+
+void test_debug_print_active_contract_path()
+{
+    const std::string out = captureDebugPrint(TPS25751ActiveRDOContract(ACTIVE_AND_REQUESTED));
+
+    TEST_ASSERT_FALSE(contains(out, "No active RDO contract"));
+    TEST_ASSERT_TRUE(contains(out, "Requested RDO (as source): 0x1234ABCD"));
+    TEST_ASSERT_TRUE(contains(out, "Object Position: 2"));
+    TEST_ASSERT_TRUE(contains(out, "Operating Current: 3000 mA"));
+    TEST_ASSERT_TRUE(contains(out, "Max/Min Current: 3000 mA"));
 }
 
 void test_requested_rdo_alone_does_not_create_active_contract()
@@ -116,6 +210,11 @@ int main(int, char **)
     RUN_TEST(test_requested_rdo_decodes_bytes_12_to_15);
     RUN_TEST(test_active_rdo_fields_decode_independently_of_requested_rdo);
     RUN_TEST(test_requested_rdo_alone_does_not_create_active_contract);
+    RUN_TEST(test_no_contract_when_active_word_is_zero);
+    RUN_TEST(test_giveback_with_min_above_operating_is_semantically_invalid);
+    RUN_TEST(test_object_position_zero_is_semantically_invalid);
+    RUN_TEST(test_zero_currents_with_contract_is_semantically_invalid);
+    RUN_TEST(test_debug_print_active_contract_path);
     RUN_TEST(test_short_buffer_returns_zero_requested_rdo);
 
     return UNITY_END();

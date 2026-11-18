@@ -83,6 +83,13 @@ uint8_t TPS25751Register::extractBits(uint8_t bitPos, uint8_t bitLen) const
         TPS_DEBUG_TRACE(DEBUG_CAT_PARSING, "extractBits: invalid register (pos=%u, len=%u)", bitPos, bitLen);
         return 0;
     }
+    if (bitLen > 8)
+    {
+        // extractBits() is the 8-bit extractor and returns 0 for wider fields;
+        // a caller asking for more than 8 bits wants extractBits16/32/64.
+        // Warn so this programming error is visible; the return value is unchanged.
+        TPS_DEBUG_WARN(DEBUG_CAT_PARSING, "extractBits: len=%u > 8 at pos=%u returns 0; use extractBits16/32/64", bitLen, bitPos);
+    }
     uint8_t result = extractBits(_raw, _len, bitPos, bitLen);
     TPS_DEBUG_TRACE(DEBUG_CAT_PARSING, "extractBits: pos=%u, len=%u -> 0x%02X", bitPos, bitLen, result);
     return result;

@@ -25,7 +25,7 @@ bool TPS25751ActiveRDOContract::unchunkedSupported() const {
 }
 
 uint16_t TPS25751ActiveRDOContract::operatingCurrent() const {
-    return extractBits(10, 10);  // Bits 19:10
+    return extractBits16(10, 10);  // Bits 19:10
 }
 
 uint16_t TPS25751ActiveRDOContract::operatingCurrent_mA() const {
@@ -33,7 +33,7 @@ uint16_t TPS25751ActiveRDOContract::operatingCurrent_mA() const {
 }
 
 uint16_t TPS25751ActiveRDOContract::maxMinCurrent() const {
-    return extractBits(0, 10);  // Bits 9:0
+    return extractBits16(0, 10);  // Bits 9:0
 }
 
 uint16_t TPS25751ActiveRDOContract::maxMinCurrent_mA() const {
@@ -42,7 +42,7 @@ uint16_t TPS25751ActiveRDOContract::maxMinCurrent_mA() const {
 
 bool TPS25751ActiveRDOContract::hasActiveContract() const {
     // If all bits are zero, no contract exists
-    uint32_t allBits = extractBits(0, 32);
+    uint32_t allBits = extractBits32(0, 32);  // Bits 31:0 (SLVUCR8B p.39)
     return allBits != 0;
 }
 

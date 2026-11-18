@@ -18,7 +18,7 @@ The TPS25751 library is an object-oriented C++ library for interfacing with the 
 **Last Updated:** 2026-07-08
 **Current Phase:** Implementation complete — **27/27 registers done** (Batch F added
 LIQUID_DETECTION_CONFIG: a R/W 11-byte liquid/moisture-detection configuration block
-— sleep intervals, ADC sample count/cadence, ADC threshold pairs with hysteresis, and
+— wait intervals (rev B "Wait Time"), ADC sample count/cadence, ADC threshold pairs with hysteresis, and
 the state/enable bits for liquid detection + corrosion mitigation — implemented as a
 straightforward `setBits()`-based R/W register mirroring `TPS25751AutoNegotiateSink`
 (all bit offsets ≤ 82, well within `extractBits()`/`setBits()`'s `uint8_t bitPos`
@@ -197,7 +197,7 @@ Serial.println(F("String in flash"));                // Use F() macro
   byte assembly from `_raw[]` (mirroring `TPS25751TransmitSourceCaps::getPDO()`)
   rather than calling `extractBits()`
 - LIQUID_DETECTION_CONFIG (Batch F, 2026-07-08) — R/W 11-byte (0x98)
-  liquid/moisture-detection configuration: with/without-liquid sleep intervals
+  liquid/moisture-detection configuration: with/without-liquid wait intervals (rev B "Wait Time"; rev A "Sleep Time")
   (1000 ms/LSB), ADC sample count and sample-time cadence (10 ms/LSB), the two ADC
   threshold pairs (14 mV/LSB, each providing hysteresis for exit out of Liquid
   Detected), and the liquid-detection-state / enable-corrosion-mitigation /
@@ -270,7 +270,7 @@ Each register has its own class inheriting from `TPS25751Register`:
 - `TPS25751TransmitSinkCaps`: TRANSMIT_SINK_CAPABILITIES register (0x33) — R/W 53-byte advertised sink capabilities; up to 7 PDOs starting at byte 1 (same layout as the Received caps). Mirrors `TPS25751ReceivedSinkCaps` decode (Sink Fixed PDO: bit 28 = Higher Capability, bits 24:23 = Fast-Role-Swap current, a **2-bit** field) + adds the encode path
 - `TPS25751AutoNegotiateSink`: AUTONEGOTIATE_SINK register (0x37) — R/W 24-byte sink-negotiation configuration (voltage window, minimum required power, capability-mismatch handling, PPS sink request parameters); `setBits()`-based field setters mirroring `TPS25751InterruptMask`'s pattern, plus a cross-field semantic check (host-provided min voltage ≤ host-provided max voltage when neither bound is PD-computed)
 - `TPS25751IOConfig`: IO_CONFIG register (0x5C) — **read-only** 49-byte GPIO configuration block (output/interrupt/pull-up/pull-down/open-drain/initial-value/event-polarity per-GPIO bitmaps, analog-input selection, per-GPIO event mapping); "cannot be modified at run-time" per the TRM, so there are no setters, no write path, and no `kAddress`. Bit offsets run up to 391 (past `extractBits()`'s `uint8_t bitPos` range), so every field is decoded via direct byte assembly from `_raw[]`, mirroring `TPS25751TransmitSourceCaps::getPDO()`
-- `TPS25751LiquidDetectionConfig`: LIQUID_DETECTION_CONFIG register (0x98) — R/W 11-byte liquid/moisture-detection configuration (with/without-liquid sleep intervals at 1000 ms/LSB, ADC sample count + sample-time cadence at 10 ms/LSB, two ADC threshold pairs at 14 mV/LSB providing hysteresis for exit out of Liquid Detected, and the liquid-detection-state / enable-corrosion-mitigation / enable-liquid-detection bits); `setBits()`-based field setters + `kAddress` write path mirroring `TPS25751AutoNegotiateSink` (all bit offsets ≤ 82, within `extractBits()`/`setBits()`'s `uint8_t bitPos` range — no direct byte assembly needed), plus a cross-field semantic check (low ≤ high on each threshold pair). The `numberOfSamples` "must be 2^N" TRM note is intentionally not enforced (reset value 0 is not a power of two)
+- `TPS25751LiquidDetectionConfig`: LIQUID_DETECTION_CONFIG register (0x98) — R/W 11-byte liquid/moisture-detection configuration (with/without-liquid wait intervals (rev B "Wait Time"; rev A "Sleep Time") at 1000 ms/LSB, ADC sample count + sample-time cadence at 10 ms/LSB, two ADC threshold pairs at 14 mV/LSB providing hysteresis for exit out of Liquid Detected, and the liquid-detection-state / enable-corrosion-mitigation / enable-liquid-detection bits); `setBits()`-based field setters + `kAddress` write path mirroring `TPS25751AutoNegotiateSink` (all bit offsets ≤ 82, within `extractBits()`/`setBits()`'s `uint8_t bitPos` range — no direct byte assembly needed), plus a cross-field semantic check (low ≤ high on each threshold pair). The `numberOfSamples` "must be 2^N" TRM note is intentionally not enforced (reset value 0 is not a power of two)
 
 ### 4CC Command-Task Interface & I2Cc Downstream-Device Proxy
 

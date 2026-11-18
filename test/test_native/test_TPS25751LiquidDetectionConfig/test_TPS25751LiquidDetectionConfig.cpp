@@ -12,8 +12,8 @@
  * TPS25751Register::extractBits()/setBits()).
  *
  * FULL_BUFFER field values (all raw, little-endian bit-packed):
- *   bits 15:0   sleepTimeNoLiquid       raw = 300  -> 300000 ms  (byte0=0x2C, byte1=0x01)
- *   bits 31:16  sleepTimeLiquid         raw = 60   ->  60000 ms  (byte2=0x3C, byte3=0x00)
+ *   bits 15:0   waitTimeNoLiquid       raw = 300  -> 300000 ms  (byte0=0x2C, byte1=0x01)
+ *   bits 31:16  waitTimeLiquid         raw = 60   ->  60000 ms  (byte2=0x3C, byte3=0x00)
  *   bits 39:32  numberOfSamples         raw = 8               (byte4=0x08)
  *   bits 47:40  lowThresholdNoLiquid    raw = 50   ->   700 mV  (byte5=0x32)
  *   bits 55:48  highThresholdNoLiquid   raw = 100  ->  1400 mV  (byte6=0x64)
@@ -69,7 +69,7 @@ void test_default_constructor_allocates_zeroed_buffer()
     TEST_ASSERT_TRUE(reg.isValid());
     TEST_ASSERT_EQUAL_size_t(LDC_SIZE, reg.size());
     TEST_ASSERT_TRUE(reg.isValidSize(LDC_SIZE));
-    TEST_ASSERT_EQUAL_UINT16(0, reg.rawSleepTimeNoLiquid());
+    TEST_ASSERT_EQUAL_UINT16(0, reg.rawWaitTimeNoLiquid());
     TEST_ASSERT_FALSE(reg.enableLiquidDetection());
 }
 
@@ -89,7 +89,7 @@ void test_explicit_length_constructor()
 
     TEST_ASSERT_TRUE(reg.isValid());
     TEST_ASSERT_TRUE(reg.isValidSize(LDC_SIZE));
-    TEST_ASSERT_EQUAL_UINT16(300, reg.rawSleepTimeNoLiquid());
+    TEST_ASSERT_EQUAL_UINT16(300, reg.rawWaitTimeNoLiquid());
 }
 
 void test_reginfo_constructor_allocates_zeroed_buffer()
@@ -136,20 +136,20 @@ void test_all_ones_is_invalid_data()
     TEST_ASSERT_FALSE(reg.isSemanticallyValid());
 }
 
-// --- Field decode: sleep-interval fields --------------------------------------
+// --- Field decode: wait-interval fields --------------------------------------
 
-void test_decode_sleep_time_no_liquid()
+void test_decode_wait_time_no_liquid()
 {
     TPS25751LiquidDetectionConfig reg(FULL_BUFFER);
-    TEST_ASSERT_EQUAL_UINT16(300, reg.rawSleepTimeNoLiquid());
-    TEST_ASSERT_EQUAL_UINT32(300000, reg.sleepTimeNoLiquid_ms());
+    TEST_ASSERT_EQUAL_UINT16(300, reg.rawWaitTimeNoLiquid());
+    TEST_ASSERT_EQUAL_UINT32(300000, reg.waitTimeNoLiquid_ms());
 }
 
-void test_decode_sleep_time_liquid()
+void test_decode_wait_time_liquid()
 {
     TPS25751LiquidDetectionConfig reg(FULL_BUFFER);
-    TEST_ASSERT_EQUAL_UINT16(60, reg.rawSleepTimeLiquid());
-    TEST_ASSERT_EQUAL_UINT32(60000, reg.sleepTimeLiquid_ms());
+    TEST_ASSERT_EQUAL_UINT16(60, reg.rawWaitTimeLiquid());
+    TEST_ASSERT_EQUAL_UINT32(60000, reg.waitTimeLiquid_ms());
 }
 
 // --- Field decode: sampling configuration -------------------------------------
@@ -224,31 +224,31 @@ void test_semantic_valid_with_full_buffer()
 
 // --- Setters: round trip + neighbouring-field preservation --------------------
 
-void test_set_raw_sleep_time_no_liquid_round_trip()
+void test_set_raw_wait_time_no_liquid_round_trip()
 {
     TPS25751LiquidDetectionConfig reg;
-    reg.setRawSleepTimeNoLiquid(300);
-    TEST_ASSERT_EQUAL_UINT16(300, reg.rawSleepTimeNoLiquid());
-    TEST_ASSERT_EQUAL_UINT32(300000, reg.sleepTimeNoLiquid_ms());
+    reg.setRawWaitTimeNoLiquid(300);
+    TEST_ASSERT_EQUAL_UINT16(300, reg.rawWaitTimeNoLiquid());
+    TEST_ASSERT_EQUAL_UINT32(300000, reg.waitTimeNoLiquid_ms());
 }
 
-void test_set_raw_sleep_time_no_liquid_preserves_neighbouring_field()
+void test_set_raw_wait_time_no_liquid_preserves_neighbouring_field()
 {
     TPS25751LiquidDetectionConfig reg(FULL_BUFFER);
-    uint16_t sleepLiquidBefore = reg.rawSleepTimeLiquid();
+    uint16_t waitLiquidBefore = reg.rawWaitTimeLiquid();
 
-    reg.setRawSleepTimeNoLiquid(0);
+    reg.setRawWaitTimeNoLiquid(0);
 
-    TEST_ASSERT_EQUAL_UINT16(0, reg.rawSleepTimeNoLiquid());
-    TEST_ASSERT_EQUAL_UINT16(sleepLiquidBefore, reg.rawSleepTimeLiquid());
+    TEST_ASSERT_EQUAL_UINT16(0, reg.rawWaitTimeNoLiquid());
+    TEST_ASSERT_EQUAL_UINT16(waitLiquidBefore, reg.rawWaitTimeLiquid());
 }
 
-void test_set_raw_sleep_time_liquid_round_trip()
+void test_set_raw_wait_time_liquid_round_trip()
 {
     TPS25751LiquidDetectionConfig reg;
-    reg.setRawSleepTimeLiquid(60);
-    TEST_ASSERT_EQUAL_UINT16(60, reg.rawSleepTimeLiquid());
-    TEST_ASSERT_EQUAL_UINT32(60000, reg.sleepTimeLiquid_ms());
+    reg.setRawWaitTimeLiquid(60);
+    TEST_ASSERT_EQUAL_UINT16(60, reg.rawWaitTimeLiquid());
+    TEST_ASSERT_EQUAL_UINT32(60000, reg.waitTimeLiquid_ms());
 }
 
 void test_set_number_of_samples_round_trip()
@@ -349,9 +349,9 @@ void test_setters_no_op_on_invalid_register()
 
     TEST_ASSERT_FALSE(reg.isValid());
     reg.setLiquidDetectionState(false);
-    reg.setRawSleepTimeNoLiquid(1);
+    reg.setRawWaitTimeNoLiquid(1);
     TEST_ASSERT_FALSE(reg.isValid());  // still invalid; no crash
-    TEST_ASSERT_EQUAL_UINT16(300, moved.rawSleepTimeNoLiquid());  // untouched
+    TEST_ASSERT_EQUAL_UINT16(300, moved.rawWaitTimeNoLiquid());  // untouched
 }
 
 // --- Rule of Five -------------------------------------------------------------
@@ -363,7 +363,7 @@ void test_copy_constructor_deep_copies()
 
     TEST_ASSERT_NOT_EQUAL(original.raw(), copy.raw());
     TEST_ASSERT_EQUAL_UINT8_ARRAY(original.raw(), copy.raw(), LDC_SIZE);
-    TEST_ASSERT_EQUAL_UINT16(original.rawSleepTimeNoLiquid(), copy.rawSleepTimeNoLiquid());
+    TEST_ASSERT_EQUAL_UINT16(original.rawWaitTimeNoLiquid(), copy.rawWaitTimeNoLiquid());
 }
 
 void test_move_constructor_transfers_ownership()
@@ -375,8 +375,34 @@ void test_move_constructor_transfers_ownership()
 
     TEST_ASSERT_EQUAL(buf, moved.raw());  // buffer stolen, not copied
     TEST_ASSERT_FALSE(original.isValid());
-    TEST_ASSERT_EQUAL_UINT16(300, moved.rawSleepTimeNoLiquid());
+    TEST_ASSERT_EQUAL_UINT16(300, moved.rawWaitTimeNoLiquid());
 }
+
+// --- Deprecated aliases (pre-Rev. B "Sleep Time" names) ------------------------
+
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
+void test_deprecated_sleep_time_aliases_match_wait_time()
+{
+    // The Rev. A names must read and write the same bits as the Rev. B
+    // "Wait Time" names (SLVUCR8B p.60: bits 15:0 and 31:16, 1000 ms/LSB).
+    TPS25751LiquidDetectionConfig reg;
+
+    reg.setRawSleepTimeNoLiquid(300);
+    reg.setRawSleepTimeLiquid(60);
+    TEST_ASSERT_EQUAL_UINT16(300, reg.rawWaitTimeNoLiquid());
+    TEST_ASSERT_EQUAL_UINT16(60, reg.rawWaitTimeLiquid());
+    TEST_ASSERT_EQUAL_UINT8(0x2C, reg.raw()[0]);
+    TEST_ASSERT_EQUAL_UINT8(0x01, reg.raw()[1]);
+    TEST_ASSERT_EQUAL_UINT8(0x3C, reg.raw()[2]);
+    TEST_ASSERT_EQUAL_UINT8(0x00, reg.raw()[3]);
+
+    TEST_ASSERT_EQUAL_UINT16(reg.rawWaitTimeNoLiquid(), reg.rawSleepTimeNoLiquid());
+    TEST_ASSERT_EQUAL_UINT32(reg.waitTimeNoLiquid_ms(), reg.sleepTimeNoLiquid_ms());
+    TEST_ASSERT_EQUAL_UINT16(reg.rawWaitTimeLiquid(), reg.rawSleepTimeLiquid());
+    TEST_ASSERT_EQUAL_UINT32(reg.waitTimeLiquid_ms(), reg.sleepTimeLiquid_ms());
+}
+#pragma GCC diagnostic pop
 
 // --- Runner -------------------------------------------------------------------
 
@@ -394,8 +420,8 @@ int main(int, char **)
     RUN_TEST(test_all_zeros_is_valid_data);
     RUN_TEST(test_all_ones_is_invalid_data);
 
-    RUN_TEST(test_decode_sleep_time_no_liquid);
-    RUN_TEST(test_decode_sleep_time_liquid);
+    RUN_TEST(test_decode_wait_time_no_liquid);
+    RUN_TEST(test_decode_wait_time_liquid);
     RUN_TEST(test_decode_number_of_samples);
     RUN_TEST(test_decode_no_liquid_thresholds);
     RUN_TEST(test_decode_liquid_thresholds);
@@ -406,9 +432,9 @@ int main(int, char **)
     RUN_TEST(test_semantic_invalid_when_liquid_low_gt_high);
     RUN_TEST(test_semantic_valid_with_full_buffer);
 
-    RUN_TEST(test_set_raw_sleep_time_no_liquid_round_trip);
-    RUN_TEST(test_set_raw_sleep_time_no_liquid_preserves_neighbouring_field);
-    RUN_TEST(test_set_raw_sleep_time_liquid_round_trip);
+    RUN_TEST(test_set_raw_wait_time_no_liquid_round_trip);
+    RUN_TEST(test_set_raw_wait_time_no_liquid_preserves_neighbouring_field);
+    RUN_TEST(test_set_raw_wait_time_liquid_round_trip);
     RUN_TEST(test_set_number_of_samples_round_trip);
     RUN_TEST(test_set_no_liquid_thresholds_round_trip);
     RUN_TEST(test_set_liquid_thresholds_round_trip);
@@ -421,6 +447,8 @@ int main(int, char **)
 
     RUN_TEST(test_copy_constructor_deep_copies);
     RUN_TEST(test_move_constructor_transfers_ownership);
+
+    RUN_TEST(test_deprecated_sleep_time_aliases_match_wait_time);
 
     return UNITY_END();
 }

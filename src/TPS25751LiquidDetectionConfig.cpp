@@ -1,25 +1,25 @@
 #include "TPS25751LiquidDetectionConfig.h"
 
-// --- Decode: sleep-interval fields --------------------------------------------
+// --- Decode: wait-interval fields --------------------------------------------
 
-uint16_t TPS25751LiquidDetectionConfig::rawSleepTimeNoLiquid() const
+uint16_t TPS25751LiquidDetectionConfig::rawWaitTimeNoLiquid() const
 {
-    return extractBits16(kSleepTimeNoLiquidShift, kSleepTimeNoLiquidBits);
+    return extractBits16(kWaitTimeNoLiquidShift, kWaitTimeNoLiquidBits);
 }
 
-uint32_t TPS25751LiquidDetectionConfig::sleepTimeNoLiquid_ms() const
+uint32_t TPS25751LiquidDetectionConfig::waitTimeNoLiquid_ms() const
 {
-    return static_cast<uint32_t>(rawSleepTimeNoLiquid()) * kMillisecondsPerLsb1000;
+    return static_cast<uint32_t>(rawWaitTimeNoLiquid()) * kMillisecondsPerLsb1000;
 }
 
-uint16_t TPS25751LiquidDetectionConfig::rawSleepTimeLiquid() const
+uint16_t TPS25751LiquidDetectionConfig::rawWaitTimeLiquid() const
 {
-    return extractBits16(kSleepTimeLiquidShift, kSleepTimeLiquidBits);
+    return extractBits16(kWaitTimeLiquidShift, kWaitTimeLiquidBits);
 }
 
-uint32_t TPS25751LiquidDetectionConfig::sleepTimeLiquid_ms() const
+uint32_t TPS25751LiquidDetectionConfig::waitTimeLiquid_ms() const
 {
-    return static_cast<uint32_t>(rawSleepTimeLiquid()) * kMillisecondsPerLsb1000;
+    return static_cast<uint32_t>(rawWaitTimeLiquid()) * kMillisecondsPerLsb1000;
 }
 
 // --- Decode: sampling configuration -------------------------------------------
@@ -112,14 +112,14 @@ bool TPS25751LiquidDetectionConfig::enableLiquidDetection() const
 
 // --- Setters: each a single setBits() call; setBits() itself guards !isValid() ---
 
-void TPS25751LiquidDetectionConfig::setRawSleepTimeNoLiquid(uint16_t raw)
+void TPS25751LiquidDetectionConfig::setRawWaitTimeNoLiquid(uint16_t raw)
 {
-    setBits(kSleepTimeNoLiquidShift, kSleepTimeNoLiquidBits, raw);
+    setBits(kWaitTimeNoLiquidShift, kWaitTimeNoLiquidBits, raw);
 }
 
-void TPS25751LiquidDetectionConfig::setRawSleepTimeLiquid(uint16_t raw)
+void TPS25751LiquidDetectionConfig::setRawWaitTimeLiquid(uint16_t raw)
 {
-    setBits(kSleepTimeLiquidShift, kSleepTimeLiquidBits, raw);
+    setBits(kWaitTimeLiquidShift, kWaitTimeLiquidBits, raw);
 }
 
 void TPS25751LiquidDetectionConfig::setNumberOfSamples(uint8_t raw)
@@ -182,16 +182,16 @@ void TPS25751LiquidDetectionConfig::debugPrint(Stream &s) const
     s.println(F(" bytes"));
     s.println(F("========================================"));
 
-    s.print(F("Sleep Time No Liquid: "));
-    s.print(sleepTimeNoLiquid_ms());
+    s.print(F("Wait Time No Liquid: "));
+    s.print(waitTimeNoLiquid_ms());
     s.print(F(" ms (raw "));
-    s.print(rawSleepTimeNoLiquid());
+    s.print(rawWaitTimeNoLiquid());
     s.println(F(")"));
 
-    s.print(F("Sleep Time Liquid: "));
-    s.print(sleepTimeLiquid_ms());
+    s.print(F("Wait Time Liquid: "));
+    s.print(waitTimeLiquid_ms());
     s.print(F(" ms (raw "));
-    s.print(rawSleepTimeLiquid());
+    s.print(rawWaitTimeLiquid());
     s.println(F(")"));
 
     s.print(F("Number of Samples: "));

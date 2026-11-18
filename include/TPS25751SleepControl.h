@@ -6,16 +6,20 @@
 /**
  * @brief Minimum time the PD controller waits before entering sleep mode
  *
- * Source: SLVUCR8B (Rev. B, 2026-08), page 52. Rev B changed 2h from 1200 ms
- * (Rev. A) to 1000 ms; the enumerator name predates that change.
+ * Source: SLVUCR8B (Rev. B, 2026-08), page 52. Rev. B changed 2h from 1200 ms
+ * (Rev. A) to 1000 ms. Time1200ms is a deprecated alias for Time1000ms with
+ * the same value.
  *
  * @see TI TPS25751 Technical Reference Manual, Table 3-27 (bits 2:1, Sleep Time)
  */
 enum class SleepTime : uint8_t {
     Reserved0 = 0,   ///< 0h - Reserved
     Time100ms = 1,   ///< 1h - 100 ms
-    Time1200ms = 2,  ///< 2h - 1000 ms (SLVUCR8B p.52; was 1200 ms in Rev. A)
-    Reserved3 = 3    ///< 3h - Reserved
+    Time1000ms = 2,  ///< 2h - 1000 ms (SLVUCR8B p.52; was 1200 ms in Rev. A)
+    Reserved3 = 3,   ///< 3h - Reserved
+
+    /// @deprecated Rev. A name for 2h. Same value as Time1000ms.
+    Time1200ms [[deprecated("SLVUCR8B Rev. B p.52 defines 2h as 1000 ms; use SleepTime::Time1000ms")]] = 2
 };
 
 /**

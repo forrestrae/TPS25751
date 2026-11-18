@@ -9,13 +9,16 @@
  *
  * Source: SLVUCR8B (Rev. B, 2026-08), page 31. Rev. B defines 2h as
  * "Detect proprietary chargers only"; Rev. A marked it "Reserved do not
- * use". The enumerator name predates that change.
+ * use". Reserved is a deprecated alias for ProprietaryOnly with the same value.
  */
 enum class ChargerDetectEnable : uint8_t {
     None = 0,           ///< Do not detect any legacy chargers
     BC12Only = 1,       ///< Detect BC 1.2 chargers
-    Reserved = 2,       ///< Detect proprietary chargers only (Rev. B; Reserved in Rev. A)
-    BC12AndProprietary = 3  ///< Detect BC 1.2 and proprietary legacy chargers
+    ProprietaryOnly = 2,    ///< Detect proprietary chargers only (Rev. B; Reserved in Rev. A)
+    BC12AndProprietary = 3, ///< Detect BC 1.2 and proprietary legacy chargers
+
+    /// @deprecated Rev. A name for 2h. Same value as ProprietaryOnly.
+    Reserved [[deprecated("SLVUCR8B Rev. B p.31 defines 2h as proprietary-only detection; use ChargerDetectEnable::ProprietaryOnly")]] = 2
 };
 
 /**
@@ -23,16 +26,20 @@ enum class ChargerDetectEnable : uint8_t {
  *
  * Source: SLVUCR8B (Rev. B, 2026-08), page 31. Rev. B describes 0h as
  * "BC 1.2 SDP only"; Rev. A said "Do not emulate any legacy charger".
+ * None is a deprecated alias for SDP with the same value.
  */
 enum class ChargerAdvertiseEnable : uint8_t {
-    None = 0,           ///< BC 1.2 SDP only (Rev. B; "no legacy charger emulation" in Rev. A)
+    SDP = 0,            ///< BC 1.2 SDP only (Rev. B; "no legacy charger emulation" in Rev. A)
     CDP = 1,            ///< BC 1.2 CDP only
     DCP = 2,            ///< BC 1.2 DCP only
     Reserved3 = 3,      ///< Reserved
     Reserved4 = 4,      ///< Reserved
     DCP_Auto1 = 5,      ///< DCP Auto 1 (2.7V and DCP)
     DCP_Auto2 = 6,      ///< DCP Auto 2 (1.2V 2.7V and DCP)
-    Reserved7 = 7       ///< Reserved
+    Reserved7 = 7,      ///< Reserved
+
+    /// @deprecated Rev. A name for 0h. Same value as SDP.
+    None [[deprecated("SLVUCR8B Rev. B p.31 defines 0h as BC 1.2 SDP only; use ChargerAdvertiseEnable::SDP")]] = 0
 };
 
 /**

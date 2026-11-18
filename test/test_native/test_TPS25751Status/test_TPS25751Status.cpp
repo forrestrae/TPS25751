@@ -175,7 +175,7 @@ void test_connection_state_2h_is_corrosion_mitigation()
     TPS25751Status status(data);
 
     TEST_ASSERT_TRUE(status.plugPresent());
-    TEST_ASSERT_EQUAL(AUDIO_ACCESSORY, status.connectionState());
+    TEST_ASSERT_EQUAL(CORROSION_MITIGATION, status.connectionState());
     TEST_ASSERT_EQUAL_STRING("Corrosion Mitigation (Ra/Ra)", toString(status.connectionState()).c_str());
 }
 
@@ -185,9 +185,19 @@ void test_connection_state_5h_is_debug_rp_rp()
     TPS25751Status status(data);
 
     TEST_ASSERT_TRUE(status.plugPresent());
-    TEST_ASSERT_EQUAL(RESERVED, status.connectionState());
+    TEST_ASSERT_EQUAL(DEBUG_ACCESSORY_RP_RP, status.connectionState());
     TEST_ASSERT_EQUAL_STRING("Debug connection (Rp/Rp)", toString(status.connectionState()).c_str());
 }
+
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
+void test_deprecated_connection_state_aliases_match_rev_b_names()
+{
+    // Rev. A names keep their old values so existing sketches decode the same.
+    TEST_ASSERT_EQUAL_INT(CORROSION_MITIGATION, AUDIO_ACCESSORY);
+    TEST_ASSERT_EQUAL_INT(DEBUG_ACCESSORY_RP_RP, RESERVED);
+}
+#pragma GCC diagnostic pop
 
 void test_connection_state_1h_string()
 {
@@ -324,6 +334,7 @@ int main(int, char **)
     RUN_TEST(test_connection_state_2h_is_corrosion_mitigation);
     RUN_TEST(test_connection_state_5h_is_debug_rp_rp);
     RUN_TEST(test_connection_state_1h_string);
+    RUN_TEST(test_deprecated_connection_state_aliases_match_rev_b_names);
 
     RUN_TEST(test_semantic_valid_states);
     RUN_TEST(test_semantic_plug_present_but_disconnected);

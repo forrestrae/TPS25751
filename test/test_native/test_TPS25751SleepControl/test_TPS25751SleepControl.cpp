@@ -31,13 +31,13 @@ constexpr size_t SLEEP_CONTROL_SIZE = TPS25751Registers::Registers::SLEEP_CONTRO
 constexpr uint8_t ALLOWED_100MS[SLEEP_CONTROL_SIZE] = {0x03};
 
 // bit0=1 (allowed), bits2:1 = 10 (1000 ms)  -> 0b101 = 0x05
-constexpr uint8_t ALLOWED_1200MS[SLEEP_CONTROL_SIZE] = {0x05};
+constexpr uint8_t ALLOWED_1000MS[SLEEP_CONTROL_SIZE] = {0x05};
 
 // bit0=1 (allowed), bits2:1 = 00 (Reserved) -> 0b001 = 0x01 (Rev. A reset value)
 constexpr uint8_t ALLOWED_RESERVED0[SLEEP_CONTROL_SIZE] = {0x01};
 
 // bit0=0 (not allowed), bits2:1 = 10 (1000 ms) -> 0b100 = 0x04
-constexpr uint8_t NOT_ALLOWED_1200MS[SLEEP_CONTROL_SIZE] = {0x04};
+constexpr uint8_t NOT_ALLOWED_1000MS[SLEEP_CONTROL_SIZE] = {0x04};
 
 // bit0=1 (allowed), bits2:1 = 11 (Reserved) -> 0b111 = 0x07
 constexpr uint8_t ALLOWED_RESERVED3[SLEEP_CONTROL_SIZE] = {0x07};
@@ -79,11 +79,11 @@ void test_data_constructor_copies_buffer()
 
 void test_explicit_length_constructor()
 {
-    TPS25751SleepControl reg(ALLOWED_1200MS, SLEEP_CONTROL_SIZE);
+    TPS25751SleepControl reg(ALLOWED_1000MS, SLEEP_CONTROL_SIZE);
 
     TEST_ASSERT_TRUE(reg.isValid());
     TEST_ASSERT_TRUE(reg.isValidSize(SLEEP_CONTROL_SIZE));
-    TEST_ASSERT_EQUAL(SleepTime::Time1200ms, reg.sleepTime());
+    TEST_ASSERT_EQUAL(SleepTime::Time1000ms, reg.sleepTime());
 }
 
 void test_reginfo_constructor_allocates_zeroed_buffer()
@@ -145,18 +145,18 @@ void test_decode_allowed_100ms()
     TEST_ASSERT_EQUAL(SleepTime::Time100ms, reg.sleepTime());
 }
 
-void test_decode_allowed_1200ms()
+void test_decode_allowed_1000ms()
 {
-    TPS25751SleepControl reg(ALLOWED_1200MS);
+    TPS25751SleepControl reg(ALLOWED_1000MS);
     TEST_ASSERT_TRUE(reg.sleepModeAllowed());
-    TEST_ASSERT_EQUAL(SleepTime::Time1200ms, reg.sleepTime());
+    TEST_ASSERT_EQUAL(SleepTime::Time1000ms, reg.sleepTime());
 }
 
-void test_decode_not_allowed_1200ms()
+void test_decode_not_allowed_1000ms()
 {
-    TPS25751SleepControl reg(NOT_ALLOWED_1200MS);
+    TPS25751SleepControl reg(NOT_ALLOWED_1000MS);
     TEST_ASSERT_FALSE(reg.sleepModeAllowed());
-    TEST_ASSERT_EQUAL(SleepTime::Time1200ms, reg.sleepTime());
+    TEST_ASSERT_EQUAL(SleepTime::Time1000ms, reg.sleepTime());
 }
 
 // --- Semantic validation ----------------------------------------------------
@@ -192,8 +192,8 @@ void test_not_allowed_reserved_time_is_semantically_valid()
 void test_semantic_valid_states()
 {
     TEST_ASSERT_TRUE(TPS25751SleepControl(ALLOWED_100MS).isSemanticallyValid());
-    TEST_ASSERT_TRUE(TPS25751SleepControl(ALLOWED_1200MS).isSemanticallyValid());
-    TEST_ASSERT_TRUE(TPS25751SleepControl(NOT_ALLOWED_1200MS).isSemanticallyValid());
+    TEST_ASSERT_TRUE(TPS25751SleepControl(ALLOWED_1000MS).isSemanticallyValid());
+    TEST_ASSERT_TRUE(TPS25751SleepControl(NOT_ALLOWED_1000MS).isSemanticallyValid());
 }
 
 // --- Setters: round trip + neighbouring-bit preservation --------------------
@@ -223,8 +223,8 @@ void test_set_sleep_mode_allowed_preserves_other_bits()
 void test_set_sleep_time_round_trip()
 {
     TPS25751SleepControl reg;  // starts all-zero
-    reg.setSleepTime(SleepTime::Time1200ms);
-    TEST_ASSERT_EQUAL(SleepTime::Time1200ms, reg.sleepTime());
+    reg.setSleepTime(SleepTime::Time1000ms);
+    TEST_ASSERT_EQUAL(SleepTime::Time1000ms, reg.sleepTime());
 
     reg.setSleepTime(SleepTime::Time100ms);
     TEST_ASSERT_EQUAL(SleepTime::Time100ms, reg.sleepTime());
@@ -250,7 +250,7 @@ void test_setters_no_op_on_invalid_register()
 
     TEST_ASSERT_FALSE(reg.isValid());
     reg.setSleepModeAllowed(true);
-    reg.setSleepTime(SleepTime::Time1200ms);
+    reg.setSleepTime(SleepTime::Time1000ms);
     TEST_ASSERT_FALSE(reg.isValid());  // still invalid; no crash
     TEST_ASSERT_EQUAL(SleepTime::Time100ms, moved.sleepTime());  // untouched
 }
@@ -261,15 +261,33 @@ void test_to_string_covers_all_enum_values()
 {
     TEST_ASSERT_EQUAL_STRING("Reserved (0h)", toString(SleepTime::Reserved0));
     TEST_ASSERT_EQUAL_STRING("100 ms", toString(SleepTime::Time100ms));
-    TEST_ASSERT_EQUAL_STRING("1000 ms", toString(SleepTime::Time1200ms));
+    TEST_ASSERT_EQUAL_STRING("1000 ms", toString(SleepTime::Time1000ms));
     TEST_ASSERT_EQUAL_STRING("Reserved (3h)", toString(SleepTime::Reserved3));
 }
+
+// --- Deprecated alias ---------------------------------------------------------
+
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
+void test_deprecated_time1200ms_alias_matches_time1000ms()
+{
+    // The Rev. A name must keep its old value (2h) so existing sketches read
+    // and write the same bits.
+    TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(SleepTime::Time1000ms),
+                            static_cast<uint8_t>(SleepTime::Time1200ms));
+
+    TPS25751SleepControl reg;
+    reg.setSleepTime(SleepTime::Time1200ms);
+    TEST_ASSERT_EQUAL_UINT8(0x04, reg.raw()[0]);
+    TEST_ASSERT_EQUAL(SleepTime::Time1000ms, reg.sleepTime());
+}
+#pragma GCC diagnostic pop
 
 // --- Rule of Five -----------------------------------------------------------
 
 void test_copy_constructor_deep_copies()
 {
-    TPS25751SleepControl original(ALLOWED_1200MS);
+    TPS25751SleepControl original(ALLOWED_1000MS);
     TPS25751SleepControl copy(original);
 
     TEST_ASSERT_NOT_EQUAL(original.raw(), copy.raw());
@@ -306,8 +324,8 @@ int main(int, char **)
     RUN_TEST(test_all_ones_is_invalid_data);
 
     RUN_TEST(test_decode_allowed_100ms);
-    RUN_TEST(test_decode_allowed_1200ms);
-    RUN_TEST(test_decode_not_allowed_1200ms);
+    RUN_TEST(test_decode_allowed_1000ms);
+    RUN_TEST(test_decode_not_allowed_1000ms);
 
     RUN_TEST(test_reset_value_0x03_is_allowed_100ms_and_valid);
     RUN_TEST(test_allowed_reserved0_is_semantically_invalid);
@@ -322,6 +340,7 @@ int main(int, char **)
     RUN_TEST(test_setters_no_op_on_invalid_register);
 
     RUN_TEST(test_to_string_covers_all_enum_values);
+    RUN_TEST(test_deprecated_time1200ms_alias_matches_time1000ms);
 
     RUN_TEST(test_copy_constructor_deep_copies);
     RUN_TEST(test_move_constructor_transfers_ownership);

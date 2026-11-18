@@ -57,7 +57,7 @@ void test_default_constructor_allocates_zeroed_buffer()
     TEST_ASSERT_TRUE(reg.isValid());
     TEST_ASSERT_EQUAL_size_t(PORT_CONTROL_SIZE, reg.size());
     TEST_ASSERT_EQUAL(ChargerDetectEnable::None, reg.chargerDetectEnable());
-    TEST_ASSERT_EQUAL(ChargerAdvertiseEnable::None, reg.chargerAdvertiseEnable());
+    TEST_ASSERT_EQUAL(ChargerAdvertiseEnable::SDP, reg.chargerAdvertiseEnable());
     TEST_ASSERT_TRUE(reg.isSemanticallyValid());
 }
 
@@ -68,7 +68,7 @@ void test_reset_value_decodes_rev_b_defaults()
     TPS25751PortControl reg(RESET_VALUE);
 
     TEST_ASSERT_EQUAL(ChargerDetectEnable::None, reg.chargerDetectEnable());
-    TEST_ASSERT_EQUAL(ChargerAdvertiseEnable::None, reg.chargerAdvertiseEnable());
+    TEST_ASSERT_EQUAL(ChargerAdvertiseEnable::SDP, reg.chargerAdvertiseEnable());
     TEST_ASSERT_FALSE(reg.resistor15kPresent());
     TEST_ASSERT_FALSE(reg.enableCurrentMonitor());
     TEST_ASSERT_FALSE(reg.unconstrainedPower());
@@ -94,7 +94,7 @@ void test_charger_detect_2h_decodes_as_proprietary_only()
 {
     TPS25751PortControl reg(DETECT_PROPRIETARY);
 
-    TEST_ASSERT_EQUAL_UINT8(2, static_cast<uint8_t>(reg.chargerDetectEnable()));
+    TEST_ASSERT_EQUAL(ChargerDetectEnable::ProprietaryOnly, reg.chargerDetectEnable());
     TEST_ASSERT_EQUAL_STRING("Proprietary only", toString(reg.chargerDetectEnable()));
 }
 
@@ -116,8 +116,27 @@ void test_charger_detect_3h_decodes()
 
 void test_charger_advertise_0h_string_is_sdp()
 {
-    TEST_ASSERT_EQUAL_STRING("BC 1.2 SDP only", toString(ChargerAdvertiseEnable::None));
+    TEST_ASSERT_EQUAL_STRING("BC 1.2 SDP only", toString(ChargerAdvertiseEnable::SDP));
 }
+
+// --- Deprecated aliases -------------------------------------------------------
+
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
+void test_deprecated_aliases_match_rev_b_names()
+{
+    // Rev. A names keep their old values so existing sketches decode the same.
+    TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(ChargerDetectEnable::ProprietaryOnly),
+                            static_cast<uint8_t>(ChargerDetectEnable::Reserved));
+    TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(ChargerAdvertiseEnable::SDP),
+                            static_cast<uint8_t>(ChargerAdvertiseEnable::None));
+
+    TEST_ASSERT_EQUAL(ChargerDetectEnable::Reserved,
+                      TPS25751PortControl(DETECT_PROPRIETARY).chargerDetectEnable());
+    TEST_ASSERT_EQUAL(ChargerAdvertiseEnable::None,
+                      TPS25751PortControl(RESET_VALUE).chargerAdvertiseEnable());
+}
+#pragma GCC diagnostic pop
 
 // --- Existing semantic rule ---------------------------------------------------
 
@@ -148,6 +167,7 @@ int main(int, char **)
     RUN_TEST(test_charger_detect_2h_is_semantically_valid);
     RUN_TEST(test_charger_detect_3h_decodes);
     RUN_TEST(test_charger_advertise_0h_string_is_sdp);
+    RUN_TEST(test_deprecated_aliases_match_rev_b_names);
     RUN_TEST(test_15k_resistor_with_dcp_is_semantically_invalid);
     RUN_TEST(test_wrong_size_fails_semantic_validation);
 

@@ -60,7 +60,7 @@ const char* toString(SleepTime val) {
     switch (val) {
         case SleepTime::Reserved0: return "Reserved (0h)";
         case SleepTime::Time100ms: return "100 ms";
-        case SleepTime::Time1200ms: return "1000 ms";  // SLVUCR8B p.52
+        case SleepTime::Time1000ms: return "1000 ms";  // SLVUCR8B p.52
         case SleepTime::Reserved3: return "Reserved (3h)";
         default: return "Unknown";
     }

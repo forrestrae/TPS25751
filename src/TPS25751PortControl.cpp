@@ -5,7 +5,7 @@ ChargerDetectEnable TPS25751PortControl::chargerDetectEnable() const {
 }
 
 ChargerAdvertiseEnable TPS25751PortControl::chargerAdvertiseEnable() const {
-    return extractEnum<ChargerAdvertiseEnable>(26, 3, static_cast<uint8_t>(ChargerAdvertiseEnable::Reserved7), ChargerAdvertiseEnable::None);
+    return extractEnum<ChargerAdvertiseEnable>(26, 3, static_cast<uint8_t>(ChargerAdvertiseEnable::Reserved7), ChargerAdvertiseEnable::SDP);
 }
 
 bool TPS25751PortControl::resistor15kPresent() const {
@@ -89,7 +89,7 @@ const char* toString(ChargerDetectEnable val) {
     switch (val) {
         case ChargerDetectEnable::None: return "None";
         case ChargerDetectEnable::BC12Only: return "BC 1.2 only";
-        case ChargerDetectEnable::Reserved: return "Proprietary only";  // SLVUCR8B p.31
+        case ChargerDetectEnable::ProprietaryOnly: return "Proprietary only";  // SLVUCR8B p.31
         case ChargerDetectEnable::BC12AndProprietary: return "BC 1.2 + Proprietary";
         default: return "Unknown";
     }
@@ -97,7 +97,7 @@ const char* toString(ChargerDetectEnable val) {
 
 const char* toString(ChargerAdvertiseEnable val) {
     switch (val) {
-        case ChargerAdvertiseEnable::None: return "BC 1.2 SDP only";  // SLVUCR8B p.31
+        case ChargerAdvertiseEnable::SDP: return "BC 1.2 SDP only";  // SLVUCR8B p.31
         case ChargerAdvertiseEnable::CDP: return "CDP";
         case ChargerAdvertiseEnable::DCP: return "DCP";
         case ChargerAdvertiseEnable::Reserved3: return "Reserved (3)";

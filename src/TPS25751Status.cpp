@@ -91,13 +91,13 @@ std::string toString(const ConnectionState s)
             return "No connection";
         case PORT_DISABLED:
             return "Port is disabled";
-        case AUDIO_ACCESSORY:
+        case CORROSION_MITIGATION:
             return "Corrosion Mitigation (Ra/Ra)";  // SLVUCR8B p.25
         case DEBUG_ACCESSORY:
             return "Debug connection (Rd/Rd)";
         case NO_CONNECTION_RA_DETECTED:
             return "No connection - Ra detected (Ra but no Rd)";
-        case RESERVED:
+        case DEBUG_ACCESSORY_RP_RP:
             return "Debug connection (Rp/Rp)";  // SLVUCR8B p.25
         case CONNECTED_NO_RA_DETECTED:
             return "Connection present - no Ra detected";

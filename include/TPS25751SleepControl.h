@@ -6,12 +6,15 @@
 /**
  * @brief Minimum time the PD controller waits before entering sleep mode
  *
+ * Source: SLVUCR8B (Rev. B, 2026-08), page 52. Rev B changed 2h from 1200 ms
+ * (Rev. A) to 1000 ms; the enumerator name predates that change.
+ *
  * @see TI TPS25751 Technical Reference Manual, Table 3-27 (bits 2:1, Sleep Time)
  */
 enum class SleepTime : uint8_t {
     Reserved0 = 0,   ///< 0h - Reserved
     Time100ms = 1,   ///< 1h - 100 ms
-    Time1200ms = 2,  ///< 2h - 1200 ms
+    Time1200ms = 2,  ///< 2h - 1000 ms (SLVUCR8B p.52; was 1200 ms in Rev. A)
     Reserved3 = 3    ///< 3h - Reserved
 };
 
@@ -26,10 +29,10 @@ enum class SleepTime : uint8_t {
  * - Address: 0x70
  * - Size: 1 byte
  * - Access: Read/Write
- * - Reset value: 0x01 (Sleep Mode Allowed set, Sleep Time = 0h/Reserved) --
- *   note this reset state is itself semantically INVALID per this class's
- *   isSemanticallyValid() (sleep allowed with a reserved sleep time), which
- *   callers should be prepared for on a factory-fresh device.
+ * - Reset value: 0x03 (Sleep Mode Allowed = 1, Sleep Time = 1h/100 ms), which
+ *   is semantically valid. Source: SLVUCR8B (Rev. B, 2026-08), page 52.
+ *   Rev. A listed 0x01 (Sleep Time = 0h/Reserved), which this class's
+ *   isSemanticallyValid() rejects.
  *
  * @see TI TPS25751 Technical Reference Manual, Section 3.2.28, Table 3-27
  */

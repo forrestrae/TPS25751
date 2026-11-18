@@ -4,17 +4,16 @@
  *
  * Run with: pio test -e native
  *
- * Test buffers are hand-packed from the SLEEP_CONTROL (0x70) field table in
- * the TPS25751 TRM (Table 3-27), cross-checked against the tps25751-docs MCP
- * register data:
- *   bit 0      Sleep Mode Allowed
- *   bits 2:1   Sleep Time (0h=Reserved, 1h=100 ms, 2h=1200 ms, 3h=Reserved)
+ * Test buffers are hand-packed from the SLEEP_CONTROL (0x70) field table,
+ * Source: SLVUCR8B (Rev. B, 2026-08), page 52, via the tps25751-docs MCP:
+ *   bit 0      Sleep Mode Allowed (reset 1h)
+ *   bits 2:1   Sleep Time (0h=Reserved, 1h=100 ms, 2h=1000 ms, 3h=Reserved;
+ *              reset 1h). Rev. A listed 2h as 1200 ms.
  *   bits 7:3   Reserved
  *
- * NOTE: the hardware reset value of this register is 0x01 (Sleep Mode
- * Allowed = 1, Sleep Time = 0h/Reserved). That combination is flagged
- * INVALID by isSemanticallyValid() (sleep allowed while the time field is a
- * Reserved code) -- see test_reset_value_is_semantically_invalid below. A
+ * The Rev. B reset value is 0x03 (allowed, 100 ms), which is semantically
+ * valid; see test_reset_value_0x03_is_allowed_100ms_and_valid. 0x01 (allowed
+ * with a Reserved Sleep Time, the Rev. A reset) stays an invalid case. A
  * Reserved Sleep Time is only acceptable while Sleep Mode Allowed is clear.
  */
 
@@ -28,16 +27,16 @@ namespace {
 
 constexpr size_t SLEEP_CONTROL_SIZE = TPS25751Registers::Registers::SLEEP_CONTROL.size;  // 1
 
-// bit0=1 (allowed), bits2:1 = 01 (100 ms)   -> 0b011 = 0x03
+// bit0=1 (allowed), bits2:1 = 01 (100 ms)   -> 0b011 = 0x03 (Rev. B reset value)
 constexpr uint8_t ALLOWED_100MS[SLEEP_CONTROL_SIZE] = {0x03};
 
-// bit0=1 (allowed), bits2:1 = 10 (1200 ms)  -> 0b101 = 0x05
+// bit0=1 (allowed), bits2:1 = 10 (1000 ms)  -> 0b101 = 0x05
 constexpr uint8_t ALLOWED_1200MS[SLEEP_CONTROL_SIZE] = {0x05};
 
-// bit0=1 (allowed), bits2:1 = 00 (Reserved) -> 0b001 = 0x01 (hardware reset value)
+// bit0=1 (allowed), bits2:1 = 00 (Reserved) -> 0b001 = 0x01 (Rev. A reset value)
 constexpr uint8_t ALLOWED_RESERVED0[SLEEP_CONTROL_SIZE] = {0x01};
 
-// bit0=0 (not allowed), bits2:1 = 10 (1200 ms) -> 0b100 = 0x04
+// bit0=0 (not allowed), bits2:1 = 10 (1000 ms) -> 0b100 = 0x04
 constexpr uint8_t NOT_ALLOWED_1200MS[SLEEP_CONTROL_SIZE] = {0x04};
 
 // bit0=1 (allowed), bits2:1 = 11 (Reserved) -> 0b111 = 0x07
@@ -162,9 +161,20 @@ void test_decode_not_allowed_1200ms()
 
 // --- Semantic validation ----------------------------------------------------
 
-void test_reset_value_is_semantically_invalid()
+void test_reset_value_0x03_is_allowed_100ms_and_valid()
 {
-    // Hardware reset value 0x01: Sleep Mode Allowed set, Sleep Time Reserved(0h).
+    // Rev. B reset value 0x03 (SLVUCR8B p.52): Sleep Mode Allowed = 1,
+    // Sleep Time = 1h (100 ms).
+    TPS25751SleepControl reg(ALLOWED_100MS);
+    TEST_ASSERT_EQUAL_UINT8(0x03, reg.raw()[0]);
+    TEST_ASSERT_TRUE(reg.sleepModeAllowed());
+    TEST_ASSERT_EQUAL(SleepTime::Time100ms, reg.sleepTime());
+    TEST_ASSERT_TRUE(reg.isSemanticallyValid());
+}
+
+void test_allowed_reserved0_is_semantically_invalid()
+{
+    // 0x01: Sleep Mode Allowed set with a Reserved (0h) Sleep Time.
     TEST_ASSERT_FALSE(TPS25751SleepControl(ALLOWED_RESERVED0).isSemanticallyValid());
 }
 
@@ -251,7 +261,7 @@ void test_to_string_covers_all_enum_values()
 {
     TEST_ASSERT_EQUAL_STRING("Reserved (0h)", toString(SleepTime::Reserved0));
     TEST_ASSERT_EQUAL_STRING("100 ms", toString(SleepTime::Time100ms));
-    TEST_ASSERT_EQUAL_STRING("1200 ms", toString(SleepTime::Time1200ms));
+    TEST_ASSERT_EQUAL_STRING("1000 ms", toString(SleepTime::Time1200ms));
     TEST_ASSERT_EQUAL_STRING("Reserved (3h)", toString(SleepTime::Reserved3));
 }
 
@@ -299,7 +309,8 @@ int main(int, char **)
     RUN_TEST(test_decode_allowed_1200ms);
     RUN_TEST(test_decode_not_allowed_1200ms);
 
-    RUN_TEST(test_reset_value_is_semantically_invalid);
+    RUN_TEST(test_reset_value_0x03_is_allowed_100ms_and_valid);
+    RUN_TEST(test_allowed_reserved0_is_semantically_invalid);
     RUN_TEST(test_allowed_reserved3_is_semantically_invalid);
     RUN_TEST(test_not_allowed_reserved_time_is_semantically_valid);
     RUN_TEST(test_semantic_valid_states);

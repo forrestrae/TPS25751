@@ -89,7 +89,7 @@ const char* toString(ChargerDetectEnable val) {
     switch (val) {
         case ChargerDetectEnable::None: return "None";
         case ChargerDetectEnable::BC12Only: return "BC 1.2 only";
-        case ChargerDetectEnable::Reserved: return "Reserved";
+        case ChargerDetectEnable::Reserved: return "Proprietary only";  // SLVUCR8B p.31
         case ChargerDetectEnable::BC12AndProprietary: return "BC 1.2 + Proprietary";
         default: return "Unknown";
     }
@@ -97,7 +97,7 @@ const char* toString(ChargerDetectEnable val) {
 
 const char* toString(ChargerAdvertiseEnable val) {
     switch (val) {
-        case ChargerAdvertiseEnable::None: return "None";
+        case ChargerAdvertiseEnable::None: return "BC 1.2 SDP only";  // SLVUCR8B p.31
         case ChargerAdvertiseEnable::CDP: return "CDP";
         case ChargerAdvertiseEnable::DCP: return "DCP";
         case ChargerAdvertiseEnable::Reserved3: return "Reserved (3)";
@@ -140,10 +140,8 @@ bool TPS25751PortControl::isSemanticallyValid() const {
         return false;
     }
 
-    // Check for reserved enum values
-    if (detectEn == ChargerDetectEnable::Reserved) {
-        return false;  // Reserved value used
-    }
+    // Every Charger Detect Enable value (0h-3h) is defined in Rev. B; 2h is
+    // "Detect proprietary chargers only" (SLVUCR8B p.31), so no rejection here.
 
     // Logical consistency checks
     // If 15k resistor is present, certain charger modes shouldn't be used

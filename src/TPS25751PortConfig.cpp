@@ -15,7 +15,8 @@ const char* toString(TypeCStateMachine state) {
 const char* toString(TypeCSupportOptions opt) {
     switch (opt) {
         case TypeCSupportOptions::None: return "None";
-        case TypeCSupportOptions::DRP_Src: return "DRP with Source";
+        case TypeCSupportOptions::TrySRC: return "Try.SRC";
+        case TypeCSupportOptions::TrySNK: return "Try.SNK";  // SLVUCR8B p.29
         case TypeCSupportOptions::Reserved: return "Reserved";
         default: return "Unknown";
     }
@@ -136,7 +137,7 @@ bool TPS25751PortConfig::isSemanticallyValid() const {
     }
     
     // DRP support should be consistent with state machine
-    if (support == TypeCSupportOptions::DRP_Src && stateM == TypeCStateMachine::SinkOnly) {
+    if (support == TypeCSupportOptions::TrySRC && stateM == TypeCStateMachine::SinkOnly) {
         return false;  // Inconsistent configuration
     }
     

@@ -11,11 +11,22 @@ enum class TypeCStateMachine : uint8_t
     Disabled = 3
 };
 
+/**
+ * @brief TypeC Support Options (PORT_CONFIGURATION bits 9:8)
+ *
+ * Optional Type-C states supported as a DRP; the options are mutually
+ * exclusive. Source: SLVUCR8B (Rev. B, 2026-08), page 29. Rev. B adds 2h,
+ * Try.SNK. DRP_Src is a deprecated alias for TrySRC with the same value.
+ */
 enum class TypeCSupportOptions : uint8_t
 {
-    None = 0,
-    DRP_Src = 1,
-    Reserved = 3
+    None = 0,       ///< No Type-C optional states are supported
+    TrySRC = 1,     ///< Try.SRC state is supported as a DRP
+    TrySNK = 2,     ///< Try.SNK state is supported as a DRP (new in Rev. B)
+    Reserved = 3,   ///< Reserved
+
+    /// @deprecated Pre-Rev. B name for 1h. Same value as TrySRC.
+    DRP_Src [[deprecated("SLVUCR8B Rev. B p.29 names 1h Try.SRC; use TypeCSupportOptions::TrySRC")]] = 1
 };
 
 /**

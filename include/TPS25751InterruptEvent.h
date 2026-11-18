@@ -44,6 +44,9 @@ public:
     bool extDcdcSourceSafeState() const;   // bit 57
     bool extDcdcSinkSafeState() const;     // bit 56
 
+    // Discover Modes (bit 51), new in Rev. B (SLVUCR8B p.19)
+    bool discoverModeCompleted() const;    // bit 51
+
     // Error conditions (bits 32-39, 46)
     bool unableToSourceError() const;      // bit 46
     bool messageDataError() const;         // bit 39
@@ -62,6 +65,9 @@ public:
     // Command completion (bit 30)
     bool cmd1Complete() const;             // bit 30
 
+    // Manufacturer Info (bit 29), new in Rev. B (SLVUCR8B p.19)
+    bool midbReceived() const;             // bit 29
+
     // Register update notifications (bits 23-27)
     bool pdStatusUpdated() const;          // bit 27
     bool statusUpdated() const;            // bit 26
@@ -73,8 +79,8 @@ public:
     bool usbHostPresent() const;           // bit 20
 
     // Power Delivery swap requests (bits 17-18)
-    bool dataSwapRequested() const;        // bit 18
-    bool powerSwapRequested() const;       // bit 17
+    bool dataSwapRequested() const;        // bit 18; Rev. B: "Data Role Swap Requested"
+    bool powerSwapRequested() const;       // bit 17; Rev. B: "Power Role Swap Requested"
 
     // PD message reception (bits 14-15)
     bool sinkCapMessageReceived() const;   // bit 15

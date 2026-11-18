@@ -88,6 +88,12 @@ public:
     /** @brief CMD1 Complete source enabled. @see bit 30 */
     bool cmd1Complete() const;
 
+    /** @brief MIDB Received (Manufacturer Info message) source enabled. SLVUCR8B p.21. @see bit 29 */
+    bool midbReceived() const;
+
+    /** @brief Discover Mode Completed source enabled. SLVUCR8B p.21. @see bit 51 */
+    bool discoverModeCompleted() const;
+
     // Register update notifications (bits 23-27)
     /** @brief PD Status Updated source enabled. @see bit 27 */
     bool pdStatusUpdated() const;
@@ -164,6 +170,9 @@ public:
     void setPlugInsertOrRemoval(bool enabled);
 
     void setCmd1Complete(bool enabled);
+
+    void setMidbReceived(bool enabled);
+    void setDiscoverModeCompleted(bool enabled);
 
     void setPdStatusUpdated(bool enabled);
     void setStatusUpdated(bool enabled);

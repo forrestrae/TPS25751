@@ -15,15 +15,16 @@
  * preservation across setBits()-based clear setters.
  *
  * clearAll()'s expected byte pattern (derived by summing the byte/offset
- * contribution of each of the 36 named bits -- see TPS25751InterruptClear.cpp
+ * contribution of each of the 38 named bits; bits 29 and 51 added per
+ * SLVUCR8B (Rev. B, 2026-08), page 23 -- see TPS25751InterruptClear.cpp
  * kNamedBits and TPS25751InterruptEvent.h for the canonical bit list):
  *   byte0  = 0x3A  (bits 1,3,4,5)
  *   byte1  = 0xF2  (bits 9,12,13,14,15)
  *   byte2  = 0xB6  (bits 17,18,20,21,23)
- *   byte3  = 0x4D  (bits 24,26,27,30)
+ *   byte3  = 0x6D  (bits 24,26,27,29,30)
  *   byte4  = 0xDF  (bits 32,33,34,35,36,38,39)
  *   byte5  = 0x4C  (bits 42,43,46)
- *   byte6  = 0x00  (no named bits)
+ *   byte6  = 0x08  (bit 51)
  *   byte7  = 0x13  (bits 56,57,60)
  *   byte8  = 0x06  (bits 65,66)
  *   byte9  = 0x00  (no named bits)
@@ -44,7 +45,7 @@ constexpr uint8_t ALL_ZEROS_DATA[INT_CLEAR1_SIZE] = {0, 0, 0, 0, 0, 0, 0, 0, 0, 
 constexpr uint8_t ALL_ONES_DATA[INT_CLEAR1_SIZE] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
 
 constexpr uint8_t CLEAR_ALL_EXPECTED[INT_CLEAR1_SIZE] = {
-    0x3A, 0xF2, 0xB6, 0x4D, 0xDF, 0x4C, 0x00, 0x13, 0x06, 0x00, 0x07,
+    0x3A, 0xF2, 0xB6, 0x6D, 0xDF, 0x4C, 0x08, 0x13, 0x06, 0x00, 0x07,
 };
 
 }  // namespace
@@ -180,6 +181,24 @@ void test_clear_plug_insert_or_removal_sets_expected_bit()
     }
 }
 
+void test_clear_midb_received_and_discover_mode_completed_set_expected_bits()
+{
+    // Rev. B bits (SLVUCR8B p.23): MIDB Received bit 29 -> byte 3 bit 5;
+    // Discover Mode Completed bit 51 -> byte 6 bit 3.
+    TPS25751InterruptClear reg;
+
+    reg.clearMidbReceived();
+    TEST_ASSERT_EQUAL_UINT8(0x20, reg.raw()[3]);
+
+    reg.clearDiscoverModeCompleted();
+    TEST_ASSERT_EQUAL_UINT8(0x08, reg.raw()[6]);
+    TEST_ASSERT_EQUAL_UINT8(0x20, reg.raw()[3]);  // bit 29 still staged
+
+    for (size_t i = 0; i < INT_CLEAR1_SIZE; i++) {
+        if (i != 3 && i != 6) TEST_ASSERT_EQUAL_UINT8(0x00, reg.raw()[i]);
+    }
+}
+
 void test_multiple_named_clears_accumulate_without_disturbing_each_other()
 {
     TPS25751InterruptClear reg;
@@ -290,6 +309,7 @@ int main(int, char **)
     RUN_TEST(test_clear_pd_hardreset_sets_expected_bit);
     RUN_TEST(test_clear_i2c_controller_nacked_sets_expected_bit);
     RUN_TEST(test_clear_plug_insert_or_removal_sets_expected_bit);
+    RUN_TEST(test_clear_midb_received_and_discover_mode_completed_set_expected_bits);
     RUN_TEST(test_multiple_named_clears_accumulate_without_disturbing_each_other);
 
     RUN_TEST(test_clear_all_sets_every_named_bit);

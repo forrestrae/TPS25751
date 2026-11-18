@@ -4,7 +4,7 @@
 
 namespace {
 
-/// @brief {bit, name} table for the 36 named clearable sources, used only by
+/// @brief {bit, name} table for the 38 named clearable sources, used only by
 /// debugPrint() to dump which bits are currently staged in the local buffer.
 struct NamedBit {
     uint8_t bit;
@@ -21,6 +21,7 @@ constexpr NamedBit kNamedBits[] = {
     {60, "Liquid Detection"},
     {57, "Ext DCDC Source Safe State"},
     {56, "Ext DCDC Sink Safe State"},
+    {51, "Discover Mode Completed"},
     {46, "Unable to Source Error"},
     {39, "Message Data Error"},
     {38, "Protocol Error"},
@@ -33,6 +34,7 @@ constexpr NamedBit kNamedBits[] = {
     {42, "Sink Transition Completed"},
     {3,  "Plug Insert or Removal"},
     {30, "CMD1 Complete"},
+    {29, "MIDB Received"},
     {27, "PD Status Updated"},
     {26, "Status Updated"},
     {24, "Power Status Updated"},
@@ -85,6 +87,9 @@ void TPS25751InterruptClear::clearPlugInsertOrRemoval() { setBits(3, 1, 1u); }
 
 void TPS25751InterruptClear::clearCmd1Complete() { setBits(30, 1, 1u); }
 
+void TPS25751InterruptClear::clearMidbReceived() { setBits(29, 1, 1u); }
+void TPS25751InterruptClear::clearDiscoverModeCompleted() { setBits(51, 1, 1u); }
+
 void TPS25751InterruptClear::clearPdStatusUpdated() { setBits(27, 1, 1u); }
 void TPS25751InterruptClear::clearStatusUpdated() { setBits(26, 1, 1u); }
 void TPS25751InterruptClear::clearPowerStatusUpdated() { setBits(24, 1, 1u); }
@@ -116,7 +121,7 @@ void TPS25751InterruptClear::clear(uint8_t bitPos)
 
 void TPS25751InterruptClear::clearAll()
 {
-    // Set exactly the 36 named bits to 1 via setBits() (never memset(0xFF),
+    // Set exactly the 38 named bits to 1 via setBits() (never memset(0xFF),
     // which would also set undocumented reserved bits). Idempotent: setting
     // an already-set bit is a no-op change.
     for (size_t i = 0; i < kNumNamedBits; ++i) {

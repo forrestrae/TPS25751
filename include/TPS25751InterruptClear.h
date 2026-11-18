@@ -90,6 +90,12 @@ public:
     /** @brief Stage a clear of CMD1 Complete. @see bit 30 */
     void clearCmd1Complete();
 
+    /** @brief Stage a clear of MIDB Received (Manufacturer Info message). SLVUCR8B p.23. @see bit 29 */
+    void clearMidbReceived();
+
+    /** @brief Stage a clear of Discover Mode Completed. SLVUCR8B p.23. @see bit 51 */
+    void clearDiscoverModeCompleted();
+
     /** @brief Stage a clear of PD Status Updated. @see bit 27 */
     void clearPdStatusUpdated();
     /** @brief Stage a clear of Status Updated. @see bit 26 */
@@ -137,7 +143,7 @@ public:
     void clear(uint8_t bitPos);
 
     /**
-     * @brief Stage a clear of every named source (all 36 named bits set to 1)
+     * @brief Stage a clear of every named source (all 38 named bits set to 1)
      *
      * Reserved bits are left untouched (0) -- this does NOT memset the buffer
      * to 0xFF, which would also set reserved bits the TRM does not document

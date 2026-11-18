@@ -173,7 +173,7 @@ Serial.println(F("String in flash"));                // Use F() macro
 - SLEEP_CONTROL, CUSTOMER_USE (Batch A, 2026-07-06) — the first R/W host registers
   with field setters and `writeSleepControl()`/`writeCustomerUse()` write paths
 - INT_MASK1, INT_CLEAR1 (Batch B, 2026-07-07) — interrupt enable-mask and
-  event-clear registers mirroring INT_EVENT1's 36-source bit map; built on the new
+  event-clear registers mirroring INT_EVENT1's 38-source bit map (36 in rev A; rev B adds bits 29 and 51); built on the new
   base-class `setBits()` write primitive and typed `TPS25751::writeRegister<T>()`
 - ADC_RESULTS (Batch C, 2026-07-07) — read-only internal-ADC telemetry: per-pin
   voltage (14 mV/LSB; VBUS at 98 mV/LSB) and PP_5V1 current (16.5 mA/LSB) with raw
@@ -263,7 +263,7 @@ Each register has its own class inheriting from `TPS25751Register`:
 - `TPS25751Data`: DATA register (0x09) — generic 64-byte 4CC task payload (no fixed layout)
 - `TPS25751SleepControl`: SLEEP_CONTROL register (0x70) — sleep-mode enable + sleep-time; R/W with field setters
 - `TPS25751CustomerUse`: CUSTOMER_USE register (0x06) — opaque 8-byte application blob; R/W raw/64-bit accessors
-- `TPS25751InterruptMask`: INT_MASK1 register (0x16) — per-source interrupt enable mask mirroring INT_EVENT1's 36-bit map; R/W with `set<Source>(bool)` setters (a 1 unmasks/enables that source)
+- `TPS25751InterruptMask`: INT_MASK1 register (0x16) — per-source interrupt enable mask mirroring INT_EVENT1's 38-source bit map (rev B adds MIDB Received bit 29 and Discover Mode Completed bit 51); R/W with `set<Source>(bool)` setters (a 1 unmasks/enables that source)
 - `TPS25751InterruptClear`: INT_CLEAR1 register (0x18) — write-only event-clear staging buffer; `clear<Source>()` / `clear(bitPos)` / `clearAll()` helpers (write a 1 to acknowledge that INT_EVENT1 source)
 - `TPS25751ADCResults`: ADC_RESULTS register (0x6A) — read-only 13-byte internal-ADC telemetry block; per-pin voltage and PP_5V1 current with `raw*()` + unit-converted (`*Millivolts()`/`*Milliamps()`) accessors. Byte layout is not alphabetical (transcribed from the TRM); not updated in Unconnected-Sleep mode
 - `TPS25751TransmitSourceCaps`: TRANSMIT_SOURCE_CAPABILITIES register (0x32) — R/W 63-byte advertised source capabilities; up to 7 PDOs starting at **byte 3** (bits 9:8 hold the Power Path for PDO 1; bits 23:10 are reserved in rev B, SLVUCR8B p.36). Mirrors `TPS25751ReceivedSourceCaps` decode + adds the encode path: static `build{FixedSupply,Battery,Variable,PPS}PDO()` word builders, `setPDO`/`setPDOCount`, and `get/setPowerPathForPDO`

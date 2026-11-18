@@ -243,6 +243,48 @@ void test_set_i2c_controller_nacked_preserves_other_bits()
     TEST_ASSERT_TRUE(reg.readyForPatch());  // bit 81, same byte, untouched
 }
 
+void test_set_midb_received_round_trip_and_preserves_other_bits()
+{
+    // Rev. B bit 29 (SLVUCR8B p.21) -> byte 3 bit 5.
+    TPS25751InterruptMask reg;
+    reg.setMidbReceived(true);
+    TEST_ASSERT_TRUE(reg.midbReceived());
+    TEST_ASSERT_EQUAL_UINT8(0x20, reg.raw()[3]);
+    TEST_ASSERT_EQUAL_UINT8(1, reg.getEnabledCount());
+
+    reg.setMidbReceived(false);
+    TEST_ASSERT_FALSE(reg.midbReceived());
+    TEST_ASSERT_EQUAL_UINT8(0x00, reg.raw()[3]);
+
+    uint8_t ones[INT_MASK1_SIZE];
+    for (size_t i = 0; i < INT_MASK1_SIZE; i++) ones[i] = 0xFF;
+    TPS25751InterruptMask full(ones);
+    full.setMidbReceived(false);
+    TEST_ASSERT_EQUAL_UINT8(0xDF, full.raw()[3]);
+    TEST_ASSERT_TRUE(full.cmd1Complete());  // bit 30 untouched
+}
+
+void test_set_discover_mode_completed_round_trip_and_preserves_other_bits()
+{
+    // Rev. B bit 51 (SLVUCR8B p.21) -> byte 6 bit 3.
+    TPS25751InterruptMask reg;
+    reg.setDiscoverModeCompleted(true);
+    TEST_ASSERT_TRUE(reg.discoverModeCompleted());
+    TEST_ASSERT_EQUAL_UINT8(0x08, reg.raw()[6]);
+    TEST_ASSERT_TRUE(reg.hasAnyEnabled());
+    TEST_ASSERT_EQUAL_UINT8(1, reg.getEnabledCount());
+
+    reg.setDiscoverModeCompleted(false);
+    TEST_ASSERT_FALSE(reg.discoverModeCompleted());
+    TEST_ASSERT_EQUAL_UINT8(0x00, reg.raw()[6]);
+
+    uint8_t ones[INT_MASK1_SIZE];
+    for (size_t i = 0; i < INT_MASK1_SIZE; i++) ones[i] = 0xFF;
+    TPS25751InterruptMask full(ones);
+    full.setDiscoverModeCompleted(false);
+    TEST_ASSERT_EQUAL_UINT8(0xF7, full.raw()[6]);
+}
+
 void test_setters_no_op_on_invalid_register()
 {
     // A moved-from register is !isValid(); setters must guard and no-op.
@@ -307,6 +349,8 @@ int main(int, char **)
     RUN_TEST(test_set_overcurrent_preserves_other_bits);
     RUN_TEST(test_set_liquid_detection_preserves_other_bits);
     RUN_TEST(test_set_i2c_controller_nacked_preserves_other_bits);
+    RUN_TEST(test_set_midb_received_round_trip_and_preserves_other_bits);
+    RUN_TEST(test_set_discover_mode_completed_round_trip_and_preserves_other_bits);
     RUN_TEST(test_setters_no_op_on_invalid_register);
 
     RUN_TEST(test_copy_constructor_deep_copies);

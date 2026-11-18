@@ -141,6 +141,23 @@ public:
     uint32_t sinkMinRequiredPower_mW() const;
 
     /**
+     * @brief Get the raw Auto Neg Max Current field (bits 21:12)
+     *
+     * Maximum current the PD controller will request. The host should keep
+     * every TX_SINK_CAPS PDO's max current at or below this value. Reset 145h
+     * (3250 mA). Source: SLVUCR8B (Rev. B, 2026-08), page 40.
+     *
+     * @return Raw 10-bit value (10 mA/LSB)
+     */
+    uint16_t rawAutoNegMaxCurrent() const;
+
+    /**
+     * @brief Get the maximum current to request, in milliamps
+     * @return autoNegMaxCurrent in mA (raw * 10)
+     */
+    uint16_t autoNegMaxCurrent_mA() const;
+
+    /**
      * @brief Get the raw Auto Neg Max Voltage field
      * @return Raw 10-bit value (50 mV/LSB)
      * @see TI TPS25751 Technical Reference Manual, Table 3-21, bits 41:32
@@ -197,12 +214,15 @@ public:
     PpsRequestInterval ppsRequestInterval() const;
 
     /**
-     * @brief Get the PPS Source Operating Mode selection
+     * @brief Get the PPS Operating Mode selection
+     *
+     * Source: SLVUCR8B (Rev. B, 2026-08), page 40 ("PPS Operating Mode";
+     * earlier library versions said "PPS Source Operating Mode").
      * @return true if the system is assumed to be in Constant Voltage (CV) mode
      * @return false if the system is assumed to be in Current-Limit (CC) mode
      * @see TI TPS25751 Technical Reference Manual, Table 3-21, bit 67
      */
-    bool ppsSourceOperatingModeConstantVoltage() const;
+    bool ppsOperatingModeConstantVoltage() const;
 
     /**
      * @brief Get the PPS Required Full Voltage Range configuration
@@ -234,17 +254,20 @@ public:
     uint16_t ppsOperatingCurrent_mA() const;
 
     /**
-     * @brief Get the raw PPS Output Voltage field
+     * @brief Get the raw PPS Operating Voltage field
+     *
+     * Source: SLVUCR8B (Rev. B, 2026-08), page 40 ("PPS Operating Voltage";
+     * earlier library versions said "PPS Output Voltage").
      * @return Raw 11-bit value (20 mV/LSB)
      * @see TI TPS25751 Technical Reference Manual, Table 3-21, bits 115:105
      */
-    uint16_t rawPpsOutputVoltage() const;
+    uint16_t rawPpsOperatingVoltage() const;
 
     /**
-     * @brief Get the desired PPS sink output voltage, in millivolts
-     * @return ppsOutputVoltage in mV (raw * 20)
+     * @brief Get the desired PPS sink operating voltage, in millivolts
+     * @return ppsOperatingVoltage in mV (raw * 20)
      */
-    uint16_t ppsOutputVoltage_mV() const;
+    uint16_t ppsOperatingVoltage_mV() const;
 
     // --- Setters (1:1 with the accessors above; each a single setBits() call) --
 
@@ -279,6 +302,12 @@ public:
     void setRawSinkMinRequiredPower(uint16_t raw);
 
     /**
+     * @brief Set the raw Auto Neg Max Current field (bits 21:12)
+     * @param raw Raw 10-bit value (10 mA/LSB); values above 0x3FF are masked
+     */
+    void setRawAutoNegMaxCurrent(uint16_t raw);
+
+    /**
      * @brief Set the raw Auto Neg Max Voltage field
      * @param raw Raw 10-bit value (50 mV/LSB); values above 0x3FF are masked
      */
@@ -302,8 +331,8 @@ public:
     /// @brief Set the PPS Request Interval field
     void setPpsRequestInterval(PpsRequestInterval interval);
 
-    /// @brief Set the PPS Source Operating Mode selection (true = Constant Voltage)
-    void setPpsSourceOperatingModeConstantVoltage(bool constantVoltage);
+    /// @brief Set the PPS Operating Mode selection (true = Constant Voltage)
+    void setPpsOperatingModeConstantVoltage(bool constantVoltage);
 
     /// @brief Set the PPS Required Full Voltage Range configuration
     void setPpsRequiredFullVoltageRange(bool required);
@@ -318,10 +347,32 @@ public:
     void setRawPpsOperatingCurrent(uint8_t raw);
 
     /**
-     * @brief Set the raw PPS Output Voltage field
+     * @brief Set the raw PPS Operating Voltage field
      * @param raw Raw 11-bit value (20 mV/LSB); values above 0x7FF are masked
      */
-    void setRawPpsOutputVoltage(uint16_t raw);
+    void setRawPpsOperatingVoltage(uint16_t raw);
+
+    // --- Deprecated pre-Rev. B names: same bits, same units -------------------
+
+    /// @deprecated Use ppsOperatingModeConstantVoltage().
+    [[deprecated("SLVUCR8B Rev. B p.40 names bit 67 PPS Operating Mode; use ppsOperatingModeConstantVoltage()")]]
+    bool ppsSourceOperatingModeConstantVoltage() const { return ppsOperatingModeConstantVoltage(); }
+
+    /// @deprecated Use setPpsOperatingModeConstantVoltage().
+    [[deprecated("SLVUCR8B Rev. B p.40 names bit 67 PPS Operating Mode; use setPpsOperatingModeConstantVoltage()")]]
+    void setPpsSourceOperatingModeConstantVoltage(bool constantVoltage) { setPpsOperatingModeConstantVoltage(constantVoltage); }
+
+    /// @deprecated Use rawPpsOperatingVoltage().
+    [[deprecated("SLVUCR8B Rev. B p.40 names bits 115:105 PPS Operating Voltage; use rawPpsOperatingVoltage()")]]
+    uint16_t rawPpsOutputVoltage() const { return rawPpsOperatingVoltage(); }
+
+    /// @deprecated Use ppsOperatingVoltage_mV().
+    [[deprecated("SLVUCR8B Rev. B p.40 names bits 115:105 PPS Operating Voltage; use ppsOperatingVoltage_mV()")]]
+    uint16_t ppsOutputVoltage_mV() const { return ppsOperatingVoltage_mV(); }
+
+    /// @deprecated Use setRawPpsOperatingVoltage().
+    [[deprecated("SLVUCR8B Rev. B p.40 names bits 115:105 PPS Operating Voltage; use setRawPpsOperatingVoltage()")]]
+    void setRawPpsOutputVoltage(uint16_t raw) { setRawPpsOperatingVoltage(raw); }
 
     void debugPrint(Stream &s = Serial) const override;
 
@@ -352,6 +403,9 @@ private:
     static constexpr uint8_t kAutoComputeSinkMaxVoltageBit = 5;
     static constexpr uint8_t kAutoDisableSinkUponCapMismatchBit = 6;
 
+    static constexpr uint8_t kAutoNegMaxCurrentShift = 12;   ///< bits 21:12 (SLVUCR8B p.40)
+    static constexpr uint8_t kAutoNegMaxCurrentBits = 10;
+
     static constexpr uint8_t kSinkMinRequiredPowerShift = 22;
     static constexpr uint8_t kSinkMinRequiredPowerBits = 10;
 
@@ -369,20 +423,21 @@ private:
     static constexpr uint8_t kPpsRequestIntervalShift = 65;
     static constexpr uint8_t kPpsRequestIntervalBits = 2;
 
-    static constexpr uint8_t kPpsSourceOperatingModeBit = 67;
+    static constexpr uint8_t kPpsOperatingModeBit = 67;
     static constexpr uint8_t kPpsRequiredFullVoltageRangeBit = 68;
     static constexpr uint8_t kPpsDisableSinkUponNonApdoBit = 69;
 
     static constexpr uint8_t kPpsOperatingCurrentShift = 96;
     static constexpr uint8_t kPpsOperatingCurrentBits = 7;
 
-    static constexpr uint8_t kPpsOutputVoltageShift = 105;
-    static constexpr uint8_t kPpsOutputVoltageBits = 11;
+    static constexpr uint8_t kPpsOperatingVoltageShift = 105;
+    static constexpr uint8_t kPpsOperatingVoltageBits = 11;
 
     // Unit conversion constants.
     static constexpr uint16_t kMilliwattsPerLsb250 = 250;
     static constexpr uint16_t kMillivoltsPerLsb50 = 50;
     static constexpr uint16_t kMilliampsPerLsb50 = 50;
+    static constexpr uint16_t kMilliampsPerLsb10 = 10;
     static constexpr uint16_t kMillivoltsPerLsb20 = 20;
 };
 

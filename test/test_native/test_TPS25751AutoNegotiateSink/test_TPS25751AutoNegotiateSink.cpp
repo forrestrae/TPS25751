@@ -19,17 +19,18 @@
  *   bit 4  autoComputeSinkMinVoltage      = 0 (host-provided)
  *   bit 5  autoComputeSinkMaxVoltage      = 0 (host-provided)
  *   bit 6  autoDisableSinkUponCapMismatch = 1
+ *   bits 21:12  autoNegMaxCurrent     raw = 0    (new accessor; see reset test)
  *   bits 31:22  sinkMinRequiredPower  raw = 100  -> 25000 mW
  *   bits 41:32  autoNegMaxVoltage     raw = 240  -> 12000 mV
  *   bits 51:42  autoNegMinVoltage     raw = 100  ->  5000 mV  (min <= max)
  *   bits 61:52  capMismatchPower      raw = 50   -> 12500 mW
  *   bit 64  ppsEnableSinkMode              = 1
  *   bits 66:65  ppsRequestInterval    raw = 3    (Interval1s)
- *   bit 67  ppsSourceOperatingModeCV       = 1
+ *   bit 67  ppsOperatingModeCV             = 1
  *   bit 68  ppsRequiredFullVoltageRange    = 1
  *   bit 69  ppsDisableSinkUponNonApdo      = 1
  *   bits 102:96 ppsOperatingCurrent   raw = 60   ->  3000 mA
- *   bits 115:105 ppsOutputVoltage     raw = 200  ->  4000 mV
+ *   bits 115:105 ppsOperatingVoltage  raw = 200  ->  4000 mV
  */
 
 #include <unity.h>
@@ -205,7 +206,7 @@ void test_decode_pps_fields()
 
     TEST_ASSERT_TRUE(reg.ppsEnableSinkMode());
     TEST_ASSERT_EQUAL(PpsRequestInterval::Interval1s, reg.ppsRequestInterval());
-    TEST_ASSERT_TRUE(reg.ppsSourceOperatingModeConstantVoltage());
+    TEST_ASSERT_TRUE(reg.ppsOperatingModeConstantVoltage());
     TEST_ASSERT_TRUE(reg.ppsRequiredFullVoltageRange());
     TEST_ASSERT_TRUE(reg.ppsDisableSinkUponNonApdoContract());
 }
@@ -220,8 +221,8 @@ void test_decode_pps_operating_current()
 void test_decode_pps_output_voltage()
 {
     TPS25751AutoNegotiateSink reg(FULL_BUFFER);
-    TEST_ASSERT_EQUAL_UINT16(200, reg.rawPpsOutputVoltage());
-    TEST_ASSERT_EQUAL_UINT16(4000, reg.ppsOutputVoltage_mV());
+    TEST_ASSERT_EQUAL_UINT16(200, reg.rawPpsOperatingVoltage());
+    TEST_ASSERT_EQUAL_UINT16(4000, reg.ppsOperatingVoltage_mV());
 }
 
 void test_pps_request_interval_enum_bounds()
@@ -373,10 +374,10 @@ void test_set_pps_enable_sink_mode_round_trip_preserves_neighbours()
 void test_set_pps_source_operating_mode_round_trip()
 {
     TPS25751AutoNegotiateSink reg;
-    reg.setPpsSourceOperatingModeConstantVoltage(true);
-    TEST_ASSERT_TRUE(reg.ppsSourceOperatingModeConstantVoltage());
-    reg.setPpsSourceOperatingModeConstantVoltage(false);
-    TEST_ASSERT_FALSE(reg.ppsSourceOperatingModeConstantVoltage());
+    reg.setPpsOperatingModeConstantVoltage(true);
+    TEST_ASSERT_TRUE(reg.ppsOperatingModeConstantVoltage());
+    reg.setPpsOperatingModeConstantVoltage(false);
+    TEST_ASSERT_FALSE(reg.ppsOperatingModeConstantVoltage());
 }
 
 void test_set_pps_required_full_voltage_range_round_trip()
@@ -408,20 +409,105 @@ void test_set_raw_pps_operating_current_masks_overwide_value()
     TEST_ASSERT_EQUAL_UINT8(0x7F, reg.rawPpsOperatingCurrent());
 }
 
-void test_set_raw_pps_output_voltage_round_trip()
+void test_set_raw_pps_operating_voltage_round_trip()
 {
     TPS25751AutoNegotiateSink reg;
-    reg.setRawPpsOutputVoltage(200);
-    TEST_ASSERT_EQUAL_UINT16(200, reg.rawPpsOutputVoltage());
-    TEST_ASSERT_EQUAL_UINT16(4000, reg.ppsOutputVoltage_mV());
+    reg.setRawPpsOperatingVoltage(200);
+    TEST_ASSERT_EQUAL_UINT16(200, reg.rawPpsOperatingVoltage());
+    TEST_ASSERT_EQUAL_UINT16(4000, reg.ppsOperatingVoltage_mV());
 }
 
-void test_set_raw_pps_output_voltage_masks_overwide_value()
+void test_set_raw_pps_operating_voltage_masks_overwide_value()
 {
     TPS25751AutoNegotiateSink reg;
-    reg.setRawPpsOutputVoltage(0xFFFF);  // only 11 bits (0x7FF) should stick
-    TEST_ASSERT_EQUAL_UINT16(0x7FF, reg.rawPpsOutputVoltage());
+    reg.setRawPpsOperatingVoltage(0xFFFF);  // only 11 bits (0x7FF) should stick
+    TEST_ASSERT_EQUAL_UINT16(0x7FF, reg.rawPpsOperatingVoltage());
 }
+
+// --- Rev. B: Auto Neg Max Current (bits 21:12) and reset value ---------------
+// Source: SLVUCR8B (Rev. B, 2026-08), page 40.
+
+// Rev. B reset 21919041145076h, little-endian.
+constexpr uint8_t REV_B_RESET[AN_SINK_SIZE] = {
+    0x76, 0x50, 0x14, 0x41, 0x90, 0x91, 0x21, 0x00,
+};
+
+void test_reset_value_decodes_rev_b_defaults()
+{
+    TPS25751AutoNegotiateSink reg(REV_B_RESET);
+
+    TEST_ASSERT_FALSE(reg.rdoPriorityPrefersLowerVoltage());      // bit 0 = 0
+    TEST_ASSERT_TRUE(reg.noUSBSuspend());                         // bit 1 = 1
+    TEST_ASSERT_TRUE(reg.autoComputeSinkMinPower());              // bit 2 = 1
+    TEST_ASSERT_FALSE(reg.noCapabilityMismatch());                // bit 3 = 0
+    TEST_ASSERT_TRUE(reg.autoComputeSinkMinVoltage());            // bit 4 = 1
+    TEST_ASSERT_TRUE(reg.autoComputeSinkMaxVoltage());            // bit 5 = 1
+    TEST_ASSERT_TRUE(reg.autoDisableSinkUponCapabilityMismatch()); // bit 6 = 1
+
+    TEST_ASSERT_EQUAL_UINT16(0x145, reg.rawAutoNegMaxCurrent());  // bits 21:12
+    TEST_ASSERT_EQUAL_UINT16(3250, reg.autoNegMaxCurrent_mA());
+    TEST_ASSERT_EQUAL_UINT16(0x104, reg.rawSinkMinRequiredPower());
+    TEST_ASSERT_EQUAL_UINT16(0x190, reg.rawAutoNegMaxVoltage());
+    TEST_ASSERT_EQUAL_UINT16(0x64, reg.rawAutoNegMinVoltage());
+    TEST_ASSERT_EQUAL_UINT16(0x2, reg.rawCapMismatchPower());
+
+    TEST_ASSERT_TRUE(reg.isSemanticallyValid());
+}
+
+void test_set_raw_auto_neg_max_current_round_trip()
+{
+    TPS25751AutoNegotiateSink reg;
+    reg.setRawAutoNegMaxCurrent(0x145);
+
+    TEST_ASSERT_EQUAL_UINT16(0x145, reg.rawAutoNegMaxCurrent());
+    TEST_ASSERT_EQUAL_UINT16(3250, reg.autoNegMaxCurrent_mA());
+    // bits 21:12 = 0x145 -> byte1 bits 7:4 = 0x5, byte2 bits 5:0 = 0x14.
+    TEST_ASSERT_EQUAL_UINT8(0x50, reg.raw()[1]);
+    TEST_ASSERT_EQUAL_UINT8(0x14, reg.raw()[2]);
+}
+
+void test_set_raw_auto_neg_max_current_preserves_neighbouring_fields()
+{
+    TPS25751AutoNegotiateSink reg(REV_B_RESET);
+    const uint16_t sinkMinPowerBefore = reg.rawSinkMinRequiredPower();
+
+    reg.setRawAutoNegMaxCurrent(0);
+
+    TEST_ASSERT_EQUAL_UINT16(0, reg.rawAutoNegMaxCurrent());
+    TEST_ASSERT_EQUAL_UINT16(sinkMinPowerBefore, reg.rawSinkMinRequiredPower());  // bits 31:22
+    TEST_ASSERT_EQUAL_UINT8(0x76, reg.raw()[0]);   // bits 7:0 untouched
+    TEST_ASSERT_EQUAL_UINT8(0x00, reg.raw()[1]);   // bits 11:8 reserved were 0
+    TEST_ASSERT_EQUAL_UINT8(0x00, reg.raw()[2]);   // bits 23:22 (Sink Min Power low bits) were 0
+}
+
+void test_set_raw_auto_neg_max_current_masks_overwide_value()
+{
+    TPS25751AutoNegotiateSink reg;
+    reg.setRawAutoNegMaxCurrent(0xFFFF);  // only 10 bits (0x3FF) should stick
+
+    TEST_ASSERT_EQUAL_UINT16(0x3FF, reg.rawAutoNegMaxCurrent());
+    TEST_ASSERT_EQUAL_UINT16(0, reg.rawSinkMinRequiredPower());
+    TEST_ASSERT_EQUAL_UINT8(0x00, reg.raw()[0]);
+}
+
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
+void test_deprecated_pps_aliases_match_rev_b_names()
+{
+    // Pre-Rev. B names must read and write the same bits (67 and 115:105).
+    TPS25751AutoNegotiateSink reg;
+
+    reg.setPpsSourceOperatingModeConstantVoltage(true);
+    TEST_ASSERT_TRUE(reg.ppsOperatingModeConstantVoltage());
+    TEST_ASSERT_EQUAL(reg.ppsOperatingModeConstantVoltage(), reg.ppsSourceOperatingModeConstantVoltage());
+    TEST_ASSERT_EQUAL_UINT8(0x08, reg.raw()[8]);  // bit 67
+
+    reg.setRawPpsOutputVoltage(200);
+    TEST_ASSERT_EQUAL_UINT16(200, reg.rawPpsOperatingVoltage());
+    TEST_ASSERT_EQUAL_UINT16(reg.rawPpsOperatingVoltage(), reg.rawPpsOutputVoltage());
+    TEST_ASSERT_EQUAL_UINT16(reg.ppsOperatingVoltage_mV(), reg.ppsOutputVoltage_mV());
+}
+#pragma GCC diagnostic pop
 
 void test_setters_no_op_on_invalid_register()
 {
@@ -504,8 +590,13 @@ int main(int, char **)
     RUN_TEST(test_set_pps_disable_sink_upon_non_apdo_contract_round_trip);
     RUN_TEST(test_set_raw_pps_operating_current_round_trip);
     RUN_TEST(test_set_raw_pps_operating_current_masks_overwide_value);
-    RUN_TEST(test_set_raw_pps_output_voltage_round_trip);
-    RUN_TEST(test_set_raw_pps_output_voltage_masks_overwide_value);
+    RUN_TEST(test_set_raw_pps_operating_voltage_round_trip);
+    RUN_TEST(test_set_raw_pps_operating_voltage_masks_overwide_value);
+    RUN_TEST(test_reset_value_decodes_rev_b_defaults);
+    RUN_TEST(test_set_raw_auto_neg_max_current_round_trip);
+    RUN_TEST(test_set_raw_auto_neg_max_current_preserves_neighbouring_fields);
+    RUN_TEST(test_set_raw_auto_neg_max_current_masks_overwide_value);
+    RUN_TEST(test_deprecated_pps_aliases_match_rev_b_names);
     RUN_TEST(test_setters_no_op_on_invalid_register);
 
     RUN_TEST(test_copy_constructor_deep_copies);

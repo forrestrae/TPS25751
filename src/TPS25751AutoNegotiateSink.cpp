@@ -39,6 +39,16 @@ bool TPS25751AutoNegotiateSink::autoDisableSinkUponCapabilityMismatch() const
 
 // --- Decode: scaled multi-bit fields -----------------------------------------
 
+uint16_t TPS25751AutoNegotiateSink::rawAutoNegMaxCurrent() const
+{
+    return extractBits16(kAutoNegMaxCurrentShift, kAutoNegMaxCurrentBits);
+}
+
+uint16_t TPS25751AutoNegotiateSink::autoNegMaxCurrent_mA() const
+{
+    return static_cast<uint16_t>(rawAutoNegMaxCurrent() * kMilliampsPerLsb10);
+}
+
 uint16_t TPS25751AutoNegotiateSink::rawSinkMinRequiredPower() const
 {
     return extractBits16(kSinkMinRequiredPowerShift, kSinkMinRequiredPowerBits);
@@ -93,9 +103,9 @@ PpsRequestInterval TPS25751AutoNegotiateSink::ppsRequestInterval() const
                                             PpsRequestInterval::Interval8s);
 }
 
-bool TPS25751AutoNegotiateSink::ppsSourceOperatingModeConstantVoltage() const
+bool TPS25751AutoNegotiateSink::ppsOperatingModeConstantVoltage() const
 {
-    return extractBits(kPpsSourceOperatingModeBit, 1);
+    return extractBits(kPpsOperatingModeBit, 1);
 }
 
 bool TPS25751AutoNegotiateSink::ppsRequiredFullVoltageRange() const
@@ -118,14 +128,14 @@ uint16_t TPS25751AutoNegotiateSink::ppsOperatingCurrent_mA() const
     return static_cast<uint16_t>(rawPpsOperatingCurrent()) * kMilliampsPerLsb50;
 }
 
-uint16_t TPS25751AutoNegotiateSink::rawPpsOutputVoltage() const
+uint16_t TPS25751AutoNegotiateSink::rawPpsOperatingVoltage() const
 {
-    return extractBits16(kPpsOutputVoltageShift, kPpsOutputVoltageBits);
+    return extractBits16(kPpsOperatingVoltageShift, kPpsOperatingVoltageBits);
 }
 
-uint16_t TPS25751AutoNegotiateSink::ppsOutputVoltage_mV() const
+uint16_t TPS25751AutoNegotiateSink::ppsOperatingVoltage_mV() const
 {
-    return static_cast<uint16_t>(rawPpsOutputVoltage()) * kMillivoltsPerLsb20;
+    return static_cast<uint16_t>(rawPpsOperatingVoltage()) * kMillivoltsPerLsb20;
 }
 
 // --- Setters: each a single setBits() call; setBits() itself guards !isValid() ---
@@ -165,6 +175,11 @@ void TPS25751AutoNegotiateSink::setAutoDisableSinkUponCapabilityMismatch(bool en
     setBits(kAutoDisableSinkUponCapMismatchBit, 1, enabled ? 1u : 0u);
 }
 
+void TPS25751AutoNegotiateSink::setRawAutoNegMaxCurrent(uint16_t raw)
+{
+    setBits(kAutoNegMaxCurrentShift, kAutoNegMaxCurrentBits, raw);
+}
+
 void TPS25751AutoNegotiateSink::setRawSinkMinRequiredPower(uint16_t raw)
 {
     setBits(kSinkMinRequiredPowerShift, kSinkMinRequiredPowerBits, raw);
@@ -195,9 +210,9 @@ void TPS25751AutoNegotiateSink::setPpsRequestInterval(PpsRequestInterval interva
     setBits(kPpsRequestIntervalShift, kPpsRequestIntervalBits, static_cast<uint8_t>(interval));
 }
 
-void TPS25751AutoNegotiateSink::setPpsSourceOperatingModeConstantVoltage(bool constantVoltage)
+void TPS25751AutoNegotiateSink::setPpsOperatingModeConstantVoltage(bool constantVoltage)
 {
-    setBits(kPpsSourceOperatingModeBit, 1, constantVoltage ? 1u : 0u);
+    setBits(kPpsOperatingModeBit, 1, constantVoltage ? 1u : 0u);
 }
 
 void TPS25751AutoNegotiateSink::setPpsRequiredFullVoltageRange(bool required)
@@ -215,9 +230,9 @@ void TPS25751AutoNegotiateSink::setRawPpsOperatingCurrent(uint8_t raw)
     setBits(kPpsOperatingCurrentShift, kPpsOperatingCurrentBits, raw);
 }
 
-void TPS25751AutoNegotiateSink::setRawPpsOutputVoltage(uint16_t raw)
+void TPS25751AutoNegotiateSink::setRawPpsOperatingVoltage(uint16_t raw)
 {
-    setBits(kPpsOutputVoltageShift, kPpsOutputVoltageBits, raw);
+    setBits(kPpsOperatingVoltageShift, kPpsOperatingVoltageBits, raw);
 }
 
 void TPS25751AutoNegotiateSink::debugPrint(Stream &s) const
@@ -251,6 +266,12 @@ void TPS25751AutoNegotiateSink::debugPrint(Stream &s) const
     s.print(F("Auto Disable Sink Upon Capability Mismatch: "));
     s.println(autoDisableSinkUponCapabilityMismatch() ? F("Yes") : F("No"));
 
+    s.print(F("Auto Neg Max Current: "));
+    s.print(autoNegMaxCurrent_mA());
+    s.print(F(" mA (raw "));
+    s.print(rawAutoNegMaxCurrent());
+    s.println(F(")"));
+
     s.print(F("Sink Min Required Power: "));
     s.print(sinkMinRequiredPower_mW());
     s.print(F(" mW (raw "));
@@ -281,8 +302,8 @@ void TPS25751AutoNegotiateSink::debugPrint(Stream &s) const
     s.print(F("PPS Request Interval: "));
     s.println(toString(ppsRequestInterval()));
 
-    s.print(F("PPS Source Operating Mode: "));
-    s.println(ppsSourceOperatingModeConstantVoltage() ? F("Constant Voltage (CV)") : F("Current Limit (CC)"));
+    s.print(F("PPS Operating Mode: "));
+    s.println(ppsOperatingModeConstantVoltage() ? F("Constant Voltage (CV)") : F("Current Limit (CC)"));
 
     s.print(F("PPS Required Full Voltage Range: "));
     s.println(ppsRequiredFullVoltageRange() ? F("Yes") : F("No"));
@@ -296,10 +317,10 @@ void TPS25751AutoNegotiateSink::debugPrint(Stream &s) const
     s.print(rawPpsOperatingCurrent());
     s.println(F(")"));
 
-    s.print(F("PPS Output Voltage: "));
-    s.print(ppsOutputVoltage_mV());
+    s.print(F("PPS Operating Voltage: "));
+    s.print(ppsOperatingVoltage_mV());
     s.print(F(" mV (raw "));
-    s.print(rawPpsOutputVoltage());
+    s.print(rawPpsOperatingVoltage());
     s.println(F(")"));
 
     s.println(F("========================================"));

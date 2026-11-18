@@ -167,6 +167,33 @@ void test_connected_source_decode()
 
 // --- Semantic validation ----------------------------------------------------
 
+// Connection State values redefined in Rev. B (SLVUCR8B p.25). Byte 0:
+// bit 0 Plug Present, bits 3:1 Connection State.
+void test_connection_state_2h_is_corrosion_mitigation()
+{
+    const uint8_t data[STATUS_SIZE] = {0x05, 0x00, 0x00, 0x00, 0x00};  // plug, 2h
+    TPS25751Status status(data);
+
+    TEST_ASSERT_TRUE(status.plugPresent());
+    TEST_ASSERT_EQUAL(AUDIO_ACCESSORY, status.connectionState());
+    TEST_ASSERT_EQUAL_STRING("Corrosion Mitigation (Ra/Ra)", toString(status.connectionState()).c_str());
+}
+
+void test_connection_state_5h_is_debug_rp_rp()
+{
+    const uint8_t data[STATUS_SIZE] = {0x0B, 0x00, 0x00, 0x00, 0x00};  // plug, 5h
+    TPS25751Status status(data);
+
+    TEST_ASSERT_TRUE(status.plugPresent());
+    TEST_ASSERT_EQUAL(RESERVED, status.connectionState());
+    TEST_ASSERT_EQUAL_STRING("Debug connection (Rp/Rp)", toString(status.connectionState()).c_str());
+}
+
+void test_connection_state_1h_string()
+{
+    TEST_ASSERT_EQUAL_STRING("Port is disabled", toString(PORT_DISABLED).c_str());
+}
+
 void test_semantic_valid_states()
 {
     TEST_ASSERT_TRUE(TPS25751Status(DISCONNECTED_DATA).isSemanticallyValid());
@@ -293,6 +320,10 @@ int main(int, char **)
     RUN_TEST(test_disconnected_decode);
     RUN_TEST(test_connected_sink_decode);
     RUN_TEST(test_connected_source_decode);
+
+    RUN_TEST(test_connection_state_2h_is_corrosion_mitigation);
+    RUN_TEST(test_connection_state_5h_is_debug_rp_rp);
+    RUN_TEST(test_connection_state_1h_string);
 
     RUN_TEST(test_semantic_valid_states);
     RUN_TEST(test_semantic_plug_present_but_disconnected);

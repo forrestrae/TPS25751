@@ -7,14 +7,23 @@
 #include "TPS25751RegisterAddress.h"
 
 // Forward declare enums used for interpreting fields
+
+/**
+ * @brief STATUS Connection State (bits 3:1)
+ *
+ * Source: SLVUCR8B (Rev. B, 2026-08), page 25. Rev. B redefines 2h as
+ * corrosion mitigation (TRM text: "Corrosion Mitigaion (Ra/Ra)"; Rev. A:
+ * "Audio connection (Ra/Ra)") and 5h as "Debug connection (Rp/Rp)" (Rev. A:
+ * Reserved). The enumerator names predate that change.
+ */
 enum ConnectionState
 {
     DISCONNECTED = 0,
     PORT_DISABLED = 1,
-    AUDIO_ACCESSORY = 2,
-    DEBUG_ACCESSORY = 3,
+    AUDIO_ACCESSORY = 2,            ///< 2h: Corrosion Mitigation (Ra/Ra) in Rev. B
+    DEBUG_ACCESSORY = 3,            ///< 3h: Debug connection (Rd/Rd)
     NO_CONNECTION_RA_DETECTED = 4,
-    RESERVED = 5,
+    RESERVED = 5,                   ///< 5h: Debug connection (Rp/Rp) in Rev. B
     CONNECTED_NO_RA_DETECTED = 6,
     CONNECTED_RA_DETECTED = 7
 };

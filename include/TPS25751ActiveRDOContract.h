@@ -10,7 +10,13 @@
  * This register stores the RDO (Request Data Object) of the current explicit
  * USB PD contract, or all zeroes if no contract exists.
  *
- * Register Size: 4 bytes
+ * Layout (SLVUCR8B (Rev. B, 2026-08), page 39):
+ * - Bits 31:0    RDO of the active contract (decoded by the accessors below)
+ * - Bits 95:32   Reserved
+ * - Bits 127:96  RequestedRDO: the RDO the port partner requested while the
+ *                PD controller is the source (see requestedRDO())
+ *
+ * Register Size: 16 bytes
  * Access: Read-only
  * Address: 0x35
  */
@@ -86,9 +92,21 @@ public:
 
     /**
      * @brief Check if contract exists
-     * @return true if an active RDO contract exists
+     * @return true if an active RDO contract exists (bits 31:0 non-zero)
      */
     bool hasActiveContract() const;
+
+    /**
+     * @brief Get the RDO requested by the port partner (bits 127:96)
+     *
+     * Valid when the PD controller is acting as a source. Updated when a Source
+     * PDO has been negotiated (the Accept message has been transmitted and the
+     * tSrcTransition timer has expired). Source: SLVUCR8B (Rev. B, 2026-08),
+     * page 39.
+     *
+     * @return Raw 32-bit RequestedRDO word; 0 if the buffer is too short
+     */
+    uint32_t requestedRDO() const;
 
     void debugPrint(Stream &s = Serial) const override;
 

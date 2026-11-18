@@ -46,8 +46,15 @@ bool TPS25751ActiveRDOContract::hasActiveContract() const {
     return allBits != 0;
 }
 
+uint32_t TPS25751ActiveRDOContract::requestedRDO() const {
+    // Bits 127:96 (bytes 12-15, little-endian). Source: SLVUCR8B (Rev. B, 2026-08), page 39.
+    return extractBits32(96, 32);
+}
+
 void TPS25751ActiveRDOContract::debugPrint(Stream &s) const {
     s.println(F("=== Active RDO Contract Register (0x35) ==="));
+
+    s.print(F("  Requested RDO (as source): 0x")); s.println(requestedRDO(), HEX);
 
     if (!hasActiveContract()) {
         s.println(F("  No active RDO contract"));

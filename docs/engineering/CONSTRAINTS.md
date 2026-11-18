@@ -649,9 +649,10 @@ for (uint8_t i = 0; i < pdoCount; i++) {
 
 > **The byte-1 PDO offset above is NOT universal.** It holds for
 > RECEIVED_SOURCE/SINK_CAPS (0x30/0x31) and TRANSMIT_SINK_CAPS (0x33), but
-> **TRANSMIT_SOURCE_CAPS (0x32)** inserts two *Power-Path* bytes after the count
-> byte: bits 9:8 = Power Path for PDO 1, 11:10 = PDO 2, … 21:20 = PDO 7 (bits
-> 23:22 reserved), so **PDO 1 starts at byte 3** and PDO *n* at `3 + (n-1)*4`.
+> **TRANSMIT_SOURCE_CAPS (0x32)** inserts two bytes after the count byte:
+> bits 9:8 = Power Path for PDO 1 and bits 23:10 reserved (SLVUCR8B Rev. B,
+> page 36; Rev. A used bits 21:10 for Power Path for PDO 2-7), so **PDO 1
+> starts at byte 3** and PDO *n* at `3 + (n-1)*4`.
 > Always check the specific register's field table before assuming the offset.
 
 ### Transmit Capabilities encode quirks (Batch D)

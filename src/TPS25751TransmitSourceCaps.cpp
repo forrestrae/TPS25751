@@ -38,8 +38,10 @@ bool TPS25751TransmitSourceCaps::hasSourceCaps() const {
 }
 
 uint8_t TPS25751TransmitSourceCaps::getPowerPathForPDO(uint8_t index) const {
-    if (index >= 7) return 0;
-    return extractBits(8 + index * 2, 2);
+    // Only PDO 1 has a Power Path field (bits 9:8); bits 23:10 are reserved.
+    // Source: SLVUCR8B (Rev. B, 2026-08), page 36.
+    if (index != 0) return 0;
+    return extractBits(8, 2);
 }
 
 // Helper method to extract bits from a specific PDO
@@ -230,8 +232,10 @@ void TPS25751TransmitSourceCaps::setPPSPDO(uint8_t index, uint16_t maxVoltage_mV
 }
 
 void TPS25751TransmitSourceCaps::setPowerPathForPDO(uint8_t index, uint8_t pp) {
-    if (index >= 7) return;
-    setBits(8 + index * 2, 2, pp);
+    // Only PDO 1 has a Power Path field (bits 9:8); never write reserved bits
+    // 23:10. Source: SLVUCR8B (Rev. B, 2026-08), page 36.
+    if (index != 0) return;
+    setBits(8, 2, pp);
 }
 
 void TPS25751TransmitSourceCaps::debugPrint(Stream &s) const {
@@ -250,7 +254,10 @@ void TPS25751TransmitSourceCaps::debugPrint(Stream &s) const {
         s.println();
         s.print(F("--- PDO ")); s.print(i + 1); s.println(F(" ---"));
 
-        s.print(F("Power Path: 0x")); s.println(getPowerPathForPDO(i), HEX);
+        if (i == 0) {
+            // Rev. B defines a Power Path only for PDO 1 (SLVUCR8B p.36).
+            s.print(F("Power Path: 0x")); s.println(getPowerPathForPDO(0), HEX);
+        }
 
         PDOType type = getPDOType(i);
         s.print(F("Type: "));

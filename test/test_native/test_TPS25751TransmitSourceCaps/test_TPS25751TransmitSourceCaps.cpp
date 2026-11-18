@@ -6,10 +6,11 @@
  *
  * TRANSMIT_SOURCE_CAPABILITIES (0x32) is 63 bytes:
  *   Byte 0, bits 2:0   Number Valid PDOs (0-7); bits 7:3 reserved
- *   Byte 1             Power Path for PDO 1 (bits 1:0) / PDO 2 (bits 3:2) /
- *                      PDO 3 (bits 5:4) / PDO 4 (bits 7:6)
- *   Byte 2             Power Path for PDO 5 (bits 1:0) / PDO 6 (bits 3:2) /
- *                      PDO 7 (bits 5:4); bits 7:6 reserved
+ *   Byte 1, bits 1:0   Power Path for PDO 1 (register bits 9:8;
+ *                      0h = PP5V, 2h = PP_EXT)
+ *   Bits 23:10         Reserved (byte 1 bits 7:2, byte 2). Rev. A used
+ *                      them for Power Path for PDO 2-7; Source: SLVUCR8B
+ *                      (Rev. B, 2026-08), page 36.
  *   Bytes 3..30        PDO 1..7, 4 bytes each, little-endian
  *                      (PDO n at byte 3 + (n-1)*4)
  *
@@ -114,13 +115,13 @@ void test_setting_pdo0_does_not_disturb_power_path_bytes()
 {
     TPS25751TransmitSourceCaps reg;
     reg.setPowerPathForPDO(0, 0x2);
-    reg.setPowerPathForPDO(3, 0x2);
 
     reg.setPDO(0, 0xFFFFFFFF);
 
-    // Bytes 1-2 (power path) must be untouched by a PDO write.
+    // Bytes 1-2 (power path + reserved) must be untouched by a PDO write.
     TEST_ASSERT_EQUAL_UINT8(0x02, reg.getPowerPathForPDO(0));
-    TEST_ASSERT_EQUAL_UINT8(0x02, reg.getPowerPathForPDO(3));
+    TEST_ASSERT_EQUAL_UINT8(0x02, reg.raw()[1]);
+    TEST_ASSERT_EQUAL_UINT8(0x00, reg.raw()[2]);
 }
 
 void test_setting_power_path_does_not_disturb_pdo0()
@@ -129,7 +130,6 @@ void test_setting_power_path_does_not_disturb_pdo0()
     reg.setPDO(0, 0x11223344);
 
     reg.setPowerPathForPDO(0, 0x2);
-    reg.setPowerPathForPDO(1, 0x2);
 
     TEST_ASSERT_EQUAL_UINT32(0x11223344, reg.getPDO(0));
 }
@@ -158,32 +158,62 @@ void test_set_pdo_count_preserves_reserved_bits()
 
 // --- Power Path round-trip + reserved-bit preservation -----------------------
 
-void test_power_path_round_trip()
+void test_power_path_pdo1_round_trip()
 {
     TPS25751TransmitSourceCaps reg;
-    reg.setPowerPathForPDO(0, 0x2);
-    reg.setPowerPathForPDO(6, 0x2);
 
+    reg.setPowerPathForPDO(0, 0x2);  // PP_EXT
     TEST_ASSERT_EQUAL_UINT8(0x2, reg.getPowerPathForPDO(0));
-    TEST_ASSERT_EQUAL_UINT8(0x2, reg.getPowerPathForPDO(6));
+    TEST_ASSERT_EQUAL_UINT8(0x02, reg.raw()[1]);  // bits 9:8 = byte 1 bits 1:0
+
+    reg.setPowerPathForPDO(0, 0x0);  // PP5V
+    TEST_ASSERT_EQUAL_UINT8(0x0, reg.getPowerPathForPDO(0));
+    TEST_ASSERT_EQUAL_UINT8(0x00, reg.raw()[1]);
 }
 
-void test_power_path_preserves_reserved_bits_23_22()
+void test_power_path_pdo1_preserves_reserved_bits_23_10()
 {
     uint8_t fullOnes[TX_SOURCE_CAPS_SIZE];
     memset(fullOnes, 0xFF, sizeof(fullOnes));
     TPS25751TransmitSourceCaps reg(fullOnes, TX_SOURCE_CAPS_SIZE);
 
-    // Clear power path for PDO 5 and 6 (bits 17:16 and 19:18), leaving
-    // reserved bits 23:22 (byte 2 bits 7:6) untouched.
-    reg.setPowerPathForPDO(4, 0x0);
-    reg.setPowerPathForPDO(5, 0x0);
+    reg.setPowerPathForPDO(0, 0x0);
 
-    TEST_ASSERT_EQUAL_UINT8(0x0, reg.getPowerPathForPDO(4));
-    TEST_ASSERT_EQUAL_UINT8(0x0, reg.getPowerPathForPDO(5));
-    // byte 2 = 0b11pp'pp00 with pp=00,00 -> bits7:6 (reserved) still 1,
-    // bits5:4 (PDO7) still 1 (0b11), bits3:0 cleared -> 0b11110000 = 0xF0
-    TEST_ASSERT_EQUAL_UINT8(0xF0, reg.raw()[2]);
+    TEST_ASSERT_EQUAL_UINT8(0x0, reg.getPowerPathForPDO(0));
+    TEST_ASSERT_EQUAL_UINT8(0xFC, reg.raw()[1]);  // bits 15:10 still set
+    TEST_ASSERT_EQUAL_UINT8(0xFF, reg.raw()[2]);  // bits 23:16 still set
+}
+
+void test_power_path_index_1_to_6_set_is_no_op()
+{
+    // Rev. B marks bits 23:10 reserved (SLVUCR8B p.36): writes for PDO 2-7
+    // must not touch the buffer, whatever the starting contents.
+    uint8_t fullOnes[TX_SOURCE_CAPS_SIZE];
+    memset(fullOnes, 0xFF, sizeof(fullOnes));
+    TPS25751TransmitSourceCaps ones(fullOnes, TX_SOURCE_CAPS_SIZE);
+    TPS25751TransmitSourceCaps zeros;
+
+    for (uint8_t index = 1; index <= 6; index++) {
+        ones.setPowerPathForPDO(index, 0x0);
+        zeros.setPowerPathForPDO(index, 0x3);
+    }
+    ones.setPowerPathForPDO(7, 0x0);    // out of range entirely
+    zeros.setPowerPathForPDO(255, 0x3);
+
+    TEST_ASSERT_EACH_EQUAL_UINT8(0xFF, ones.raw(), TX_SOURCE_CAPS_SIZE);
+    TEST_ASSERT_EACH_EQUAL_UINT8(0x00, zeros.raw(), TX_SOURCE_CAPS_SIZE);
+}
+
+void test_power_path_index_1_to_6_get_returns_zero()
+{
+    uint8_t fullOnes[TX_SOURCE_CAPS_SIZE];
+    memset(fullOnes, 0xFF, sizeof(fullOnes));
+    TPS25751TransmitSourceCaps reg(fullOnes, TX_SOURCE_CAPS_SIZE);
+
+    TEST_ASSERT_EQUAL_UINT8(0x3, reg.getPowerPathForPDO(0));
+    for (uint8_t index = 1; index <= 6; index++) {
+        TEST_ASSERT_EQUAL_UINT8(0, reg.getPowerPathForPDO(index));
+    }
 }
 
 // --- Encode<->decode round trip for all four PDO types -----------------------
@@ -364,8 +394,10 @@ int main(int, char **)
     RUN_TEST(test_set_pdo_count_round_trip);
     RUN_TEST(test_set_pdo_count_preserves_reserved_bits);
 
-    RUN_TEST(test_power_path_round_trip);
-    RUN_TEST(test_power_path_preserves_reserved_bits_23_22);
+    RUN_TEST(test_power_path_pdo1_round_trip);
+    RUN_TEST(test_power_path_pdo1_preserves_reserved_bits_23_10);
+    RUN_TEST(test_power_path_index_1_to_6_set_is_no_op);
+    RUN_TEST(test_power_path_index_1_to_6_get_returns_zero);
 
     RUN_TEST(test_fixed_supply_round_trip);
     RUN_TEST(test_fixed_supply_all_flags_false);

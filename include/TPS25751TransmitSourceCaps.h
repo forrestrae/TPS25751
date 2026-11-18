@@ -14,15 +14,18 @@
  * This register holds the Source Capabilities message the PD controller
  * ADVERTISES to a port partner -- i.e. the outbound counterpart of
  * TPS25751ReceivedSourceCaps (0x30), which decodes what a partner sent to
- * us. Contains up to 7 Power Data Objects (PDOs), each preceded (as a block)
- * by a 2-bit Power Path selector per PDO. This register is initialized by
+ * us. Contains up to 7 Power Data Objects (PDOs), preceded by a 2-bit Power
+ * Path selector for PDO 1 only. This register is initialized by
  * Application Customization; writes take effect the next time the controller
  * sends a Source Capabilities message, not immediately.
  *
  * Register layout (little-endian PDOs):
  * - Byte 0, bits 2:0: Number Valid PDOs (0-7); bits 7:3 reserved
- * - Byte 1, bits 1:0/3:2/5:4/7:6: Power Path for PDO 1/2/3/4
- * - Byte 2, bits 1:0/3:2/5:4: Power Path for PDO 5/6/7; bits 7:6 reserved
+ * - Byte 1, bits 1:0 (register bits 9:8): Power Path for PDO 1
+ *   (0h = PP5V, 2h = PP_EXT)
+ * - Register bits 23:10 (byte 1 bits 7:2, byte 2): reserved. Rev. A defined
+ *   Power Path for PDO 2-7 here; SLVUCR8B (Rev. B, 2026-08), page 36, marks
+ *   these bits RESERVED, so the library never writes them.
  * - Bytes 3..30: PDO 1..7, 4 bytes each, little-endian (PDO n at byte 3 + (n-1)*4)
  *
  * This is the library's first PDO ENCODE path: in addition to the decode
@@ -80,14 +83,15 @@ public:
     bool hasSourceCaps() const;
 
     /**
-     * @brief Get the Power Path selector for a given PDO
+     * @brief Get the Power Path selector for PDO 1
      *
-     * Register bits 8 + index*2 (width 2). Per TRM: for PDO 1, 0h = PP_5V1,
-     * 2h = PP_EXT1 (1h/3h reserved); for PDO 2..7, 2h = PP_EXT1 (0h/1h/3h
-     * reserved).
+     * Register bits 9:8: 0h = PP5V, 2h = PP_EXT (1h/3h undefined).
+     * Source: SLVUCR8B (Rev. B, 2026-08), page 36. Rev. B defines a Power
+     * Path only for PDO 1; bits 23:10, which Rev. A used for PDO 2-7, are
+     * reserved.
      *
-     * @param index PDO index (0-6)
-     * @return Raw 2-bit Power Path selector value
+     * @param index PDO index; only 0 (PDO 1) is meaningful
+     * @return Raw 2-bit Power Path selector for index 0; 0 for any other index
      */
     uint8_t getPowerPathForPDO(uint8_t index) const;
 
@@ -204,8 +208,14 @@ public:
                    bool powerLimited = false);
 
     /**
-     * @brief Set the Power Path selector for a given PDO (register bits 8 + index*2, width 2)
-     * @param index PDO index (0-6)
+     * @brief Set the Power Path selector for PDO 1 (register bits 9:8)
+     *
+     * Source: SLVUCR8B (Rev. B, 2026-08), page 36: 0h = PP5V, 2h = PP_EXT.
+     * Rev. B defines a Power Path only for PDO 1 and marks bits 23:10
+     * reserved, so this is a no-op for any index other than 0; it never
+     * writes bits 23:10.
+     *
+     * @param index PDO index; only 0 (PDO 1) writes, any other index is a no-op
      * @param pp Raw 2-bit Power Path selector value (masked to 2 bits)
      */
     void setPowerPathForPDO(uint8_t index, uint8_t pp);

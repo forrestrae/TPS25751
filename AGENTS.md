@@ -176,7 +176,7 @@ Serial.println(F("String in flash"));                // Use F() macro
   event-clear registers mirroring INT_EVENT1's 38-source bit map (36 in rev A; rev B adds bits 29 and 51); built on the new
   base-class `setBits()` write primitive and typed `TPS25751::writeRegister<T>()`
 - ADC_RESULTS (Batch C, 2026-07-07) — read-only internal-ADC telemetry: per-pin
-  voltage (14 mV/LSB; VBUS at 98 mV/LSB) and PP_5V1 current (16.5 mA/LSB) with raw
+  voltage (14 mV/LSB; VBUS at 98 mV/LSB) and power-path current, mean and peak (16.5 mA/LSB, needs PORT_CONTROL.EnableCurrentMonitor), with raw
   + unit-converted accessors. Not updated by the controller in Unconnected-Sleep
   mode (a stale/all-zero read there is expected, not an error)
 - TRANSMIT_SOURCE_CAPS, TRANSMIT_SINK_CAPS (Batch D, 2026-07-07) — R/W advertised
@@ -265,7 +265,7 @@ Each register has its own class inheriting from `TPS25751Register`:
 - `TPS25751CustomerUse`: CUSTOMER_USE register (0x06) — opaque 8-byte application blob; R/W raw/64-bit accessors
 - `TPS25751InterruptMask`: INT_MASK1 register (0x16) — per-source interrupt enable mask mirroring INT_EVENT1's 38-source bit map (rev B adds MIDB Received bit 29 and Discover Mode Completed bit 51); R/W with `set<Source>(bool)` setters (a 1 unmasks/enables that source)
 - `TPS25751InterruptClear`: INT_CLEAR1 register (0x18) — write-only event-clear staging buffer; `clear<Source>()` / `clear(bitPos)` / `clearAll()` helpers (write a 1 to acknowledge that INT_EVENT1 source)
-- `TPS25751ADCResults`: ADC_RESULTS register (0x6A) — read-only 13-byte internal-ADC telemetry block; per-pin voltage and PP_5V1 current with `raw*()` + unit-converted (`*Millivolts()`/`*Milliamps()`) accessors. Byte layout is not alphabetical (transcribed from the TRM); not updated in Unconnected-Sleep mode
+- `TPS25751ADCResults`: ADC_RESULTS register (0x6A) — read-only 13-byte internal-ADC telemetry block; per-pin voltage and power-path current (IVBUS_Mean byte 5, IVBUS_Peak byte 11 per rev B) with `raw*()` + unit-converted (`*Millivolts()`/`*Milliamps()`) accessors. Byte layout is not alphabetical (transcribed from the TRM); not updated in Unconnected-Sleep mode
 - `TPS25751TransmitSourceCaps`: TRANSMIT_SOURCE_CAPABILITIES register (0x32) — R/W 63-byte advertised source capabilities; up to 7 PDOs starting at **byte 3** (bits 9:8 hold the Power Path for PDO 1; bits 23:10 are reserved in rev B, SLVUCR8B p.36). Mirrors `TPS25751ReceivedSourceCaps` decode + adds the encode path: static `build{FixedSupply,Battery,Variable,PPS}PDO()` word builders, `setPDO`/`setPDOCount`, and `get/setPowerPathForPDO`
 - `TPS25751TransmitSinkCaps`: TRANSMIT_SINK_CAPABILITIES register (0x33) — R/W 53-byte advertised sink capabilities; up to 7 PDOs starting at byte 1 (same layout as the Received caps). Mirrors `TPS25751ReceivedSinkCaps` decode (Sink Fixed PDO: bit 28 = Higher Capability, bits 24:23 = Fast-Role-Swap current, a **2-bit** field) + adds the encode path
 - `TPS25751AutoNegotiateSink`: AUTONEGOTIATE_SINK register (0x37) — R/W 24-byte sink-negotiation configuration (voltage window, minimum required power, capability-mismatch handling, PPS sink request parameters); `setBits()`-based field setters mirroring `TPS25751InterruptMask`'s pattern, plus a cross-field semantic check (host-provided min voltage ≤ host-provided max voltage when neither bound is PD-computed)

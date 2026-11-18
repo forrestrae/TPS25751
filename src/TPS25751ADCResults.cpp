@@ -30,24 +30,24 @@ uint16_t TPS25751ADCResults::ldo3v3Millivolts() const
     return static_cast<uint16_t>(rawLDO3V3()) * kMillivoltsPerLsb14;
 }
 
-uint8_t TPS25751ADCResults::rawVBUS1() const
+uint8_t TPS25751ADCResults::rawVBUS() const
 {
-    return extractBits(kVBUS1BitPos, kFieldBitLen);
+    return extractBits(kVBUSBitPos, kFieldBitLen);
 }
 
-uint16_t TPS25751ADCResults::vbus1Millivolts() const
+uint16_t TPS25751ADCResults::vbusMillivolts() const
 {
-    return static_cast<uint16_t>(rawVBUS1()) * kVbus1MillivoltsPerLsb;
+    return static_cast<uint16_t>(rawVBUS()) * kVbusMillivoltsPerLsb;
 }
 
-uint8_t TPS25751ADCResults::rawIVBUS1() const
+uint8_t TPS25751ADCResults::rawIVBUSMean() const
 {
-    return extractBits(kIVBUS1BitPos, kFieldBitLen);
+    return extractBits(kIVBUSMeanBitPos, kFieldBitLen);
 }
 
-uint16_t TPS25751ADCResults::ivbus1Milliamps() const
+uint16_t TPS25751ADCResults::ivbusMeanMilliamps() const
 {
-    return static_cast<uint16_t>(rawIVBUS1()) * kMilliampsPerLsbNumerator / kMilliampsPerLsbDenominator;
+    return static_cast<uint16_t>(rawIVBUSMean()) * kMilliampsPerLsbNumerator / kMilliampsPerLsbDenominator;
 }
 
 uint8_t TPS25751ADCResults::rawGPIO4() const
@@ -90,14 +90,14 @@ uint16_t TPS25751ADCResults::gpio2Millivolts() const
     return static_cast<uint16_t>(rawGPIO2()) * kMillivoltsPerLsb14;
 }
 
-uint8_t TPS25751ADCResults::rawIVBUS1Mean() const
+uint8_t TPS25751ADCResults::rawIVBUSPeak() const
 {
-    return extractBits(kIVBUS1MeanBitPos, kFieldBitLen);
+    return extractBits(kIVBUSPeakBitPos, kFieldBitLen);
 }
 
-uint16_t TPS25751ADCResults::ivbus1MeanMilliamps() const
+uint16_t TPS25751ADCResults::ivbusPeakMilliamps() const
 {
-    return static_cast<uint16_t>(rawIVBUS1Mean()) * kMilliampsPerLsbNumerator / kMilliampsPerLsbDenominator;
+    return static_cast<uint16_t>(rawIVBUSPeak()) * kMilliampsPerLsbNumerator / kMilliampsPerLsbDenominator;
 }
 
 void TPS25751ADCResults::debugPrint(Stream &s) const
@@ -122,16 +122,16 @@ void TPS25751ADCResults::debugPrint(Stream &s) const
     s.print(rawLDO3V3());
     s.println(F(")"));
 
-    s.print(F("  VBUS1: "));
-    s.print(vbus1Millivolts());
+    s.print(F("  VBUS: "));
+    s.print(vbusMillivolts());
     s.print(F(" mV (raw "));
-    s.print(rawVBUS1());
+    s.print(rawVBUS());
     s.println(F(")"));
 
-    s.print(F("  IVBUS1: "));
-    s.print(ivbus1Milliamps());
+    s.print(F("  IVBUS_Mean: "));
+    s.print(ivbusMeanMilliamps());
     s.print(F(" mA (raw "));
-    s.print(rawIVBUS1());
+    s.print(rawIVBUSMean());
     s.println(F(")"));
 
     s.print(F("  GPIO4: "));
@@ -158,12 +158,13 @@ void TPS25751ADCResults::debugPrint(Stream &s) const
     s.print(rawGPIO2());
     s.println(F(")"));
 
-    s.print(F("  IVBUS1_Mean: "));
-    s.print(ivbus1MeanMilliamps());
+    s.print(F("  IVBUS_Peak: "));
+    s.print(ivbusPeakMilliamps());
     s.print(F(" mA (raw "));
-    s.print(rawIVBUS1Mean());
+    s.print(rawIVBUSPeak());
     s.println(F(")"));
 
+    s.println(F("  NOTE: IVBUS_Mean/IVBUS_Peak need PORT_CONTROL.EnableCurrentMonitor = 1."));
     s.println(F("  NOTE: not updated by the PD controller in Unconnected Sleep mode."));
 
     s.println();

@@ -82,7 +82,7 @@ originally slated for old Phase 4, pulled forward to enable
 | PD_STATUS | 0x40 | `TPS25751PDStatus` | 4 | Power Delivery status |
 | IO_CONFIG | 0x5C | `TPS25751IOConfig` | 49 | Boot-fixed GPIO configuration (R) |
 | TYPEC_STATE | 0x69 | `TPS25751TypeCState` | 4 | Type-C state machine status |
-| ADC_RESULTS | 0x6A | `TPS25751ADCResults` | 13 | Internal-ADC telemetry: per-pin voltage + PP_5V1 current (R) |
+| ADC_RESULTS | 0x6A | `TPS25751ADCResults` | 13 | Internal-ADC telemetry: per-pin voltage + power-path current, mean and peak (R) |
 | SLEEP_CONTROL | 0x70 | `TPS25751SleepControl` | 1 | Sleep-mode enable + sleep-time (R/W) |
 | GPIO_STATUS | 0x72 | `TPS25751GPIOStatus` | 8 | GPIO pin status and direction |
 | LIQUID_DETECTION_CONFIG | 0x98 | `TPS25751LiquidDetectionConfig` | 11 | Liquid/moisture-detection config, corrosion mitigation (R/W) |

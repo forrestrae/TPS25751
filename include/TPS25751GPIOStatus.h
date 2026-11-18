@@ -10,6 +10,10 @@
  * This register captures the status and settings of all GPIO pins.
  * The available GPIO pins may vary by device type - check the device-specific datasheet.
  *
+ * Data bits: GPIO 0-7 at bits 7:0, GPIO 10-12 at bits 12:10 (bits 9:8 reserved).
+ * Direction bits: GPIO 0-7 at bits 39:32.
+ * Source: SLVUCR8B (Rev. B, 2026-08), page 53. Rev. B added GPIO 10 and 11 Data.
+ *
  * Register Size: 8 bytes
  * Access: Read-only
  * Address: 0x72
@@ -31,7 +35,7 @@ public:
 
     /**
      * @brief Get data value of GPIO pin
-     * @param pin GPIO pin number (0-7, or 12)
+     * @param pin GPIO pin number (0-7, 10, 11, or 12; other pins return false)
      * @return true if logic high detected, false if logic low
      */
     bool gpioData(uint8_t pin) const;

@@ -6,11 +6,12 @@ bool TPS25751GPIOStatus::gpioDirection(uint8_t pin) const {
 }
 
 bool TPS25751GPIOStatus::gpioData(uint8_t pin) const {
-    if (pin == 12) {
-        return extractBits(12, 1);
+    // Data bits exist for GPIO 0-7 (bits 7:0) and GPIO 10-12 (bits 12:10);
+    // bits 9:8 are reserved. Source: SLVUCR8B (Rev. B, 2026-08), page 53.
+    if (pin <= 7 || (pin >= 10 && pin <= 12)) {
+        return extractBits(pin, 1);
     }
-    if (pin > 7) return false;  // Only GPIO 0-7 and 12 have data bits
-    return extractBits(pin, 1);
+    return false;
 }
 
 bool TPS25751GPIOStatus::gpio12Data() const {
@@ -36,8 +37,12 @@ void TPS25751GPIOStatus::debugPrint(Stream &s) const {
         s.println(gpioData(i) ? F("HIGH") : F("LOW"));
     }
 
-    s.print(F("   GPIO 12: "));
-    s.println(gpio12Data() ? F("HIGH") : F("LOW"));
+    for (uint8_t i = 10; i <= 12; i++) {
+        s.print(F("    GPIO "));
+        s.print(i);
+        s.print(F(": "));
+        s.println(gpioData(i) ? F("HIGH") : F("LOW"));
+    }
 
     s.println();
 }

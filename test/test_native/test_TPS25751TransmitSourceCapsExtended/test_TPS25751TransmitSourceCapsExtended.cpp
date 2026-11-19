@@ -566,6 +566,21 @@ void test_typed_peak_current_overload_above_25_clamps()
 
 // Peak Current 3 occupies TRM bytes 8 and 9: F9 FF read little-endian is 0xFFF9.
 // Peak Current 1 and 2 stay zero, which proves the index selects the right bytes.
+// Gate re-derivation (USB PD R3.3 Table 6.59), with a word whose sub-fields do not
+// saturate: DISTINCT_BUFFER bytes 8 and 9 are BC 9A, so Peak Current 3 = 0x9ABC
+// = 1001 1010 1011 1100b. Bits 4:0 = 11100b = 28, invalid, treated as 25 -> 250%.
+// Bits 10:5 = 010101b = 21 -> 21 * 20 = 420 ms. Bits 14:11 = 0011b = 3 -> 15%.
+// Bit 15 = 1 -> VBUS droop.
+void test_typed_peak_current_distinct_word()
+{
+    Caps reg(DISTINCT_BUFFER);
+    TEST_ASSERT_EQUAL_HEX16(0x9ABC, reg.peakCurrent(3));
+    TEST_ASSERT_EQUAL_UINT16(250, reg.peakCurrentOverloadPercent(3));
+    TEST_ASSERT_EQUAL_UINT16(420, reg.peakCurrentOverloadPeriod_ms(3));
+    TEST_ASSERT_EQUAL_UINT8(15, reg.peakCurrentDutyCyclePercent(3));
+    TEST_ASSERT_TRUE(reg.peakCurrentVbusDroop(3));
+}
+
 void test_typed_peak_current_index_selects_the_word()
 {
     uint8_t buf[CAPS_SIZE] = {0};
@@ -787,6 +802,7 @@ int main(int, char **)
     RUN_TEST(test_typed_touch_current_bits);
     RUN_TEST(test_typed_peak_current_maximum_word);
     RUN_TEST(test_typed_peak_current_overload_above_25_clamps);
+    RUN_TEST(test_typed_peak_current_distinct_word);
     RUN_TEST(test_typed_peak_current_index_selects_the_word);
     RUN_TEST(test_typed_peak_current_out_of_range_index_is_zero);
     RUN_TEST(test_typed_touch_temperature_standard);

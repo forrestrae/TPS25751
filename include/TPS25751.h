@@ -35,6 +35,7 @@
 #include "TPS25751GlobalSystemConfig.h"
 #include "TPS25751TransmitSourceInfo.h"
 #include "TPS25751TransmitPPSStatus.h"
+#include "TPS25751TransmitSinkCapsExtended.h"
 #include "TPS25751TransmitSourceCapsExtended.h"
 #include "TPS25751ReceivedSOPIdentity.h"
 #include "TPS25751RegisterAddress.h"
@@ -181,6 +182,13 @@ public:
     bool readTransmitPPSStatus(TPS25751TransmitPPSStatus &ppsStatus) const;
 
     /**
+     * @brief Read the Transmit Sink Capabilities Extended register (0x7E)
+     * @param caps Register object to populate (14 bytes)
+     * @return true if the read succeeded
+     */
+    bool readTransmitSinkCapsExtended(TPS25751TransmitSinkCapsExtended &caps) const;
+
+    /**
      * @brief Read the TX Source Capabilities Extended register (0x77)
      * @param caps Register object to populate (15 bytes)
      * @return true if the read succeeded
@@ -312,6 +320,20 @@ public:
      *         otherwise the result of the underlying I2C write
      */
     bool writeTransmitPPSStatus(const TPS25751TransmitPPSStatus &ppsStatus) const;
+
+    /**
+     * @brief Write the TX Sink Capabilities Extended (0x7E) register
+     *
+     * The controller builds its Get_Sink_Cap_Extended reply from this register only while
+     * PD3_CONFIGURATION (0x42) bit 17
+     * (TPS25751PD3Config::supportSinkCapExtended()); with it clear the controller
+     * answers Get_Sink_Cap_Extended with Not_Supported.
+     *
+     * @param caps Register object holding the bytes to write
+     * @return false if @p caps is not valid or not the expected size;
+     *         otherwise the result of the underlying I2C write
+     */
+    bool writeTransmitSinkCapsExtended(const TPS25751TransmitSinkCapsExtended &caps) const;
 
     /**
      * @brief Write the TX Source Capabilities Extended (0x77) register
@@ -599,6 +621,13 @@ public:
      * @return Unique pointer to the register (nullptr if failed)
      */
     std::unique_ptr<TPS25751TransmitPPSStatus> readTransmitPPSStatusRegister(bool validate = true) const;
+
+    /**
+     * @brief Read TX Sink Capabilities Extended (0x7E) register using factory pattern
+     * @param validate Whether to validate the register after reading
+     * @return Unique pointer to the register (nullptr if failed)
+     */
+    std::unique_ptr<TPS25751TransmitSinkCapsExtended> readTransmitSinkCapsExtendedRegister(bool validate = true) const;
 
     /**
      * @brief Read TX Source Capabilities Extended (0x77) register using factory pattern

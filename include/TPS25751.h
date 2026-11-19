@@ -34,6 +34,7 @@
 #include "TPS25751PD3Config.h"
 #include "TPS25751GlobalSystemConfig.h"
 #include "TPS25751TransmitSourceInfo.h"
+#include "TPS25751TransmitPPSStatus.h"
 #include "TPS25751ReceivedSOPIdentity.h"
 #include "TPS25751RegisterAddress.h"
 #include "TPS25751RegisterFactory.h"
@@ -172,6 +173,13 @@ public:
     bool readTransmitSourceInfo(TPS25751TransmitSourceInfo &sourceInfo) const;
 
     /**
+     * @brief Read the Transmitted PPS Status Data Block register (0x7A)
+     * @param ppsStatus Register object to populate (4 bytes)
+     * @return true if the read succeeded
+     */
+    bool readTransmitPPSStatus(TPS25751TransmitPPSStatus &ppsStatus) const;
+
+    /**
      * @brief Write the Sleep Control register (0x70)
      * @param sleepControl Register object holding the bytes to write
      * @return false if @p sleepControl is not valid or not the expected size;
@@ -280,6 +288,22 @@ public:
      *         otherwise the result of the underlying I2C write
      */
     bool writeTransmitSourceInfo(const TPS25751TransmitSourceInfo &sourceInfo) const;
+
+    /**
+     * @brief Write the Transmitted PPS Status Data Block register (0x7A)
+     *
+     * The controller sends this register's contents in reply to Get_PPS_Status
+     * only while PD3_CONFIGURATION (0x42) bit 20
+     * (TPS25751PD3Config::supportPpsStatus()) is set; with it clear the
+     * controller answers Not_Supported. The TRM does not say the firmware
+     * updates this register, so the host supplies the PPS status it wants
+     * reported.
+     *
+     * @param ppsStatus Register object holding the bytes to write
+     * @return false if @p ppsStatus is not valid or not the expected size;
+     *         otherwise the result of the underlying I2C write
+     */
+    bool writeTransmitPPSStatus(const TPS25751TransmitPPSStatus &ppsStatus) const;
 
     // Type-safe register reading methods
     bool readRegister(TPS25751Registers::RegisterInfo regInfo, uint8_t *buffer) const;
@@ -546,6 +570,13 @@ public:
      * @return Unique pointer to the register (nullptr if failed)
      */
     std::unique_ptr<TPS25751TransmitSourceInfo> readTransmitSourceInfoRegister(bool validate = true) const;
+
+    /**
+     * @brief Read Transmitted PPS Status (0x7A) register using factory pattern
+     * @param validate Whether to validate the register after reading
+     * @return Unique pointer to the register (nullptr if failed)
+     */
+    std::unique_ptr<TPS25751TransmitPPSStatus> readTransmitPPSStatusRegister(bool validate = true) const;
 
     /**
      * @brief Read Received SOP Identity Data Object (0x48) register using factory pattern

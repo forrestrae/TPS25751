@@ -205,6 +205,11 @@ bool TPS25751::readTransmitSourceInfo(TPS25751TransmitSourceInfo &sourceInfo) co
     return readRegister(TPS25751Registers::Registers::TRANSMIT_SOURCE_INFO, sourceInfo);
 }
 
+bool TPS25751::readTransmitPPSStatus(TPS25751TransmitPPSStatus &ppsStatus) const
+{
+    return readRegister(TPS25751Registers::Registers::TRANSMIT_PPS_STATUS, ppsStatus);
+}
+
 bool TPS25751::writeSleepControl(const TPS25751SleepControl &sleepControl) const
 {
     // Delegates to the typed writeRegister<T>() (keyed on kAddress) so there is
@@ -268,6 +273,11 @@ bool TPS25751::writeGlobalSystemConfig(const TPS25751GlobalSystemConfig &globalS
 bool TPS25751::writeTransmitSourceInfo(const TPS25751TransmitSourceInfo &sourceInfo) const
 {
     return writeRegister(sourceInfo);
+}
+
+bool TPS25751::writeTransmitPPSStatus(const TPS25751TransmitPPSStatus &ppsStatus) const
+{
+    return writeRegister(ppsStatus);
 }
 
 // Type-safe register reading methods
@@ -569,6 +579,14 @@ std::unique_ptr<TPS25751TransmitSourceInfo> TPS25751::readTransmitSourceInfoRegi
 
     TPS25751TransmitSourceInfo* typedReg = static_cast<TPS25751TransmitSourceInfo*>(reg.release());
     return std::unique_ptr<TPS25751TransmitSourceInfo>(typedReg);
+}
+
+std::unique_ptr<TPS25751TransmitPPSStatus> TPS25751::readTransmitPPSStatusRegister(bool validate) const {
+    auto reg = readAndValidateRegisterByAddress(TPS25751Registers::Address::TRANSMIT_PPS_STATUS, validate);
+    if (!reg) return nullptr;
+
+    TPS25751TransmitPPSStatus* typedReg = static_cast<TPS25751TransmitPPSStatus*>(reg.release());
+    return std::unique_ptr<TPS25751TransmitPPSStatus>(typedReg);
 }
 
 std::unique_ptr<TPS25751ReceivedSOPIdentity> TPS25751::readReceivedSOPIdentityRegister(bool validate) const {

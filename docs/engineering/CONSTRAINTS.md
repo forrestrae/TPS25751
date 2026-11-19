@@ -541,8 +541,14 @@ Two consequences for writers:
   unchanged. Writing a default-constructed object clears them and also sets PP1
   and PP3 to Disabled.
 - The TRM says any modification "will cause a port disconnect and reconnect
-  with the new settings". The library has not yet exercised the write on
-  hardware; the plan lists that check as open.
+  with the new settings". On 2026-11-19, with the board on a bench supply and
+  nothing attached, `setRcpThreshold()` plus `writeGlobalSystemConfig()` from a
+  fresh read changed byte 2 from `14` to `54`. The read-back matched exactly,
+  so only bits 23:22 changed and every undocumented bit survived. Writing the
+  original bytes back also read back exactly. With no partner there was nothing
+  to disconnect: STATUS kept toggling Port Role about every 85 ms, as it does
+  when unattached, and INT_EVENT1 latched nothing. The reconnect with a partner
+  attached is not observed.
 
 `debugPrint()` prints all 14 raw bytes so a before-and-after comparison shows
 whether the undocumented bits survived.
@@ -568,8 +574,22 @@ authoritative status. On 2026-11-18 the board was attached to a PD source as a
 UFP sink, with PORT_CONTROL Automatic ID Request = 1. 0x48 read Response Type 0
 (not sent or pending) with zero VDOs, and bit 51 was clear. A SOP Discover
 Identity is normally sent by the DFP, so this result is expected for a UFP; the
-TRM does not state the firmware's policy. The timing of bit 51 relative to a
-0x48 update is not yet observed.
+TRM does not state the firmware's policy.
+
+On 2026-11-19 the board was attached to an iPhone as the source and DFP, and
+0x48 read Response Type 1 (ACK) with six VDOs; the ID Header VDO carries VID
+0x05AC. Polling every 14 ms showed the order of events on attach: 0x48 cleared
+to all zero in the same sample as the attach, filled about 240 ms later, and
+INT_EVENT1 bit 51 set 106 ms after that. Bit 51 therefore lags the 0x48 update,
+as its TRM text implies. With no partner, 0x48 read Response Type 0 and zero
+VDOs, but after a detach it kept the previous partner's identity until the next
+attach cleared it, so a nonzero 0x48 does not mean a partner is present now.
+
+INT_EVENT1 latches only sources that INT_MASK1 enables. This board's EEPROM
+configuration enables only Ready for Patch and Patch Loaded (INT_MASK1
+`00 … 00 03`), so with the shipped configuration INT_EVENT1 stays all zero
+through attach, discovery, and detach. To observe bit 51 or the plug event,
+set the matching INT_MASK1 bits first.
 
 **TX_SOURCE_INFO (0x78) is R/W, but the firmware owns it.** SLVUCR8B Rev. B
 (p.55) lists every field as R/W and also says the register "is automatically
@@ -582,10 +602,18 @@ and read `00 00 00 80 00 00 00 80`, the documented reset 8000000080000000h. A
 write that changed only the upper word (Port Maximum PDP 30, Port Guaranteed PDP
 20, in 0.5 W units) read back exactly, and restoring the original read back
 exactly; the firmware did not overwrite the value within the 50 ms before the
-read-back. Whether the firmware changes either word while the board sources power
-is not yet observed. `TPS25751TransmitSourceInfo` checks a Guaranteed PDP at most
-Maximum PDP rule that the TRM does not state; if firmware-written data breaks it,
-drop the rule under "Validation tiers" in the plan.
+read-back. With no partner attached on 2026-11-19 the register also read the
+reset. When an iPhone attached and the board became the source, the firmware
+rewrote the lower word within about 110 ms of the attach, to `64 64 00 80`: Port
+Reported PDP and Port Present PDP 100 W, Port Maximum PDP 0 W, Port Type
+Guaranteed. It left the upper word at its reset, and the value stayed after
+the iPhone was unplugged. A Present PDP above the Maximum PDP is not consistent
+with the field descriptions, but the library checks no rule on the lower word,
+so the firmware value validates. `TPS25751TransmitSourceInfo` checks a
+Guaranteed PDP at most Maximum PDP rule on the upper word that the TRM does not
+state. The firmware leaves both of those fields at 0, so hardware has not
+exercised the rule; if firmware-written data breaks it, drop the rule under
+"Validation tiers" in the plan.
 
 TRANSMITTED_PPS_STATUS (0x7A) reported a length byte of 4 on the same board, read
 `00 00 00 00`, and round-tripped a written value (`FA 00 3C 02`: 5000 mV,
@@ -1146,6 +1174,7 @@ void foo() {
 | 1.7 | 2026-11-18 | Claude Code | Batch J of the rev B plan: TX_SOURCE_CAPABILITIES_EXTENDED (0x77) reads Source PDP 0x7F from firmware configuration, not the documented reset; 0x77 and TRANSMIT_SINK_CAPABILITIES_EXTENDED (0x7E) report 15 and 14 bytes as the TRM implies, and the firmware sets none of their reserved bits (Read/Write Registers section) |
 | 1.8 | 2026-11-19 | Claude Code | Batch K of the rev B plan: TX_BATTERY_CAPABILITIES (0x7D) is the first R/W register past bit 255 and uses class-local byte helpers (Read-Only Registers section, IO_CONFIG note); the TRM labels 0x7D battery 3 as battery 0; 0x7B and 0x7D report 16 and 36 bytes and round-trip on hardware; CUSTOMER_USE (0x06) ignores runtime writes (Read/Write Registers section) |
 | 1.9 | 2026-11-19 | Claude Code | CUSTOMER_USE (0x06) is read-only in the library: `writeCustomerUse()`, the class setters, and `kAddress` are removed (Read/Write Registers section) |
+| 1.10 | 2026-11-19 | Claude Code | Batches G to I bench checks: a GLOBAL_SYSTEM_CONFIGURATION (0x27) RCP write preserves the undocumented bits; RECEIVED_SOP_IDENTITY (0x48) fills about 106 ms before INT_EVENT1 bit 51 and keeps the last identity after detach; INT_EVENT1 latches only INT_MASK1-enabled sources; the firmware fills the TX_SOURCE_INFO (0x78) lower word when the board sources (Read/Write Registers section) |
 
 ---
 

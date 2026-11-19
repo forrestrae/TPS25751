@@ -12,6 +12,9 @@
  *   bit 7 = 0x80, bit 4 = 0x10
  * Reserved bits: 31:21, 16:12, 9, 6:5, 3:0       -> 0xFFE1F26F
  *   (the two masks are complements of each other)
+ * Validation checks reserved bits 31:21, 16:12, 9, 6:5 -> 0xFFE1F260. Bits 3:0
+ * are set by the firmware (hardware read 0x0008001A on 2026-11-18) and are
+ * not checked.
  */
 
 #include <unity.h>
@@ -29,7 +32,9 @@ namespace {
 constexpr size_t PD3_SIZE = TPS25751Registers::Registers::PD3_CONFIGURATION.size;  // 4
 
 constexpr uint32_t DEFINED_MASK = 0x001E0D90u;
-constexpr uint32_t RESERVED_MASK = 0xFFE1F26Fu;
+constexpr uint32_t RESERVED_MASK = 0xFFE1F26Fu;          // every reserved bit in Table 3-26
+constexpr uint32_t CHECKED_RESERVED_MASK = 0xFFE1F260u;  // reserved bits validation rejects
+constexpr uint32_t FIRMWARE_RESERVED_MASK = 0x0000000Fu; // bits 3:0, set by firmware
 
 constexpr uint8_t RESET_BUFFER[PD3_SIZE] = {0x10, 0x00, 0x08, 0x00};
 constexpr uint8_t ALL_ONES_DATA[PD3_SIZE] = {0xFF, 0xFF, 0xFF, 0xFF};
@@ -109,7 +114,10 @@ void tearDown() {}
 
 void test_masks_are_complements()
 {
-    TEST_ASSERT_EQUAL_UINT32(RESERVED_MASK, TPS25751PD3Config::kReservedMask);
+    TEST_ASSERT_EQUAL_UINT32(CHECKED_RESERVED_MASK, TPS25751PD3Config::kCheckedReservedMask);
+    TEST_ASSERT_EQUAL_UINT32(FIRMWARE_RESERVED_MASK, TPS25751PD3Config::kFirmwareReservedMask);
+    TEST_ASSERT_EQUAL_UINT32(RESERVED_MASK, CHECKED_RESERVED_MASK | FIRMWARE_RESERVED_MASK);
+    TEST_ASSERT_EQUAL_UINT32(0u, CHECKED_RESERVED_MASK & FIRMWARE_RESERVED_MASK);
     TEST_ASSERT_EQUAL_UINT32(0xFFFFFFFFu, DEFINED_MASK | RESERVED_MASK);
     TEST_ASSERT_EQUAL_UINT32(0u, DEFINED_MASK & RESERVED_MASK);
 
@@ -340,17 +348,36 @@ void test_reserved_range_6_5_invalid()
     TEST_ASSERT_FALSE(resetWithBit(5).isSemanticallyValid());
 }
 
-void test_reserved_range_3_0_invalid()
+// Bits 3:0 are reserved in the TRM, but the firmware sets them, so
+// validation does not check them (see kFirmwareReservedMask).
+void test_reserved_range_3_0_not_checked()
 {
-    TEST_ASSERT_FALSE(resetWithBit(3).isSemanticallyValid());
-    TEST_ASSERT_FALSE(resetWithBit(0).isSemanticallyValid());
+    TEST_ASSERT_TRUE(resetWithBit(3).isSemanticallyValid());
+    TEST_ASSERT_TRUE(resetWithBit(2).isSemanticallyValid());
+    TEST_ASSERT_TRUE(resetWithBit(1).isSemanticallyValid());
+    TEST_ASSERT_TRUE(resetWithBit(0).isSemanticallyValid());
+}
+
+// Value read from hardware on 2026-11-18 (APP mode, EEPROM configuration):
+// the documented reset 0x00080010 plus bits 3 and 1.
+void test_hardware_value_0x0008001A_is_valid()
+{
+    uint8_t buf[PD3_SIZE];
+    packLE(0x0008001Au, buf);
+    TPS25751PD3Config reg(buf);
+
+    TEST_ASSERT_TRUE(reg.supportGetRevision());
+    TEST_ASSERT_TRUE(reg.unchunkedSupported());
+    TEST_ASSERT_FALSE(reg.supportPpsStatus());
+    TEST_ASSERT_FALSE(reg.autoGetMidb());
+    TEST_ASSERT_TRUE(reg.isSemanticallyValid());
 }
 
 void test_every_reserved_bit_individually_invalid()
 {
     for (uint8_t bit = 0; bit < 32; bit++)
     {
-        const bool reserved = (RESERVED_MASK >> bit) & 1u;
+        const bool reserved = (CHECKED_RESERVED_MASK >> bit) & 1u;
         uint8_t buf[PD3_SIZE];
         packLE(1u << bit, buf);
         TPS25751PD3Config reg(buf);
@@ -377,7 +404,20 @@ void test_debug_print_reports_reserved_bits()
     TPS25751PD3Config reg(RESERVED_ONLY);
     const std::string out = captureDebugPrint(reg);
 
-    TEST_ASSERT_NOT_EQUAL(std::string::npos, out.find("Reserved bits set: 0xFFE1F26F"));
+    TEST_ASSERT_NOT_EQUAL(std::string::npos, out.find("Reserved bits set: 0xFFE1F260"));
+    TEST_ASSERT_NOT_EQUAL(std::string::npos, out.find("Reserved bits 3:0 (firmware-set, not checked): 0xF"));
+}
+
+void test_debug_print_reports_firmware_bits_without_reserved_warning()
+{
+    uint8_t buf[PD3_SIZE];
+    packLE(0x0008001Au, buf);
+    TPS25751PD3Config reg(buf);
+    const std::string out = captureDebugPrint(reg);
+
+    TEST_ASSERT_NOT_EQUAL(std::string::npos, out.find("Raw: 0x0008001A"));
+    TEST_ASSERT_NOT_EQUAL(std::string::npos, out.find("Reserved bits 3:0 (firmware-set, not checked): 0xA"));
+    TEST_ASSERT_EQUAL(std::string::npos, out.find("Reserved bits set"));
 }
 
 // --- Rule of Five ----------------------------------------------------------------
@@ -457,11 +497,13 @@ int main(int, char **)
     RUN_TEST(test_reserved_range_16_12_invalid);
     RUN_TEST(test_reserved_bit_9_invalid);
     RUN_TEST(test_reserved_range_6_5_invalid);
-    RUN_TEST(test_reserved_range_3_0_invalid);
+    RUN_TEST(test_reserved_range_3_0_not_checked);
+    RUN_TEST(test_hardware_value_0x0008001A_is_valid);
     RUN_TEST(test_every_reserved_bit_individually_invalid);
 
     RUN_TEST(test_debug_print_lists_fields_without_reserved_warning);
     RUN_TEST(test_debug_print_reports_reserved_bits);
+    RUN_TEST(test_debug_print_reports_firmware_bits_without_reserved_warning);
 
     RUN_TEST(test_copy_constructor_deep_copies);
     RUN_TEST(test_move_constructor_transfers_ownership);

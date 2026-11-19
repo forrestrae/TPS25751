@@ -138,11 +138,20 @@ void TPS25751PD3Config::debugPrint(Stream &s) const
     printEnabled(s, F("Auto Get MIDB: "), autoGetMidb());
     printEnabled(s, F("Unchunked Supported: "), unchunkedSupported());
 
-    const uint32_t reserved = value & kReservedMask;
+    const uint32_t reserved = value & kCheckedReservedMask;
     if (reserved != 0)
     {
         s.print(F("Reserved bits set: 0x"));
         s.println(static_cast<unsigned long>(reserved), HEX);
+    }
+
+    // Bits 3:0 are reserved in the TRM but set by the firmware, so they are
+    // reported for diagnostics and not treated as an error.
+    const uint32_t firmwareReserved = value & kFirmwareReservedMask;
+    if (firmwareReserved != 0)
+    {
+        s.print(F("Reserved bits 3:0 (firmware-set, not checked): 0x"));
+        s.println(static_cast<unsigned long>(firmwareReserved), HEX);
     }
 
     s.println(F("========================================"));
@@ -157,7 +166,8 @@ bool TPS25751PD3Config::isSemanticallyValid() const
     constexpr size_t expectedSize = TPS25751Registers::Registers::PD3_CONFIGURATION.size;
     if (!isValidSize(expectedSize)) return false;
 
-    const uint32_t reserved = extractBits32(0, 32) & kReservedMask;
+    // Bits 3:0 are excluded: the firmware sets them (see kFirmwareReservedMask).
+    const uint32_t reserved = extractBits32(0, 32) & kCheckedReservedMask;
     if (reserved != 0)
     {
         TPS_DEBUG_WARN(DEBUG_CAT_VALIDATION, "PD3_CONFIGURATION: reserved bits set (0x%08lX)", static_cast<unsigned long>(reserved));

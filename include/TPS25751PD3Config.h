@@ -19,7 +19,8 @@
  * - Size: 4 bytes (32 bits)
  * - Access: Read/Write
  * - Reset: 00080010h (Support Get Revision and Unchunked Supported set)
- * - Reserved bits: 31:21, 16:12, 9, 6:5, 3:0 (must read 0)
+ * - Reserved bits: 31:21, 16:12, 9, 6:5, 3:0. Validation checks all but 3:0,
+ *   which the firmware sets (see kFirmwareReservedMask)
  *
  * Bit n lives in byte n / 8, bit n % 8 of the 4-byte buffer, so the reset value
  * is the buffer {0x10, 0x00, 0x08, 0x00}.
@@ -166,7 +167,9 @@ public:
      * @brief Semantic validation
      *
      * Base checks (valid buffer, not the all-0xFF bus-error signature, expected
-     * size) plus: every reserved bit (31:21, 16:12, 9, 6:5, 3:0) must read 0.
+     * size) plus: reserved bits 31:21, 16:12, 9, and 6:5 must read 0.
+     * Reserved bits 3:0 are not checked, because the firmware sets them (see
+     * kFirmwareReservedMask).
      */
     bool isSemanticallyValid() const override;
 
@@ -183,14 +186,26 @@ public:
     static constexpr uint8_t kUnchunkedSupportedBit = 4;
 
     /**
-     * Mask of the reserved bits, derived from Table 3-26:
+     * Mask of the reserved bits that isSemanticallyValid() requires to be 0,
+     * derived from Table 3-26:
      *   bits 31:21 = 0xFFE00000
      *   bits 16:12 = 0x0001F000
      *   bit  9     = 0x00000200
      *   bits  6:5  = 0x00000060
-     *   bits  3:0  = 0x0000000F
-     * OR of the five = 0xFFE1F26F. Together with the nine defined bits
-     * (0x001E0D90) it covers all 32 bits.
+     * OR of the four = 0xFFE1F260.
      */
-    static constexpr uint32_t kReservedMask = 0xFFE1F26Fu;
+    static constexpr uint32_t kCheckedReservedMask = 0xFFE1F260u;
+
+    /**
+     * Reserved bits 3:0, which the TRM gives as reset 0h but the firmware sets.
+     * A TPS25751 in APP mode with an EEPROM configuration (Boot Flags Revision
+     * ID 193) read 0x0008001A on 2026-11-18: the documented reset plus bits 3
+     * and 1. Validation ignores these bits; debugPrint() reports them. The
+     * TRM does not say what they mean, so the class does not decode them.
+     *
+     * kCheckedReservedMask | kFirmwareReservedMask = 0xFFE1F26F, every
+     * reserved bit in Table 3-26. Together with the nine defined bits
+     * (0x001E0D90) that covers all 32 bits.
+     */
+    static constexpr uint32_t kFirmwareReservedMask = 0x0000000Fu;
 };

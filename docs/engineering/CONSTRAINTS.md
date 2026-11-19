@@ -491,6 +491,23 @@ by that configuration). If a device does report `0x01`, `isSemanticallyValid() =
 is expected and is not an I2C error. (General rule: semantic validation encodes
 *logical* consistency, which a reset state is not obligated to satisfy.)
 
+**Trap: firmware can set bits the TRM marks reserved.**
+PD3_CONFIGURATION (0x42) lists bits 3:0 as reserved with reset 0h (SLVUCR8B
+Rev. B, Table 3-26, p.46), and its documented reset is `0x00080010`. On
+2026-11-18 a TPS25751 in APP mode with an EEPROM-loaded configuration (Boot
+Flags Revision ID 193, Teensy 4.0 host) read `0x0008001A`: the documented reset
+plus bits 3 and 1. The read does not show whether the silicon reset or the
+EEPROM configuration sets them. With all reserved bits checked, the validated
+read failed on that board and `readPD3ConfigRegister(true)` returned nullptr. `TPS25751PD3Config` therefore checks only bits 31:21, 16:12, 9,
+and 6:5 (`kCheckedReservedMask`, `0xFFE1F260`), leaves bits 3:0 unchecked
+(`kFirmwareReservedMask`), and reports them in `debugPrint()`. Its setters
+never touch any reserved bit, so a read-modify-write sends bits 3:0 back as
+read. A write round trip on the same board confirmed this: clearing Support
+Get Revision read back `0x0000001A`, and restoring it read back `0x0008001A`.
+This follows the rule in `docs/plans/trm-revB-audit-remaining-registers.md`
+("Validation tiers"): when hardware shows firmware setting a reserved bit, drop
+that check and record why here.
+
 ---
 
 ## USB Power Delivery Complexity
@@ -814,6 +831,10 @@ bool validateData() const {
 }
 ```
 
+Check reserved bits against the TRM, then against hardware. If a real device
+sets a reserved bit, the check rejects every valid read from it. See the
+PD3_CONFIGURATION trap under Read/Write Registers.
+
 ### 6. Large Stack Allocations
 
 **Wrong:**
@@ -948,6 +969,7 @@ void foo() {
 | 1.1 | 2026-06-24 | Claude Code | Added BQ25798 downstream device decode conventions (big-endian, signed ADC, LSB sources) |
 | 1.2 | 2026-07-02 | Claude Code | BQ25798 decode/encode conventions moved to the sibling lib/BQ25798 repo with the driver; generic I2Cr/I2Cw framing rules retained here |
 | 1.3 | 2026-07-07 | Claude Code | Batch C: documented the ADC_RESULTS (0x6A) update-frequency caveat — not refreshed in Unconnected Sleep, so a stale/all-zero read is expected, not an error (Read-Only Registers section) |
+| 1.4 | 2026-11-18 | Claude Code | Batch G of the rev B plan: firmware sets PD3_CONFIGURATION (0x42) reserved bits 3:0 on hardware, so validation no longer checks them (Read/Write Registers section) |
 
 ---
 

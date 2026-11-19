@@ -186,6 +186,7 @@ inline const RegisterInfo* getRegisterInfo(Address addr) {
         case Address::PORT_CONFIGURATION: return &Registers::PORT_CONFIGURATION;
         case Address::COMMAND: return &Registers::COMMAND;
         case Address::DATA: return &Registers::DATA;
+        case Address::CUSTOMER_USE: return &Registers::CUSTOMER_USE;
         case Address::VERSION: return &Registers::VERSION;
         case Address::INT_EVENT1: return &Registers::INT_EVENT1;
         case Address::INT_MASK1: return &Registers::INT_MASK1;

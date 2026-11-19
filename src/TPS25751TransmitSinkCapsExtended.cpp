@@ -4,24 +4,11 @@
 
 namespace {
 
-void printHex8(Stream &s, uint8_t value)
-{
-    // Zero-padded to 2 hex digits; Stream's HEX output drops leading zeros.
-    s.print(static_cast<unsigned int>((value >> 4) & 0xFu), HEX);
-    s.print(static_cast<unsigned int>(value & 0xFu), HEX);
-}
-
-void printHex16(Stream &s, uint16_t value)
-{
-    printHex8(s, static_cast<uint8_t>(value >> 8));
-    printHex8(s, static_cast<uint8_t>(value & 0xFFu));
-}
-
 void printByteField(Stream &s, const __FlashStringHelper *label, uint8_t value)
 {
     s.print(label);
     s.print(F("0x"));
-    printHex8(s, value);
+    TPS25751Register::printHex(s, value, 2);
     s.print(F(" ("));
     s.print(value);
     s.println(F(")"));
@@ -107,11 +94,7 @@ uint8_t TPS25751TransmitSinkCapsExtended::sinkMaximumPdp() const
 
 const char *TPS25751TransmitSinkCapsExtended::toString(LoadStep val)
 {
-    switch (val) {
-        case LoadStep::Rate150mAPerUs: return "150 mA/us";
-        case LoadStep::Rate500mAPerUs: return "500 mA/us";
-        default: return "Invalid (assume 150 mA/us)";
-    }
+    return TPS25751UsbPd::toString(val);
 }
 
 const char *TPS25751TransmitSinkCapsExtended::toString(TouchTemperature val)
@@ -132,29 +115,27 @@ bool TPS25751TransmitSinkCapsExtended::skedbVersionValid() const
 
 TPS25751TransmitSinkCapsExtended::LoadStep TPS25751TransmitSinkCapsExtended::loadStepRate() const
 {
-    return static_cast<LoadStep>(loadStep() & 0x03u);
+    return TPS25751UsbPd::loadStepFromRaw(loadStep());
 }
 
 uint16_t TPS25751TransmitSinkCapsExtended::sinkLoadOverloadPercent() const
 {
-    uint16_t steps = sinkLoadCharacteristics() & 0x1Fu;  // bits 4:0
-    if (steps > 25) steps = 25;                          // 26..31 invalid, treated as 25
-    return static_cast<uint16_t>(steps * 10);
+    return TPS25751UsbPd::overloadPercent(sinkLoadCharacteristics());
 }
 
 uint16_t TPS25751TransmitSinkCapsExtended::sinkLoadOverloadPeriod_ms() const
 {
-    return static_cast<uint16_t>(((sinkLoadCharacteristics() >> 5) & 0x3Fu) * 20);  // bits 10:5, 20 ms steps
+    return TPS25751UsbPd::overloadPeriod_ms(sinkLoadCharacteristics());
 }
 
 uint8_t TPS25751TransmitSinkCapsExtended::sinkLoadDutyCyclePercent() const
 {
-    return static_cast<uint8_t>(((sinkLoadCharacteristics() >> 11) & 0x0Fu) * 5);  // bits 14:11, 5 % steps
+    return TPS25751UsbPd::overloadDutyCyclePercent(sinkLoadCharacteristics());
 }
 
 bool TPS25751TransmitSinkCapsExtended::sinkLoadVbusDroopTolerated() const
 {
-    return (sinkLoadCharacteristics() & 0x8000u) != 0;
+    return TPS25751UsbPd::overloadVbusDroop(sinkLoadCharacteristics());
 }
 
 bool TPS25751TransmitSinkCapsExtended::lpsCompliant() const
@@ -320,14 +301,14 @@ void TPS25751TransmitSinkCapsExtended::debugPrint(Stream &s) const
     for (size_t i = 0; i < size(); i++)
     {
         s.print(F(" "));
-        printHex8(s, raw()[i]);
+        printHex(s, raw()[i], 2);
     }
     s.println();
 
     printByteField(s, F("SKEDB Version: "), skedbVersion());
     printByteField(s, F("Load Step: "), loadStep());
     s.print(F("Sink Load Characteristics: 0x"));
-    printHex16(s, sinkLoadCharacteristics());
+    printHex(s, sinkLoadCharacteristics(), 4);
     s.println();
     printByteField(s, F("Compliance: "), compliance());
     printByteField(s, F("Touch Temperature: "), touchTemperature());
@@ -341,8 +322,7 @@ void TPS25751TransmitSinkCapsExtended::debugPrint(Stream &s) const
     if (reserved != 0)
     {
         s.print(F("Reserved bits set (111:88): 0x"));
-        printHex8(s, static_cast<uint8_t>(reserved >> 16));
-        printHex16(s, static_cast<uint16_t>(reserved & 0xFFFFu));
+        printHex(s, reserved, 6);
         s.println();
     }
 

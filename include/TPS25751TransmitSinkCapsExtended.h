@@ -2,6 +2,7 @@
 
 #include "TPS25751Register.h"
 #include "TPS25751RegisterAddress.h"
+#include "TPS25751UsbPd.h"
 
 /**
  * @file TPS25751TransmitSinkCapsExtended.h
@@ -116,11 +117,8 @@ public:
 
     // --- Typed decode, USB PD R3.3 Table 6.70 (built on the raw accessors above) ---
 
-    /// @brief Load step rate, Load Step bits 1:0 (USB PD R3.3 Table 6.70)
-    enum class LoadStep : uint8_t {
-        Rate150mAPerUs = 0,  ///< 00b - 150 mA/us load step (default)
-        Rate500mAPerUs = 1   ///< 01b - 500 mA/us load step
-    };
+    /// @brief Load step rate, Load Step bits 1:0 (USB PD R3.3 Table 6.70); shared with 0x77, see TPS25751UsbPd.h
+    using LoadStep = TPS25751UsbPd::LoadStep;
 
     /**
      * @brief Touch Temperature standard (USB PD R3.3 Table 6.70)

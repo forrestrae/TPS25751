@@ -462,6 +462,12 @@ void TPS25751Status::debugPrint() const {
 - Indent sub-fields with 2 spaces
 - Keep alignment consistent
 - Always print field names, even if value is unknown
+- Print fixed-width hex with `TPS25751Register::printHex(s, value, digits)`, which
+  zero-pads to exactly `digits` hex digits (`Stream`'s `HEX` output drops leading
+  zeros). Do not add a per-class hex helper.
+- Decode a USB PD encoding that more than one register carries through the shared
+  definition in `TPS25751UsbPd.h` (the load step rate and the overload word of
+  0x77 and 0x7E), so the registers cannot drift apart.
 
 ---
 
@@ -848,6 +854,7 @@ Use this checklist for every new register:
 |---------|------|--------|---------|
 | 1.0 | 2025-10-20 | Claude Code | Initial standards document extracted from implementation plan |
 | 1.1 | 2026-06-24 | Claude Code | Added downstream device register class conventions and big-endian 16-bit assembly rule (ADR-008) |
+| 1.2 | 2026-11-19 | Claude Code | `setBits()`/`extractBits*()` take a 16-bit bit position (ADR-012); shared `printHex()` and `TPS25751UsbPd.h` for debug output and shared USB PD decode |
 
 ---
 

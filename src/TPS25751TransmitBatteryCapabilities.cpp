@@ -4,24 +4,11 @@
 
 namespace {
 
-void printHex8(Stream &s, uint8_t value)
-{
-    // Zero-padded to 2 hex digits; Stream's HEX output drops leading zeros.
-    s.print(static_cast<unsigned int>((value >> 4) & 0xFu), HEX);
-    s.print(static_cast<unsigned int>(value & 0xFu), HEX);
-}
-
-void printHex16(Stream &s, uint16_t value)
-{
-    printHex8(s, static_cast<uint8_t>(value >> 8));
-    printHex8(s, static_cast<uint8_t>(value & 0xFFu));
-}
-
 void printHex16Field(Stream &s, const __FlashStringHelper *label, uint16_t value)
 {
     s.print(label);
     s.print(F("0x"));
-    printHex16(s, value);
+    TPS25751Register::printHex(s, value, 4);
     s.print(F(" ("));
     s.print(value);
     s.print(F(")"));
@@ -156,7 +143,7 @@ void TPS25751TransmitBatteryCapabilities::debugPrint(Stream &s) const
         for (size_t i = start; i < end; i++)
         {
             s.print(F(" "));
-            printHex8(s, raw()[i]);
+            printHex(s, raw()[i], 2);
         }
         s.println();
     }
@@ -166,13 +153,13 @@ void TPS25751TransmitBatteryCapabilities::debugPrint(Stream &s) const
         s.print(F("Battery "));
         s.print(i);
         s.print(F(": VID 0x"));
-        printHex16(s, vid(i));
+        printHex(s, vid(i), 4);
         s.print(F(", PID 0x"));
-        printHex16(s, pid(i));
+        printHex(s, pid(i), 4);
         printHex16Field(s, F(", Design Capacity "), batteryDesignCapacity(i));
         printHex16Field(s, F(", Last Full Charge Capacity "), batteryLastFullChargeCapacity(i));
         s.print(F(", Battery Type 0x"));
-        printHex8(s, batteryType(i));
+        printHex(s, batteryType(i), 2);
         s.println();
     }
 

@@ -122,10 +122,7 @@ void TPS25751PD3Config::debugPrint(Stream &s) const
     // 00080010h notation; Stream's HEX output drops leading zeros.
     const uint32_t value = extractBits32(0, 32);
     s.print(F("Raw: 0x"));
-    for (int shift = 28; shift >= 0; shift -= 4)
-    {
-        s.print(static_cast<unsigned int>((value >> shift) & 0xFu), HEX);
-    }
+    printHex(s, value, 8);
     s.println();
 
     printEnabled(s, F("Support PPS Status: "), supportPpsStatus());

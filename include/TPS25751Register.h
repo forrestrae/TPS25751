@@ -25,6 +25,21 @@ public:
      */
     void debugDumpRaw(Stream& s = Serial, const char* prefix = nullptr) const;
 
+    /**
+     * @brief Debug helper: print @p value as exactly @p digits uppercase hex digits
+     *
+     * Stream's HEX output drops leading zeros, so 0x0A prints as "A". debugPrint()
+     * implementations use this to print fixed-width values, such as a byte as
+     * "0A" or a 32-bit word as "0008001A", matching the TRM's notation. No "0x"
+     * prefix is printed. Digits above the value's width print as 0.
+     *
+     * @param s      Output stream
+     * @param value  Value to print
+     * @param digits Number of hex digits, 1 to 8; 0 prints nothing and values
+     *               above 8 are treated as 8
+     */
+    static void printHex(Stream& s, uint32_t value, uint8_t digits);
+
 protected:
     uint8_t *_raw;
     size_t _len;

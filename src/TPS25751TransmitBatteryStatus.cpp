@@ -2,23 +2,6 @@
 
 #include "TPS25751TransmitBatteryStatus.h"
 
-namespace {
-
-void printHex8(Stream &s, uint8_t value)
-{
-    // Zero-padded to 2 hex digits; Stream's HEX output drops leading zeros.
-    s.print(static_cast<unsigned int>((value >> 4) & 0xFu), HEX);
-    s.print(static_cast<unsigned int>(value & 0xFu), HEX);
-}
-
-void printHex16(Stream &s, uint16_t value)
-{
-    printHex8(s, static_cast<uint8_t>(value >> 8));
-    printHex8(s, static_cast<uint8_t>(value & 0xFFu));
-}
-
-}  // namespace
-
 // --- Decode ---------------------------------------------------------------------
 
 uint8_t TPS25751TransmitBatteryStatus::batteryInfo(uint8_t battery) const
@@ -102,7 +85,7 @@ void TPS25751TransmitBatteryStatus::debugPrint(Stream &s) const
     for (size_t i = 0; i < size(); i++)
     {
         s.print(F(" "));
-        printHex8(s, raw()[i]);
+        printHex(s, raw()[i], 2);
     }
     s.println();
 
@@ -112,9 +95,9 @@ void TPS25751TransmitBatteryStatus::debugPrint(Stream &s) const
         s.print(F("Battery "));
         s.print(i);
         s.print(F(": Battery Info 0x"));
-        printHex8(s, batteryInfo(i));
+        printHex(s, batteryInfo(i), 2);
         s.print(F(", Present Capacity 0x"));
-        printHex16(s, capacity);
+        printHex(s, capacity, 4);
         s.print(F(" ("));
         s.print(capacity);
         s.println(F(")"));

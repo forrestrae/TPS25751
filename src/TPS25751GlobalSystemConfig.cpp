@@ -130,8 +130,7 @@ void TPS25751GlobalSystemConfig::debugPrint(Stream &s) const
     for (size_t i = 0; i < size(); i++)
     {
         s.print(F(" "));
-        if (raw()[i] < 0x10) s.print(F("0"));
-        s.print(raw()[i], HEX);
+        printHex(s, raw()[i], 2);
     }
     s.println();
 

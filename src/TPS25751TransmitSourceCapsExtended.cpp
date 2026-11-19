@@ -4,24 +4,11 @@
 
 namespace {
 
-void printHex8(Stream &s, uint8_t value)
-{
-    // Zero-padded to 2 hex digits; Stream's HEX output drops leading zeros.
-    s.print(static_cast<unsigned int>((value >> 4) & 0xFu), HEX);
-    s.print(static_cast<unsigned int>(value & 0xFu), HEX);
-}
-
-void printHex16(Stream &s, uint16_t value)
-{
-    printHex8(s, static_cast<uint8_t>(value >> 8));
-    printHex8(s, static_cast<uint8_t>(value & 0xFFu));
-}
-
 void printByteField(Stream &s, const __FlashStringHelper *label, uint8_t value)
 {
     s.print(label);
     s.print(F("0x"));
-    printHex8(s, value);
+    TPS25751Register::printHex(s, value, 2);
     s.print(F(" ("));
     s.print(value);
     s.println(F(")"));
@@ -91,11 +78,7 @@ uint8_t TPS25751TransmitSourceCapsExtended::sourcePdp() const
 
 const char *TPS25751TransmitSourceCapsExtended::toString(LoadStep val)
 {
-    switch (val) {
-        case LoadStep::Rate150mAPerUs: return "150 mA/us";
-        case LoadStep::Rate500mAPerUs: return "500 mA/us";
-        default: return "Invalid (assume 150 mA/us)";
-    }
+    return TPS25751UsbPd::toString(val);
 }
 
 const char *TPS25751TransmitSourceCapsExtended::toString(TouchTemperature val)
@@ -110,7 +93,7 @@ const char *TPS25751TransmitSourceCapsExtended::toString(TouchTemperature val)
 
 TPS25751TransmitSourceCapsExtended::LoadStep TPS25751TransmitSourceCapsExtended::loadStep() const
 {
-    return static_cast<LoadStep>(voltageRegulation() & 0x03u);
+    return TPS25751UsbPd::loadStepFromRaw(voltageRegulation());
 }
 
 uint8_t TPS25751TransmitSourceCapsExtended::iocPercent() const
@@ -160,24 +143,22 @@ bool TPS25751TransmitSourceCapsExtended::groundPinProtectiveEarth() const
 
 uint16_t TPS25751TransmitSourceCapsExtended::peakCurrentOverloadPercent(uint8_t index) const
 {
-    uint16_t steps = peakCurrent(index) & 0x1Fu;  // bits 4:0
-    if (steps > 25) steps = 25;                   // 26..31 invalid, treated as 25
-    return static_cast<uint16_t>(steps * 10);
+    return TPS25751UsbPd::overloadPercent(peakCurrent(index));
 }
 
 uint16_t TPS25751TransmitSourceCapsExtended::peakCurrentOverloadPeriod_ms(uint8_t index) const
 {
-    return static_cast<uint16_t>(((peakCurrent(index) >> 5) & 0x3Fu) * 20);  // bits 10:5, 20 ms steps
+    return TPS25751UsbPd::overloadPeriod_ms(peakCurrent(index));
 }
 
 uint8_t TPS25751TransmitSourceCapsExtended::peakCurrentDutyCyclePercent(uint8_t index) const
 {
-    return static_cast<uint8_t>(((peakCurrent(index) >> 11) & 0x0Fu) * 5);  // bits 14:11, 5 % steps
+    return TPS25751UsbPd::overloadDutyCyclePercent(peakCurrent(index));
 }
 
 bool TPS25751TransmitSourceCapsExtended::peakCurrentVbusDroop(uint8_t index) const
 {
-    return (peakCurrent(index) & 0x8000u) != 0;
+    return TPS25751UsbPd::overloadVbusDroop(peakCurrent(index));
 }
 
 TPS25751TransmitSourceCapsExtended::TouchTemperature TPS25751TransmitSourceCapsExtended::touchTemperatureStandard() const
@@ -279,7 +260,7 @@ void TPS25751TransmitSourceCapsExtended::debugPrint(Stream &s) const
     for (size_t i = 0; i < size(); i++)
     {
         s.print(F(" "));
-        printHex8(s, raw()[i]);
+        printHex(s, raw()[i], 2);
     }
     s.println();
 
@@ -292,7 +273,7 @@ void TPS25751TransmitSourceCapsExtended::debugPrint(Stream &s) const
         s.print(F("Peak Current "));
         s.print(i);
         s.print(F(": 0x"));
-        printHex16(s, peakCurrent(i));
+        printHex(s, peakCurrent(i), 4);
         s.println();
     }
     printByteField(s, F("Touch Temperature: "), touchTemperature());
@@ -307,7 +288,7 @@ void TPS25751TransmitSourceCapsExtended::debugPrint(Stream &s) const
     if (reserved != 0)
     {
         s.print(F("Reserved bits set (119:111): 0x"));
-        printHex16(s, reserved);
+        printHex(s, reserved, 4);
         s.println();
     }
 

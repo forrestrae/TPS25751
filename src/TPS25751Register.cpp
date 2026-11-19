@@ -385,3 +385,15 @@ void TPS25751Register::debugDumpRaw(Stream &s, const char *prefix) const
 
     TPS25751Debug::hexDump(s, _raw, _len, nullptr);
 }
+
+void TPS25751Register::printHex(Stream &s, uint32_t value, uint8_t digits)
+{
+    if (digits > 8)
+    {
+        digits = 8;
+    }
+    for (uint8_t i = digits; i > 0; --i)
+    {
+        s.print(static_cast<unsigned int>((value >> ((i - 1) * 4)) & 0xFu), HEX);
+    }
+}

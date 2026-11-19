@@ -163,15 +163,6 @@ void TPS25751TransmitSourceInfo::setPortReportedPdp_mW(uint32_t mW)
 
 namespace {
 
-void printHex32(Stream &s, uint32_t value)
-{
-    // Zero-padded to 8 hex digits; Stream's HEX output drops leading zeros.
-    for (int shift = 28; shift >= 0; shift -= 4)
-    {
-        s.print(static_cast<unsigned int>((value >> shift) & 0xFu), HEX);
-    }
-}
-
 void printPdp(Stream &s, const __FlashStringHelper *label, const __FlashStringHelper *unit,
               unsigned int raw, uint32_t mW)
 {
@@ -200,8 +191,8 @@ void TPS25751TransmitSourceInfo::debugPrint(Stream &s) const
     // The two 32-bit words, upper first, so the line reads like the TRM's
     // 8000000080000000h reset notation.
     s.print(F("Raw: 0x"));
-    printHex32(s, extractBits32(32, 32));
-    printHex32(s, extractBits32(0, 32));
+    printHex(s, extractBits32(32, 32), 8);
+    printHex(s, extractBits32(0, 32), 8);
     s.println();
 
     s.print(F("Port Type (bit 63): "));
@@ -231,8 +222,8 @@ void TPS25751TransmitSourceInfo::debugPrint(Stream &s) const
     if (reservedUpper != 0 || reservedLower != 0)
     {
         s.print(F("Reserved bits set: 0x"));
-        printHex32(s, reservedUpper);
-        printHex32(s, reservedLower);
+        printHex(s, reservedUpper, 8);
+        printHex(s, reservedLower, 8);
         s.println();
     }
 

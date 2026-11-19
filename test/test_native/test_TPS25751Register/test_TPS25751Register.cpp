@@ -14,9 +14,16 @@
  * Fixture: byte k = 0x10 + k for k = 0..39, so byte 31 = 0x2F, byte 32 = 0x30,
  * byte 33 = 0x31, and byte 39 = 0x37. Expected values below are computed by hand
  * from those bytes, little-endian, bit n in byte n / 8 at bit n % 8.
+ *
+ * The suite also covers printHex(), the zero-padded hex printer that every
+ * debugPrint() shares.
  */
 
 #include <unity.h>
+
+#include <cstdio>
+#include <string>
+#include <unistd.h>
 
 #include "TPS25751Register.h"
 
@@ -38,6 +45,30 @@ void fill(uint8_t *buf)
 }
 
 enum class Small : uint8_t { A = 0, B = 1, C = 2, Invalid = 0xFF };
+
+// Runs TPS25751Register::printHex() against the stdout-backed native Stream stub
+// and returns what it printed.
+std::string capturePrintHex(uint32_t value, uint8_t digits)
+{
+    fflush(stdout);
+    FILE *tmp = tmpfile();
+    const int saved = dup(fileno(stdout));
+    dup2(fileno(tmp), fileno(stdout));
+
+    TPS25751Register::printHex(Serial, value, digits);
+
+    fflush(stdout);
+    dup2(saved, fileno(stdout));
+    close(saved);
+
+    std::string out;
+    rewind(tmp);
+    char buf[64];
+    size_t n;
+    while ((n = fread(buf, 1, sizeof(buf), tmp)) > 0) out.append(buf, n);
+    fclose(tmp);
+    return out;
+}
 
 }  // namespace
 
@@ -246,6 +277,31 @@ void test_fields_below_bit_255_are_unchanged()
     TEST_ASSERT_EQUAL_UINT8(0, reg.extractBits(0, 9));         // wider than 8 bits
 }
 
+void test_print_hex_zero_pads_to_the_digit_count()
+{
+    TEST_ASSERT_EQUAL_STRING("0A", capturePrintHex(0x0A, 2).c_str());
+    TEST_ASSERT_EQUAL_STRING("00", capturePrintHex(0x00, 2).c_str());
+    TEST_ASSERT_EQUAL_STRING("FF", capturePrintHex(0xFF, 2).c_str());
+    TEST_ASSERT_EQUAL_STRING("05AC", capturePrintHex(0x05AC, 4).c_str());
+    TEST_ASSERT_EQUAL_STRING("000ABC", capturePrintHex(0xABC, 6).c_str());
+    TEST_ASSERT_EQUAL_STRING("0008001A", capturePrintHex(0x0008001A, 8).c_str());
+    TEST_ASSERT_EQUAL_STRING("F8091166", capturePrintHex(0xF8091166, 8).c_str());
+}
+
+void test_print_hex_prints_only_the_low_digits()
+{
+    // Fewer digits than the value needs: only the low digits print.
+    TEST_ASSERT_EQUAL_STRING("34", capturePrintHex(0x1234, 2).c_str());
+    TEST_ASSERT_EQUAL_STRING("4", capturePrintHex(0x1234, 1).c_str());
+}
+
+void test_print_hex_digit_count_limits()
+{
+    TEST_ASSERT_EQUAL_STRING("", capturePrintHex(0x1234, 0).c_str());
+    TEST_ASSERT_EQUAL_STRING("00001234", capturePrintHex(0x1234, 9).c_str());
+    TEST_ASSERT_EQUAL_STRING("00001234", capturePrintHex(0x1234, 255).c_str());
+}
+
 int main(int, char **)
 {
     UNITY_BEGIN();
@@ -261,5 +317,8 @@ int main(int, char **)
     RUN_TEST(test_extract_enum_past_bit_255);
     RUN_TEST(test_extract_array_across_bit_255);
     RUN_TEST(test_fields_below_bit_255_are_unchanged);
+    RUN_TEST(test_print_hex_zero_pads_to_the_digit_count);
+    RUN_TEST(test_print_hex_prints_only_the_low_digits);
+    RUN_TEST(test_print_hex_digit_count_limits);
     return UNITY_END();
 }

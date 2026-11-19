@@ -22,19 +22,6 @@ uint8_t TPS25751Version::versionRevision() const
     return extractBits(0, 8);
 }
 
-namespace {
-
-// Print value as exactly `digits` uppercase hex digits, zero-padded.
-void printHexPadded(Stream &s, uint32_t value, uint8_t digits)
-{
-    for (int shift = (digits - 1) * 4; shift >= 0; shift -= 4)
-    {
-        s.print(static_cast<unsigned int>((value >> shift) & 0xFu), HEX);
-    }
-}
-
-}  // namespace
-
 void TPS25751Version::debugPrint(Stream &s) const
 {
     s.println(F("========================================"));
@@ -46,15 +33,15 @@ void TPS25751Version::debugPrint(Stream &s) const
     s.println(F("========================================"));
 
     s.print(F("Version (hex VVVV.MM.RR): "));
-    printHexPadded(s, versionMajor(), 4);
+    printHex(s, versionMajor(), 4);
     s.print(F("."));
-    printHexPadded(s, versionMinor(), 2);
+    printHex(s, versionMinor(), 2);
     s.print(F("."));
-    printHexPadded(s, versionRevision(), 2);
+    printHex(s, versionRevision(), 2);
     s.println();
 
     s.print(F("Raw: 0x"));
-    printHexPadded(s, rawVersion(), 8);
+    printHex(s, rawVersion(), 8);
     s.println();
 
     s.println(F("========================================"));

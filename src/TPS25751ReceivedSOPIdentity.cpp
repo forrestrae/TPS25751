@@ -65,19 +65,6 @@ const char *toString(TPS25751ReceivedSOPIdentity::ConnectorType val)
     }
 }
 
-namespace {
-
-// Zero-padded hex; Stream's HEX output drops leading zeros.
-void printHexPadded(Stream &s, uint32_t value, int digits)
-{
-    for (int shift = (digits - 1) * 4; shift >= 0; shift -= 4)
-    {
-        s.print(static_cast<unsigned int>((value >> shift) & 0xFu), HEX);
-    }
-}
-
-}  // namespace
-
 void TPS25751ReceivedSOPIdentity::debugPrint(Stream &s) const
 {
     s.println(F("========================================"));
@@ -105,11 +92,7 @@ void TPS25751ReceivedSOPIdentity::debugPrint(Stream &s) const
         s.print(labels[i]);
         s.print(F(" VDO: 0x"));
         const uint32_t value = vdo(i);
-        // Zero-padded to 8 hex digits; Stream's HEX output drops leading zeros.
-        for (int shift = 28; shift >= 0; shift -= 4)
-        {
-            s.print(static_cast<unsigned int>((value >> shift) & 0xFu), HEX);
-        }
+        printHex(s, value, 8);
         s.println();
     }
 
@@ -122,7 +105,7 @@ void TPS25751ReceivedSOPIdentity::debugPrint(Stream &s) const
     else
     {
         s.print(F("ID Header: VID 0x"));
-        printHexPadded(s, usbVendorId(), 4);
+        printHex(s, usbVendorId(), 4);
         s.print(F(", Host: "));
         s.print(usbHostCapable() ? F("Yes") : F("No"));
         s.print(F(", Device: "));
@@ -139,15 +122,15 @@ void TPS25751ReceivedSOPIdentity::debugPrint(Stream &s) const
         if (count > 1)
         {
             s.print(F("Cert Stat: XID 0x"));
-            printHexPadded(s, xid(), 8);
+            printHex(s, xid(), 8);
             s.println();
         }
         if (count > 2)
         {
             s.print(F("Product: PID 0x"));
-            printHexPadded(s, usbProductId(), 4);
+            printHex(s, usbProductId(), 4);
             s.print(F(", bcdDevice 0x"));
-            printHexPadded(s, bcdDevice(), 4);
+            printHex(s, bcdDevice(), 4);
             s.println();
         }
     }

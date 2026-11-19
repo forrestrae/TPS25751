@@ -10,7 +10,7 @@ Register byte sizes in `include/TPS25751RegisterAddress.h` match rev B for all 2
 
 No code or test assumes the rev A 29h Port Control reset (03915052h) or the rev A INT_MASK reset (030000h). The library never decoded 28h bits 63-32, so the RESERVED change there needs no code change. The Sleep Control reset change (01h to 03h) was assumed in code comments, a test, and CONSTRAINTS.md.
 
-Status as of 2026-11-18: 11 steps done, 1 partial (step 1, hardware check pending), 1 not started (step 12), 0 deferred.
+Status as of 2026-11-18: 13 steps done, 0 partial, 0 not started, 0 deferred.
 
 ## Approach
 
@@ -20,14 +20,14 @@ Each step carries a status tag: `[done]`, `[partial]`, or `[not started]`. Step 
 
 ## Changes
 
-### 1. Sleep Time label and reset (70h) [partial]
+### 1. Sleep Time label and reset (70h) [done]
 
 Rev B (p.52): Sleep Time bits 2-1 value 2h = 1000 ms (rev A: 1200 ms). Register reset 03h, Sleep Time reset 1h.
 
 - Files: `include/TPS25751SleepControl.h` (enum line 14, reset doc 29-31), `src/TPS25751SleepControl.cpp:63`, `test/test_native/test_TPS25751SleepControl/test_TPS25751SleepControl.cpp`, `docs/engineering/CONSTRAINTS.md:502-511`.
 - Tests: in suite `test_TPS25751SleepControl`, replace `test_reset_value_is_semantically_invalid` with `test_reset_value_0x03_is_allowed_100ms_and_valid`, and keep a 0x01 case asserting invalid.
 - Verified: `Time1000ms = 2` in `include/TPS25751SleepControl.h:18` with `Time1200ms` kept as a deprecated alias, the "1000 ms" string at `src/TPS25751SleepControl.cpp:63`, the 0x03 reset documented in the header, and the CONSTRAINTS.md trap rewritten for the rev B reset. `test_reset_value_0x03_is_allowed_100ms_and_valid` and a 0x01 invalid case (`test_allowed_reserved0_is_semantically_invalid`) exist. MCP `explain_bitfield(SLEEP_CONTROL, "Sleep Time")` returned 2h = 1000 ms, reset 1h; `list_registers` shows 0x70 reset 03h. Commits 9d051d5 and e850010.
-- Remaining: hardware check. Read 0x70 after power-on and expect 0x03.
+- Hardware observation, 2026-11-18: after a power cycle, `example-read-registers` on a Teensy 4.0 host with a TPS25751 in Application mode printed `SLEEP_CONTROL raw: 0x03` (Sleep Mode Allowed = Yes, Sleep Time = 100 ms). The sketch performs no writes to 0x70, and the read was taken about 64 s after boot. The board loads its configuration from EEPROM (Boot Flags: I2C EEPROM Present 1, Patch Config Source EEPROM Loaded, Revision ID 193), so the read matches rev B but does not separate the silicon reset from a value set by that configuration. The raw print was added to the sketch in commit 502652d, and the CONSTRAINTS.md trap now records the observation in commit 5a90523.
 
 ### 2. Charger Detect Enable 2h (29h) [done]
 
@@ -110,13 +110,14 @@ Rev B (p.53): bits 10 and 11 are GPIO 10 Data and GPIO 11 Data.
 - Tests: no suite existed. Add `test/test_native/test_TPS25751GPIOStatus` asserting data for pins 10, 11, and 12, and false for 8 and 9.
 - Verified: `gpioData()` accepts pins 0-7 and 10-12 and returns false for 8 and 9. Suite `test_TPS25751GPIOStatus` has `test_gpio_10_and_11_data_decode` and `test_reserved_pins_8_and_9_read_false`. MCP `get_register(GPIO_STATUS)` returned GPIO 10 Data bit 10, GPIO 11 Data bit 11, GPIO 12 Data bit 12, RESERVED bits 9:8. Commit 44be95d.
 
-### 12. New accessors for newly documented fields (28h, 29h) [not started]
+### 12. New accessors for newly documented fields (28h, 29h) [done]
 
-Add when needed. Rev B 28h (p.29): USB3 Rate bits 14-13, DebugAccessory Support bit 12, USB Communication Capable bit 11, APDO ILIM Over Shoot bits 30-29, APDO VBUS UVP Threshold bits 28-27. Rev B 29h (p.31): DCD Enable bit 25, Automatic ID Request bit 16 (reset 1h).
+Rev B 28h (p.29): USB3 Rate bits 14-13, DebugAccessory Support bit 12, USB Communication Capable bit 11, APDO ILIM Over Shoot bits 30-29, APDO VBUS UVP Threshold bits 28-27. Rev B 29h (p.31): DCD Enable bit 25, Automatic ID Request bit 16 (reset 1h).
 
 - Files: `include/TPS25751PortConfig.h`, `src/TPS25751PortConfig.cpp`, `include/TPS25751PortControl.h`, `src/TPS25751PortControl.cpp`.
 - Tests: extend the PortConfig and PortControl suites added in steps 2 and 3.
-- Current state: no accessor for any of these fields exists in `include/TPS25751PortConfig.h` or `include/TPS25751PortControl.h` (grep returned nothing), and the suites have no tests for them. MCP `get_register(PORT_CONTROL)` confirms DCD Enable bit 25 and Automatic ID Request bit 16 (reset 1h) are defined. No commit.
+- Current state: all seven fields have read accessors. Neither class has setters for its other fields, so none were added, although the TRM lists all seven as R/W. USB3 Rate, APDO ILIM Over Shoot, and APDO VBUS UVP Threshold are typed enums with `toString()` helpers; the other four are bools. USB3 Rate 3h and APDO VBUS UVP Threshold 3h are Reserved and make `isSemanticallyValid()` return false, matching how Reserved TypeC Support Options is treated. All four APDO ILIM Over Shoot values are defined and none is rejected. `TPS25751PortControl` has no reserved values for the new bits, so its validation is unchanged.
+- Verified: `usb3Rate()`, `debugAccessorySupport()`, `usbCommunicationCapable()`, `apdoIlimOvershoot()`, and `apdoVbusUvpThreshold()` are in `TPS25751PortConfig` at bits 14:13, 12, 11, 30:29, and 28:27; `dcdEnable()` and `automaticIdRequest()` are in `TPS25751PortControl` at bits 25 and 16. `debugPrint()` prints each. `test_TPS25751PortConfig` covers decode of every named value, the 0001220002h reset fixture with the new fields at 0, Reserved rejection, and isolation from neighbouring bits. `test_TPS25751PortControl` covers each bit alone and together, the 00015052h reset fixture with Automatic ID Request decoding as 1 and DCD Enable as 0, and isolation from bit 24 and the bits around bit 16. MCP `explain_bitfield` returned each field's access type, reset, and value table: USB3 Rate 0h to 3h (3h Reserved), DebugAccessory Support and USB Communication Capable reset 0h, APDO ILIM Over Shoot 0h to 3h (25 mA, 50 mA, 75 mA, static 2900 mA), APDO VBUS UVP Threshold 0h to 3h (90%, 88%, 92%, Reserved), DCD Enable reset 0h, Automatic ID Request reset 1h. On the hardware board the example decoded 0x28 as USB3 not supported with both flags 0 and 0x29 with DCD Enable and Automatic ID Request enabled. Commits 09dc4c2 and 3590a75.
 
 ### 13. Comments only: VBUS OVP discrepancy and TI spellings [done]
 
@@ -173,6 +174,7 @@ The library does not support these rev B registers. They are listed in suggested
 | `test/test_native/test_TPS25751AutoNegotiateSink/` | 10 |
 | `test/test_native/test_TPS25751GPIOStatus/` (new) | 11 |
 | `docs/engineering/CONSTRAINTS.md` | 1, 4 |
+| `examples/read-registers/src/main.cpp` | 1 |
 | `AGENTS.md`, `docs/plans/plan-impl-v01.md` | 7 |
 
 ## Verification
@@ -181,10 +183,10 @@ The library does not support these rev B registers. They are listed in suggested
    ```bash
    pio test -e native
    ```
-   A single suite runs with `pio test -e native -f "test_native/<suite>"`. Last result, 2026-11-18 on `fix/rev-b-trm` after steps 1 to 11 and 13: 17 suites, 337 of 337 test cases passed.
+   A single suite runs with `pio test -e native -f "test_native/<suite>"`. Last result, 2026-11-18 on `fix/rev-b-trm` after steps 1 to 13: 17 suites, 359 of 359 test cases passed.
 2. MCP confirmation: each step's rev B fact was re-checked with `explain_bitfield`, `get_register`, or `list_registers`; the call and result are recorded under that step.
 3. Register sizes: `list_registers` against `include/TPS25751RegisterAddress.h` gives 27 of 27 matches.
-4. Hardware (pending, closes step 1): read 0x70 (SLEEP_CONTROL) after power-on and expect 0x03. CONSTRAINTS.md previously called 0x01 "exactly what the TRM specifies", so the old value was TRM-derived, not observed on hardware.
+4. Hardware (done, closes step 1): 0x70 (SLEEP_CONTROL) read 0x03 on 2026-11-18 after a power cycle, on a Teensy 4.0 host with a TPS25751 in Application mode, using `example-read-registers` (no writes to 0x70). CONSTRAINTS.md previously called 0x01 "exactly what the TRM specifies", so the old value was TRM-derived, not observed on hardware. The board loads its configuration from EEPROM, so the read matches rev B without isolating the silicon reset from an EEPROM-set value.
 
 ## Appendix A: Audit findings
 

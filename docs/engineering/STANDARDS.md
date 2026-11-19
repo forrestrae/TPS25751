@@ -125,12 +125,21 @@ Registers are identified solely by their hardware address
 (`TPS25751Registers::Address`) — there is no separate type enum. The factory
 dispatches object creation directly on the address.
 
-### Step 1: Add the Address (if not already present)
+### Step 1: Add the Address
 
-The 27 hardware addresses already live in `TPS25751Registers::Address` in
-`TPS25751RegisterAddress.h`, each paired with a `RegisterInfo` size entry. If the
-register you are adding is already in that enum (it usually is), there is nothing to
-add here.
+A new register adds four entries to `TPS25751RegisterAddress.h`:
+
+1. An `Address` enumerator, in address order, with a `///` comment giving the TRM
+   title and rev B page, for example
+   `/// PD3 Configuration (SLVUCR8B Rev. B, p.46).`
+2. A `Registers::` `RegisterInfo` constant pairing the address with its size in
+   bytes. The size is the TRM width rounded up to whole bytes, unless hardware
+   reports a different length byte (see CONSTRAINTS.md).
+3. A case in `getRegisterSize()`.
+4. A case in `getRegisterInfo()`.
+
+Check the address first. Registers the library already decodes have all four
+entries, and a register that only lacked a class needs none of them.
 
 ### Step 2: Add Forward Declaration
 

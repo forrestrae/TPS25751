@@ -137,7 +137,7 @@ Describe INT_CLEAR1 as R/W, as both TRM revisions do (finding 16). The library o
 
 The address enums `INT_EVENT1`, `INT_MASK1`, and `INT_CLEAR1` keep their names (finding 14). Rev B still uses these short names, so a rename would warn users for using the name the TRM uses. See `docs/plans/int-register-rename.md`.
 
-The library does not support these rev B registers. They are listed in suggested order by usefulness to a sink/source host, for a later register batch:
+The library does not support these rev B registers. They are listed in suggested order by usefulness to a sink/source host, for a later register batch. [trm-revB-audit-remaining-registers.md](trm-revB-audit-remaining-registers.md) adds all ten in Batches G to K and records each batch's status:
 
 | Offset | Register | Width | Page | Note |
 |---|---|---|---|---|

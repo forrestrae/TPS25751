@@ -15,8 +15,14 @@ The TPS25751 library is an object-oriented C++ library for interfacing with the 
 - RAII memory management for embedded systems
 - Platform-optimized for Teensy 4.x (ARM Cortex-M7, no RTTI)
 
-**Last Updated:** 2026-07-08
-**Current Phase:** Implementation complete — **27/27 registers done** (Batch F added
+**Last Updated:** 2026-11-18
+**Current Phase:** Rev B register coverage, 29 of the 37 registers in TRM SLVUCR8B.
+[trm-revB-audit-remaining-registers.md](docs/plans/trm-revB-audit-remaining-registers.md)
+adds the ten registers rev B documents that the library did not decode, in Batches G
+to K on `fix/rev-b-trm`. Batch G added VERSION (0x0F, read-only) and PD3_CONFIGURATION
+(0x42, R/W), whose bits enable the controller's replies from the Tx data blocks that
+later batches add. Earlier history: the 27 registers of plan-impl-v01 were complete on
+2026-07-08 (Batch F added
 LIQUID_DETECTION_CONFIG: a R/W 11-byte liquid/moisture-detection configuration block
 — wait intervals (rev B "Wait Time"), ADC sample count/cadence, ADC threshold pairs with hysteresis, and
 the state/enable bits for liquid detection + corrosion mitigation — implemented as a
@@ -54,7 +60,7 @@ checkout layout.
 
 | MCP server | Tool prefix | Device | Use for |
 |---|---|---|---|
-| `tps25751-docs` | `mcp__tps25751-docs__*` | TPS25751 USB-C PD controller (27 registers) | The host PD controller's own registers (STATUS, MODE, COMMAND/DATA, …) |
+| `tps25751-docs` | `mcp__tps25751-docs__*` | TPS25751 USB-C PD controller (37 registers) | The host PD controller's own registers (STATUS, MODE, COMMAND/DATA, …) |
 
 (The BQ25798 charger's `bq25798-docs` server is configured in the sibling
 `lib/BQ25798` driver repo, backed by the same server engine.)
@@ -163,7 +169,7 @@ Serial.println(F("String in flash"));                // Use F() macro
 
 ## Implementation Status
 
-**Implemented Registers:** 27/27 — **all registers complete**
+**Implemented Registers:** 29/37
 - STATUS, MODE, POWER_PATH_STATUS, BOOT_FLAGS, PORT_CONFIG
 - TYPEC_STATE, INTERRUPT_EVENT, POWER_STATUS, PD_STATUS
 - ACTIVE_PDO_CONTRACT, ACTIVE_RDO_CONTRACT, PORT_CONTROL
@@ -204,10 +210,17 @@ Serial.println(F("String in flash"));                // Use F() macro
   enable-liquid-detection bits. A straightforward `setBits()`-based R/W register
   mirroring `TPS25751AutoNegotiateSink` (all bit offsets ≤ 82, within
   `extractBits()`/`setBits()`'s `uint8_t bitPos` range) with a cross-field
-  low ≤ high semantic check on each threshold pair. **Completes the register set.**
+  low ≤ high semantic check on each threshold pair. Completed the 27 registers of plan-impl-v01.
+- VERSION, PD3_CONFIGURATION (Batch G, 2026-11-18): VERSION (0x0F, 4 B) is the
+  read-only bootloader/application version, decoded as VVVV.MM.RR from a
+  little-endian word. PD3_CONFIGURATION (0x42, 4 B, reset 00080010h) is R/W, with
+  one `setBits()` setter per PD 3.x feature bit and `writePD3Config()`. Six of its
+  bits enable the controller's replies to Get_* messages from 0x77, 0x78, 0x7A,
+  0x7B, 0x7D, and 0x7E; with a bit clear the controller answers Not_Supported.
 
-**Status:** All 27 registers implemented.
-- See [Implementation Plan](docs/plans/plan-impl-v01.md) for the completed roadmap
+**Status:** 29 of 37 registers implemented. Batches H to K add 27h, 48h, 78h, 7Ah, 77h, 7Eh, 7Bh, and 7Dh.
+- See [trm-revB-audit-remaining-registers.md](docs/plans/trm-revB-audit-remaining-registers.md) for the current roadmap
+  and [plan-impl-v01.md](docs/plans/plan-impl-v01.md) for the completed rev A roadmap
 
 ---
 
@@ -271,6 +284,8 @@ Each register has its own class inheriting from `TPS25751Register`:
 - `TPS25751AutoNegotiateSink`: AUTONEGOTIATE_SINK register (0x37) — R/W 24-byte sink-negotiation configuration (voltage window, minimum required power, capability-mismatch handling, PPS sink request parameters); `setBits()`-based field setters mirroring `TPS25751InterruptMask`'s pattern, plus a cross-field semantic check (host-provided min voltage ≤ host-provided max voltage when neither bound is PD-computed)
 - `TPS25751IOConfig`: IO_CONFIG register (0x5C) — **read-only** 49-byte GPIO configuration block (output/interrupt/pull-up/pull-down/open-drain/initial-value/event-polarity per-GPIO bitmaps, analog-input selection, per-GPIO event mapping); "cannot be modified at run-time" per the TRM, so there are no setters, no write path, and no `kAddress`. Bit offsets run up to 391 (past `extractBits()`'s `uint8_t bitPos` range), so every field is decoded via direct byte assembly from `_raw[]`, mirroring `TPS25751TransmitSourceCaps::getPDO()`
 - `TPS25751LiquidDetectionConfig`: LIQUID_DETECTION_CONFIG register (0x98) — R/W 11-byte liquid/moisture-detection configuration (with/without-liquid wait intervals (rev B "Wait Time"; rev A "Sleep Time") at 1000 ms/LSB, ADC sample count + sample-time cadence at 10 ms/LSB, two ADC threshold pairs at 14 mV/LSB providing hysteresis for exit out of Liquid Detected, and the liquid-detection-state / enable-corrosion-mitigation / enable-liquid-detection bits); `setBits()`-based field setters + `kAddress` write path mirroring `TPS25751AutoNegotiateSink` (all bit offsets ≤ 82, within `extractBits()`/`setBits()`'s `uint8_t bitPos` range — no direct byte assembly needed), plus a cross-field semantic check (low ≤ high on each threshold pair). The `numberOfSamples` "must be 2^N" TRM note is intentionally not enforced (reset value 0 is not a power of two)
+- `TPS25751Version`: VERSION register (0x0F), read-only, 4 bytes. `rawVersion()`, `versionMajor()` (VVVV, bits 31:16), `versionMinor()` (MM, bits 15:8), and `versionRevision()` (RR, bits 7:0). The TRM gives only "byte 1 = RR, byte 2 = MM, etc.", so VVVV in bytes 3 and 4 is an inference awaiting hardware confirmation; `debugPrint()` shows hex `VVVV.MM.RR` because the TRM does not say whether the digits are BCD. No semantic rules; the all-zero reset is valid
+- `TPS25751PD3Config`: PD3_CONFIGURATION register (0x42), R/W, 4 bytes, reset 00080010h (Support Get Revision and Unchunked Supported set). Bool accessors and `setBits()` setters for bits 20, 19, 18, 17, 11, 10, 8, 7, and 4, plus `kAddress` and `writePD3Config()`. Bits 20, 18, 17, 11, 10, and 8 gate the replies from 0x7A, 0x78, 0x7E, 0x7B, 0x7D, and 0x77. Bit 7 (Auto Get MIDB) stores its result in TX_MIBDB_SOP (0x73), which the library does not decode. Semantic validation requires reserved bits 31:21, 16:12, 9, 6:5, and 3:0 to read 0
 
 ### 4CC Command-Task Interface & I2Cc Downstream-Device Proxy
 
@@ -445,7 +460,8 @@ auto statusReg = tps.readStatusRegister(true);  // with validation
     │   ├── DOCUMENTATION.md            # Documentation standards
     │   └── CODE_REVIEW_GUIDELINES.md   # Review checklist (embedded C++ / TPS25751-specific)
     └── plans/
-        └── plan-impl-v01.md            # Implementation plan (12 registers remaining)
+        ├── plan-impl-v01.md            # Completed plan for the first 27 registers
+        └── trm-revB-audit-remaining-registers.md  # Current plan: the other ten rev B registers
 ```
 
 Sibling repositories (side-by-side in the parent project's `lib/`):
@@ -462,7 +478,7 @@ Sibling repositories (side-by-side in the parent project's `lib/`):
 - **Platform Issues:** See [CONSTRAINTS.md](docs/engineering/CONSTRAINTS.md)
 - **Writing Tests:** See [TESTING.md](docs/engineering/TESTING.md)
 - **Reviewing Code:** See [CODE_REVIEW_GUIDELINES.md](docs/engineering/CODE_REVIEW_GUIDELINES.md)
-- **Current Roadmap:** See [Implementation Plan](docs/plans/plan-impl-v01.md)
+- **Current Roadmap:** See [trm-revB-audit-remaining-registers.md](docs/plans/trm-revB-audit-remaining-registers.md)
 - **MCP Servers:** See `../device-register-mcp-server/AGENTS.md` (sibling repo)
 - **BQ25798 Driver:** See `../BQ25798/AGENTS.md` (sibling repo)
 

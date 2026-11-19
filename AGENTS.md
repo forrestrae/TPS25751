@@ -63,8 +63,8 @@ unit-test harness in place (`pio test -e native`, Batch 0)
 **IMPORTANT**: When working with TPS25751 registers, use the `tps25751-docs`
 register-docs MCP server for accurate register information extracted from the TI
 manuals, and the `usb-pd-docs` server for the USB PD data objects that seven of those
-registers carry. The generic server engine **and all device and specification
-definitions** live in the sibling **`lib/device-register-mcp-server`** repository; this
+registers carry. The generic server engine and all device and specification
+definitions live in the sibling `lib/device-register-mcp-server` repository; this
 repo's `.mcp.json` invokes it cross-repo (`uv --directory ../device-register-mcp-server
 run server.py`, with `DEVICE_CONFIG=devices/tps25751/device.json` for `tps25751-docs`
 and `DEVICE_CONFIG=specifications/USB_PD/specification.json` for `usb-pd-docs`; a
@@ -230,8 +230,8 @@ Serial.println(F("String in flash"));                // Use F() macro
   `setBits()`-based field setters and a cross-field semantic check (host-provided
   min voltage ≤ host-provided max voltage, skipped when either bound is
   PD-computed); IO_CONFIG (0x5C, 49 B) is **read-only** — the TRM states GPIO
-  configuration is fixed at boot — and its bit offsets run up to 391, past the
-  8-bit `bitPos` the base class then had, so it decoded every field by direct byte
+  configuration is fixed at boot. Its bit offsets run up to 391, past the 8-bit
+  `bitPos` the base class then had, so it decoded every field by direct byte
   assembly from `_raw[]`. Since ADR-012 (16-bit `bitPos`, 2026-11-19) it reads
   every field through `extractBits*()`
 - LIQUID_DETECTION_CONFIG (Batch F, 2026-07-08) — R/W 12-byte (0x98)

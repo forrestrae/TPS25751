@@ -315,24 +315,25 @@ private:
 
 #### 5. Utility Components
 
-**TPS25751BitUtils:**
+**Bit helpers (on `TPS25751Register`):** the bitfield helpers live on the register
+base class, not in a separate utility class. Each has an instance form that reads the
+register's own buffer and a static form that takes a buffer and its length:
+
 ```cpp
-class TPS25751BitUtils {
-public:
-    static uint8_t extractBits(const uint8_t* data, uint8_t byteIndex,
-                               uint8_t bitCount, uint8_t bitOffset);
-
-    static uint16_t extractBits16(const uint8_t* data, uint8_t startByte,
-                                  uint8_t bitCount, uint8_t bitOffset);
-
-    static uint32_t extractBits32(const uint8_t* data, uint8_t startByte,
-                                  uint8_t bitCount, uint8_t bitOffset);
-
-    static bool getBit(const uint8_t* data, uint8_t byteIndex, uint8_t bitIndex);
-
-    static void setBit(uint8_t* data, uint8_t byteIndex, uint8_t bitIndex, bool value);
-};
+// Bit n of a register is bit n % 8 of byte n / 8; multi-byte fields are little-endian.
+uint8_t  extractBits  (uint16_t bitPos, uint8_t bitLen) const;  // 1..8 bits
+uint16_t extractBits16(uint16_t bitPos, uint8_t bitLen) const;  // 1..16 bits
+uint32_t extractBits32(uint16_t bitPos, uint8_t bitLen) const;  // 1..32 bits
+uint64_t extractBits64(uint16_t bitPos, uint8_t bitLen) const;  // 1..64 bits
+void     setBits      (uint16_t bitPos, uint8_t bitLen, uint32_t value);  // 1..32 bits
+template<typename E> E extractEnum(uint16_t bitPos, uint8_t bitLen, uint8_t maxValid, E dflt) const;
+static void printHex(Stream& s, uint32_t value, uint8_t digits);  // zero-padded hex for debugPrint()
 ```
+
+The bit position is 16 bits (ADR-012), and a field outside the buffer reads 0 or is not
+written. `include/util/TPS25751BitUtils.h` still declares a legacy free function
+`extractBits(const uint8_t*, uint8_t, uint8_t)` with an 8-bit position and no bounds
+check; no library code calls it. Use the base-class helpers instead.
 
 **TPS25751Debug:**
 ```cpp

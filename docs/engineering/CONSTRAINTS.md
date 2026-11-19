@@ -508,6 +508,44 @@ This follows the rule in `docs/plans/trm-revB-audit-remaining-registers.md`
 ("Validation tiers"): when hardware shows firmware setting a reserved bit, drop
 that check and record why here.
 
+**Trap: GLOBAL_SYSTEM_CONFIGURATION (0x27) is 14 bytes on the wire, not the
+TRM's 116 bits, and its reserved bits carry firmware data.** SLVUCR8B Rev. B
+(Table 3-13, p.28) gives a 116-bit register, which rounds up to 15 bytes. On
+2026-11-18 the same board as above (APP mode, EEPROM configuration, Teensy 4.0
+host) answered a raw read of 0x27 with a length byte of 14 on four consecutive
+reads. `TPS25751::readRegister()` rejects any length byte that differs from
+`RegisterInfo`, so a 15-byte `RegisterInfo` would fail every read.
+`Registers::GLOBAL_SYSTEM_CONFIGURATION` is therefore 14 bytes, and bits
+115:112 are not transmitted. The data was `05 09 14 00 1C 03 00 00 00 00 00 00
+00 00`. The documented fields decode to PP Cable1 enabled, PP1 Source, ILIM Over
+Shoot none, PP3 bi-directional, and RCP 6 mV, but the firmware also sets bit 2
+(reserved 7:1), bit 11 (13:11), bit 20 (21:19), and bits 34, 35, 36, 40, and 41
+(115:24). Every reserved range holds data, so `TPS25751GlobalSystemConfig`
+checks no reserved bit; its semantic rules are PP3 Config ≤ 5 and PP1 Config ≤ 1.
+Two consequences for writers:
+
+- A write must start from a fresh read of the same board. The setters touch
+  only their own fields, so a read-modify-write sends the undocumented bits back
+  unchanged. Writing a default-constructed object clears them and also sets PP1
+  and PP3 to Disabled.
+- The TRM says any modification "will cause a port disconnect and reconnect
+  with the new settings". The library has not yet exercised the write on
+  hardware; the plan lists that check as open.
+
+`debugPrint()` prints all 14 raw bytes so a before-and-after comparison shows
+whether the undocumented bits survived.
+
+**RECEIVED_SOP_IDENTITY (0x48) and INT_EVENT1 bit 51.** 0x48 holds the latest
+Discover Identity response. INT_EVENT1 bit 51 means "The Discover Modes process
+has completed" (p.19), a later discovery step, and INT_EVENT1 has no Discover
+Identity event. Treat bit 51 as a hint and Response Type (bits 7:6) as the
+authoritative status. On 2026-11-18 the board was attached to a PD source as a
+UFP sink, with PORT_CONTROL Automatic ID Request = 1. 0x48 read Response Type 0
+(not sent or pending) with zero VDOs, and bit 51 was clear. A SOP Discover
+Identity is normally sent by the DFP, so this result is expected for a UFP; the
+TRM does not state the firmware's policy. The timing of bit 51 relative to a
+0x48 update is not yet observed.
+
 ---
 
 ## USB Power Delivery Complexity
@@ -833,7 +871,8 @@ bool validateData() const {
 
 Check reserved bits against the TRM, then against hardware. If a real device
 sets a reserved bit, the check rejects every valid read from it. See the
-PD3_CONFIGURATION trap under Read/Write Registers.
+PD3_CONFIGURATION and GLOBAL_SYSTEM_CONFIGURATION traps under Read/Write
+Registers.
 
 ### 6. Large Stack Allocations
 
@@ -970,6 +1009,7 @@ void foo() {
 | 1.2 | 2026-07-02 | Claude Code | BQ25798 decode/encode conventions moved to the sibling lib/BQ25798 repo with the driver; generic I2Cr/I2Cw framing rules retained here |
 | 1.3 | 2026-07-07 | Claude Code | Batch C: documented the ADC_RESULTS (0x6A) update-frequency caveat — not refreshed in Unconnected Sleep, so a stale/all-zero read is expected, not an error (Read-Only Registers section) |
 | 1.4 | 2026-11-18 | Claude Code | Batch G of the rev B plan: firmware sets PD3_CONFIGURATION (0x42) reserved bits 3:0 on hardware, so validation no longer checks them (Read/Write Registers section) |
+| 1.5 | 2026-11-18 | Claude Code | Batch H of the rev B plan: GLOBAL_SYSTEM_CONFIGURATION (0x27) reports 14 bytes on hardware and the firmware sets bits in all its reserved ranges; RECEIVED_SOP_IDENTITY (0x48) status comes from Response Type, not INT_EVENT1 bit 51 (Read/Write Registers section) |
 
 ---
 

@@ -16,12 +16,14 @@ The TPS25751 library is an object-oriented C++ library for interfacing with the 
 - Platform-optimized for Teensy 4.x (ARM Cortex-M7, no RTTI)
 
 **Last Updated:** 2026-11-18
-**Current Phase:** Rev B register coverage, 29 of the 37 registers in TRM SLVUCR8B.
+**Current Phase:** Rev B register coverage, 31 of the 37 registers in TRM SLVUCR8B.
 [trm-revB-audit-remaining-registers.md](docs/plans/trm-revB-audit-remaining-registers.md)
 adds the ten registers rev B documents that the library did not decode, in Batches G
 to K on `fix/rev-b-trm`. Batch G added VERSION (0x0F, read-only) and PD3_CONFIGURATION
 (0x42, R/W), whose bits enable the controller's replies from the Tx data blocks that
-later batches add. Earlier history: the 27 registers of plan-impl-v01 were complete on
+later batches add. Batch H added GLOBAL_SYSTEM_CONFIGURATION (0x27, R/W, 14 bytes on
+hardware against the TRM's 116 bits) and RECEIVED_SOP_IDENTITY (0x48, read-only, raw
+VDOs). Earlier history: the 27 registers of plan-impl-v01 were complete on
 2026-07-08 (Batch F added
 LIQUID_DETECTION_CONFIG: a R/W 11-byte liquid/moisture-detection configuration block
 — wait intervals (rev B "Wait Time"), ADC sample count/cadence, ADC threshold pairs with hysteresis, and
@@ -169,7 +171,7 @@ Serial.println(F("String in flash"));                // Use F() macro
 
 ## Implementation Status
 
-**Implemented Registers:** 29/37
+**Implemented Registers:** 31/37
 - STATUS, MODE, POWER_PATH_STATUS, BOOT_FLAGS, PORT_CONFIG
 - TYPEC_STATE, INTERRUPT_EVENT, POWER_STATUS, PD_STATUS
 - ACTIVE_PDO_CONTRACT, ACTIVE_RDO_CONTRACT, PORT_CONTROL
@@ -217,8 +219,15 @@ Serial.println(F("String in flash"));                // Use F() macro
   one `setBits()` setter per PD 3.x feature bit and `writePD3Config()`. Six of its
   bits enable the controller's replies to Get_* messages from 0x77, 0x78, 0x7A,
   0x7B, 0x7D, and 0x7E; with a bit clear the controller answers Not_Supported.
+- GLOBAL_SYSTEM_CONFIGURATION, RECEIVED_SOP_IDENTITY (Batch H, 2026-11-18):
+  GLOBAL_SYSTEM_CONFIGURATION (0x27) is R/W with typed-enum setters and
+  `writeGlobalSystemConfig()`. Every write disconnects and reconnects the port, and
+  the firmware keeps undocumented values in TRM-reserved bits, so writes must start
+  from a fresh read. RECEIVED_SOP_IDENTITY (0x48, 25 B) is the latest Discover
+  Identity response: Response Type, VDO count, and six raw VDOs. Typed VDO decode
+  waits for Batch L.
 
-**Status:** 29 of 37 registers implemented. Batches H to K add 27h, 48h, 78h, 7Ah, 77h, 7Eh, 7Bh, and 7Dh.
+**Status:** 31 of 37 registers implemented. Batches I to K add 78h, 7Ah, 77h, 7Eh, 7Bh, and 7Dh.
 - See [trm-revB-audit-remaining-registers.md](docs/plans/trm-revB-audit-remaining-registers.md) for the current roadmap
   and [plan-impl-v01.md](docs/plans/plan-impl-v01.md) for the completed rev A roadmap
 
@@ -286,6 +295,8 @@ Each register has its own class inheriting from `TPS25751Register`:
 - `TPS25751LiquidDetectionConfig`: LIQUID_DETECTION_CONFIG register (0x98) — R/W 11-byte liquid/moisture-detection configuration (with/without-liquid wait intervals (rev B "Wait Time"; rev A "Sleep Time") at 1000 ms/LSB, ADC sample count + sample-time cadence at 10 ms/LSB, two ADC threshold pairs at 14 mV/LSB providing hysteresis for exit out of Liquid Detected, and the liquid-detection-state / enable-corrosion-mitigation / enable-liquid-detection bits); `setBits()`-based field setters + `kAddress` write path mirroring `TPS25751AutoNegotiateSink` (all bit offsets ≤ 82, within `extractBits()`/`setBits()`'s `uint8_t bitPos` range — no direct byte assembly needed), plus a cross-field semantic check (low ≤ high on each threshold pair). The `numberOfSamples` "must be 2^N" TRM note is intentionally not enforced (reset value 0 is not a power of two)
 - `TPS25751Version`: VERSION register (0x0F), read-only, 4 bytes. `rawVersion()`, `versionMajor()` (VVVV, bits 31:16), `versionMinor()` (MM, bits 15:8), and `versionRevision()` (RR, bits 7:0). The TRM gives only "byte 1 = RR, byte 2 = MM, etc.", so VVVV in bytes 3 and 4 is an inference. It is still unconfirmed: hardware read 0xF8091166, which gives an implausible VVVV of F809, so the decode stays as is until it can be compared with TI's tooling; `debugPrint()` shows hex `VVVV.MM.RR` because the TRM does not say whether the digits are BCD. No semantic rules; the all-zero reset is valid
 - `TPS25751PD3Config`: PD3_CONFIGURATION register (0x42), R/W, 4 bytes, reset 00080010h (Support Get Revision and Unchunked Supported set). Bool accessors and `setBits()` setters for bits 20, 19, 18, 17, 11, 10, 8, 7, and 4, plus `kAddress` and `writePD3Config()`. Bits 20, 18, 17, 11, 10, and 8 gate the replies from 0x7A, 0x78, 0x7E, 0x7B, 0x7D, and 0x77. Bit 7 (Auto Get MIDB) stores its result in TX_MIBDB_SOP (0x73), which the library does not decode. Semantic validation requires reserved bits 31:21, 16:12, 9, and 6:5 to read 0. Bits 3:0 are reserved in the TRM but not checked, because the firmware sets them: hardware read 0x0008001A (see CONSTRAINTS.md, Read/Write Registers)
+- `TPS25751GlobalSystemConfig`: GLOBAL_SYSTEM_CONFIGURATION register (0x27), R/W, 14 bytes. The TRM gives 116 bits (15 bytes), but the controller's length byte is 14 on hardware, so `RegisterInfo` uses 14. Typed enums with `toString()` and `setBits()` setters for RCP Threshold (23:22), PP3 Config (18:16), ILIM Over Shoot for PP_5V (15:14, not 0x28's APDO ILIM), PP1 Config (10:8), and PP Cable1 Switch (bit 0); `rawPp3Config()`/`rawPp1Config()` expose undefined codes. `kAddress` and `writeGlobalSystemConfig()`; a write disconnects and reconnects the port (TRM p.28). Semantic validation checks only PP3 ≤ 5 and PP1 ≤ 1. There are no reserved-bit checks, because the firmware sets bits in all four reserved ranges (hardware read `05 09 14 00 1C 03 00…`), so a write must start from a fresh read; `debugPrint()` shows the raw bytes for that reason (see CONSTRAINTS.md, Read/Write Registers)
+- `TPS25751ReceivedSOPIdentity`: RECEIVED_SOP_IDENTITY_DATA_OBJECT register (0x48), read-only, 25 bytes. `numberValidVdos()` (2:0), nested `ResponseType` enum `responseType()` (7:6), zero-based `vdo(0..5)` via `extractBits32(8 + 32 * i, 32)` (0 for index ≥ 6), and aliases `idHeaderVdo()`, `certStatVdo()`, `productVdo()`. VDO internals are USB PD specification structures and are not decoded (Batch L). Semantic validation: count ≤ 6, reserved bits 5:3 read 0. Response Type is the authoritative status; INT_EVENT1 bit 51 is a later discovery step, not a "0x48 updated" signal
 
 ### 4CC Command-Task Interface & I2Cc Downstream-Device Proxy
 

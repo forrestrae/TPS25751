@@ -87,6 +87,16 @@ the Batch B+ registers) adds field setters or a `TPS25751::writeX()` method:
   **same-size** pairing (INT_MASK1 0x16 and LIQUID_DETECTION_CONFIG 0x98 are both
   11 bytes; RECEIVED_SINK_CAPS and TRANSMIT_SINK_CAPS are both 53). Verify each
   `writeX()` names the register whose bytes it actually writes.
+- **Firmware data in reserved bits must stay visible**: when hardware shows the
+  firmware storing values in TRM-reserved bits and the class drops those checks
+  (PD3_CONFIGURATION bits 3:0, every reserved range of GLOBAL_SYSTEM_CONFIGURATION),
+  `debugPrint()` must still show those bits, and the `writeX()` Doxygen must say
+  to start from a fresh read. Otherwise a write that clears them looks identical
+  to one that preserved them. Caught in the Batch H gate.
+- **The TRM width is not the wire length**: `RegisterInfo` must match the
+  controller's length byte, which can differ from the TRM's bit width rounded up
+  (GLOBAL_SYSTEM_CONFIGURATION: 116 bits in the TRM, 14 bytes on hardware). Do not
+  sign off a new register's size until a hardware read has confirmed the length byte.
 
 ### Downstream-Device Write-Path Traps (ADR-009)
 

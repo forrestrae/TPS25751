@@ -304,6 +304,45 @@ void print_version_and_pd3_config()
         Serial.println(F("Failed to create/read PD3 Configuration register via factory"));
 }
 
+void print_global_config_and_sop_identity()
+{
+    Serial.println();
+    Serial.println(F("-------------------- print_global_config_and_sop_identity --------------------"));
+    Serial.println();
+
+    // GLOBAL_SYSTEM_CONFIGURATION (0x27) is R/W, but this sketch never writes it:
+    // a write makes the port disconnect and reconnect, and a wrong PP1 or PP3
+    // role can back-drive the power path. RECEIVED_SOP_IDENTITY (0x48) is read-only.
+    if (const auto globalConfig = pd.readGlobalSystemConfigRegister(true))
+        globalConfig->debugPrint();
+    else
+        Serial.println(F("Failed to create/read Global System Configuration register via factory"));
+
+    if (const auto sopIdentity = pd.readReceivedSOPIdentityRegister(true))
+        sopIdentity->debugPrint();
+    else
+        Serial.println(F("Failed to create/read Received SOP Identity register via factory"));
+
+    // The identity register fills when the controller sends Discover Identity.
+    // Automatic ID Request makes that automatic; Discover Mode Completed is a
+    // later discovery step, not a "0x48 updated" signal.
+    if (const auto portControl = pd.readPortControlRegister(true))
+    {
+        Serial.print(F("PORT_CONTROL Automatic ID Request: "));
+        Serial.println(portControl->automaticIdRequest() ? F("Yes") : F("No"));
+    }
+    else
+        Serial.println(F("Failed to create/read Port Control register via factory"));
+
+    if (const auto interruptEvent = pd.readInterruptEventRegister(true))
+    {
+        Serial.print(F("INT_EVENT1 Discover Mode Completed: "));
+        Serial.println(interruptEvent->discoverModeCompleted() ? F("Yes") : F("No"));
+    }
+    else
+        Serial.println(F("Failed to create/read Interrupt Event register via factory"));
+}
+
 void print_app_mode_status(const std::unique_ptr<TPS25751Mode> &modeReg)
 {
     modeReg->debugPrint();
@@ -315,6 +354,7 @@ void print_app_mode_status(const std::unique_ptr<TPS25751Mode> &modeReg)
     print_power_status();
     print_adc_results();
     print_port_status();
+    print_global_config_and_sop_identity();
     print_contracts();
     print_interrupt_mask();
     print_sleep_and_customer_use();

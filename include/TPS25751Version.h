@@ -23,6 +23,13 @@
  * from bits 31:16. Placing VVVV in bytes 3 and 4 is an inference from that
  * sentence and is still to be confirmed on hardware.
  *
+ * Hardware observation (2026-11-18, APP mode, EEPROM configuration, Boot
+ * Flags Revision ID 193): raw 0xF8091166, which this class prints as
+ * F809.11.66. A VVVV of F809 is implausible as a version number, so either
+ * the TRM layout is incomplete or the top byte carries something other than
+ * version digits. The decode is unchanged until the value can be compared
+ * with the firmware version reported by TI's tooling.
+ *
  * The TRM does not say whether the digits are BCD, so the version is printed as
  * hexadecimal digits and the raw 32-bit value is available unmodified.
  *

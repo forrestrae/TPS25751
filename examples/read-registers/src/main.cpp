@@ -377,6 +377,41 @@ void print_source_info_and_pps_status()
         Serial.println(F("Failed to create/read PD3 Configuration register via factory"));
 }
 
+void print_caps_extended()
+{
+    Serial.println();
+    Serial.println(F("-------------------- print_caps_extended --------------------"));
+    Serial.println();
+
+    // TX_SOURCE_CAPABILITIES_EXTENDED (0x77) and TRANSMIT_SINK_CAPABILITIES_EXTENDED
+    // (0x7E) are R/W, but this sketch never writes them: whatever the host stores
+    // is sent to the port partner in reply to Get_Source_Cap_Extended or
+    // Get_Sink_Cap_Extended. The fields are raw; the USB PD specification defines
+    // their encodings.
+    if (const auto sourceCaps = pd.readTransmitSourceCapsExtendedRegister(true))
+        sourceCaps->debugPrint();
+    else
+        Serial.println(F("Failed to create/read TX Source Capabilities Extended register via factory"));
+
+    if (const auto sinkCaps = pd.readTransmitSinkCapsExtendedRegister(true))
+        sinkCaps->debugPrint();
+    else
+        Serial.println(F("Failed to create/read TX Sink Capabilities Extended register via factory"));
+
+    // The controller answers Get_Source_Cap_Extended and Get_Sink_Cap_Extended
+    // from these registers only while the matching PD3_CONFIGURATION bit is set;
+    // with the bit clear it replies Not_Supported.
+    if (const auto pd3Config = pd.readPD3ConfigRegister(true))
+    {
+        Serial.print(F("PD3 Support Source Extended Message: "));
+        Serial.println(pd3Config->supportSourceExtended() ? F("Yes") : F("No"));
+        Serial.print(F("PD3 Support Sink Cap Extended: "));
+        Serial.println(pd3Config->supportSinkCapExtended() ? F("Yes") : F("No"));
+    }
+    else
+        Serial.println(F("Failed to create/read PD3 Configuration register via factory"));
+}
+
 void print_app_mode_status(const std::unique_ptr<TPS25751Mode> &modeReg)
 {
     modeReg->debugPrint();
@@ -390,6 +425,7 @@ void print_app_mode_status(const std::unique_ptr<TPS25751Mode> &modeReg)
     print_port_status();
     print_global_config_and_sop_identity();
     print_source_info_and_pps_status();
+    print_caps_extended();
     print_contracts();
     print_interrupt_mask();
     print_sleep_and_customer_use();

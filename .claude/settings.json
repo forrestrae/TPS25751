@@ -5,13 +5,18 @@
       "mcp__tps25751-docs__search_register",
       "mcp__tps25751-docs__explain_bitfield",
       "mcp__tps25751-docs__get_register",
-      "mcp__tps25751-docs__list_registers"
+      "mcp__tps25751-docs__list_registers",
+      "mcp__usb-pd-docs__search_register",
+      "mcp__usb-pd-docs__explain_bitfield",
+      "mcp__usb-pd-docs__get_register",
+      "mcp__usb-pd-docs__list_registers"
     ],
     "deny": []
   },
   "plansDirectory": "./docs/plans",
   "enabledMcpjsonServers": [
-    "tps25751-docs"
+    "tps25751-docs",
+    "usb-pd-docs"
   ],
   "enabledPlugins": {
     "clangd-lsp@claude-plugins-official": true

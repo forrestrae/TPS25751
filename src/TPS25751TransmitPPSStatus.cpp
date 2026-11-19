@@ -21,7 +21,7 @@ void printHex32(Stream &s, uint32_t value)
 const char *TPS25751TransmitPPSStatus::toString(PresentTemperatureFlag val)
 {
     switch (val) {
-        case PresentTemperatureFlag::NotDefined: return "Not defined (TRM)";
+        case PresentTemperatureFlag::NotSupported: return "Not supported";
         case PresentTemperatureFlag::Normal: return "Normal";
         case PresentTemperatureFlag::Warning: return "Warning zone";
         case PresentTemperatureFlag::OverTemperature: return "Over-temperature";

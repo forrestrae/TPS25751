@@ -26,9 +26,10 @@
  * mean "field not supported", so the mV and mA accessors return 0 for them and
  * the *Supported() accessors report the distinction.
  *
- * TRM gap: Present Temperature Flag 00b, which is the reset value, has no stated
- * meaning. The TRM defines only 01b (normal), 10b (warning zone), and 11b
- * (over-temperature).
+ * Present Temperature Flag 00b, which is the reset value: the TRM leaves it
+ * undefined and defines only 01b (normal), 10b (warning zone), and 11b
+ * (over-temperature). USB PD R3.3 Table 6.67 (PPS Status Data Block) defines 00b as
+ * Not Supported, so the library names it that way.
  *
  * Register Details:
  * - Address: 0x7A
@@ -84,7 +85,10 @@ public:
 
     /// @brief Present Temperature Flag (bits 26:25)
     enum class PresentTemperatureFlag : uint8_t {
-        NotDefined = 0,      ///< 00b - not defined in the TRM (the reset value)
+        NotSupported = 0,    ///< 00b - Not Supported (USB PD R3.3 Table 6.67; the TRM leaves it undefined; the reset value)
+        /// 00b - same value as NotSupported
+        /// @deprecated Use NotSupported (USB PD R3.3 Table 6.67 defines 00b as Not Supported)
+        NotDefined = 0,
         Normal = 1,          ///< 01b - temperature is normal
         Warning = 2,         ///< 10b - warning zone
         OverTemperature = 3  ///< 11b - over-temperature
@@ -125,7 +129,7 @@ public:
      */
     uint16_t outputCurrent_mA() const;
 
-    /// @brief Present Temperature Flag (TRM "PTF", bits 26:25); 00b is not defined in the TRM
+    /// @brief Present Temperature Flag (TRM "PTF", bits 26:25); 00b is Not Supported per USB PD R3.3 Table 6.67 (the TRM leaves it undefined)
     PresentTemperatureFlag presentTemperatureFlag() const;
     /// @brief Raw Present Temperature Flag code (bits 26:25)
     uint8_t rawPresentTemperatureFlag() const;

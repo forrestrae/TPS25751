@@ -204,11 +204,21 @@ void test_wrong_size_fails_size_validation()
 
 // --- Decode ----------------------------------------------------------------------
 
+// USB PD R3.3 Table 6.67 names PTF 00b "Not Supported". The old TRM-based
+// enumerator NotDefined stays as an alias of the same value.
+void test_ptf_not_defined_is_an_alias_of_not_supported()
+{
+    TEST_ASSERT_EQUAL_UINT8(0, static_cast<uint8_t>(Ptf::NotSupported));
+    TEST_ASSERT_TRUE(Ptf::NotDefined == Ptf::NotSupported);
+    TEST_ASSERT_EQUAL_STRING("Not supported", Pps::toString(Ptf::NotDefined));
+    TEST_ASSERT_EQUAL_STRING("Not supported", Pps::toString(static_cast<Ptf>(0)));
+}
+
 void test_reset_value_decodes()
 {
     Pps reg(RESET_BUFFER);
 
-    TEST_ASSERT_TRUE(reg.presentTemperatureFlag() == Ptf::NotDefined);
+    TEST_ASSERT_TRUE(reg.presentTemperatureFlag() == Ptf::NotSupported);
     TEST_ASSERT_TRUE(reg.operatingMode() == Omf::ConstantVoltage);
     TEST_ASSERT_EQUAL_UINT32(0, reg.outputVoltage_mV());
     TEST_ASSERT_EQUAL_UINT16(0, reg.outputCurrent_mA());
@@ -291,12 +301,12 @@ void test_each_ptf_value_decodes_with_text()
         TEST_ASSERT_EQUAL_UINT8(code, static_cast<uint8_t>(reg.presentTemperatureFlag()));
     }
 
-    TEST_ASSERT_TRUE(makePps(0u << 25).presentTemperatureFlag() == Ptf::NotDefined);
+    TEST_ASSERT_TRUE(makePps(0u << 25).presentTemperatureFlag() == Ptf::NotSupported);
     TEST_ASSERT_TRUE(makePps(1u << 25).presentTemperatureFlag() == Ptf::Normal);
     TEST_ASSERT_TRUE(makePps(2u << 25).presentTemperatureFlag() == Ptf::Warning);
     TEST_ASSERT_TRUE(makePps(3u << 25).presentTemperatureFlag() == Ptf::OverTemperature);
 
-    TEST_ASSERT_EQUAL_STRING("Not defined (TRM)", Pps::toString(Ptf::NotDefined));
+    TEST_ASSERT_EQUAL_STRING("Not supported", Pps::toString(Ptf::NotSupported));
     TEST_ASSERT_EQUAL_STRING("Normal", Pps::toString(Ptf::Normal));
     TEST_ASSERT_EQUAL_STRING("Warning zone", Pps::toString(Ptf::Warning));
     TEST_ASSERT_EQUAL_STRING("Over-temperature", Pps::toString(Ptf::OverTemperature));
@@ -524,7 +534,7 @@ void test_debug_print_reset_and_sentinels()
     Pps reset(RESET_BUFFER);
     const std::string resetOut = captureDebugPrint(reset);
     TEST_ASSERT_NOT_EQUAL(std::string::npos, resetOut.find("Raw: 0x00000000"));
-    TEST_ASSERT_NOT_EQUAL(std::string::npos, resetOut.find("Present Temperature Flag: Not defined (TRM) (raw 0)"));
+    TEST_ASSERT_NOT_EQUAL(std::string::npos, resetOut.find("Present Temperature Flag: Not supported (raw 0)"));
 
     Pps unsupported = makePps(0x00FFFFFFu);
     const std::string out = captureDebugPrint(unsupported);
@@ -612,6 +622,7 @@ int main(int, char **)
     RUN_TEST(test_wrong_size_fails_size_validation);
 
     RUN_TEST(test_reset_value_decodes);
+    RUN_TEST(test_ptf_not_defined_is_an_alias_of_not_supported);
     RUN_TEST(test_decode_5000_mv_and_3000_ma);
     RUN_TEST(test_bench_value_decodes);
     RUN_TEST(test_voltage_in_upper_byte_decodes);

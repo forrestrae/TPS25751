@@ -582,6 +582,27 @@ board's PD3_CONFIGURATION (`0x0008001A`) has bits 18 and 20 clear, so the
 controller was answering Get_Source_Info and Get_PPS_Status with Not_Supported,
 whatever the two registers held.
 
+**TX_SOURCE_CAPABILITIES_EXTENDED (0x77) does not read its documented reset.**
+SLVUCR8B Rev. B (p.54) gives a reset of 0 for every field. On 2026-11-18 the
+same board, sinking from a PD charger, reported a length byte of 15 and read
+`00 00 00 00 00 00 00 00 00 00 00 00 00 7F 00`: Source PDP (bits 110:104) is 0x7F,
+filled from the firmware configuration, and every other field is 0. No reserved
+bit (119:111) was set, so `TPS25751TransmitSourceCapsExtended` keeps that check;
+validation accepts both the documented reset and the board's value. A write of
+distinct test bytes read back exactly over four reads 250 ms apart, and the
+restore read back exactly. Source Inputs bit 0, which the TRM says the
+Barrel_Jack_Event GPIO event can change, did not change on its own; this board
+has no barrel-jack event.
+
+TRANSMIT_SINK_CAPABILITIES_EXTENDED (0x7E) reported a length byte of 14, read all
+zero (the documented reset), and round-tripped a written value and the restore
+exactly. Both registers match their TRM widths, unlike 0x27 and 0x98. The board's
+PD3_CONFIGURATION has bits 8 and 17 clear, so the controller answers
+Get_Source_Cap_Extended and Get_Sink_Cap_Extended with Not_Supported, and neither
+register's contents go out on the wire. The field encodings come from the USB PD
+specification, which the register-docs server does not serve, so both classes
+expose raw values only.
+
 ---
 
 ## USB Power Delivery Complexity
@@ -1070,6 +1091,7 @@ void foo() {
 | 1.4 | 2026-11-18 | Claude Code | Batch G of the rev B plan: firmware sets PD3_CONFIGURATION (0x42) reserved bits 3:0 on hardware, so validation no longer checks them (Read/Write Registers section) |
 | 1.5 | 2026-11-18 | Claude Code | Batch H of the rev B plan: GLOBAL_SYSTEM_CONFIGURATION (0x27) reports 14 bytes on hardware and the firmware sets bits in all its reserved ranges; RECEIVED_SOP_IDENTITY (0x48) status comes from Response Type, not INT_EVENT1 bit 51 (Read/Write Registers section) |
 | 1.6 | 2026-11-18 | Claude Code | LIQUID_DETECTION_CONFIG (0x98) reports 12 bytes on hardware, not 11 (Read/Write Registers section); PDO classes decode only the SPR PPS APDO subtype after a subtype 10b APDO in 0x32 failed validation (USB Power Delivery Complexity section); the firmware still uses the rev A Power Path layout in 0x32 bits 21:10 |
+| 1.7 | 2026-11-18 | Claude Code | Batch J of the rev B plan: TX_SOURCE_CAPABILITIES_EXTENDED (0x77) reads Source PDP 0x7F from firmware configuration, not the documented reset; 0x77 and TRANSMIT_SINK_CAPABILITIES_EXTENDED (0x7E) report 15 and 14 bytes as the TRM implies, and the firmware sets none of their reserved bits (Read/Write Registers section) |
 
 ---
 

@@ -27,9 +27,9 @@ void printByteField(Stream &s, const __FlashStringHelper *label, uint8_t value)
     s.println(F(")"));
 }
 
-const char *yesNo(bool value)
+const __FlashStringHelper *yesNo(bool value)
 {
-    return value ? "Yes" : "No";
+    return value ? F("Yes") : F("No");
 }
 
 }  // namespace
@@ -356,8 +356,12 @@ void TPS25751TransmitSourceCapsExtended::debugPrint(Stream &s) const
     s.println(toString(touchTemperatureStandard()));
     s.print(F("Source Inputs: external supply: "));
     s.print(yesNo(externalSupplyPresent()));
-    s.print(F(", unconstrained: "));
-    s.print(yesNo(externalSupplyUnconstrained()));
+    // Table 6.59: the receiver ignores bit 1 when bit 0 (external supply) is 0.
+    if (externalSupplyPresent())
+    {
+        s.print(F(", unconstrained: "));
+        s.print(yesNo(externalSupplyUnconstrained()));
+    }
     s.print(F(", internal battery: "));
     s.println(yesNo(internalBatteryPresent()));
     s.print(F("SPR Source PDP: "));
@@ -368,7 +372,9 @@ void TPS25751TransmitSourceCapsExtended::debugPrint(Stream &s) const
     }
     else
     {
-        s.println(F("invalid (above 100 W)"));
+        s.print(F("invalid ("));
+        s.print(sourcePdp());
+        s.println(F(")"));
     }
 
     s.println(F("========================================"));

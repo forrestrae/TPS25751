@@ -27,9 +27,9 @@ void printByteField(Stream &s, const __FlashStringHelper *label, uint8_t value)
     s.println(F(")"));
 }
 
-const char *yesNo(bool value)
+const __FlashStringHelper *yesNo(bool value)
 {
-    return value ? "Yes" : "No";
+    return value ? F("Yes") : F("No");
 }
 
 // Prints "<label>valid W" or "<label>invalid (raw)".

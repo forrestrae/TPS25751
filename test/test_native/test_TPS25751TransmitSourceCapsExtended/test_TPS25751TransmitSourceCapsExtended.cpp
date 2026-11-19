@@ -697,7 +697,11 @@ void test_debug_print_typed_decode_invalid_pdp_and_holdup()
 {
     const std::string out = captureDebugPrint(Caps(BENCH_BUFFER));
     TEST_ASSERT_NOT_EQUAL(std::string::npos, out.find("Hold Up Time: not supported"));
-    TEST_ASSERT_NOT_EQUAL(std::string::npos, out.find("SPR Source PDP: invalid (above 100 W)"));
+    // The bench value 0x7F (127) is invalid; the raw value is printed with it.
+    TEST_ASSERT_NOT_EQUAL(std::string::npos, out.find("SPR Source PDP: invalid (127)"));
+    // External supply absent (Source Inputs 0): the unconstrained bit is not printed.
+    TEST_ASSERT_NOT_EQUAL(std::string::npos, out.find("Source Inputs: external supply: No, internal battery: No"));
+    TEST_ASSERT_EQUAL(std::string::npos, out.find("unconstrained"));
 }
 
 void test_copy_constructor_deep_copies()

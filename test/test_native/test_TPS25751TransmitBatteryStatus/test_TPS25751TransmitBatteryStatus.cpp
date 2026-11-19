@@ -444,8 +444,11 @@ void test_typed_out_of_range_battery_index()
 void test_debug_print_typed_decode_lines()
 {
     const std::string resetOut = captureDebugPrint(Status(RESET_BUFFER));
-    TEST_ASSERT_NOT_EQUAL(std::string::npos, resetOut.find("Battery 0: present, Charging, capacity unknown"));
-    TEST_ASSERT_NOT_EQUAL(std::string::npos, resetOut.find("Battery 1: not present, Charging, capacity 0 mWh"));
+    // Capacity FFFFh: Table 6.24 marks Charging Status reserved, so no status is printed.
+    TEST_ASSERT_NOT_EQUAL(std::string::npos, resetOut.find("Battery 0: present, capacity unknown\n"));
+    // Absent battery: neither status nor capacity is printed.
+    TEST_ASSERT_NOT_EQUAL(std::string::npos, resetOut.find("Battery 1: not present\n"));
+    TEST_ASSERT_EQUAL(std::string::npos, resetOut.find("Charging"));
 
     uint8_t buf[STATUS_SIZE] = {0};
     buf[9] = 0x07;

@@ -128,18 +128,25 @@ void TPS25751TransmitBatteryStatus::debugPrint(Stream &s) const
         s.print(F(": "));
         s.print(batteryPresent(i) ? F("present") : F("not present"));
         if (invalidBatteryReference(i)) s.print(F(", invalid battery reference"));
-        s.print(F(", "));
-        s.print(toString(chargingStatus(i)));
-        if (presentCapacityKnown(i))
+        // Table 6.24 marks Charging Status reserved when the battery is absent or
+        // the capacity is FFFFh, so print the status and capacity only when they
+        // mean something.
+        if (batteryPresent(i))
         {
-            s.print(F(", capacity "));
-            s.print(static_cast<unsigned long>(presentCapacity_mWh(i)));
-            s.println(F(" mWh"));
+            if (presentCapacityKnown(i))
+            {
+                s.print(F(", "));
+                s.print(toString(chargingStatus(i)));
+                s.print(F(", capacity "));
+                s.print(static_cast<unsigned long>(presentCapacity_mWh(i)));
+                s.print(F(" mWh"));
+            }
+            else
+            {
+                s.print(F(", capacity unknown"));
+            }
         }
-        else
-        {
-            s.println(F(", capacity unknown"));
-        }
+        s.println();
     }
 
     s.println(F("========================================"));

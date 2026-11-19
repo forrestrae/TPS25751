@@ -396,7 +396,7 @@ void print_caps_extended()
     if (const auto sinkCaps = pd.readTransmitSinkCapsExtendedRegister(true))
         sinkCaps->debugPrint();
     else
-        Serial.println(F("Failed to create/read TX Sink Capabilities Extended register via factory"));
+        Serial.println(F("Failed to create/read Transmit Sink Capabilities Extended register via factory"));
 
     // The controller answers Get_Source_Cap_Extended and Get_Sink_Cap_Extended
     // from these registers only while the matching PD3_CONFIGURATION bit is set;

@@ -324,9 +324,9 @@ public:
     /**
      * @brief Write the TX Source Capabilities Extended (0x77) register
      *
-     * The controller builds its Get_Source_Cap_Extended reply from this register only while
-     * PD3_CONFIGURATION (0x42) bit 8
-     * (TPS25751PD3Config::supportSourceExtended()); with it clear the controller
+     * The controller builds its Get_Source_Cap_Extended reply from this register
+     * only while PD3_CONFIGURATION (0x42) bit 8
+     * (TPS25751PD3Config::supportSourceExtended()) is set; with it clear the controller
      * answers Get_Source_Cap_Extended with Not_Supported.
      *
      * @param caps Register object holding the bytes to write
@@ -336,11 +336,11 @@ public:
     bool writeTransmitSourceCapsExtended(const TPS25751TransmitSourceCapsExtended &caps) const;
 
     /**
-     * @brief Write the TX Sink Capabilities Extended (0x7E) register
+     * @brief Write the Transmit Sink Capabilities Extended (0x7E) register
      *
-     * The controller builds its Get_Sink_Cap_Extended reply from this register only while
-     * PD3_CONFIGURATION (0x42) bit 17
-     * (TPS25751PD3Config::supportSinkCapExtended()); with it clear the controller
+     * The controller builds its Get_Sink_Cap_Extended reply from this register
+     * only while PD3_CONFIGURATION (0x42) bit 17
+     * (TPS25751PD3Config::supportSinkCapExtended()) is set; with it clear the controller
      * answers Get_Sink_Cap_Extended with Not_Supported.
      *
      * @param caps Register object holding the bytes to write
@@ -630,7 +630,7 @@ public:
     std::unique_ptr<TPS25751TransmitSourceCapsExtended> readTransmitSourceCapsExtendedRegister(bool validate = true) const;
 
     /**
-     * @brief Read TX Sink Capabilities Extended (0x7E) register using factory pattern
+     * @brief Read Transmit Sink Capabilities Extended (0x7E) register using factory pattern
      * @param validate Whether to validate the register after reading
      * @return Unique pointer to the register (nullptr if failed)
      */

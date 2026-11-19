@@ -10,7 +10,8 @@
  *   Capacity   +8 Battery Type
  * Battery 3 starts at byte 27 and ends at byte 35 (bits 287:216), past the point
  * bit 255 where extractBits*() and setBits() can reach; the class assembles bytes
- * itself. Every field is raw: the encodings belong to the USB PD specification.
+ * itself. The raw accessors return field bits unchanged; the typed accessors decode
+ * them per USB PD R3.3 Table 6.64 (see the Typed decode section).
  *
  * Distinct fixture: byte k = 0x40 + k for k = 0..35. Expected values, computed
  * by hand from the byte map (low byte first in the buffer):
@@ -459,6 +460,125 @@ void test_debug_print_reset_zero_pads()
     TEST_ASSERT_NOT_EQUAL(std::string::npos, out.find("Battery 1: VID 0x0000, PID 0x0000, Design Capacity 0x0000 (0), Last Full Charge Capacity 0x0000 (0), Battery Type 0x00"));
 }
 
+// --- Typed decode (USB PD R3.3 Table 6.64) ---------------------------------------------
+//
+// Entry i starts at byte 9 * i: VID +0, PID +2, Design Capacity +4, Last Full Charge
+// Capacity +6 (16-bit little-endian), Battery Type +8. Capacities count 0.1 Wh
+// (100 mWh) steps: 0000h not present, 0001h..FFFEh known, FFFFh unknown.
+
+// Battery 1 (entry at byte 9): Design Capacity 0x0258 = 600 steps = 60,000 mWh at
+// bytes 13 and 14 (58 02); Last Full Charge FFFFh (unknown) at bytes 15 and 16;
+// Battery Type 0x01 (invalid reference) at byte 17. Battery 3 (entry at byte 27):
+// Design Capacity 0x0000 at bytes 31 and 32, so the battery is not present.
+void test_typed_battery_1_and_3_fixture()
+{
+    uint8_t buf[CAPS_SIZE] = {0};
+    buf[13] = 0x58;
+    buf[14] = 0x02;
+    buf[15] = 0xFF;
+    buf[16] = 0xFF;
+    buf[17] = 0x01;
+    Caps reg(buf);
+
+    TEST_ASSERT_EQUAL_UINT16(0x0258, reg.batteryDesignCapacity(1));
+    TEST_ASSERT_TRUE(reg.batteryPresent(1));
+    TEST_ASSERT_TRUE(reg.designCapacityKnown(1));
+    TEST_ASSERT_EQUAL_UINT32(60000, reg.batteryDesignCapacity_mWh(1));
+    TEST_ASSERT_FALSE(reg.lastFullChargeCapacityKnown(1));
+    TEST_ASSERT_EQUAL_UINT32(0, reg.batteryLastFullChargeCapacity_mWh(1));
+    TEST_ASSERT_TRUE(reg.invalidBatteryReference(1));
+
+    TEST_ASSERT_FALSE(reg.batteryPresent(3));
+    TEST_ASSERT_FALSE(reg.designCapacityKnown(3));
+    TEST_ASSERT_EQUAL_UINT32(0, reg.batteryDesignCapacity_mWh(3));
+    TEST_ASSERT_FALSE(reg.lastFullChargeCapacityKnown(3));
+    TEST_ASSERT_FALSE(reg.invalidBatteryReference(3));
+
+    // Battery 0 and 2 stay untouched.
+    TEST_ASSERT_FALSE(reg.batteryPresent(0));
+    TEST_ASSERT_FALSE(reg.batteryPresent(2));
+    TEST_ASSERT_FALSE(reg.invalidBatteryReference(0));
+    TEST_ASSERT_FALSE(reg.invalidBatteryReference(2));
+}
+
+void test_typed_capacity_boundaries()
+{
+    Caps reg(g_zero);
+    // 0000h: not present, not known.
+    TEST_ASSERT_FALSE(reg.batteryPresent(0));
+    TEST_ASSERT_FALSE(reg.designCapacityKnown(0));
+    TEST_ASSERT_FALSE(reg.lastFullChargeCapacityKnown(0));
+
+    reg.setBatteryDesignCapacity(0, 0x0001);  // smallest known: 100 mWh
+    reg.setBatteryLastFullChargeCapacity(0, 0xFFFE);  // largest known: 65534 * 100 = 6,553,400 mWh
+    TEST_ASSERT_TRUE(reg.batteryPresent(0));
+    TEST_ASSERT_EQUAL_UINT32(100, reg.batteryDesignCapacity_mWh(0));
+    TEST_ASSERT_TRUE(reg.lastFullChargeCapacityKnown(0));
+    TEST_ASSERT_EQUAL_UINT32(6553400, reg.batteryLastFullChargeCapacity_mWh(0));
+
+    reg.setBatteryDesignCapacity(0, 0xFFFF);  // unknown, but the battery is present
+    TEST_ASSERT_TRUE(reg.batteryPresent(0));
+    TEST_ASSERT_FALSE(reg.designCapacityKnown(0));
+    TEST_ASSERT_EQUAL_UINT32(0, reg.batteryDesignCapacity_mWh(0));
+}
+
+void test_typed_battery_type_reserved_bits_do_not_set_invalid_reference()
+{
+    Caps reg(g_zero);
+    reg.setBatteryType(2, 0xFE);  // bits 7:1 reserved, bit 0 clear
+    TEST_ASSERT_FALSE(reg.invalidBatteryReference(2));
+    reg.setBatteryType(2, 0x01);
+    TEST_ASSERT_TRUE(reg.invalidBatteryReference(2));
+}
+
+void test_typed_battery_3_reaches_past_bit_255()
+{
+    // Battery 3 Design Capacity at bytes 31 and 32 (bit 248), Last Full at 33 and 34,
+    // Type at byte 35: the typed layer must reach them through the raw accessors.
+    uint8_t buf[CAPS_SIZE] = {0};
+    buf[31] = 0xE8;  // 0x03E8 = 1000 steps = 100,000 mWh
+    buf[32] = 0x03;
+    buf[33] = 0x64;  // 0x0064 = 100 steps = 10,000 mWh
+    buf[34] = 0x00;
+    buf[35] = 0x01;
+    Caps reg(buf);
+
+    TEST_ASSERT_TRUE(reg.batteryPresent(3));
+    TEST_ASSERT_EQUAL_UINT32(100000, reg.batteryDesignCapacity_mWh(3));
+    TEST_ASSERT_EQUAL_UINT32(10000, reg.batteryLastFullChargeCapacity_mWh(3));
+    TEST_ASSERT_TRUE(reg.invalidBatteryReference(3));
+    TEST_ASSERT_FALSE(reg.batteryPresent(0));
+}
+
+void test_typed_out_of_range_battery_index()
+{
+    Caps reg(g_allOnes);  // every field 0xFFFF / 0xFF, so any leak would be visible
+    TEST_ASSERT_FALSE(reg.invalidBatteryReference(4));
+    TEST_ASSERT_FALSE(reg.batteryPresent(4));
+    TEST_ASSERT_FALSE(reg.designCapacityKnown(4));
+    TEST_ASSERT_FALSE(reg.lastFullChargeCapacityKnown(4));
+    TEST_ASSERT_EQUAL_UINT32(0, reg.batteryDesignCapacity_mWh(4));
+    TEST_ASSERT_EQUAL_UINT32(0, reg.batteryLastFullChargeCapacity_mWh(4));
+    TEST_ASSERT_FALSE(reg.batteryPresent(255));
+}
+
+void test_debug_print_typed_decode_lines()
+{
+    uint8_t buf[CAPS_SIZE] = {0};
+    buf[13] = 0x58;
+    buf[14] = 0x02;
+    buf[15] = 0xFF;
+    buf[16] = 0xFF;
+    buf[17] = 0x01;
+    const std::string out = captureDebugPrint(Caps(buf));
+
+    TEST_ASSERT_NOT_EQUAL(std::string::npos, out.find("Battery 0: not present"));
+    TEST_ASSERT_NOT_EQUAL(std::string::npos, out.find("Battery 1: present, design capacity 60000 mWh, last full charge capacity unknown, invalid battery reference"));
+    TEST_ASSERT_NOT_EQUAL(std::string::npos, out.find("Battery 3: not present"));
+    // The existing raw line remains.
+    TEST_ASSERT_NOT_EQUAL(std::string::npos, out.find("Battery 1: VID 0x0000, PID 0x0000, Design Capacity 0x0258 (600), Last Full Charge Capacity 0xFFFF (65535), Battery Type 0x01"));
+}
+
 void test_copy_constructor_deep_copies()
 {
     Caps source(g_distinct);
@@ -534,6 +654,13 @@ int main(int, char **)
 
     RUN_TEST(test_debug_print_distinct_fixture);
     RUN_TEST(test_debug_print_reset_zero_pads);
+
+    RUN_TEST(test_typed_battery_1_and_3_fixture);
+    RUN_TEST(test_typed_capacity_boundaries);
+    RUN_TEST(test_typed_battery_type_reserved_bits_do_not_set_invalid_reference);
+    RUN_TEST(test_typed_battery_3_reaches_past_bit_255);
+    RUN_TEST(test_typed_out_of_range_battery_index);
+    RUN_TEST(test_debug_print_typed_decode_lines);
 
     RUN_TEST(test_copy_constructor_deep_copies);
     RUN_TEST(test_move_constructor_transfers_ownership);

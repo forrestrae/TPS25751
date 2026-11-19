@@ -13,10 +13,12 @@
  * capacity, last full charge capacity, and battery type.
  *
  * Every field is "as defined in the USB PD specification" (Battery_Capabilities
- * message). The TRM does not restate the encodings and the register-docs server
- * does not serve the USB PD specification, so this class exposes raw values only:
- * no units, scale factors, enums, or bit meanings. Typed decode is planned for
- * Batch L.
+ * message). The TRM does not restate the encodings, so the raw accessors return the
+ * field bits unchanged. The typed accessors beside them decode each entry per USB
+ * PD R3.3 Table 6.64 (Battery Capability Data Block): the Invalid Battery Reference
+ * flag in Battery Type bit 0, whether the battery is present, and the design and
+ * last full charge capacities in 0.1 Wh steps (reported here in mWh). The typed
+ * accessors call the raw ones, so they add no byte-offset arithmetic of their own.
  *
  * Gate bit: PD3_CONFIGURATION (0x42) bit 10, TPS25751PD3Config::supportBatteryCapabilities().
  * The TRM calls it SupportBatteryCapMsg. With the bit clear, the controller ignores
@@ -148,6 +150,25 @@ public:
      * @param battery Battery index 0 to 3: byte 8 (71:64), 17 (143:136), 26 (215:208), 35 (287:280)
      */
     uint8_t batteryType(uint8_t battery) const;
+
+    // --- Typed decode, USB PD R3.3 Table 6.64 (built on the raw accessors above) ---
+    // Every accessor returns false or 0 for a battery index of 4 or more.
+
+    /// @brief Invalid Battery Reference, Battery Type bit 0 (USB PD R3.3 Table 6.64)
+    bool invalidBatteryReference(uint8_t battery) const;
+
+    /// @brief True when Battery Design Capacity is nonzero; 0000h means the battery is not present (USB PD R3.3 Table 6.64)
+    bool batteryPresent(uint8_t battery) const;
+
+    /// @brief True when Battery Design Capacity is 0001h to FFFEh; 0000h is not present and FFFFh is unknown (USB PD R3.3 Table 6.64)
+    bool designCapacityKnown(uint8_t battery) const;
+    /// @brief Battery Design Capacity in mWh: the raw 0.1 Wh count times 100 when known, else 0 (at most 6,553,400; USB PD R3.3 Table 6.64)
+    uint32_t batteryDesignCapacity_mWh(uint8_t battery) const;
+
+    /// @brief True when Battery Last Full Charge Capacity is 0001h to FFFEh; 0000h is not present and FFFFh is unknown (USB PD R3.3 Table 6.64)
+    bool lastFullChargeCapacityKnown(uint8_t battery) const;
+    /// @brief Battery Last Full Charge Capacity in mWh: the raw 0.1 Wh count times 100 when known, else 0 (at most 6,553,400; USB PD R3.3 Table 6.64)
+    uint32_t batteryLastFullChargeCapacity_mWh(uint8_t battery) const;
 
     // --- Setters: each writes only its own field's bytes and is a no-op for battery >= 4 ---
 

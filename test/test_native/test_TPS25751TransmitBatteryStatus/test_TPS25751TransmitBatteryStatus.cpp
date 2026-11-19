@@ -7,8 +7,8 @@
  * TRANSMITTED_BATTERY_STATUS_DATA_OBJECTS_(BSDO) (0x7B) is a 16-byte R/W register
  * made of four 4-byte entries (entry i at byte 4 * i). In each entry byte 0 is
  * reserved, byte 1 is Battery Info, and bytes 2-3 are Present Capacity
- * (little-endian). Every field is raw: the encodings belong to the USB PD
- * specification, so these tests assert raw values only.
+ * (little-endian). The raw accessors return field bits unchanged; the typed
+ * accessors decode them per USB PD R3.3 Table 6.24 (see the Typed decode section).
  *
  * Reset value 000000000000000000000000FFFF0200h:
  *   00 02 FF FF 00 00 00 00 00 00 00 00 00 00 00 00
@@ -337,6 +337,126 @@ void test_debug_print_reset_zero_pads()
     TEST_ASSERT_NOT_EQUAL(std::string::npos, out.find("Battery 1: Battery Info 0x00, Present Capacity 0x0000 (0)"));
 }
 
+// --- Typed decode (USB PD R3.3 Table 6.24) ---------------------------------------------
+//
+// Each 4-byte entry is one BSDO: Battery Info byte bit 0 Invalid Battery Reference,
+// bit 1 Battery Present, bits 3:2 Charging Status, bits 7:4 reserved. Present
+// Capacity counts 0.1 Wh (100 mWh) steps; FFFFh means unknown.
+
+void test_typed_reset_value_battery_0()
+{
+    // Reset bytes 00 02 FF FF: Info 0x02 is present (bit 1), not an invalid
+    // reference (bit 0 clear), status code 0 (Charging), capacity FFFFh unknown.
+    Status reg(RESET_BUFFER);
+
+    TEST_ASSERT_TRUE(reg.batteryPresent(0));
+    TEST_ASSERT_FALSE(reg.invalidBatteryReference(0));
+    TEST_ASSERT_TRUE(reg.chargingStatus(0) == Status::ChargingStatus::Charging);
+    TEST_ASSERT_FALSE(reg.presentCapacityKnown(0));
+    TEST_ASSERT_EQUAL_UINT32(0, reg.presentCapacity_mWh(0));
+
+    // Batteries 1 to 3 are all zero: not present, capacity 0 is known and equals 0 mWh.
+    TEST_ASSERT_FALSE(reg.batteryPresent(1));
+    TEST_ASSERT_TRUE(reg.presentCapacityKnown(1));
+    TEST_ASSERT_EQUAL_UINT32(0, reg.presentCapacity_mWh(1));
+}
+
+// Battery 2 Battery Info 0x07: bit 0 invalid reference (0x01), bit 1 present (0x02),
+// bits 3:2 = 01b Discharging (0x04); 0x01 + 0x02 + 0x04 = 0x07. Capacity 0x01F4 is
+// 500 steps, 500 * 100 = 50,000 mWh, in bytes 10 and 11 as F4 01.
+void test_typed_battery_2_fixture()
+{
+    uint8_t buf[STATUS_SIZE] = {0};
+    buf[9] = 0x07;
+    buf[10] = 0xF4;
+    buf[11] = 0x01;
+    Status reg(buf);
+
+    TEST_ASSERT_TRUE(reg.invalidBatteryReference(2));
+    TEST_ASSERT_TRUE(reg.batteryPresent(2));
+    TEST_ASSERT_TRUE(reg.chargingStatus(2) == Status::ChargingStatus::Discharging);
+    TEST_ASSERT_TRUE(reg.presentCapacityKnown(2));
+    TEST_ASSERT_EQUAL_UINT32(50000, reg.presentCapacity_mWh(2));
+
+    // The other entries stay clear.
+    TEST_ASSERT_FALSE(reg.invalidBatteryReference(0));
+    TEST_ASSERT_FALSE(reg.invalidBatteryReference(1));
+    TEST_ASSERT_FALSE(reg.invalidBatteryReference(3));
+    TEST_ASSERT_EQUAL_UINT32(0, reg.presentCapacity_mWh(3));
+}
+
+void test_typed_charging_status_codes()
+{
+    // Info bits 3:2 hold the status, so code n is n << 2; bit 1 (0x02) keeps the battery present.
+    Status reg(RESET_BUFFER);
+    reg.setBatteryInfo(1, 0x02 | (0 << 2));
+    TEST_ASSERT_TRUE(reg.chargingStatus(1) == Status::ChargingStatus::Charging);
+    reg.setBatteryInfo(1, 0x02 | (1 << 2));  // 0x06
+    TEST_ASSERT_TRUE(reg.chargingStatus(1) == Status::ChargingStatus::Discharging);
+    reg.setBatteryInfo(1, 0x02 | (2 << 2));  // 0x0A
+    TEST_ASSERT_TRUE(reg.chargingStatus(1) == Status::ChargingStatus::Idle);
+    reg.setBatteryInfo(1, 0x02 | (3 << 2));  // 0x0E
+    TEST_ASSERT_TRUE(reg.chargingStatus(1) == Status::ChargingStatus::Invalid);
+
+    TEST_ASSERT_EQUAL_STRING("Charging", Status::toString(Status::ChargingStatus::Charging));
+    TEST_ASSERT_EQUAL_STRING("Discharging", Status::toString(Status::ChargingStatus::Discharging));
+    TEST_ASSERT_EQUAL_STRING("Idle", Status::toString(Status::ChargingStatus::Idle));
+    TEST_ASSERT_EQUAL_STRING("Invalid", Status::toString(Status::ChargingStatus::Invalid));
+    TEST_ASSERT_EQUAL_STRING("Undefined", Status::toString(static_cast<Status::ChargingStatus>(4)));
+}
+
+void test_typed_reserved_info_bits_do_not_affect_flags()
+{
+    Status reg(RESET_BUFFER);
+    reg.setBatteryInfo(3, 0xF0);  // reserved bits 7:4 only
+    TEST_ASSERT_FALSE(reg.invalidBatteryReference(3));
+    TEST_ASSERT_FALSE(reg.batteryPresent(3));
+    TEST_ASSERT_TRUE(reg.chargingStatus(3) == Status::ChargingStatus::Charging);
+}
+
+void test_typed_capacity_boundaries()
+{
+    Status reg(RESET_BUFFER);
+    reg.setRawPresentCapacity(1, 0xFFFE);  // largest known value: 65534 * 100
+    TEST_ASSERT_TRUE(reg.presentCapacityKnown(1));
+    TEST_ASSERT_EQUAL_UINT32(6553400, reg.presentCapacity_mWh(1));
+
+    reg.setRawPresentCapacity(1, 0xFFFF);  // unknown
+    TEST_ASSERT_FALSE(reg.presentCapacityKnown(1));
+    TEST_ASSERT_EQUAL_UINT32(0, reg.presentCapacity_mWh(1));
+
+    reg.setRawPresentCapacity(1, 0x0001);  // one step: 100 mWh
+    TEST_ASSERT_EQUAL_UINT32(100, reg.presentCapacity_mWh(1));
+}
+
+void test_typed_out_of_range_battery_index()
+{
+    Status reg(DISTINCT_BUFFER);
+    TEST_ASSERT_FALSE(reg.invalidBatteryReference(4));
+    TEST_ASSERT_FALSE(reg.batteryPresent(4));
+    TEST_ASSERT_TRUE(reg.chargingStatus(4) == Status::ChargingStatus::Charging);
+    TEST_ASSERT_FALSE(reg.presentCapacityKnown(4));
+    TEST_ASSERT_EQUAL_UINT32(0, reg.presentCapacity_mWh(4));
+    TEST_ASSERT_FALSE(reg.batteryPresent(255));
+    TEST_ASSERT_EQUAL_UINT32(0, reg.presentCapacity_mWh(255));
+}
+
+void test_debug_print_typed_decode_lines()
+{
+    const std::string resetOut = captureDebugPrint(Status(RESET_BUFFER));
+    TEST_ASSERT_NOT_EQUAL(std::string::npos, resetOut.find("Battery 0: present, Charging, capacity unknown"));
+    TEST_ASSERT_NOT_EQUAL(std::string::npos, resetOut.find("Battery 1: not present, Charging, capacity 0 mWh"));
+
+    uint8_t buf[STATUS_SIZE] = {0};
+    buf[9] = 0x07;
+    buf[10] = 0xF4;
+    buf[11] = 0x01;
+    const std::string out = captureDebugPrint(Status(buf));
+    TEST_ASSERT_NOT_EQUAL(std::string::npos, out.find("Battery 2: present, invalid battery reference, Discharging, capacity 50000 mWh"));
+    // The existing raw line remains.
+    TEST_ASSERT_NOT_EQUAL(std::string::npos, out.find("Battery 2: Battery Info 0x07, Present Capacity 0x01F4 (500)"));
+}
+
 void test_copy_constructor_deep_copies()
 {
     Status source(DISTINCT_BUFFER);
@@ -408,6 +528,14 @@ int main(int, char **)
 
     RUN_TEST(test_debug_print_distinct_fixture);
     RUN_TEST(test_debug_print_reset_zero_pads);
+
+    RUN_TEST(test_typed_reset_value_battery_0);
+    RUN_TEST(test_typed_battery_2_fixture);
+    RUN_TEST(test_typed_charging_status_codes);
+    RUN_TEST(test_typed_reserved_info_bits_do_not_affect_flags);
+    RUN_TEST(test_typed_capacity_boundaries);
+    RUN_TEST(test_typed_out_of_range_battery_index);
+    RUN_TEST(test_debug_print_typed_decode_lines);
 
     RUN_TEST(test_copy_constructor_deep_copies);
     RUN_TEST(test_move_constructor_transfers_ownership);

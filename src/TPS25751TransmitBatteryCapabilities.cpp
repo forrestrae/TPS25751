@@ -97,6 +97,42 @@ uint8_t TPS25751TransmitBatteryCapabilities::batteryType(uint8_t battery) const
     return readByte(entryOffset(battery) + kBatteryTypeOffset);
 }
 
+// --- Typed decode (USB PD R3.3 Table 6.64), built on the accessors above ------------
+
+bool TPS25751TransmitBatteryCapabilities::invalidBatteryReference(uint8_t battery) const
+{
+    return (batteryType(battery) & 0x01u) != 0;
+}
+
+bool TPS25751TransmitBatteryCapabilities::batteryPresent(uint8_t battery) const
+{
+    return batteryDesignCapacity(battery) != 0x0000u;
+}
+
+bool TPS25751TransmitBatteryCapabilities::designCapacityKnown(uint8_t battery) const
+{
+    const uint16_t raw = batteryDesignCapacity(battery);
+    return raw != 0x0000u && raw != 0xFFFFu;
+}
+
+uint32_t TPS25751TransmitBatteryCapabilities::batteryDesignCapacity_mWh(uint8_t battery) const
+{
+    if (!designCapacityKnown(battery)) return 0;
+    return static_cast<uint32_t>(batteryDesignCapacity(battery)) * 100u;  // 0.1 Wh = 100 mWh per step
+}
+
+bool TPS25751TransmitBatteryCapabilities::lastFullChargeCapacityKnown(uint8_t battery) const
+{
+    const uint16_t raw = batteryLastFullChargeCapacity(battery);
+    return raw != 0x0000u && raw != 0xFFFFu;
+}
+
+uint32_t TPS25751TransmitBatteryCapabilities::batteryLastFullChargeCapacity_mWh(uint8_t battery) const
+{
+    if (!lastFullChargeCapacityKnown(battery)) return 0;
+    return static_cast<uint32_t>(batteryLastFullChargeCapacity(battery)) * 100u;
+}
+
 // --- Setters ----------------------------------------------------------------------
 
 void TPS25751TransmitBatteryCapabilities::setVid(uint8_t battery, uint16_t value)
@@ -173,6 +209,43 @@ void TPS25751TransmitBatteryCapabilities::debugPrint(Stream &s) const
         printHex16Field(s, F(", Last Full Charge Capacity "), batteryLastFullChargeCapacity(i));
         s.print(F(", Battery Type 0x"));
         printHex8(s, batteryType(i));
+        s.println();
+    }
+
+    // Typed decode, USB PD R3.3 Table 6.64.
+    for (uint8_t i = 0; i < kBatteryCount; i++)
+    {
+        s.print(F("Battery "));
+        s.print(i);
+        s.print(F(": "));
+        if (!batteryPresent(i))
+        {
+            s.print(F("not present"));
+        }
+        else
+        {
+            s.print(F("present, design capacity "));
+            if (designCapacityKnown(i))
+            {
+                s.print(static_cast<unsigned long>(batteryDesignCapacity_mWh(i)));
+                s.print(F(" mWh"));
+            }
+            else
+            {
+                s.print(F("unknown"));
+            }
+            s.print(F(", last full charge capacity "));
+            if (lastFullChargeCapacityKnown(i))
+            {
+                s.print(static_cast<unsigned long>(batteryLastFullChargeCapacity_mWh(i)));
+                s.print(F(" mWh"));
+            }
+            else
+            {
+                s.print(F("unknown"));
+            }
+        }
+        if (invalidBatteryReference(i)) s.print(F(", invalid battery reference"));
         s.println();
     }
 

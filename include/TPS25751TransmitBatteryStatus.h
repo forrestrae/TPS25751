@@ -12,9 +12,12 @@
  * per battery index 0 to 3.
  *
  * Every field is "as defined in the USB PD specification" (Battery Status Data
- * Object). The TRM does not restate the encodings and the register-docs server
- * does not serve the USB PD specification, so this class exposes raw values only:
- * no units, enums, or bit meanings. Typed decode is planned for Batch L.
+ * Object). The TRM does not restate the encodings, so the raw accessors return the
+ * field bits unchanged. The typed accessors beside them decode each entry per USB
+ * PD R3.3 Table 6.24 (Battery Status Data Object): the Invalid Battery Reference
+ * and Battery Present flags, the Battery Charging Status, and the Battery Present
+ * Capacity in 0.1 Wh steps (reported here in mWh). Each entry is one BSDO, so
+ * BSDO bit 8 is bit 0 of the entry's Battery Info byte.
  *
  * Gate bit: PD3_CONFIGURATION (0x42) bit 11, TPS25751PD3Config::supportBatteryStatus().
  * The TRM calls it SupportBatteryStatusMsg. With the bit clear, the controller
@@ -122,6 +125,52 @@ public:
      * @return The raw 16-bit value, or 0 if @p battery is 4 or more or the register is invalid
      */
     uint16_t rawPresentCapacity(uint8_t battery) const;
+
+    // --- Typed decode, USB PD R3.3 Table 6.24 (built on the raw accessors above) ---
+    // Every accessor returns false or 0 for a battery index of 4 or more.
+
+    /// @brief Battery Charging Status, BSDO bits 11:10 (Battery Info bits 3:2; USB PD R3.3 Table 6.24)
+    enum class ChargingStatus : uint8_t {
+        Charging = 0,     ///< 00b - Battery is charging
+        Discharging = 1,  ///< 01b - Battery is discharging
+        Idle = 2,         ///< 10b - Battery is idle
+        Invalid = 3       ///< 11b - Invalid; the receiver ignores the field
+    };
+
+    /// @brief Text for a ChargingStatus; any code above 3 is "Undefined"
+    static const char *toString(ChargingStatus val);
+
+    /**
+     * @brief Invalid Battery Reference, BSDO bit 8 (Battery Info bit 0; USB PD R3.3 Table 6.24)
+     *
+     * True when the Get_Battery_Status message named a battery or slot that does
+     * not exist.
+     */
+    bool invalidBatteryReference(uint8_t battery) const;
+
+    /// @brief Battery Present, BSDO bit 9 (Battery Info bit 1; USB PD R3.3 Table 6.24)
+    bool batteryPresent(uint8_t battery) const;
+
+    /**
+     * @brief Battery Charging Status, BSDO bits 11:10 (Battery Info bits 3:2; USB PD R3.3 Table 6.24)
+     *
+     * Meaningful only when batteryPresent() is true and presentCapacityKnown() is
+     * true; otherwise the specification marks the field reserved. Code 3 passes
+     * through as ChargingStatus::Invalid. Returns Charging (0) for an index of 4 or more.
+     */
+    ChargingStatus chargingStatus(uint8_t battery) const;
+
+    /// @brief True when Battery Present Capacity is not FFFFh, which means unknown (USB PD R3.3 Table 6.24)
+    bool presentCapacityKnown(uint8_t battery) const;
+
+    /**
+     * @brief Battery state of charge in milliwatt-hours (USB PD R3.3 Table 6.24)
+     *
+     * The raw field counts 0.1 Wh steps (100 mWh) from 0000h to FFFEh, so the
+     * result is at most 6,553,400 mWh. Returns 0 when the capacity is unknown
+     * (FFFFh) or the index is out of range.
+     */
+    uint32_t presentCapacity_mWh(uint8_t battery) const;
 
     // --- Setters: each a single setBits() call after the index guard ---
     // No setter touches the reserved bytes 0, 4, 8, and 12.

@@ -33,6 +33,45 @@ uint16_t TPS25751TransmitBatteryStatus::rawPresentCapacity(uint8_t battery) cons
     return extractBits16(presentCapacityBit(battery), 16);
 }
 
+// --- Typed decode (USB PD R3.3 Table 6.24) ------------------------------------------
+
+const char *TPS25751TransmitBatteryStatus::toString(ChargingStatus val)
+{
+    switch (val) {
+        case ChargingStatus::Charging: return "Charging";
+        case ChargingStatus::Discharging: return "Discharging";
+        case ChargingStatus::Idle: return "Idle";
+        case ChargingStatus::Invalid: return "Invalid";
+        default: return "Undefined";
+    }
+}
+
+bool TPS25751TransmitBatteryStatus::invalidBatteryReference(uint8_t battery) const
+{
+    return (batteryInfo(battery) & 0x01u) != 0;
+}
+
+bool TPS25751TransmitBatteryStatus::batteryPresent(uint8_t battery) const
+{
+    return (batteryInfo(battery) & 0x02u) != 0;
+}
+
+TPS25751TransmitBatteryStatus::ChargingStatus TPS25751TransmitBatteryStatus::chargingStatus(uint8_t battery) const
+{
+    return static_cast<ChargingStatus>((batteryInfo(battery) >> 2) & 0x03u);
+}
+
+bool TPS25751TransmitBatteryStatus::presentCapacityKnown(uint8_t battery) const
+{
+    return battery < kBatteryCount && rawPresentCapacity(battery) != 0xFFFFu;
+}
+
+uint32_t TPS25751TransmitBatteryStatus::presentCapacity_mWh(uint8_t battery) const
+{
+    if (!presentCapacityKnown(battery)) return 0;
+    return static_cast<uint32_t>(rawPresentCapacity(battery)) * 100u;  // 0.1 Wh = 100 mWh per step
+}
+
 // --- Setters: each a single setBits() call after the index guard -----------------
 
 void TPS25751TransmitBatteryStatus::setBatteryInfo(uint8_t battery, uint8_t value)
@@ -79,6 +118,28 @@ void TPS25751TransmitBatteryStatus::debugPrint(Stream &s) const
         s.print(F(" ("));
         s.print(capacity);
         s.println(F(")"));
+    }
+
+    // Typed decode, USB PD R3.3 Table 6.24.
+    for (uint8_t i = 0; i < kBatteryCount; i++)
+    {
+        s.print(F("Battery "));
+        s.print(i);
+        s.print(F(": "));
+        s.print(batteryPresent(i) ? F("present") : F("not present"));
+        if (invalidBatteryReference(i)) s.print(F(", invalid battery reference"));
+        s.print(F(", "));
+        s.print(toString(chargingStatus(i)));
+        if (presentCapacityKnown(i))
+        {
+            s.print(F(", capacity "));
+            s.print(static_cast<unsigned long>(presentCapacity_mWh(i)));
+            s.println(F(" mWh"));
+        }
+        else
+        {
+            s.println(F(", capacity unknown"));
+        }
     }
 
     s.println(F("========================================"));

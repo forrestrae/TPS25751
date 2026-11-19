@@ -343,6 +343,40 @@ void print_global_config_and_sop_identity()
         Serial.println(F("Failed to create/read Interrupt Event register via factory"));
 }
 
+void print_source_info_and_pps_status()
+{
+    Serial.println();
+    Serial.println(F("-------------------- print_source_info_and_pps_status --------------------"));
+    Serial.println();
+
+    // TX_SOURCE_INFO (0x78) and TRANSMITTED_PPS_STATUS (0x7A) are R/W, but this
+    // sketch never writes them: the PD firmware updates 0x78 on its own, and a
+    // wrong value in either register is sent to the port partner in reply to
+    // Get_Source_Info or Get_PPS_Status.
+    if (const auto sourceInfo = pd.readTransmitSourceInfoRegister(true))
+        sourceInfo->debugPrint();
+    else
+        Serial.println(F("Failed to create/read TX Source Info register via factory"));
+
+    if (const auto ppsStatus = pd.readTransmitPPSStatusRegister(true))
+        ppsStatus->debugPrint();
+    else
+        Serial.println(F("Failed to create/read Transmitted PPS Status register via factory"));
+
+    // The controller answers Get_Source_Info and Get_PPS_Status from these
+    // registers only while the matching PD3_CONFIGURATION bit is set; with the
+    // bit clear it replies Not_Supported.
+    if (const auto pd3Config = pd.readPD3ConfigRegister(true))
+    {
+        Serial.print(F("PD3 Support Get Source Info: "));
+        Serial.println(pd3Config->supportGetSourceInfo() ? F("Yes") : F("No"));
+        Serial.print(F("PD3 Support PPS Status: "));
+        Serial.println(pd3Config->supportPpsStatus() ? F("Yes") : F("No"));
+    }
+    else
+        Serial.println(F("Failed to create/read PD3 Configuration register via factory"));
+}
+
 void print_app_mode_status(const std::unique_ptr<TPS25751Mode> &modeReg)
 {
     modeReg->debugPrint();
@@ -355,6 +389,7 @@ void print_app_mode_status(const std::unique_ptr<TPS25751Mode> &modeReg)
     print_adc_results();
     print_port_status();
     print_global_config_and_sop_identity();
+    print_source_info_and_pps_status();
     print_contracts();
     print_interrupt_mask();
     print_sleep_and_customer_use();

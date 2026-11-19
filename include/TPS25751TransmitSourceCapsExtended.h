@@ -21,8 +21,12 @@
  * The TRM numbers its bytes from the start of this register. The USB PD
  * Source_Capabilities_Extended Data Block (SCEDB) starts with VID, PID, XID, and
  * the firmware and hardware versions, which the controller prepends (see Reply
- * content), so TRM byte n is SCEDB byte n + 10 for n 0 to 13. The TRM has no field
- * for SCEDB byte 24 (EPR Source PDP Rating).
+ * content), so TRM byte n is SCEDB byte n + 10 for n 0 to 14. TRM byte 14 (bits
+ * 119:112), which the TRM marks reserved, is SCEDB byte 24, the EPR Source PDP
+ * Rating, and reserved bit 111 is bit 7 of the SPR Source PDP Rating. Table 6.59
+ * says an SPR Source shall set the EPR rating to 0, and SPR codes with bit 7 set
+ * are invalid, so the reserved-bit check agrees with the specification for this
+ * SPR controller.
  *
  * Reply content: when the controller answers Get_Source_Cap_Extended it first
  * sends the VID, PID, and XID fields (from the firmware configuration made with

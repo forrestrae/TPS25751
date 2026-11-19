@@ -62,23 +62,42 @@ unit-test harness in place (`pio test -e native`, Batch 0)
 
 **IMPORTANT**: When working with TPS25751 registers, use the `tps25751-docs`
 register-docs MCP server for accurate register information extracted from the TI
-manuals. The generic server engine **and all device definitions** live in the
-sibling **`lib/device-register-mcp-server`** repository; this repo's `.mcp.json` invokes
-it cross-repo (`uv --directory ../device-register-mcp-server run server.py` with
-`DEVICE_CONFIG=devices/tps25751/device.json` — a relative `DEVICE_CONFIG` resolves
-against `server.py`'s own directory). This relies on the side-by-side `lib/`
-checkout layout.
+manuals, and the `usb-pd-docs` server for the USB PD data objects that seven of those
+registers carry. The generic server engine **and all device and specification
+definitions** live in the sibling **`lib/device-register-mcp-server`** repository; this
+repo's `.mcp.json` invokes it cross-repo (`uv --directory ../device-register-mcp-server
+run server.py`, with `DEVICE_CONFIG=devices/tps25751/device.json` for `tps25751-docs`
+and `DEVICE_CONFIG=specifications/USB_PD/specification.json` for `usb-pd-docs`; a
+relative `DEVICE_CONFIG` resolves against `server.py`'s own directory). This relies on
+the side-by-side `lib/` checkout layout.
 
-| MCP server | Tool prefix | Device | Use for |
+| MCP server | Tool prefix | Source | Use for |
 |---|---|---|---|
-| `tps25751-docs` | `mcp__tps25751-docs__*` | TPS25751 USB-C PD controller (37 registers) | The host PD controller's own registers (STATUS, MODE, COMMAND/DATA, …) |
+| `tps25751-docs` | `mcp__tps25751-docs__*` | TI TRM SLVUCR8B rev B, TPS25751 USB-C PD controller (37 registers) | The host PD controller's own registers (STATUS, MODE, COMMAND/DATA, …) |
+| `usb-pd-docs` | `mcp__usb-pd-docs__*` | USB PD R3.3 V1.0 (16 data objects, Tables 6.24 to 6.70) | The data objects that registers 48h, 77h, 78h, 7Ah, 7Bh, 7Dh, and 7Eh carry: field values, units, and validity rules the TRM defers to the specification |
+
+The two servers are linked. For the seven registers above, `tps25751-docs` prints a
+Specification block after the register description in `get_register`,
+`search_register`, and the register resource: one line per mapped object with the
+register bits, the specification table and object, the object bits when the register
+holds only part of it, and a note (for example "bits 119:0 = Table 6.59 Source
+Capabilities Extended Data Block (SCEDB), bits 199:80", with "TPS byte 0 is SCEDB byte
+10"). `explain_bitfield` also prints, under each matched field, a `Specification:`
+line naming the object field it equals, is part of, or spans, and flags TRM RESERVED
+bits that cover specification data. The mapping comes from
+`devices/tps25751/spec_refs.json` in the server repo. Look up the object's fields and
+values in `usb-pd-docs` (`get_register` takes a table number such as `6.59`), and cite
+both: the TRM page for the register and the specification table and page for the
+encoding. `usb-pd-docs` does not serve the PDO or APDO tables.
 
 (The BQ25798 charger's `bq25798-docs` server is configured in the sibling
 `lib/BQ25798` driver repo, backed by the same server engine.)
 
-**Available tools:** `search_register`, `explain_bitfield`, `get_register`.
-The server provides register definitions with addresses, bit fields, enumerated value
-meanings, and access types ([R], [R/W], [W]).
+**Available tools** (both servers): `search_register`, `explain_bitfield`,
+`get_register`, `list_registers`. `tps25751-docs` provides register definitions with
+addresses, bit fields, enumerated value meanings, and access types ([R], [R/W], [W]);
+`usb-pd-docs` provides the same for specification data objects, keyed by name, alias,
+or table number.
 
 The server is **device-generic**: each device is defined under `devices/<device>/`
 in the server repo by a `device.json` manifest plus its registers JSON and JSON
@@ -89,14 +108,14 @@ repo**, then point an MCP server entry at it from the consuming repo's `.mcp.jso
 
 ### Configuring the MCP Servers Per Tool
 
-The register-docs MCP server uses the standard MCP protocol and works with any compatible AI coding assistant. Tool-specific config files (each defining `tps25751-docs` against the sibling server repo) are included in this repo:
+The register-docs MCP server uses the standard MCP protocol and works with any compatible AI coding assistant. Tool-specific config files (each defining `tps25751-docs` and `usb-pd-docs` against the sibling server repo) are included in this repo:
 
 | Tool | Config File | Notes |
 |---|---|---|
-| **Claude Code** | `.mcp.json` + `.claude/settings.json` | Auto-activated via `enabledMcpjsonServers` |
+| **Claude Code** | `.mcp.json` + `.claude/settings.json` | Both servers listed in `enabledMcpjsonServers`, and their four tools each in `permissions.allow` |
 | **Cursor** | `.cursor/mcp.json` | Loaded automatically from project root |
 | **VS Code (Copilot)** | `.vscode/mcp.json` | Requires GitHub Copilot with MCP support enabled |
-| **Windsurf** | *(no project-level config)* | Add manually via Windsurf global MCP settings |
+| **Windsurf** | *(no project-level config)* | Add both servers manually via Windsurf global MCP settings |
 
 > **Note:** The `.claude/` directory contains Claude Code-specific settings (permissions, plugin config). Other tools use their own config conventions and are not affected by it.
 
@@ -341,7 +360,7 @@ Each register has its own class inheriting from `TPS25751Register`:
 - `TPS25751PD3Config`: PD3_CONFIGURATION register (0x42), R/W, 4 bytes, reset 00080010h (Support Get Revision and Unchunked Supported set). Bool accessors and `setBits()` setters for bits 20, 19, 18, 17, 11, 10, 8, 7, and 4, plus `kAddress` and `writePD3Config()`. Bits 20, 18, 17, 11, 10, and 8 gate the replies from 0x7A, 0x78, 0x7E, 0x7B, 0x7D, and 0x77. Bit 7 (Auto Get MIDB) stores its result in TX_MIBDB_SOP (0x73), which the library does not decode. Semantic validation requires reserved bits 31:21, 16:12, 9, and 6:5 to read 0. Bits 3:0 are reserved in the TRM but not checked, because the firmware sets them: hardware read 0x0008001A (see CONSTRAINTS.md, Read/Write Registers)
 - `TPS25751GlobalSystemConfig`: GLOBAL_SYSTEM_CONFIGURATION register (0x27), R/W, 14 bytes. The TRM gives 116 bits (15 bytes), but the controller's length byte is 14 on hardware, so `RegisterInfo` uses 14. Typed enums with `toString()` and `setBits()` setters for RCP Threshold (23:22), PP3 Config (18:16), ILIM Over Shoot for PP_5V (15:14, not 0x28's APDO ILIM), PP1 Config (10:8), and PP Cable1 Switch (bit 0); `rawPp3Config()`/`rawPp1Config()` expose undefined codes. `kAddress` and `writeGlobalSystemConfig()`; a write disconnects and reconnects the port (TRM p.28). Semantic validation checks only PP3 ≤ 5 and PP1 ≤ 1. There are no reserved-bit checks, because the firmware sets bits in all four reserved ranges (hardware read `05 09 14 00 1C 03 00…`), so a write must start from a fresh read; `debugPrint()` shows the raw bytes for that reason (see CONSTRAINTS.md, Read/Write Registers)
 - `TPS25751ReceivedSOPIdentity`: RECEIVED_SOP_IDENTITY_DATA_OBJECT register (0x48), read-only, 25 bytes. `numberValidVdos()` (2:0), nested `ResponseType` enum `responseType()` (7:6), zero-based `vdo(0..5)` via `extractBits32(8 + 32 * i, 32)` (0 for index ≥ 6), and aliases `idHeaderVdo()`, `certStatVdo()`, `productVdo()`. Typed decode (Batch L, USB PD R3.3 Tables 6.34, 6.38, 6.39) from VDOs 0 to 2: `usbHostCapable()`, `usbDeviceCapable()`, `productTypeUfp()` (enum `ProductTypeUfp`, SOP values), `alternateModesSupported()`, `productTypeDfp()` (enum `ProductTypeDfp`), `connectorType()` (enum `ConnectorType`), each enum with a `raw*()` form and a free `toString()` that prints "Invalid" for undefined codes, `usbVendorId()`, `xid()`, `usbProductId()`, and `bcdDevice()`; meaningful only for an Ack with enough valid VDOs. VDOs 3 to 5 stay raw. Semantic validation: count ≤ 6, reserved bits 5:3 read 0. Response Type is the authoritative status; INT_EVENT1 bit 51 is a later discovery step, not a "0x48 updated" signal
-- `TPS25751TransmitSourceInfo`: TX_SOURCE_INFO register (0x78), R/W, 8 bytes, reset 8000000080000000h. Nested `PortType` enum (Managed, Guaranteed) for the two Port Type bits, `portTypeUpper()` (bit 63) and `portTypeLower()` (bit 31); the TRM gives both the same text and does not explain the duplication. `dpsPort()` (62); raw and `_mW` accessors for Port Maximum PDP and Port Guaranteed PDP at 0.5 W/LSB (49:41, 40:32) and Port Maximum, Present, and Reported PDP at 1 W/LSB (23:16, 15:8, 7:0). Raw setters mask to the field width; unit setters round down and clamp to the field maximum. `kAddress` and `writeTransmitSourceInfo()`. The TRM says the PD firmware updates the register automatically, so a host write can be overwritten. Semantic validation: reserved bits 61:50 and 30:24 read 0; DPSPort set requires bit 63 Managed (TRM); Guaranteed PDP at most Maximum PDP when the maximum is nonzero (inferred from the field descriptions, not stated by the TRM). Gated by PD3_CONFIGURATION bit 18 (`supportGetSourceInfo()`)
+- `TPS25751TransmitSourceInfo`: TX_SOURCE_INFO register (0x78), R/W, 8 bytes, reset 8000000080000000h. Nested `PortType` enum (Managed, Guaranteed) for the two Port Type bits, `portTypeUpper()` (bit 63) and `portTypeLower()` (bit 31). The TRM gives both the same text; USB PD R3.3 Tables 6.29 and 6.30 explain it: bits 31:0 are SIDO1 (1 W steps) and bits 63:32 are SIDO2 (0.5 W steps), each with its own Port Type in bit 31. `dpsPort()` (62); raw and `_mW` accessors for Port Maximum PDP and Port Guaranteed PDP at 0.5 W/LSB (49:41, 40:32) and Port Maximum, Present, and Reported PDP at 1 W/LSB (23:16, 15:8, 7:0). Raw setters mask to the field width; unit setters round down and clamp to the field maximum. `kAddress` and `writeTransmitSourceInfo()`. The TRM says the PD firmware updates the register automatically, so a host write can be overwritten. Semantic validation: reserved bits 61:50 and 30:24 read 0; DPSPort set requires bit 63 Managed (TRM); Guaranteed PDP at most Maximum PDP when the maximum is nonzero (inferred from the field descriptions, not stated by the TRM). Gated by PD3_CONFIGURATION bit 18 (`supportGetSourceInfo()`)
 - `TPS25751TransmitPPSStatus`: TRANSMITTED_PPS_STATUS_DATA_BLOCK register (0x7A), R/W, 4 bytes. Output Voltage (15:0, 20 mV/LSB, 0xFFFF not supported) and Output Current (23:16, 50 mA/LSB, 0xFF not supported) with raw, `*Supported()`, and unit accessors (unit accessors return 0 for the sentinel); nested `PresentTemperatureFlag` (26:25; 00b, the reset, is undefined in the TRM and `NotSupported` per USB PD R3.3 Table 6.67, with `NotDefined` a deprecated alias) and `OperatingMode` (27, CV or CL) enums. Unit setters round down and clamp one below the sentinel; `setOutputVoltageNotSupported()` and `setOutputCurrentNotSupported()` write the sentinels. `kAddress` and `writeTransmitPPSStatus()`. Semantic validation: reserved bits 31:28 and 24 read 0. Gated by PD3_CONFIGURATION bit 20 (`supportPpsStatus()`)
 - `TPS25751TransmitSourceCapsExtended`: TX_SOURCE_CAPABILITIES_EXTENDED_DATA_BLOCK register (0x77), R/W, 15 bytes. Raw accessors and `setBits()` setters for Voltage Regulation, Hold Up Time, Compliance, Touch Current (bytes 0 to 3), `peakCurrent(1..3)` (16-bit little-endian at bits 47:32, 63:48, 79:64; 0 for any other index), Touch Temperature (87:80), Source Inputs (95:88), Number Fixed Batteries (99:96), Number Hot Swappable Batteries (103:100), and Source PDP (110:104, 7 bits). `kAddress` and `writeTransmitSourceCapsExtended()`. Typed decode (Batch L, USB PD R3.3 Table 6.59; TRM byte n is SCEDB byte n + 10): `loadStep()` (enum), `iocPercent()`, `holdUpTimeSupported()`/`holdUpTime_ms()`, three compliance and three touch-current flags, per Peak Current `peakCurrentOverloadPercent(i)` (10%/LSB, 26 to 31 treated as 25), `peakCurrentOverloadPeriod_ms(i)` (20 ms/LSB), `peakCurrentDutyCyclePercent(i)` (5%/LSB, 4 bits), `peakCurrentVbusDroop(i)`, `touchTemperatureStandard()` (enum), three Source Inputs flags, and `sourcePdpValid()`/`sourcePdp_W()` (0 to 100 W; the board's 0x7F is invalid). Semantic validation: reserved bits 119:111 read 0, each battery count at most 4 (TRM "Max of 4"). The battery counts should agree with 0x7B and 0x7D, which one register cannot check. Source Inputs bit 0 can be changed by the Barrel_Jack_Event GPIO event. Hardware reads Source PDP 0x7F, not the documented reset of 0 (see CONSTRAINTS.md, Read/Write Registers). Gated by PD3_CONFIGURATION bit 8 (`supportSourceExtended()`; the TRM calls it SourceCapExtMsg on p.54)
 - `TPS25751TransmitBatteryStatus`: TRANSMITTED_BATTERY_STATUS_DATA_OBJECTS_(BSDO) register (0x7B), R/W, 16 bytes, reset FFFF0200h in the low word (Battery 0 Battery Info 2h, Present Capacity FFFFh). Four 4-byte entries at byte 4i: a reserved byte, Battery Info (byte 4i+1), and Present Capacity (bytes 4i+2 and 4i+3, little-endian). Indexed `batteryInfo(i)`/`rawPresentCapacity(i)` and `setBits()` setters for i 0 to 3 (0 or no-op for i of 4 or more); TI names battery 3's capacity "Battery 3 Present Info". `kAddress` and `writeTransmitBatteryStatus()`. Typed decode (Batch L, USB PD R3.3 Table 6.24; Battery Info bit 0 is BSDO bit 8): `invalidBatteryReference(i)`, `batteryPresent(i)`, `chargingStatus(i)` (enum; reserved when absent or capacity unknown), `presentCapacityKnown(i)`, and `presentCapacity_mWh(i)` (0.1 Wh/LSB, FFFFh unknown). The reset decodes as battery 0 present with unknown capacity, which disagrees with the zero battery counts in 0x77 and 0x7E on the test board. Semantic validation: reserved bytes 0, 4, 8, and 12 read 0. The reset contains 0xFF bytes but passes the all-0xFF data check. The 0x77 battery counts should agree with the populated entries, which one register cannot check. Gated by PD3_CONFIGURATION bit 11 (`supportBatteryStatus()`)

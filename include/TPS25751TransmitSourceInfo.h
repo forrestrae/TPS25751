@@ -24,12 +24,21 @@
  * write. Every field is nonetheless listed R/W in the TRM, so the class provides
  * setters and a write path.
  *
- * TRM ambiguities, recorded and not resolved here:
- * - The TRM defines two Port Type bits, 63 ("PortType") and 31 ("Port Type"),
- *   with identical text, and does not explain the duplication.
- * - The TRM does not say how the upper word's 0.5 W fields (Port Maximum PDP
- *   and Port Guaranteed PDP) relate to the lower word's 1 W fields (Port
- *   Maximum PDP, Port Present PDP, Port Reported PDP).
+ * Specification mapping (USB PD R3.3 V1.0, Tables 6.29 and 6.30, page 154; the
+ * tps25751-docs server's Specification block for 78h): the register holds the two
+ * Source_Info Data Objects. Bits 31:0 are SIDO1 (Table 6.29, PDP in 1 W steps)
+ * and bits 63:32 are SIDO2 (Table 6.30, PDP in 0.5 W steps). Every field lands on
+ * the specification field of the same name and width. This settles the two TRM
+ * ambiguities:
+ * - The two Port Type bits are bit 31 of SIDO1 and bit 31 of SIDO2; each object
+ *   carries its own copy. Table 6.30 says that with DPS Port set, Port Type shall
+ *   be 0 in both SIDO1 and SIDO2. Semantic validation checks only bit 63 (the TRM
+ *   rule).
+ * - Table 6.29 says SIDO1 Port Maximum PDP shall equal SIDO2 Port Maximum PDP
+ *   rounded down to 1 W. Semantic validation does not check this.
+ * Table 6.30 defines Port Guaranteed PDP as the minimum the port can always
+ * provide and Port Maximum PDP as the most it will provide, which supports the
+ * Guaranteed at most Maximum check below; neither table states that rule.
  *
  * Register Details:
  * - Address: 0x78
@@ -96,18 +105,18 @@ public:
     /**
      * @brief Port Type, upper word
      *
-     * TRM name "PortType", bit 63. Reset 1 (Guaranteed). The TRM defines a second
-     * Port Type bit, bit 31 (portTypeLower()), with identical text and does not
-     * explain the duplication. DPSPort's rule ("If set, then PortType shall be 0")
-     * refers to this bit.
+     * TRM name "PortType", bit 63: Port Type of SIDO2 (USB PD R3.3 Table 6.30).
+     * Reset 1 (Guaranteed). Bit 31 (portTypeLower()) is the Port Type of SIDO1.
+     * DPSPort's TRM rule ("If set, then PortType shall be 0") refers to this bit;
+     * Table 6.30 extends it to both.
      */
     PortType portTypeUpper() const;
 
     /**
      * @brief Port Type, lower word
      *
-     * TRM name "Port Type", bit 31. Reset 1 (Guaranteed). Same text as bit 63
-     * (portTypeUpper()); the TRM does not explain the duplication.
+     * TRM name "Port Type", bit 31: Port Type of SIDO1 (USB PD R3.3 Table 6.29).
+     * Reset 1 (Guaranteed). Bit 63 (portTypeUpper()) is the Port Type of SIDO2.
      */
     PortType portTypeLower() const;
 

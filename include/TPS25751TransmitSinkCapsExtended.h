@@ -22,8 +22,11 @@
  * The TRM numbers its bytes from the start of this register. The USB PD
  * Sink_Capabilities_Extended Data Block (SKEDB) starts with VID, PID, XID, and the
  * firmware and hardware versions, which the controller prepends (see Reply
- * content), so TRM byte n is SKEDB byte n + 10 for n 0 to 10. The three EPR Sink
- * PDP bytes (SKEDB 21 to 23) fall in the TRM's reserved bits 111:88.
+ * content), so TRM byte n is SKEDB byte n + 10 for n 0 to 13. TRM bytes 11 to 13
+ * (bits 111:88), which the TRM marks reserved, are SKEDB bytes 21 to 23, the EPR
+ * Sink Minimum, Operational, and Maximum PDP. The controller is SPR-only, and the
+ * reserved-bit check requires them to read 0; Table 6.70 states no rule for an SPR
+ * Sink, so that check rests on the TRM alone.
  *
  * Reply content: when the controller answers Get_Sink_Cap_Extended it first sends
  * the VID, PID, and XID fields (from the firmware configuration made with the

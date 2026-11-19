@@ -775,7 +775,8 @@ the SPR PPS layout above. On 2026-11-18 the test board's TRANSMIT_SOURCE_CAPS
 the PPS layout it gave a 17700 mV minimum and a 200 mV maximum, and the whole
 register failed `isSemanticallyValid()`. USB PD 3.1 and later define further APDO
 subtypes; their layouts are not yet checked against the specification. The
-`usb-pd-docs` MCP server serves USB PD R3.3 but not yet its APDO tables. Every PDO class (`TPS25751ActivePDOContract`,
+`usb-pd-docs` MCP server serves USB PD R3.3 but not yet its PDO or APDO tables
+(checked 2026-11-19: it serves 16 data objects, Tables 6.24 to 6.70, none a PDO). Every PDO class (`TPS25751ActivePDOContract`,
 `TPS25751Received{Source,Sink}Caps`, `TPS25751Transmit{Source,Sink}Caps`)
 therefore exposes the subtype (`apdoSubtype()` / `getAPDOSubtype()`) and
 `isSprPps()` / `isSprPpsPDO()`. The PPS accessors return 0 (or false) for any
@@ -895,8 +896,10 @@ from memory. Points that are easy to get wrong:
 - Offsets. TRM byte n of 0x77 is Source_Capabilities_Extended Data Block (Table 6.59)
   byte n + 10, and TRM byte n of 0x7E is Sink_Capabilities_Extended Data Block
   (Table 6.70) byte n + 10, because the controller prepends VID, PID, XID, and the
-  firmware and hardware versions. The EPR PDP bytes have no TRM field (0x77) or fall
-  in TRM reserved bits 111:88 (0x7E). 0x7B entries are whole BSDOs (Table 6.24), so
+  firmware and hardware versions. The EPR PDP bytes fall in TRM reserved bits:
+  0x77 byte 14 (bits 119:112) is the EPR Source PDP Rating, which an SPR Source shall
+  set to 0 (Table 6.59), and 0x7E bits 111:88 are the three EPR Sink PDP bytes. Both
+  classes require those bits to read 0. 0x7B entries are whole BSDOs (Table 6.24), so
   BSDO bit 8 is bit 0 of the Battery Info byte. 0x7D entries are whole Battery
   Capability Data Blocks (Table 6.64).
 - Source PDP width. The TRM gives 0x77 Source PDP as 7 bits (110:104); the
@@ -915,14 +918,25 @@ from memory. Points that are easy to get wrong:
 - 0x7A Present Temperature Flag 00b is "Not Supported" in Table 6.67; the TRM leaves it
   undefined. `PresentTemperatureFlag::NotSupported` names it, and `NotDefined` stays
   as a deprecated alias of the same value.
+- 0x78 TX Source Info is the two Source_Info Data Objects: bits 31:0 are SIDO1
+  (Table 6.29, 1 W steps) and bits 63:32 are SIDO2 (Table 6.30, 0.5 W steps). The two
+  Port Type bits the TRM leaves unexplained are bit 31 of each object. Table 6.30 says
+  DPS Port requires Port Type 0 in both, where the class checks only bit 63, and
+  Table 6.29 says SIDO1 Port Maximum PDP equals SIDO2 Port Maximum PDP rounded down to
+  1 W, which the class does not check.
+- Finding the mapping. Since `device-register-mcp-server` 8673c30, `tps25751-docs`
+  prints a Specification block for 48h, 77h, 78h, 7Ah, 7Bh, 7Dh, and 7Eh that names
+  the object and bits each register carries, and `explain_bitfield` names the object
+  field under each register field. Start there, then read the object in `usb-pd-docs`.
 
 ### USB PD Specification Reference
 
 For complete details, refer to:
 - **USB Power Delivery Specification R3.3 V1.0**, via the `usb-pd-docs` MCP server:
-  Table 6.24 (BSDO), 6.34 (ID Header VDO), 6.38 (Cert Stat VDO), 6.39 (Product VDO),
-  6.59 (Source_Capabilities_Extended), 6.64 (Battery Capabilities), 6.67 (PPS Status),
-  and 6.70 (Sink_Capabilities_Extended)
+  Table 6.24 (BSDO), 6.29 and 6.30 (Source_Info SIDO1 and SIDO2), 6.34 (ID Header
+  VDO), 6.38 (Cert Stat VDO), 6.39 (Product VDO), 6.40 to 6.44 and 6.53 (Product Type
+  VDOs, not decoded), 6.59 (Source_Capabilities_Extended), 6.64 (Battery
+  Capabilities), 6.67 (PPS Status), and 6.70 (Sink_Capabilities_Extended)
 - **USB Power Delivery Specification 3.1**
 - Section 6.4.1: Power Data Objects
 - Table 6-7: Fixed Supply PDO
@@ -1222,6 +1236,7 @@ void foo() {
 | 1.10 | 2026-11-19 | Claude Code | Batches G to I bench checks: a GLOBAL_SYSTEM_CONFIGURATION (0x27) RCP write preserves the undocumented bits; RECEIVED_SOP_IDENTITY (0x48) fills about 106 ms before INT_EVENT1 bit 51 and keeps the last identity after detach; INT_EVENT1 latches only INT_MASK1-enabled sources; the firmware fills the TX_SOURCE_INFO (0x78) lower word when the board sources (Read/Write Registers section) |
 | 1.11 | 2026-11-19 | Claude Code | Batch L of the rev B plan: typed USB PD R3.3 decode for 0x48, 0x77, 0x7E, 0x7B, and 0x7D and the 0x7A PTF 00b meaning (new USB PD Specification Structures section); 0x48 decode of an iPhone on hardware; the 0x7B reset value reports a battery that 0x77 and 0x7E do not (Read/Write Registers section) |
 | 1.12 | 2026-11-19 | Claude Code | ADR-012: the base-class bit helpers take a 16-bit bit position, so IO_CONFIG (0x5C) and TX_BATTERY_CAPABILITIES (0x7D) read and write through them (Read-Only Registers section, IO_CONFIG note) |
+| 1.13 | 2026-11-19 | Claude Code | USB PD cross-check against the linked `tps25751-docs` output: 0x77 byte 14 is the EPR Source PDP Rating, 0x78 is SIDO1 and SIDO2, and the Specification block (USB PD Specification Structures section) |
 
 ---
 

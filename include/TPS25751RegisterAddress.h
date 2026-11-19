@@ -17,6 +17,8 @@ enum class Address : uint8_t {
     CUSTOMER_USE = 0x06,
     COMMAND = 0x08,
     DATA = 0x09,
+    /// Version (SLVUCR8B Rev. B, p.18). TI short name VERSION.
+    VERSION = 0x0F,
     /// Interrupt Event for I2Ct_IRQ (SLVUCR8B Rev. B, p.19). TI short name INT_EVENT1.
     INT_EVENT1 = 0x14,
     /// Interrupt Mask for I2Ct_IRQ (SLVUCR8B Rev. B, p.21). TI short name INT_MASK1.
@@ -66,6 +68,7 @@ namespace Registers {
     constexpr RegisterInfo CUSTOMER_USE{Address::CUSTOMER_USE, 8};
     constexpr RegisterInfo COMMAND{Address::COMMAND, 4};
     constexpr RegisterInfo DATA{Address::DATA, 64};
+    constexpr RegisterInfo VERSION{Address::VERSION, 4};
     constexpr RegisterInfo INT_EVENT1{Address::INT_EVENT1, 11};
     constexpr RegisterInfo INT_MASK1{Address::INT_MASK1, 11};
     constexpr RegisterInfo INT_CLEAR1{Address::INT_CLEAR1, 11};
@@ -102,6 +105,7 @@ constexpr uint8_t getRegisterSize(Address addr) {
         case Address::CUSTOMER_USE: return Registers::CUSTOMER_USE.size;
         case Address::COMMAND: return Registers::COMMAND.size;
         case Address::DATA: return Registers::DATA.size;
+        case Address::VERSION: return Registers::VERSION.size;
         case Address::INT_EVENT1: return Registers::INT_EVENT1.size;
         case Address::INT_MASK1: return Registers::INT_MASK1.size;
         case Address::INT_CLEAR1: return Registers::INT_CLEAR1.size;
@@ -143,6 +147,7 @@ inline const RegisterInfo* getRegisterInfo(Address addr) {
         case Address::PORT_CONFIGURATION: return &Registers::PORT_CONFIGURATION;
         case Address::COMMAND: return &Registers::COMMAND;
         case Address::DATA: return &Registers::DATA;
+        case Address::VERSION: return &Registers::VERSION;
         case Address::INT_EVENT1: return &Registers::INT_EVENT1;
         case Address::INT_MASK1: return &Registers::INT_MASK1;
         case Address::INT_CLEAR1: return &Registers::INT_CLEAR1;

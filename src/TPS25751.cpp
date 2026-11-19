@@ -507,6 +507,14 @@ std::unique_ptr<TPS25751LiquidDetectionConfig> TPS25751::readLiquidDetectionConf
     return nullptr;
 }
 
+std::unique_ptr<TPS25751Version> TPS25751::readVersionRegister(bool validate) const {
+    auto reg = readAndValidateRegisterByAddress(TPS25751Registers::Address::VERSION, validate);
+    if (!reg) return nullptr;
+
+    TPS25751Version* versionReg = static_cast<TPS25751Version*>(reg.release());
+    return std::unique_ptr<TPS25751Version>(versionReg);
+}
+
 std::unique_ptr<TPS25751PortControl> TPS25751::readPortControlRegister(bool validate) const {
     auto reg = readAndValidateRegisterByAddress(TPS25751Registers::Address::PORT_CONTROL, validate);
     if (!reg) return nullptr;

@@ -30,6 +30,7 @@
 #include "TPS25751AutoNegotiateSink.h"
 #include "TPS25751IOConfig.h"
 #include "TPS25751LiquidDetectionConfig.h"
+#include "TPS25751Version.h"
 #include "TPS25751RegisterAddress.h"
 #include "TPS25751RegisterFactory.h"
 #include "TPS25751Task.h"
@@ -451,6 +452,13 @@ public:
      * @return Unique pointer to Liquid Detection Config register (nullptr if failed)
      */
     std::unique_ptr<TPS25751LiquidDetectionConfig> readLiquidDetectionConfigRegister(bool validate = true) const;
+
+    /**
+     * @brief Read Version register (0x0F) using factory pattern
+     * @param validate Whether to validate the register after reading
+     * @return Unique pointer to Version register (nullptr if failed)
+     */
+    std::unique_ptr<TPS25751Version> readVersionRegister(bool validate = true) const;
 
     /**
      * @brief Read Port Control register using factory pattern

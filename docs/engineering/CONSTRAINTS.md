@@ -504,9 +504,10 @@ SLEEP_CONTROL (0x70) resets to `0x03` in SLVUCR8B Rev. B (page 52): Sleep Mode
 Allowed = 1, Sleep Time = `1h` (100 ms), which `isSemanticallyValid()` accepts.
 Rev. A listed `0x01` (Sleep Time = `0h`, a *Reserved* code), a combination
 `isSemanticallyValid()` rejects. Rev. B also redefined Sleep Time `2h` from
-1200 ms to 1000 ms. The reset value here is TRM-derived, not a hardware
-observation; one read of 0x70 after power-on would confirm which revision the
-silicon follows. If a device does report `0x01`, `isSemanticallyValid() == false`
+1200 ms to 1000 ms. A read of 0x70 after a power cycle on 2026-11-18 returned
+`0x03`, matching Rev. B (Teensy 4.0 host, TPS25751 with an EEPROM-loaded
+configuration, so the read does not separate the silicon reset from a value set
+by that configuration). If a device does report `0x01`, `isSemanticallyValid() == false`
 is expected and is not an I2C error. (General rule: semantic validation encodes
 *logical* consistency, which a reset state is not obligated to satisfy.)
 

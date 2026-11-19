@@ -22,7 +22,9 @@
   "export": {
     "exclude": [
       ".github",
+      ".githooks",
       ".claude",
+      ".codex",
       ".cursor",
       ".idea",
       ".junie",

@@ -426,10 +426,12 @@ auto statusReg = tps.readStatusRegister(true);  // with validation
 │                                       #   (CLAUDE.md is a symlink -> AGENTS.md; edit AGENTS.md)
 ├── .mcp.json                           # Claude Code MCP server config
 ├── .claude/                            # Claude Code-specific settings
+├── .githooks/                          # Git workflow hooks (see "Git Workflow")
 ├── .cursor/mcp.json                    # Cursor MCP server config
 ├── .vscode/mcp.json                    # VS Code Copilot MCP server config
 ├── library.json                        # PlatformIO library manifest
 ├── library.properties                  # Arduino library manifest
+├── scripts/                            # Release + git workflow tooling (verify.py, integrate.py, ...)
 ├── include/                            # Public header files
 ├── src/                                # Implementation files
 ├── examples/                           # Example sketches
@@ -534,6 +536,81 @@ TPS25751-specific traps to add:
 
 ---
 
+## Git Workflow
+
+Every change follows this workflow. A push to `main` publishes to the PlatformIO
+Registry, so the local machine enforces the workflow with git hooks, and CI checks it
+again before publishing. Design notes: [git-workflow-definition-enforcement.md](docs/plans/git-workflow-definition-enforcement.md).
+
+### One-time setup per clone
+
+```bash
+scripts/setup_hooks.sh
+```
+
+This sets `core.hooksPath=.githooks`, makes plain `git merge` on `main` always create a
+merge commit (`branch.main.mergeoptions=--no-ff`), makes `git pull` fast-forward only,
+and records `main`'s current tip as the baseline that predates the workflow. Claude Code
+and Codex sessions warn at start if the hooks are not active.
+
+For Codex, also trust this repository (`codex --trust` or the trust prompt) and approve
+its two hooks from `.codex/hooks.json` when Codex shows "Hooks need review". Codex runs
+project hooks only in trusted projects and only after each hook's content is approved;
+any later change to a hook needs approval again.
+
+### Steps
+
+1. Work on a topic branch, never on `main`. Name it `<type>/<kebab-topic>`, where type
+   is one of `feat fix docs refactor test chore perf build ci` (for example
+   `fix/rev-b-trm`).
+2. Write commit subjects as Conventional Commits, `type(scope)!: subject`, with the same
+   type list, at most 100 characters, imperative mood, and no attribution trailers. The
+   only other accepted subjects are `Merge branch '<branch>'` and git's default
+   `Revert "<subject>"`. One logical change per commit.
+3. When the branch is done, rebase it onto `main`, commit or stash everything (the tree
+   must be clean, untracked files included), and run `scripts/verify.py`. It lints the
+   branch name and every commit, refuses merge commits on the branch and hand-edited
+   version fields, then runs the script tests, `pio test -e native`, and
+   `pio run -e example-read-registers`. A pass records the branch tip as verified.
+4. Run `scripts/integrate.py <branch>` from the checkout that has `main`. It runs
+   `git merge --no-ff <branch> -m "Merge branch '<branch>'"`, tags the tip
+   `archive/<branch>`, and deletes the branch. Agents may run this step.
+5. The human pushes: `git push origin main refs/tags/archive/<branch>`. Agents never push.
+6. CI on `main` re-runs the gate, derives the release level, bumps, tags, and publishes
+   (see "Publishing the Library"). Afterwards, `git pull` brings the bot's
+   `chore(release)` commit into local `main`.
+
+The `--no-ff` matters. A plain `git merge` of a branch that is already ahead of `main`
+fast-forwards and silently ignores `-m`, which is how the `#minor` token for Batches A to
+F never reached CI and the release shipped as v2.0.2.
+
+### Enforcement
+
+| Rule | Enforced by |
+|---|---|
+| Commit message format | `commit-msg` hook (`scripts/check_commits.py`); CI lints the release range |
+| `main` moves only by a `--no-ff` merge whose second parent passed `verify.py` and whose tree equals that tip's tree | `reference-transaction` hook (`scripts/gitguard.py`). Direct commits, amends, resets, fast-forwards, and merges of stale or unverified branches on `main` are refused. Moves to commits already on `origin/main` (pulling a release) are allowed. |
+| Agents never push | `pre-push` hook refuses every push from an agent shell, recognised by its environment: `CLAUDECODE` (Claude Code), `CODEX_THREAD_ID`, `CODEX_SESSION_ID`, `CODEX_TOOL_CALL_ID`, or `CODEX_SANDBOX` (Codex), or `WORKFLOW_AGENT=1` (any other agent that opts in). The agent guard also denies `git push`. |
+| A human push of `main` is gated | `pre-push` re-checks each new first-parent commit with the same rule |
+| Agents cannot switch the hooks off | `scripts/agent_guard.py`, a `PreToolUse` hook for Claude Code (`.claude/settings.json`) and Codex (`.codex/hooks.json`), denies `--no-verify`, `git commit -n`, changes to `core.hooksPath`, `branch.main.mergeoptions`, or `pull.ff`, `GIT_CONFIG_*` overrides, and writes to the workflow tooling or the verify stamp files, whether through a shell command, an edit tool, or a Codex `apply_patch` |
+| Nothing failing is published | `publish.yml` job `verify` (lint, script tests, native tests, example build) gates job `publish` |
+| Remote `main` is not rewritten or deleted | GitHub ruleset on `main`: block force push and deletion |
+
+Workflow tooling is maintained by the human: `.githooks/`, `scripts/workflow_common.py`,
+`gitguard.py`, `check_commits.py`, `release_level.py`, `verify.py`, `integrate.py`,
+`setup_hooks.sh`, `agent_guard.py`, `.claude/settings*.json`, `.codex/`, and
+`.github/workflows/publish.yml`. To let an agent change them, set `WORKFLOW_GUARD_OFF=1`
+in the agent's environment for that session: for Claude Code, add
+`"env": { "WORKFLOW_GUARD_OFF": "1" }` to `.claude/settings.local.json` (not the shared
+`settings.json`) and remove it afterwards; for Codex, start it with the variable set.
+
+Renaming or moving `agent_guard.py` breaks the hooks that call it, and Claude Code then
+refuses every Bash and edit call until the path in `.claude/settings.json` matches again.
+Update the hook configs first, then move the file.
+
+If a refused fast-forward leaves files staged on `main`, restore the tree with
+`git reset --merge HEAD`.
+
 ## Development Workflow
 
 ### Adding a New Register Class
@@ -595,14 +672,18 @@ Publishing to the PlatformIO Registry is automated by
 `.github/workflows/publish.yml` (design notes in
 [docs/plans/platformio-pkg-publish.md](docs/plans/platformio-pkg-publish.md)):
 
-- **Every push to `main`** bumps the patch version in `library.json` **and**
-  `library.properties` (via `scripts/bump_version.py` — the single source of truth
-  for bumps; never edit the version fields by hand), commits the bump back as
-  `chore(release): vX.Y.Z [skip ci]`, tags `vX.Y.Z`, and runs
+- **Every push to `main`** first runs job `verify` (commit lint, script tests,
+  `pio test -e native`, `pio run -e example-read-registers`). Only if it passes does
+  job `publish` bump the version in `library.json` **and** `library.properties` (via
+  `scripts/bump_version.py`, the single source of truth for bumps; never edit the
+  version fields by hand), commit the bump back as
+  `chore(release): vX.Y.Z [skip ci]`, push an annotated tag `vX.Y.Z`, and run
   `pio pkg publish --no-interactive`.
-- Include `#minor` or `#major` as a whitespace-delimited token in the commit
-  **subject line** to raise the bump level (default is patch). The body is
-  never scanned, so prose mentioning the tokens is safe.
+- The bump level is derived by `scripts/release_level.py` from every commit since the
+  previous `chore(release)` commit: a breaking marker (`type!:` or a
+  `BREAKING CHANGE:` footer) gives major, any `feat` gives minor, anything else gives
+  patch. Merge commits are ignored. The old `#minor`/`#major` subject tokens no
+  longer have any effect.
 - The registry tarball is filtered by the `export.exclude` list in `library.json`
   (dev tooling, IDE configs, `docs/plans/`, `platformio.ini`, `scripts/`, `test/`
   are not shipped). Check what would be published with `pio pkg pack`.

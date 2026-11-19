@@ -1,0 +1,10 @@
+#!/bin/sh
+# Refuse any update of local main that is not a verified --no-ff merge.
+# Rules: scripts/workflow_common.py (main_update_decision).
+[ "$1" = "prepared" ] || exit 0
+input=$(cat)
+case "$input" in
+    *" refs/heads/main"*|*" HEAD"*) ;;
+    *) exit 0 ;;
+esac
+printf '%s\n' "$input" | exec python3 "$(git rev-parse --show-toplevel)/scripts/gitguard.py" reference-transaction "$1"

@@ -522,6 +522,11 @@ Batch D, remind the session of the plan's Batch-D Tightening section.
 
 ### Merge & release (you, per batch)
 
+> Superseded on 2026-11-18 by the "Git Workflow" section of AGENTS.md. Merges now go
+> through `scripts/verify.py` and `scripts/integrate.py`, and the release level is
+> derived from Conventional Commits; `#minor` tokens have no effect. The text below is
+> kept as the historical record of how Batches 0 to F were run.
+
 Merging to `main` **auto-publishes to the PlatformIO Registry**, which is why
 every kickoff prompt ends with "stop before merging" — you approve each release:
 

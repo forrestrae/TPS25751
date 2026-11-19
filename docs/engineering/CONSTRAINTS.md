@@ -559,6 +559,29 @@ Identity is normally sent by the DFP, so this result is expected for a UFP; the
 TRM does not state the firmware's policy. The timing of bit 51 relative to a
 0x48 update is not yet observed.
 
+**TX_SOURCE_INFO (0x78) is R/W, but the firmware owns it.** SLVUCR8B Rev. B
+(p.55) lists every field as R/W and also says the register "is automatically
+updated by the PD firmware and does not require any EC implementation". A host
+write can therefore be overwritten, and the TRM does not say when. It also
+defines two Port Type bits, 63 and 31, with identical text, and does not say how
+the upper word's 0.5 W PDP fields relate to the lower word's 1 W fields. On
+2026-11-18 the same board, sinking from a PD charger, reported a length byte of 8
+and read `00 00 00 80 00 00 00 80`, the documented reset 8000000080000000h. A
+write that changed only the upper word (Port Maximum PDP 30, Port Guaranteed PDP
+20, in 0.5 W units) read back exactly, and restoring the original read back
+exactly; the firmware did not overwrite the value within the 50 ms before the
+read-back. Whether the firmware changes either word while the board sources power
+is not yet observed. `TPS25751TransmitSourceInfo` checks a Guaranteed PDP at most
+Maximum PDP rule that the TRM does not state; if firmware-written data breaks it,
+drop the rule under "Validation tiers" in the plan.
+
+TRANSMITTED_PPS_STATUS (0x7A) reported a length byte of 4 on the same board, read
+`00 00 00 00`, and round-tripped a written value (`FA 00 3C 02`: 5000 mV,
+3000 mA, temperature normal, constant voltage) and the restore exactly. The
+board's PD3_CONFIGURATION (`0x0008001A`) has bits 18 and 20 clear, so the
+controller was answering Get_Source_Info and Get_PPS_Status with Not_Supported,
+whatever the two registers held.
+
 ---
 
 ## USB Power Delivery Complexity

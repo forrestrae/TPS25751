@@ -62,15 +62,13 @@
  * times in the TRM, so this class identifies every field by its bit range, never
  * by name.
  *
- * Why byte assembly: this is the library's first R/W register with fields past
- * bit 255. extractBits*() and setBits() take a uint8_t bit position, which cannot
- * address battery 3 (its Design Capacity starts at bit 248, its Last Full Charge
- * Capacity at bit 264, and its Battery Type at bit 280); a cast would wrap to a low
- * bit and corrupt battery 0. The class therefore never calls extractBits*() or
- * setBits(). Every field of every battery goes through class-private
- * bounds-checked little-endian byte helpers: reads follow the technique of
- * TPS25751IOConfig::readGpioBitmap() and writes are the matching inverse, so one
- * decode path serves all four entries.
+ * Fields past bit 255: this is the library's first R/W register with fields past
+ * bit 255 (battery 3's Last Full Charge Capacity starts at bit 264 and its Battery
+ * Type at bit 280). The base-class extractBits*() and setBits() take a 16-bit bit
+ * position (ADR-012 in ARCHITECTURE.md), so every field of every battery goes
+ * through them at bit (9 * battery + field offset) * 8, and one decode path serves
+ * all four entries. Before ADR-012 the position was 8 bits and the class carried
+ * its own byte helpers.
  *
  * Hardware reading (2026-11-19, board sinking from a PD charger): the length
  * byte is 36 and the register read all zero, the documented reset. Writes
@@ -199,14 +197,9 @@ public:
     bool isSemanticallyValid() const override;
 
 private:
-    /// Little-endian 16-bit read at @p byteOffset; 0 unless the register is valid and both bytes are in range.
-    uint16_t readLE16(size_t byteOffset) const;
-    /// Byte read at @p byteOffset; 0 unless the register is valid and the byte is in range.
-    uint8_t readByte(size_t byteOffset) const;
-    /// Little-endian 16-bit write at @p byteOffset; no-op unless the register is valid and both bytes are in range.
-    void writeLE16(size_t byteOffset, uint16_t value);
-    /// Byte write at @p byteOffset; no-op unless the register is valid and the byte is in range.
-    void writeByte(size_t byteOffset, uint8_t value);
-    /// First byte of battery @p battery's entry (the caller range-checks @p battery).
-    static size_t entryOffset(uint8_t battery) { return static_cast<size_t>(kEntrySize) * battery; }
+    /// Bit position of the field at byte @p fieldOffset of battery @p battery's entry (the caller range-checks @p battery).
+    static uint16_t fieldBit(uint8_t battery, size_t fieldOffset)
+    {
+        return static_cast<uint16_t>((static_cast<size_t>(kEntrySize) * battery + fieldOffset) * 8);
+    }
 };

@@ -1309,8 +1309,9 @@ has, and every new long register would have added another.
   64 bits.
 - Do all internal byte arithmetic (start byte, bytes needed, loop indexes) in `size_t`, and
   compare the field's end against the buffer length in `size_t`, so no sum can wrap.
-  `extractBits64()` computes the upper half's bit position in 32 bits and returns 0 when it
-  does not fit, instead of letting it truncate.
+  `extractBits64()` computes the upper half's bit position in 32 bits and reads that half
+  as 0 when the position does not fit, instead of letting it wrap to a low bit. Each half
+  stays bounds-checked on its own, as before.
 - Convert 0x7D and 0x5C to the base-class calls and delete their private helpers.
 - `uint16_t` rather than `size_t`: 65,535 bits is 8 KB, far past the 64-byte DATA register,
   and it matches the existing `uint16_t startBitPos` of `extractArray32()`.

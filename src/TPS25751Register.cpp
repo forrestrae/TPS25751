@@ -76,7 +76,7 @@ TPS25751Register::~TPS25751Register()
     delete[] _raw;
 }
 
-uint8_t TPS25751Register::extractBits(uint8_t bitPos, uint8_t bitLen) const
+uint8_t TPS25751Register::extractBits(uint16_t bitPos, uint8_t bitLen) const
 {
     if (!isValid())
     {
@@ -95,7 +95,7 @@ uint8_t TPS25751Register::extractBits(uint8_t bitPos, uint8_t bitLen) const
     return result;
 }
 
-uint16_t TPS25751Register::extractBits16(uint8_t bitPos, uint8_t bitLen) const
+uint16_t TPS25751Register::extractBits16(uint16_t bitPos, uint8_t bitLen) const
 {
     if (!isValid())
     {
@@ -104,7 +104,7 @@ uint16_t TPS25751Register::extractBits16(uint8_t bitPos, uint8_t bitLen) const
     return extractBits16(_raw, _len, bitPos, bitLen);
 }
 
-uint32_t TPS25751Register::extractBits32(uint8_t bitPos, uint8_t bitLen) const
+uint32_t TPS25751Register::extractBits32(uint16_t bitPos, uint8_t bitLen) const
 {
     if (!isValid())
     {
@@ -113,7 +113,7 @@ uint32_t TPS25751Register::extractBits32(uint8_t bitPos, uint8_t bitLen) const
     return extractBits32(_raw, _len, bitPos, bitLen);
 }
 
-uint64_t TPS25751Register::extractBits64(uint8_t bitPos, uint8_t bitLen) const
+uint64_t TPS25751Register::extractBits64(uint16_t bitPos, uint8_t bitLen) const
 {
     if (!isValid())
     {
@@ -122,7 +122,7 @@ uint64_t TPS25751Register::extractBits64(uint8_t bitPos, uint8_t bitLen) const
     return extractBits64(_raw, _len, bitPos, bitLen);
 }
 
-void TPS25751Register::setBits(uint8_t bitPos, uint8_t bitLen, uint32_t value)
+void TPS25751Register::setBits(uint16_t bitPos, uint8_t bitLen, uint32_t value)
 {
     if (!isValid())
     {
@@ -134,51 +134,66 @@ void TPS25751Register::setBits(uint8_t bitPos, uint8_t bitLen, uint32_t value)
 }
 
 // Bounds-checked static methods
-uint8_t TPS25751Register::extractBits(const uint8_t *data, size_t dataSize, uint8_t bitPos, uint8_t bitLen)
+//
+// Every byte computation below is done in size_t. bitPos is 16 bits, so a field
+// can start anywhere in a buffer of up to 8 KB, and no sum of start byte and
+// bytes needed can wrap before it is compared with dataSize.
+namespace {
+
+// Locates a field of bitLen bits at bitPos in a buffer of dataSize bytes.
+// Returns false when any byte of the field lies outside the buffer.
+bool locateField(size_t dataSize, uint16_t bitPos, uint8_t bitLen,
+                 size_t &byteStart, uint8_t &bitOffset, size_t &bytesNeeded)
+{
+    byteStart = static_cast<size_t>(bitPos) / 8;
+    bitOffset = static_cast<uint8_t>(bitPos % 8);
+    bytesNeeded = (static_cast<size_t>(bitOffset) + bitLen + 7) / 8;
+    return byteStart < dataSize && bytesNeeded <= dataSize - byteStart;
+}
+
+}  // namespace
+
+uint8_t TPS25751Register::extractBits(const uint8_t *data, size_t dataSize, uint16_t bitPos, uint8_t bitLen)
 {
     if (!data || bitLen == 0 || bitLen > 8 || dataSize == 0)
     {
         return 0;
     }
 
-    uint8_t byteStart = bitPos / 8;
-    uint8_t bitOffset = bitPos % 8;
-    uint8_t bytesNeeded = (bitOffset + bitLen + 7) / 8;
-
-    // Check bounds
-    if (byteStart >= dataSize || (byteStart + bytesNeeded) > dataSize)
+    size_t byteStart;
+    uint8_t bitOffset;
+    size_t bytesNeeded;
+    if (!locateField(dataSize, bitPos, bitLen, byteStart, bitOffset, bytesNeeded))
     {
         return 0;
     }
 
     uint16_t value = (data[byteStart] >> bitOffset);
-    if (bitOffset + bitLen > 8 && (static_cast<size_t>(byteStart) + 1) < dataSize)
+    if (bytesNeeded > 1)
     {
         value |= (data[byteStart + 1] << (8 - bitOffset));
     }
     return value & ((1 << bitLen) - 1);
 }
 
-uint16_t TPS25751Register::extractBits16(const uint8_t *data, size_t dataSize, uint8_t bitPos, uint8_t bitLen)
+uint16_t TPS25751Register::extractBits16(const uint8_t *data, size_t dataSize, uint16_t bitPos, uint8_t bitLen)
 {
     if (!data || bitLen == 0 || bitLen > 16 || dataSize == 0)
     {
         return 0;
     }
 
-    uint8_t byteStart = bitPos / 8;
-    uint8_t bitOffset = bitPos % 8;
-    uint8_t bytesNeeded = (bitOffset + bitLen + 7) / 8;
-
-    // Check bounds
-    if (byteStart >= dataSize || (byteStart + bytesNeeded) > dataSize)
+    size_t byteStart;
+    uint8_t bitOffset;
+    size_t bytesNeeded;
+    if (!locateField(dataSize, bitPos, bitLen, byteStart, bitOffset, bytesNeeded))
     {
         return 0;
     }
 
     uint32_t value = 0;
     // Extract only the bytes we know are valid
-    for (uint8_t i = 0; i < bytesNeeded && (byteStart + i) < dataSize && i < 3; ++i)
+    for (size_t i = 0; i < bytesNeeded; ++i)
     {
         value |= (static_cast<uint32_t>(data[byteStart + i]) << (i * 8));
     }
@@ -187,26 +202,24 @@ uint16_t TPS25751Register::extractBits16(const uint8_t *data, size_t dataSize, u
     return value & ((1UL << bitLen) - 1);
 }
 
-uint32_t TPS25751Register::extractBits32(const uint8_t *data, size_t dataSize, uint8_t bitPos, uint8_t bitLen)
+uint32_t TPS25751Register::extractBits32(const uint8_t *data, size_t dataSize, uint16_t bitPos, uint8_t bitLen)
 {
     if (!data || bitLen == 0 || bitLen > 32 || dataSize == 0)
     {
         return 0;
     }
 
-    uint8_t byteStart = bitPos / 8;
-    uint8_t bitOffset = bitPos % 8;
-    uint8_t bytesNeeded = (bitOffset + bitLen + 7) / 8;
-
-    // Check bounds
-    if (byteStart >= dataSize || (byteStart + bytesNeeded) > dataSize)
+    size_t byteStart;
+    uint8_t bitOffset;
+    size_t bytesNeeded;
+    if (!locateField(dataSize, bitPos, bitLen, byteStart, bitOffset, bytesNeeded))
     {
         return 0;
     }
 
     uint64_t value = 0;
     // Extract only the bytes we know are valid
-    for (uint8_t i = 0; i < bytesNeeded && (byteStart + i) < dataSize && i < 5; ++i)
+    for (size_t i = 0; i < bytesNeeded; ++i)
     {
         value |= (static_cast<uint64_t>(data[byteStart + i]) << (i * 8));
     }
@@ -215,7 +228,7 @@ uint32_t TPS25751Register::extractBits32(const uint8_t *data, size_t dataSize, u
     return value & ((1ULL << bitLen) - 1);
 }
 
-uint64_t TPS25751Register::extractBits64(const uint8_t *data, size_t dataSize, uint8_t bitPos, uint8_t bitLen)
+uint64_t TPS25751Register::extractBits64(const uint8_t *data, size_t dataSize, uint16_t bitPos, uint8_t bitLen)
 {
     if (!data || bitLen == 0 || bitLen > 64 || dataSize == 0)
     {
@@ -228,26 +241,31 @@ uint64_t TPS25751Register::extractBits64(const uint8_t *data, size_t dataSize, u
         return extractBits32(data, dataSize, bitPos, bitLen);
     }
 
-    // For true 64-bit fields, ensure both halves are within bounds
+    // For true 64-bit fields, each 32-bit half is bounds-checked on its own, so
+    // a field whose upper half runs off the buffer returns its lower half (the
+    // CustomerUse short-buffer test relies on this). The upper half's position
+    // is computed in 32 bits; one that does not fit in 16 bits is past any
+    // buffer, so that half reads as 0 instead of wrapping to a low bit.
+    const uint32_t highPos = static_cast<uint32_t>(bitPos) + 32u;
     uint64_t lowBits = extractBits32(data, dataSize, bitPos, 32);
-    uint64_t highBits = extractBits32(data, dataSize, bitPos + 32, bitLen - 32);
+    uint64_t highBits = (highPos > 0xFFFFu)
+                            ? 0
+                            : extractBits32(data, dataSize, static_cast<uint16_t>(highPos), bitLen - 32);
 
     return lowBits | (highBits << 32);
 }
 
-void TPS25751Register::setBits(uint8_t *data, size_t dataSize, uint8_t bitPos, uint8_t bitLen, uint32_t value)
+void TPS25751Register::setBits(uint8_t *data, size_t dataSize, uint16_t bitPos, uint8_t bitLen, uint32_t value)
 {
     if (!data || bitLen == 0 || bitLen > 32 || dataSize == 0)
     {
         return;
     }
 
-    uint8_t byteStart = bitPos / 8;
-    uint8_t bitOffset = bitPos % 8;
-    uint8_t bytesNeeded = (bitOffset + bitLen + 7) / 8;
-
-    // Check bounds (matches the extractBits family)
-    if (byteStart >= dataSize || (static_cast<size_t>(byteStart) + bytesNeeded) > dataSize)
+    size_t byteStart;
+    uint8_t bitOffset;
+    size_t bytesNeeded;
+    if (!locateField(dataSize, bitPos, bitLen, byteStart, bitOffset, bytesNeeded))
     {
         return;
     }
@@ -261,7 +279,7 @@ void TPS25751Register::setBits(uint8_t *data, size_t dataSize, uint8_t bitPos, u
     // read-modify-write the field, then write the bytes back. bitOffset (<=7) +
     // bitLen (<=32) spans at most 5 bytes, well within the 64-bit window.
     uint64_t window = 0;
-    for (uint8_t i = 0; i < bytesNeeded; ++i)
+    for (size_t i = 0; i < bytesNeeded; ++i)
     {
         window |= static_cast<uint64_t>(data[byteStart + i]) << (i * 8);
     }
@@ -269,7 +287,7 @@ void TPS25751Register::setBits(uint8_t *data, size_t dataSize, uint8_t bitPos, u
     const uint64_t fieldMask = widthMask << bitOffset;
     window = (window & ~fieldMask) | (maskedValue << bitOffset);
 
-    for (uint8_t i = 0; i < bytesNeeded; ++i)
+    for (size_t i = 0; i < bytesNeeded; ++i)
     {
         data[byteStart + i] = static_cast<uint8_t>((window >> (i * 8)) & 0xFF);
     }
@@ -283,19 +301,21 @@ size_t TPS25751Register::extractArray32(uint16_t startBitPos, uint8_t elementBit
     }
 
     size_t extractedCount = 0;
-    uint16_t currentBitPos = startBitPos;
+    const size_t totalBits = _len * 8;
+    size_t currentBitPos = startBitPos;
 
     for (size_t i = 0; i < numElements; ++i)
     {
-        // Check if we have enough bits remaining in the register
-        size_t bitsRemaining = (_len * 8) - currentBitPos;
-        if (bitsRemaining < elementBitLen)
+        // Stop when the element does not fit in the register, or its position
+        // does not fit in the 16-bit bitPos of extractBits32()
+        if (currentBitPos > totalBits || totalBits - currentBitPos < elementBitLen ||
+            currentBitPos > 0xFFFFu)
         {
-            break; // Not enough data for this element
+            break;
         }
 
         // Use bounds-checked extraction
-        output[i] = extractBits32(_raw, _len, static_cast<uint8_t>(currentBitPos), elementBitLen);
+        output[i] = extractBits32(_raw, _len, static_cast<uint16_t>(currentBitPos), elementBitLen);
         currentBitPos += elementBitLen;
         extractedCount++;
     }

@@ -29,72 +29,36 @@ void printHex16Field(Stream &s, const __FlashStringHelper *label, uint16_t value
 
 }  // namespace
 
-// --- Byte-assembly helpers --------------------------------------------------------
-// Battery 3 sits past bit 255, so extractBits*() and setBits() (uint8_t bit
-// position) cannot reach it. Every field of every entry goes through these.
-// Bounds are written as byteOffset + 1 < _len in size_t so no arithmetic wraps and
-// a 16-bit access never touches _raw[_len].
-
-uint16_t TPS25751TransmitBatteryCapabilities::readLE16(size_t byteOffset) const
-{
-    if (!isValid() || byteOffset + 1 >= _len) return 0;
-
-    return static_cast<uint16_t>(_raw[byteOffset]) |
-           static_cast<uint16_t>(static_cast<uint16_t>(_raw[byteOffset + 1]) << 8);
-}
-
-uint8_t TPS25751TransmitBatteryCapabilities::readByte(size_t byteOffset) const
-{
-    if (!isValid() || byteOffset >= _len) return 0;
-
-    return _raw[byteOffset];
-}
-
-void TPS25751TransmitBatteryCapabilities::writeLE16(size_t byteOffset, uint16_t value)
-{
-    if (!isValid() || byteOffset + 1 >= _len) return;
-
-    _raw[byteOffset] = static_cast<uint8_t>(value & 0xFFu);
-    _raw[byteOffset + 1] = static_cast<uint8_t>((value >> 8) & 0xFFu);
-}
-
-void TPS25751TransmitBatteryCapabilities::writeByte(size_t byteOffset, uint8_t value)
-{
-    if (!isValid() || byteOffset >= _len) return;
-
-    _raw[byteOffset] = value;
-}
-
 // --- Decode ---------------------------------------------------------------------
 
 uint16_t TPS25751TransmitBatteryCapabilities::vid(uint8_t battery) const
 {
     if (battery >= kBatteryCount) return 0;
-    return readLE16(entryOffset(battery) + kVidOffset);
+    return extractBits16(fieldBit(battery, kVidOffset), 16);
 }
 
 uint16_t TPS25751TransmitBatteryCapabilities::pid(uint8_t battery) const
 {
     if (battery >= kBatteryCount) return 0;
-    return readLE16(entryOffset(battery) + kPidOffset);
+    return extractBits16(fieldBit(battery, kPidOffset), 16);
 }
 
 uint16_t TPS25751TransmitBatteryCapabilities::batteryDesignCapacity(uint8_t battery) const
 {
     if (battery >= kBatteryCount) return 0;
-    return readLE16(entryOffset(battery) + kDesignCapacityOffset);
+    return extractBits16(fieldBit(battery, kDesignCapacityOffset), 16);
 }
 
 uint16_t TPS25751TransmitBatteryCapabilities::batteryLastFullChargeCapacity(uint8_t battery) const
 {
     if (battery >= kBatteryCount) return 0;
-    return readLE16(entryOffset(battery) + kLastFullChargeCapacityOffset);
+    return extractBits16(fieldBit(battery, kLastFullChargeCapacityOffset), 16);
 }
 
 uint8_t TPS25751TransmitBatteryCapabilities::batteryType(uint8_t battery) const
 {
     if (battery >= kBatteryCount) return 0;
-    return readByte(entryOffset(battery) + kBatteryTypeOffset);
+    return extractBits(fieldBit(battery, kBatteryTypeOffset), 8);
 }
 
 // --- Typed decode (USB PD R3.3 Table 6.64), built on the accessors above ------------
@@ -138,31 +102,31 @@ uint32_t TPS25751TransmitBatteryCapabilities::batteryLastFullChargeCapacity_mWh(
 void TPS25751TransmitBatteryCapabilities::setVid(uint8_t battery, uint16_t value)
 {
     if (battery >= kBatteryCount) return;
-    writeLE16(entryOffset(battery) + kVidOffset, value);
+    setBits(fieldBit(battery, kVidOffset), 16, value);
 }
 
 void TPS25751TransmitBatteryCapabilities::setPid(uint8_t battery, uint16_t value)
 {
     if (battery >= kBatteryCount) return;
-    writeLE16(entryOffset(battery) + kPidOffset, value);
+    setBits(fieldBit(battery, kPidOffset), 16, value);
 }
 
 void TPS25751TransmitBatteryCapabilities::setBatteryDesignCapacity(uint8_t battery, uint16_t value)
 {
     if (battery >= kBatteryCount) return;
-    writeLE16(entryOffset(battery) + kDesignCapacityOffset, value);
+    setBits(fieldBit(battery, kDesignCapacityOffset), 16, value);
 }
 
 void TPS25751TransmitBatteryCapabilities::setBatteryLastFullChargeCapacity(uint8_t battery, uint16_t value)
 {
     if (battery >= kBatteryCount) return;
-    writeLE16(entryOffset(battery) + kLastFullChargeCapacityOffset, value);
+    setBits(fieldBit(battery, kLastFullChargeCapacityOffset), 16, value);
 }
 
 void TPS25751TransmitBatteryCapabilities::setBatteryType(uint8_t battery, uint8_t value)
 {
     if (battery >= kBatteryCount) return;
-    writeByte(entryOffset(battery) + kBatteryTypeOffset, value);
+    setBits(fieldBit(battery, kBatteryTypeOffset), 8, value);
 }
 
 // --- Debug ------------------------------------------------------------------------

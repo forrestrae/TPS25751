@@ -21,11 +21,10 @@
  * - Access: Read-only
  *
  * All fields are byte-aligned. Bit offsets in the TRM run past 255 (e.g. the
- * GPIO12 Mapped Event field starts at bit 384), which exceeds the `uint8_t
- * bitPos` parameter of `TPS25751Register::extractBits*()` -- so this class
- * assembles every field directly from `_raw[]` with bounds checks rather than
- * calling `extractBits()`, mirroring
- * `TPS25751TransmitSourceCaps::getPDO()`'s byte-assembly pattern.
+ * GPIO12 Mapped Event field starts at bit 384). `TPS25751Register::extractBits*()`
+ * takes a 16-bit bit position (ADR-012 in ARCHITECTURE.md), so every field is
+ * read through it at bit (byte offset * 8). Before ADR-012 the position was
+ * 8 bits and this class assembled its fields from `_raw[]` by hand.
  *
  * 13-bit-per-GPIO bitmaps (bit *n* of the mask corresponds to GPIO *n*, for
  * GPIO0..GPIO12):
@@ -63,7 +62,6 @@
  * @see TI TPS25751 Technical Reference Manual SLVUCR8B (Rev. B), Section 3.2.26, Table 3-28, p.48
  * @see TPS25751Register
  * @see TPS25751
- * @see TPS25751TransmitSourceCaps::getPDO() for the byte-assembly pattern this class follows
  */
 class TPS25751IOConfig : public TPS25751Register
 {
@@ -244,7 +242,7 @@ private:
     static constexpr uint8_t kGpio4AiBit = 4;
     static constexpr uint8_t kGpio5AiBit = 5;
 
-    static constexpr uint16_t kGpioBitmapMask = 0x1FFF;  // 13 bits
+    static constexpr uint8_t kGpioBitmapBits = 13;  // GPIO0..GPIO12
     static constexpr uint8_t kMaxGpioIndex = 12;
 
     /**

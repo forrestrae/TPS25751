@@ -8,9 +8,9 @@
  * four 9-byte entries, entry i at byte 9 * i. Within an entry (all little-endian):
  *   +0..1 VID   +2..3 PID   +4..5 Design Capacity   +6..7 Last Full Charge
  *   Capacity   +8 Battery Type
- * Battery 3 starts at byte 27 and ends at byte 35 (bits 287:216), past the point
- * bit 255 where extractBits*() and setBits() can reach; the class assembles bytes
- * itself. The raw accessors return field bits unchanged; the typed accessors decode
+ * Battery 3 starts at byte 27 and ends at byte 35 (bits 287:216), so its last
+ * fields sit past bit 255; the class reaches them through the base-class
+ * extractBits*() and setBits(), which take a 16-bit bit position (ADR-012). The raw accessors return field bits unchanged; the typed accessors decode
  * them per USB PD R3.3 Table 6.64 (see the Typed decode section).
  *
  * Distinct fixture: byte k = 0x40 + k for k = 0..35. Expected values, computed

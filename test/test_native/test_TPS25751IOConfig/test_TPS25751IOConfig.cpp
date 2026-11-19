@@ -6,11 +6,9 @@
  *
  * IO_CONFIG (0x5C, 49 bytes / 392 bits) is READ-ONLY -- the TRM states GPIO
  * configuration is fixed at boot. All fields are byte-aligned; bit offsets
- * run well past 255 (e.g. GPIO12 Mapped Event starts at bit 384), so this
- * class assembles every field directly from raw bytes rather than calling
- * TPS25751Register::extractBits*(), mirroring
- * TPS25751TransmitSourceCaps::getPDO()'s byte-assembly pattern. These tests
- * therefore hand-pack a full 49-byte buffer and check every field group by
+ * run well past 255 (e.g. GPIO12 Mapped Event starts at bit 384), which the
+ * base-class extractBits*() reaches through its 16-bit bit position (ADR-012).
+ * These tests hand-pack a full 49-byte buffer and check every field group by
  * its documented byte offset.
  *
  * FULL_BUFFER layout (byte offsets; all masks are the raw little-endian

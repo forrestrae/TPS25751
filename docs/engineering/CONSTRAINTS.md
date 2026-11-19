@@ -431,25 +431,23 @@ bool isReadOnly() const override {
 > set according to the configuration during the boot process." `TPS25751IOConfig`
 > is therefore decode-only — no setters, no write path, no `kAddress`. It is
 > also the library's first register whose bit offsets run past 255 (up to 391
-> for the GPIO12 Mapped Event field), which exceeds the `uint8_t bitPos`
-> parameter of `TPS25751Register::extractBits*()`/`setBits()`. Every field is
-> byte-aligned, so `TPS25751IOConfig` assembles each one directly from `_raw[]`
-> with bounds checks instead — mirroring
-> `TPS25751TransmitSourceCaps::getPDO()`'s byte-assembly pattern — rather than
-> calling `extractBits()` at all. Any future register whose highest bit offset
-> exceeds 255 must use the same technique.
+> for the GPIO12 Mapped Event field).
 >
 > TX_BATTERY_CAPABILITIES (0x7D, Batch K) is the first R/W register past bit
 > 255. Battery 3 occupies bits 287:216 (bytes 27 to 35), so its Design Capacity
 > starts at bit 248 and ends at 263, and its Last Full Charge Capacity and Battery
-> Type start at bits 264 and 280. `TPS25751TransmitBatteryCapabilities` therefore
-> never calls `extractBits*()` or `setBits()`, for any entry. It reads and writes
-> every field through class-private helpers (`readLE16`, `readByte`, `writeLE16`,
-> `writeByte`) that check `isValid()` and `byteOffset + 1 < _len` in `size_t`, so a
-> 16-bit access cannot touch `_raw[_len]` and no offset arithmetic wraps. Casting a
-> large offset to `uint8_t` would wrap to a low bit and corrupt battery 0. The helpers
-> stay class-local: widening the base-class `bitPos` to `uint16_t` would remove them
-> and IO_CONFIG's, but it changes the base-class API and needs its own ADR.
+> Type start at bits 264 and 280.
+>
+> Fields past bit 255 need no special handling. `TPS25751Register::extractBits*()`,
+> `setBits()`, and the `extractEnum*()` templates take a `uint16_t bitPos`
+> (ADR-012 in ARCHITECTURE.md) and compute every byte offset and bound in
+> `size_t`, so a field anywhere in the buffer is reachable and a field that runs
+> past the end reads 0 or is not written. Both classes call them directly. Until
+> ADR-012 (2026-11-19) the position was `uint8_t`: IO_CONFIG assembled its fields
+> from `_raw[]` by hand and 0x7D carried class-private byte helpers, and a large
+> offset cast to `uint8_t` would have wrapped to a low bit. When a caller computes
+> a bit position, keep the arithmetic in `uint16_t` or wider; narrowing it to
+> `uint8_t` reintroduces that wrap.
 
 ### Registers written to trigger an action
 
@@ -1223,6 +1221,7 @@ void foo() {
 | 1.9 | 2026-11-19 | Claude Code | CUSTOMER_USE (0x06) is read-only in the library: `writeCustomerUse()`, the class setters, and `kAddress` are removed (Read/Write Registers section) |
 | 1.10 | 2026-11-19 | Claude Code | Batches G to I bench checks: a GLOBAL_SYSTEM_CONFIGURATION (0x27) RCP write preserves the undocumented bits; RECEIVED_SOP_IDENTITY (0x48) fills about 106 ms before INT_EVENT1 bit 51 and keeps the last identity after detach; INT_EVENT1 latches only INT_MASK1-enabled sources; the firmware fills the TX_SOURCE_INFO (0x78) lower word when the board sources (Read/Write Registers section) |
 | 1.11 | 2026-11-19 | Claude Code | Batch L of the rev B plan: typed USB PD R3.3 decode for 0x48, 0x77, 0x7E, 0x7B, and 0x7D and the 0x7A PTF 00b meaning (new USB PD Specification Structures section); 0x48 decode of an iPhone on hardware; the 0x7B reset value reports a battery that 0x77 and 0x7E do not (Read/Write Registers section) |
+| 1.12 | 2026-11-19 | Claude Code | ADR-012: the base-class bit helpers take a 16-bit bit position, so IO_CONFIG (0x5C) and TX_BATTERY_CAPABILITIES (0x7D) read and write through them (Read-Only Registers section, IO_CONFIG note) |
 
 ---
 

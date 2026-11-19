@@ -284,7 +284,9 @@ interrupt registers) use the host side's own equivalents, landed before Batch B:
   hand-poking `_raw[...]`; there are no per-class field masks to keep in sync, so
   the "hand-restated field-position mask drifts" defect class is designed out.
   Fields wider than 32 bits with no sub-structure to preserve are written
-  byte-wise by the owning class instead.
+  byte-wise by the owning class instead. `bitPos` is `uint16_t` (ADR-012), so
+  `setBits()` and `extractBits*()` reach any field in the buffer, including past
+  bit 255; keep computed bit positions in `uint16_t` or wider, never `uint8_t`.
 - **`static constexpr TPS25751Registers::Address kAddress`** on every host R/W
   register class — the single source of register identity.
 - **`TPS25751::writeRegister<T>(const T&)`** (keyed on `T::kAddress`) is the write

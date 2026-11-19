@@ -36,7 +36,7 @@
  * - Size: 53 bytes
  * - Access: Read/Write
  *
- * @see TI TPS25751 Technical Reference Manual, Section 3.2.49
+ * @see TI TPS25751 Technical Reference Manual SLVUCR8B (Rev. B), Section 3.2.18, Table 3-20, p.37
  * @see USB Power Delivery Specification 3.1, Section 6.4.1 (Power Data Objects)
  */
 class TPS25751TransmitSinkCaps : public TPS25751Register

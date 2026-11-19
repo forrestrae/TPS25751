@@ -31,7 +31,7 @@
  * }
  * @endcode
  *
- * @see TI TPS25751 Technical Reference Manual, Table 3-29
+ * @see TI TPS25751 Technical Reference Manual SLVUCR8B (Rev. B), Section 3.2.37, Table 3-39, p.60
  * @see TPS25751Register
  * @see TPS25751
  */
@@ -56,7 +56,7 @@ public:
      * position and units are unchanged.
      * @return Raw 16-bit value (1000 ms/LSB); the wait interval used while
      *         polling and no liquid has been detected
-     * @see TI TPS25751 Technical Reference Manual, Table 3-29, bits 15:0
+     * @see TI TPS25751 Technical Reference Manual, Table 3-39, bits 15:0
      */
     uint16_t rawWaitTimeNoLiquid() const;
 
@@ -73,7 +73,7 @@ public:
      * "Sleep Time In Sec Liquid"; position and units are unchanged.
      * @return Raw 16-bit value (1000 ms/LSB); the wait interval used while
      *         polling once liquid has been detected
-     * @see TI TPS25751 Technical Reference Manual, Table 3-29, bits 31:16
+     * @see TI TPS25751 Technical Reference Manual, Table 3-39, bits 31:16
      */
     uint16_t rawWaitTimeLiquid() const;
 
@@ -93,7 +93,7 @@ public:
      * is intentionally NOT enforced by this class's validation.
      *
      * @return Raw 8-bit sample count
-     * @see TI TPS25751 Technical Reference Manual, Table 3-29, bits 39:32
+     * @see TI TPS25751 Technical Reference Manual, Table 3-39, bits 39:32
      */
     uint8_t numberOfSamples() const;
 
@@ -103,7 +103,7 @@ public:
      * @brief Get the raw Low Threshold ADC No Liquid field
      * @return Raw 8-bit value (14 mV/LSB); the lower hysteresis bound for
      *         exiting the Liquid Detected state
-     * @see TI TPS25751 Technical Reference Manual, Table 3-29, bits 47:40
+     * @see TI TPS25751 Technical Reference Manual, Table 3-39, bits 47:40
      */
     uint8_t rawLowThresholdNoLiquid() const;
 
@@ -114,7 +114,7 @@ public:
      * @brief Get the raw High Threshold ADC No Liquid field
      * @return Raw 8-bit value (14 mV/LSB); the upper hysteresis bound for
      *         exiting the Liquid Detected state
-     * @see TI TPS25751 Technical Reference Manual, Table 3-29, bits 55:48
+     * @see TI TPS25751 Technical Reference Manual, Table 3-39, bits 55:48
      */
     uint8_t rawHighThresholdNoLiquid() const;
 
@@ -124,7 +124,7 @@ public:
     /**
      * @brief Get the raw Low Threshold ADC Liquid field
      * @return Raw 8-bit value (14 mV/LSB)
-     * @see TI TPS25751 Technical Reference Manual, Table 3-29, bits 63:56
+     * @see TI TPS25751 Technical Reference Manual, Table 3-39, bits 63:56
      */
     uint8_t rawLowThresholdLiquid() const;
 
@@ -134,7 +134,7 @@ public:
     /**
      * @brief Get the raw High Threshold ADC Liquid field
      * @return Raw 8-bit value (14 mV/LSB)
-     * @see TI TPS25751 Technical Reference Manual, Table 3-29, bits 71:64
+     * @see TI TPS25751 Technical Reference Manual, Table 3-39, bits 71:64
      */
     uint8_t rawHighThresholdLiquid() const;
 
@@ -146,7 +146,7 @@ public:
     /**
      * @brief Get the raw Sample Time in 10ms No Liquid field
      * @return Raw 4-bit value (10 ms/LSB)
-     * @see TI TPS25751 Technical Reference Manual, Table 3-29, bits 75:72
+     * @see TI TPS25751 Technical Reference Manual, Table 3-39, bits 75:72
      */
     uint8_t rawSampleTimeNoLiquid() const;
 
@@ -156,7 +156,7 @@ public:
     /**
      * @brief Get the raw Sample Time in 10ms Liquid field
      * @return Raw 4-bit value (10 ms/LSB)
-     * @see TI TPS25751 Technical Reference Manual, Table 3-29, bits 79:76
+     * @see TI TPS25751 Technical Reference Manual, Table 3-39, bits 79:76
      */
     uint8_t rawSampleTimeLiquid() const;
 
@@ -168,7 +168,7 @@ public:
     /**
      * @brief Get the Liquid Detection State bit
      * @return true if the register's current state is Liquid Detected
-     * @see TI TPS25751 Technical Reference Manual, Table 3-29, bit 80
+     * @see TI TPS25751 Technical Reference Manual, Table 3-39, bit 80
      */
     bool liquidDetectionState() const;
 
@@ -177,7 +177,7 @@ public:
      * @return true if corrosion mitigation is enabled -- upon liquid
      *         detection the port is disabled/disconnected and the CC pins
      *         are pulled down
-     * @see TI TPS25751 Technical Reference Manual, Table 3-29, bit 81
+     * @see TI TPS25751 Technical Reference Manual, Table 3-39, bit 81
      */
     bool enableCorrosionMitigation() const;
 
@@ -185,7 +185,7 @@ public:
      * @brief Get the Enable Liquid Detection configuration
      * @return true if liquid detection is enabled (requires proper external
      *         liquid-detection circuitry on the SBU pins)
-     * @see TI TPS25751 Technical Reference Manual, Table 3-29, bit 82
+     * @see TI TPS25751 Technical Reference Manual, Table 3-39, bit 82
      */
     bool enableLiquidDetection() const;
 

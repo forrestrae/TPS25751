@@ -10,7 +10,7 @@
  * the source even when the host has not changed the request, while a PPS
  * (Programmable Power Supply) contract is active.
  *
- * @see TI TPS25751 Technical Reference Manual, Table 3-21, "PPS Request Interval"
+ * @see TI TPS25751 Technical Reference Manual, Table 3-23, "PPS Request Interval"
  */
 enum class PpsRequestInterval : uint8_t {
     Interval8s = 0,  ///< 0h - 8 seconds
@@ -46,7 +46,7 @@ enum class PpsRequestInterval : uint8_t {
  * }
  * @endcode
  *
- * @see TI TPS25751 Technical Reference Manual, Section 3.2.13, Table 3-21
+ * @see TI TPS25751 Technical Reference Manual SLVUCR8B (Rev. B), Section 3.2.21, Table 3-23, p.40
  * @see TPS25751Register
  * @see TPS25751
  */
@@ -71,14 +71,14 @@ public:
      *
      * @return true if the PD controller prefers the LOWER voltage PDO on a tie
      * @return false if the PD controller prefers the HIGHER voltage PDO on a tie (default)
-     * @see TI TPS25751 Technical Reference Manual, Table 3-21, bit 0
+     * @see TI TPS25751 Technical Reference Manual, Table 3-23, bit 0
      */
     bool rdoPriorityPrefersLowerVoltage() const;
 
     /**
      * @brief Get the No USB Suspend flag value used for the RDO's NoUSBSusp bit
      * @return The value inserted as-is into the Request message's NoUSBSusp flag
-     * @see TI TPS25751 Technical Reference Manual, Table 3-21, bit 1
+     * @see TI TPS25751 Technical Reference Manual, Table 3-23, bit 1
      */
     bool noUSBSuspend() const;
 
@@ -86,7 +86,7 @@ public:
      * @brief Get the Auto Compute Sink Min Power configuration
      * @return true if the PD controller computes the minimum sink power from TX_SINK_CAPS
      * @return false if the minimum sink power is provided by the host (see rawSinkMinRequiredPower())
-     * @see TI TPS25751 Technical Reference Manual, Table 3-21, bit 2
+     * @see TI TPS25751 Technical Reference Manual, Table 3-23, bit 2
      */
     bool autoComputeSinkMinPower() const;
 
@@ -96,7 +96,7 @@ public:
      * TRM: "No Capabality Mismatch" (SLVUCR8B p.41; TI's spelling).
      * @return true if the Capability Mismatch bit in the RDO is always disabled
      * @return false if Capability Mismatch is enabled (asserted when conditions warrant it)
-     * @see TI TPS25751 Technical Reference Manual, Table 3-21, bit 3
+     * @see TI TPS25751 Technical Reference Manual, Table 3-23, bit 3
      */
     bool noCapabilityMismatch() const;
 
@@ -104,7 +104,7 @@ public:
      * @brief Get the Auto Compute Sink Min Voltage configuration
      * @return true if the PD controller computes the minimum acceptable voltage
      * @return false if the minimum voltage is provided by the host (see rawAutoNegMinVoltage())
-     * @see TI TPS25751 Technical Reference Manual, Table 3-21, bit 4
+     * @see TI TPS25751 Technical Reference Manual, Table 3-23, bit 4
      */
     bool autoComputeSinkMinVoltage() const;
 
@@ -112,7 +112,7 @@ public:
      * @brief Get the Auto Compute Sink Max Voltage configuration
      * @return true if the PD controller computes the maximum acceptable voltage
      * @return false if the maximum voltage is provided by the host (see rawAutoNegMaxVoltage())
-     * @see TI TPS25751 Technical Reference Manual, Table 3-21, bit 5
+     * @see TI TPS25751 Technical Reference Manual, Table 3-23, bit 5
      */
     bool autoComputeSinkMaxVoltage() const;
 
@@ -121,7 +121,7 @@ public:
      * @return true if the sink path is disabled whenever the negotiated contract
      *         would assert Capability Mismatch (only meaningful if
      *         noCapabilityMismatch() is false)
-     * @see TI TPS25751 Technical Reference Manual, Table 3-21, bit 6
+     * @see TI TPS25751 Technical Reference Manual, Table 3-23, bit 6
      */
     bool autoDisableSinkUponCapabilityMismatch() const;
 
@@ -130,7 +130,7 @@ public:
     /**
      * @brief Get the raw Auto Neg Sink Min Required Power field
      * @return Raw 10-bit value (250 mW/LSB)
-     * @see TI TPS25751 Technical Reference Manual, Table 3-21, bits 31:22
+     * @see TI TPS25751 Technical Reference Manual, Table 3-23, bits 31:22
      */
     uint16_t rawSinkMinRequiredPower() const;
 
@@ -160,7 +160,7 @@ public:
     /**
      * @brief Get the raw Auto Neg Max Voltage field
      * @return Raw 10-bit value (50 mV/LSB)
-     * @see TI TPS25751 Technical Reference Manual, Table 3-21, bits 41:32
+     * @see TI TPS25751 Technical Reference Manual, Table 3-23, bits 41:32
      */
     uint16_t rawAutoNegMaxVoltage() const;
 
@@ -173,7 +173,7 @@ public:
     /**
      * @brief Get the raw Auto Neg Min Voltage field
      * @return Raw 10-bit value (50 mV/LSB)
-     * @see TI TPS25751 Technical Reference Manual, Table 3-21, bits 51:42
+     * @see TI TPS25751 Technical Reference Manual, Table 3-23, bits 51:42
      */
     uint16_t rawAutoNegMinVoltage() const;
 
@@ -186,7 +186,7 @@ public:
     /**
      * @brief Get the raw Auto Neg Capabilities Mismatch Power field
      * @return Raw 10-bit value (250 mW/LSB)
-     * @see TI TPS25751 Technical Reference Manual, Table 3-21, bits 61:52
+     * @see TI TPS25751 Technical Reference Manual, Table 3-23, bits 61:52
      */
     uint16_t rawCapMismatchPower() const;
 
@@ -202,14 +202,14 @@ public:
      * @brief Get the PPS Enable Sink Mode bit
      * @return true if the PD controller attempts to negotiate a PPS sink contract
      *         (prioritized over any other supply type when set)
-     * @see TI TPS25751 Technical Reference Manual, Table 3-21, bit 64
+     * @see TI TPS25751 Technical Reference Manual, Table 3-23, bit 64
      */
     bool ppsEnableSinkMode() const;
 
     /**
      * @brief Get the PPS Request Interval field
      * @return The configured PpsRequestInterval value
-     * @see TI TPS25751 Technical Reference Manual, Table 3-21, bits 66:65
+     * @see TI TPS25751 Technical Reference Manual, Table 3-23, bits 66:65
      */
     PpsRequestInterval ppsRequestInterval() const;
 
@@ -220,7 +220,7 @@ public:
      * earlier library versions said "PPS Source Operating Mode").
      * @return true if the system is assumed to be in Constant Voltage (CV) mode
      * @return false if the system is assumed to be in Current-Limit (CC) mode
-     * @see TI TPS25751 Technical Reference Manual, Table 3-21, bit 67
+     * @see TI TPS25751 Technical Reference Manual, Table 3-23, bit 67
      */
     bool ppsOperatingModeConstantVoltage() const;
 
@@ -228,7 +228,7 @@ public:
      * @brief Get the PPS Required Full Voltage Range configuration
      * @return true if a PPS supply is only selected when the source's APDO fully
      *         covers TX_SINK_CAPS' PPS min/max voltage and max current
-     * @see TI TPS25751 Technical Reference Manual, Table 3-21, bit 68
+     * @see TI TPS25751 Technical Reference Manual, Table 3-23, bit 68
      */
     bool ppsRequiredFullVoltageRange() const;
 
@@ -236,14 +236,14 @@ public:
      * @brief Get the PPS Disable Sink Upon Non-APDO Contract configuration
      * @return true if the sink path is disabled before requesting a non-PPS
      *         supply type after a PPS contract was previously negotiated
-     * @see TI TPS25751 Technical Reference Manual, Table 3-21, bit 69
+     * @see TI TPS25751 Technical Reference Manual, Table 3-23, bit 69
      */
     bool ppsDisableSinkUponNonApdoContract() const;
 
     /**
      * @brief Get the raw PPS Operating Current field
      * @return Raw 7-bit value (50 mA/LSB)
-     * @see TI TPS25751 Technical Reference Manual, Table 3-21, bits 102:96
+     * @see TI TPS25751 Technical Reference Manual, Table 3-23, bits 102:96
      */
     uint8_t rawPpsOperatingCurrent() const;
 
@@ -259,7 +259,7 @@ public:
      * Source: SLVUCR8B (Rev. B, 2026-08), page 40 ("PPS Operating Voltage";
      * earlier library versions said "PPS Output Voltage").
      * @return Raw 11-bit value (20 mV/LSB)
-     * @see TI TPS25751 Technical Reference Manual, Table 3-21, bits 115:105
+     * @see TI TPS25751 Technical Reference Manual, Table 3-23, bits 115:105
      */
     uint16_t rawPpsOperatingVoltage() const;
 

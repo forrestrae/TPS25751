@@ -10,7 +10,7 @@
  * (Rev. A) to 1000 ms. Time1200ms is a deprecated alias for Time1000ms with
  * the same value.
  *
- * @see TI TPS25751 Technical Reference Manual, Table 3-27 (bits 2:1, Sleep Time)
+ * @see TI TPS25751 Technical Reference Manual SLVUCR8B (Rev. B), Table 3-31, p.52 (bits 2:1, Sleep Time)
  */
 enum class SleepTime : uint8_t {
     Reserved0 = 0,   ///< 0h - Reserved
@@ -38,7 +38,7 @@ enum class SleepTime : uint8_t {
  *   Rev. A listed 0x01 (Sleep Time = 0h/Reserved), which this class's
  *   isSemanticallyValid() rejects.
  *
- * @see TI TPS25751 Technical Reference Manual, Section 3.2.28, Table 3-27
+ * @see TI TPS25751 Technical Reference Manual SLVUCR8B (Rev. B), Section 3.2.29, Table 3-31, p.52
  */
 class TPS25751SleepControl : public TPS25751Register
 {
@@ -58,7 +58,7 @@ public:
      * is idle for sleepTime().
      *
      * @return true if sleep mode is allowed, false otherwise
-     * @see TI TPS25751 Technical Reference Manual, Table 3-27, bit 0
+     * @see TI TPS25751 Technical Reference Manual, Table 3-31, bit 0
      */
     bool sleepModeAllowed() const;
 
@@ -68,7 +68,7 @@ public:
      * The minimum time the PD controller waits before entering sleep mode.
      *
      * @return The configured SleepTime value
-     * @see TI TPS25751 Technical Reference Manual, Table 3-27, bits 2:1
+     * @see TI TPS25751 Technical Reference Manual, Table 3-31, bits 2:1
      */
     SleepTime sleepTime() const;
 

@@ -144,5 +144,5 @@ Commit: `docs(rev-b): close audit finding 14 and add the INT_CLEAR1 access findi
    - `git grep -n 'Table 3-27' -- include` prints nothing.
    - `git grep -n 'cannot be set if it is' -- include` prints nothing.
    - `git grep -n -i 'write-only' -- include src examples test AGENTS.md docs/engineering` prints nothing about INT_CLEAR1 or COMMAND. The one expected hit is `docs/engineering/CODE_REVIEW_GUIDELINES.md:82`, which uses "write-only" for a class of setter bug, not a register.
-   - `git grep -n -E '\bINT_(EVENT|MASK|CLEAR)1' -- . ':!docs/plans/'` returns the same set of files as before step 1. The names are intentionally unchanged.
+   - The old names appear in the same files as before step 1, because they are intentionally unchanged. Compare the file lists at the plan commit and at the branch tip: `diff <(git grep -l -E 'INT_(EVENT|MASK|CLEAR)1' 6836a27 -- . ':!docs/plans/' | cut -d: -f2-) <(git grep -l -E 'INT_(EVENT|MASK|CLEAR)1' HEAD -- . ':!docs/plans/' | cut -d: -f2-)` prints nothing (23 files at both). Do not add `\b` to the pattern: `git grep -E` does not support it, so the pattern then matches nothing and the check passes vacuously.
 4. `scripts/verify.py` passes on `fix/rev-b-trm` once the branch is rebased onto `main` with a clean tree, untracked files included.

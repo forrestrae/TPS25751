@@ -32,6 +32,7 @@
 #include "TPS25751TransmitSourceInfo.h"
 #include "TPS25751TransmitPPSStatus.h"
 #include "TPS25751TransmitSourceCapsExtended.h"
+#include "TPS25751TransmitBatteryStatus.h"
 #include "TPS25751TransmitSinkCapsExtended.h"
 #include "TPS25751ReceivedSOPIdentity.h"
 #include "TPS25751Debug.h"
@@ -110,6 +111,8 @@ std::unique_ptr<TPS25751Register> TPS25751RegisterFactoryImpl::createRegister(TP
             return createTransmitPPSStatusRegister();
         case TPS25751Registers::Address::TRANSMIT_SOURCE_CAPABILITIES_EXTENDED:
             return createTransmitSourceCapsExtendedRegister();
+        case TPS25751Registers::Address::TRANSMIT_BATTERY_STATUS:
+            return createTransmitBatteryStatusRegister();
         case TPS25751Registers::Address::TRANSMIT_SINK_CAPABILITIES_EXTENDED:
             return createTransmitSinkCapsExtendedRegister();
         case TPS25751Registers::Address::RECEIVED_SOP_IDENTITY:
@@ -196,6 +199,8 @@ std::unique_ptr<TPS25751Register> TPS25751RegisterFactoryImpl::createRegister(TP
             return createTransmitPPSStatusRegister(data, length);
         case TPS25751Registers::Address::TRANSMIT_SOURCE_CAPABILITIES_EXTENDED:
             return createTransmitSourceCapsExtendedRegister(data, length);
+        case TPS25751Registers::Address::TRANSMIT_BATTERY_STATUS:
+            return createTransmitBatteryStatusRegister(data, length);
         case TPS25751Registers::Address::TRANSMIT_SINK_CAPABILITIES_EXTENDED:
             return createTransmitSinkCapsExtendedRegister(data, length);
         case TPS25751Registers::Address::RECEIVED_SOP_IDENTITY:
@@ -277,6 +282,8 @@ std::unique_ptr<TPS25751Register> TPS25751RegisterFactoryImpl::createRegister(co
             return std::make_unique<TPS25751TransmitPPSStatus>(regInfo);
         case TPS25751Registers::Address::TRANSMIT_SOURCE_CAPABILITIES_EXTENDED:
             return std::make_unique<TPS25751TransmitSourceCapsExtended>(regInfo);
+        case TPS25751Registers::Address::TRANSMIT_BATTERY_STATUS:
+            return std::make_unique<TPS25751TransmitBatteryStatus>(regInfo);
         case TPS25751Registers::Address::TRANSMIT_SINK_CAPABILITIES_EXTENDED:
             return std::make_unique<TPS25751TransmitSinkCapsExtended>(regInfo);
         case TPS25751Registers::Address::RECEIVED_SOP_IDENTITY:
@@ -555,6 +562,14 @@ std::unique_ptr<TPS25751Register> TPS25751RegisterFactoryImpl::createTransmitSou
 
 std::unique_ptr<TPS25751Register> TPS25751RegisterFactoryImpl::createTransmitSourceCapsExtendedRegister(const uint8_t* data, size_t length) const {
     return std::make_unique<TPS25751TransmitSourceCapsExtended>(data, length);
+}
+
+std::unique_ptr<TPS25751Register> TPS25751RegisterFactoryImpl::createTransmitBatteryStatusRegister() const {
+    return std::make_unique<TPS25751TransmitBatteryStatus>();
+}
+
+std::unique_ptr<TPS25751Register> TPS25751RegisterFactoryImpl::createTransmitBatteryStatusRegister(const uint8_t* data, size_t length) const {
+    return std::make_unique<TPS25751TransmitBatteryStatus>(data, length);
 }
 
 std::unique_ptr<TPS25751Register> TPS25751RegisterFactoryImpl::createTransmitSinkCapsExtendedRegister() const {

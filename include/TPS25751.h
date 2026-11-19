@@ -36,6 +36,7 @@
 #include "TPS25751TransmitSourceInfo.h"
 #include "TPS25751TransmitPPSStatus.h"
 #include "TPS25751TransmitSourceCapsExtended.h"
+#include "TPS25751TransmitBatteryStatus.h"
 #include "TPS25751TransmitSinkCapsExtended.h"
 #include "TPS25751ReceivedSOPIdentity.h"
 #include "TPS25751RegisterAddress.h"
@@ -189,6 +190,13 @@ public:
     bool readTransmitSourceCapsExtended(TPS25751TransmitSourceCapsExtended &caps) const;
 
     /**
+     * @brief Read the Transmitted Battery Status Data Objects register (0x7B)
+     * @param status Register object to populate (16 bytes)
+     * @return true if the read succeeded
+     */
+    bool readTransmitBatteryStatus(TPS25751TransmitBatteryStatus &status) const;
+
+    /**
      * @brief Read the Transmit Sink Capabilities Extended register (0x7E)
      * @param caps Register object to populate (14 bytes)
      * @return true if the read succeeded
@@ -334,6 +342,21 @@ public:
      *         otherwise the result of the underlying I2C write
      */
     bool writeTransmitSourceCapsExtended(const TPS25751TransmitSourceCapsExtended &caps) const;
+
+    /**
+     * @brief Write the Transmitted Battery Status Data Objects (BSDO) (0x7B) register
+     *
+     * The controller builds its Get_Battery_Status reply from this register
+     * only while PD3_CONFIGURATION (0x42) bit 11
+     * (TPS25751PD3Config::supportBatteryStatus()) is set; with it clear the controller
+     * answers Get_Battery_Status with Not_Supported. The controller takes no automatic
+     * action when this register is written.
+     *
+     * @param status Register object holding the bytes to write
+     * @return false if @p status is not valid or not the expected size;
+     *         otherwise the result of the underlying I2C write
+     */
+    bool writeTransmitBatteryStatus(const TPS25751TransmitBatteryStatus &status) const;
 
     /**
      * @brief Write the Transmit Sink Capabilities Extended (0x7E) register
@@ -628,6 +651,13 @@ public:
      * @return Unique pointer to the register (nullptr if failed)
      */
     std::unique_ptr<TPS25751TransmitSourceCapsExtended> readTransmitSourceCapsExtendedRegister(bool validate = true) const;
+
+    /**
+     * @brief Read Transmitted Battery Status (0x7B) register using factory pattern
+     * @param validate Whether to validate the register after reading
+     * @return Unique pointer to the register (nullptr if failed)
+     */
+    std::unique_ptr<TPS25751TransmitBatteryStatus> readTransmitBatteryStatusRegister(bool validate = true) const;
 
     /**
      * @brief Read Transmit Sink Capabilities Extended (0x7E) register using factory pattern

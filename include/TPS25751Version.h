@@ -21,14 +21,18 @@
  * byte 2 = MM, etc." The TRM numbers bytes from 1 and does not spell out the
  * VVVV bytes, so this class decodes RR from bits 7:0, MM from bits 15:8 and VVVV
  * from bits 31:16. Placing VVVV in bytes 3 and 4 is an inference from that
- * sentence and is still to be confirmed on hardware.
+ * sentence.
  *
  * Hardware observation (2026-11-18, APP mode, EEPROM configuration, Boot
  * Flags Revision ID 193): raw 0xF8091166, which this class prints as
- * F809.11.66. A VVVV of F809 is implausible as a version number, so either
- * the TRM layout is incomplete or the top byte carries something other than
- * version digits. The decode is unchanged until the value can be compared
- * with the firmware version reported by TI's tooling.
+ * F809.11.66. TI's Application Customization Tool names the image it exports
+ * for this board by the same 32-bit word (..._F8091166_fullFlash.bin) and
+ * stores it little-endian as 66 11 09 F8 in each region header, so the raw
+ * value and byte order match TI's tooling. An earlier image from the previous
+ * tool build reads F8091164: only bits 7:0 changed between the two firmware
+ * releases, which fits RR in byte 1. The tool shows the version only as the
+ * hex word, so the VVVV.MM.RR split, including VVVV = F809, remains the TRM's
+ * reading and is not independently confirmed.
  *
  * The TRM does not say whether the digits are BCD, so the version is printed as
  * hexadecimal digits and the raw 32-bit value is available unmodified.
@@ -64,8 +68,8 @@ public:
      * @brief Get the VVVV (major) part of the version
      *
      * Decoded from bits 31:16. The TRM only states "byte 1 = RR, byte 2 = MM,
-     * etc.", so VVVV in bytes 3 and 4 is an inference, to be confirmed on
-     * hardware.
+     * etc.", so VVVV in bytes 3 and 4 is an inference. TI's tooling reports the
+     * whole 32-bit word and does not split it.
      * @return 16-bit major version
      */
     uint16_t versionMajor() const;

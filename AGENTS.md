@@ -740,8 +740,17 @@ against Arduino API stubs in `test/support/native/`; Unity suites live under
 `test_TPS25751Status` is the seed/reference suite). A green native test run is
 a hard gate for every register batch. See
 [TESTING.md](docs/engineering/TESTING.md) for the harness details, required
-test cases, and how to add a suite. (Automated *coverage measurement* toward
-the >90% target is still pending.)
+test cases, and how to add a suite.
+
+Line coverage of the native suites, one line per file in `src/` with the
+least-covered first (needs gcovr; see TESTING.md, Test Coverage Tracking):
+
+```bash
+test/coverage.sh
+```
+
+The first run, on 2026-11-19, measured 84% of lines, with 18 files under the
+>90% target. The verify gate and CI do not run it.
 
 ### Publishing the Library
 

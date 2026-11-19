@@ -175,6 +175,7 @@ Verify that new code follows all mandatory standards from [STANDARDS.md](STANDAR
 - **Missing negative tests**: Each validation level must have tests for both passing and failing cases
 - **Factory creation untested**: Every new register must include factory creation tests (with and without data)
 - **Tests that always pass**: Watch for tests with incorrect `EXPECT_*` calls that never actually exercise the failure path
+- **A cached build proves nothing about warnings** (caught in Batch G of the rev B plan): `platformio.ini` sets `build_cache_dir = .pio/buildcache`, so `pio run` and even `pio run -t clean` followed by `pio run` retrieve unchanged objects from the cache ("Retrieved ... from cache") and print none of their warnings. A "warning-free" claim needs a compile that bypasses the cache, for example `PLATFORMIO_BUILD_CACHE_DIR=<empty scratch dir> pio run -e example-read-registers` after `-t clean`, with the log showing a `Compiling` line for each new source file
 
 ---
 

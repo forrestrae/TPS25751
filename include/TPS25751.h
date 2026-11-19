@@ -31,6 +31,7 @@
 #include "TPS25751IOConfig.h"
 #include "TPS25751LiquidDetectionConfig.h"
 #include "TPS25751Version.h"
+#include "TPS25751PD3Config.h"
 #include "TPS25751RegisterAddress.h"
 #include "TPS25751RegisterFactory.h"
 #include "TPS25751Task.h"
@@ -147,6 +148,13 @@ public:
     bool readLiquidDetectionConfig(TPS25751LiquidDetectionConfig &liquidDetectionConfig) const;
 
     /**
+     * @brief Read the PD3 Configuration register (0x42)
+     * @param pd3Config Register object to populate
+     * @return true if the read succeeded
+     */
+    bool readPD3Config(TPS25751PD3Config &pd3Config) const;
+
+    /**
      * @brief Write the Sleep Control register (0x70)
      * @param sleepControl Register object holding the bytes to write
      * @return false if @p sleepControl is not valid or not the expected size;
@@ -214,6 +222,14 @@ public:
      *         expected size; otherwise the result of the underlying I2C write
      */
     bool writeLiquidDetectionConfig(const TPS25751LiquidDetectionConfig &liquidDetectionConfig) const;
+
+    /**
+     * @brief Write the PD3 Configuration register (0x42)
+     * @param pd3Config Register object holding the bytes to write
+     * @return false if @p pd3Config is not valid or not the expected size;
+     *         otherwise the result of the underlying I2C write
+     */
+    bool writePD3Config(const TPS25751PD3Config &pd3Config) const;
 
     // Type-safe register reading methods
     bool readRegister(TPS25751Registers::RegisterInfo regInfo, uint8_t *buffer) const;
@@ -459,6 +475,13 @@ public:
      * @return Unique pointer to Version register (nullptr if failed)
      */
     std::unique_ptr<TPS25751Version> readVersionRegister(bool validate = true) const;
+
+    /**
+     * @brief Read PD3 Configuration register (0x42) using factory pattern
+     * @param validate Whether to validate the register after reading
+     * @return Unique pointer to PD3 Configuration register (nullptr if failed)
+     */
+    std::unique_ptr<TPS25751PD3Config> readPD3ConfigRegister(bool validate = true) const;
 
     /**
      * @brief Read Port Control register using factory pattern

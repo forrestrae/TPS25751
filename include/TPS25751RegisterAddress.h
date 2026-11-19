@@ -39,6 +39,8 @@ enum class Address : uint8_t {
     AUTONEGOTIATE_SINK = 0x37,
     POWER_STATUS = 0x3F,
     PD_STATUS = 0x40,
+    /// PD3 Configuration (SLVUCR8B Rev. B, p.46). TI short name PD3_CONFIGURATION.
+    PD3_CONFIGURATION = 0x42,
     IO_CONFIG = 0x5C,
     TYPEC_STATE = 0x69,
     ADC_RESULTS = 0x6A,
@@ -86,6 +88,7 @@ namespace Registers {
     constexpr RegisterInfo AUTONEGOTIATE_SINK{Address::AUTONEGOTIATE_SINK, 24};
     constexpr RegisterInfo POWER_STATUS{Address::POWER_STATUS, 2};
     constexpr RegisterInfo PD_STATUS{Address::PD_STATUS, 4};
+    constexpr RegisterInfo PD3_CONFIGURATION{Address::PD3_CONFIGURATION, 4};
     constexpr RegisterInfo IO_CONFIG{Address::IO_CONFIG, 49};
     constexpr RegisterInfo TYPEC_STATE{Address::TYPEC_STATE, 4};
     constexpr RegisterInfo ADC_RESULTS{Address::ADC_RESULTS, 13};
@@ -123,6 +126,7 @@ constexpr uint8_t getRegisterSize(Address addr) {
         case Address::AUTONEGOTIATE_SINK: return Registers::AUTONEGOTIATE_SINK.size;
         case Address::POWER_STATUS: return Registers::POWER_STATUS.size;
         case Address::PD_STATUS: return Registers::PD_STATUS.size;
+        case Address::PD3_CONFIGURATION: return Registers::PD3_CONFIGURATION.size;
         case Address::IO_CONFIG: return Registers::IO_CONFIG.size;
         case Address::TYPEC_STATE: return Registers::TYPEC_STATE.size;
         case Address::ADC_RESULTS: return Registers::ADC_RESULTS.size;
@@ -161,6 +165,7 @@ inline const RegisterInfo* getRegisterInfo(Address addr) {
         case Address::AUTONEGOTIATE_SINK: return &Registers::AUTONEGOTIATE_SINK;
         case Address::POWER_STATUS: return &Registers::POWER_STATUS;
         case Address::PD_STATUS: return &Registers::PD_STATUS;
+        case Address::PD3_CONFIGURATION: return &Registers::PD3_CONFIGURATION;
         case Address::IO_CONFIG: return &Registers::IO_CONFIG;
         case Address::TYPEC_STATE: return &Registers::TYPEC_STATE;
         case Address::ADC_RESULTS: return &Registers::ADC_RESULTS;

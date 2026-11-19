@@ -190,6 +190,11 @@ bool TPS25751::readLiquidDetectionConfig(TPS25751LiquidDetectionConfig &liquidDe
     return readRegister(TPS25751Registers::Registers::LIQUID_DETECTION_CONFIG, liquidDetectionConfig);
 }
 
+bool TPS25751::readPD3Config(TPS25751PD3Config &pd3Config) const
+{
+    return readRegister(TPS25751Registers::Registers::PD3_CONFIGURATION, pd3Config);
+}
+
 bool TPS25751::writeSleepControl(const TPS25751SleepControl &sleepControl) const
 {
     // Delegates to the typed writeRegister<T>() (keyed on kAddress) so there is
@@ -236,6 +241,13 @@ bool TPS25751::writeLiquidDetectionConfig(const TPS25751LiquidDetectionConfig &l
     // Delegates to the typed writeRegister<T>() (keyed on kAddress) so there is
     // a single host write path; the size/validity guard lives there.
     return writeRegister(liquidDetectionConfig);
+}
+
+bool TPS25751::writePD3Config(const TPS25751PD3Config &pd3Config) const
+{
+    // Delegates to the typed writeRegister<T>() (keyed on kAddress) so there is
+    // a single host write path; the size/validity guard lives there.
+    return writeRegister(pd3Config);
 }
 
 // Type-safe register reading methods
@@ -513,6 +525,14 @@ std::unique_ptr<TPS25751Version> TPS25751::readVersionRegister(bool validate) co
 
     TPS25751Version* versionReg = static_cast<TPS25751Version*>(reg.release());
     return std::unique_ptr<TPS25751Version>(versionReg);
+}
+
+std::unique_ptr<TPS25751PD3Config> TPS25751::readPD3ConfigRegister(bool validate) const {
+    auto reg = readAndValidateRegisterByAddress(TPS25751Registers::Address::PD3_CONFIGURATION, validate);
+    if (!reg) return nullptr;
+
+    TPS25751PD3Config* pd3ConfigReg = static_cast<TPS25751PD3Config*>(reg.release());
+    return std::unique_ptr<TPS25751PD3Config>(pd3ConfigReg);
 }
 
 std::unique_ptr<TPS25751PortControl> TPS25751::readPortControlRegister(bool validate) const {

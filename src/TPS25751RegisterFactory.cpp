@@ -27,6 +27,7 @@
 #include "TPS25751IOConfig.h"
 #include "TPS25751LiquidDetectionConfig.h"
 #include "TPS25751Version.h"
+#include "TPS25751PD3Config.h"
 #include "TPS25751Debug.h"
 
 // Static factory instance
@@ -93,6 +94,8 @@ std::unique_ptr<TPS25751Register> TPS25751RegisterFactoryImpl::createRegister(TP
             return createLiquidDetectionConfigRegister();
         case TPS25751Registers::Address::VERSION:
             return createVersionRegister();
+        case TPS25751Registers::Address::PD3_CONFIGURATION:
+            return createPD3ConfigRegister();
         default:
             TPS_DEBUG_ERROR(DEBUG_CAT_REGISTER, "Unsupported register address: 0x%02X", static_cast<uint8_t>(addr));
             return nullptr;
@@ -165,6 +168,8 @@ std::unique_ptr<TPS25751Register> TPS25751RegisterFactoryImpl::createRegister(TP
             return createLiquidDetectionConfigRegister(data, length);
         case TPS25751Registers::Address::VERSION:
             return createVersionRegister(data, length);
+        case TPS25751Registers::Address::PD3_CONFIGURATION:
+            return createPD3ConfigRegister(data, length);
         default:
             TPS_DEBUG_ERROR(DEBUG_CAT_REGISTER, "Unsupported register address: 0x%02X", static_cast<uint8_t>(addr));
             return nullptr;
@@ -232,6 +237,8 @@ std::unique_ptr<TPS25751Register> TPS25751RegisterFactoryImpl::createRegister(co
             return std::make_unique<TPS25751LiquidDetectionConfig>(regInfo);
         case TPS25751Registers::Address::VERSION:
             return std::make_unique<TPS25751Version>(regInfo);
+        case TPS25751Registers::Address::PD3_CONFIGURATION:
+            return std::make_unique<TPS25751PD3Config>(regInfo);
         default:
             TPS_DEBUG_ERROR(DEBUG_CAT_REGISTER, "Unsupported register address: 0x%02X", static_cast<uint8_t>(regInfo.address));
             return nullptr;
@@ -462,6 +469,14 @@ std::unique_ptr<TPS25751Register> TPS25751RegisterFactoryImpl::createVersionRegi
 
 std::unique_ptr<TPS25751Register> TPS25751RegisterFactoryImpl::createVersionRegister(const uint8_t* data, size_t length) const {
     return std::make_unique<TPS25751Version>(data, length);
+}
+
+std::unique_ptr<TPS25751Register> TPS25751RegisterFactoryImpl::createPD3ConfigRegister() const {
+    return std::make_unique<TPS25751PD3Config>();
+}
+
+std::unique_ptr<TPS25751Register> TPS25751RegisterFactoryImpl::createPD3ConfigRegister(const uint8_t* data, size_t length) const {
+    return std::make_unique<TPS25751PD3Config>(data, length);
 }
 
 // Singleton factory instance management

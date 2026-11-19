@@ -11,9 +11,18 @@
  * controller sends in reply to a USB PD 3.x Get_Sink_Cap_Extended message.
  *
  * Every field is "as defined in the USB PD specification" (Sink_Capabilities_Extended).
- * The TRM does not restate the encodings and the register-docs server does not
- * serve the USB PD specification, so this class exposes raw values only: no
- * units, enums, or bit meanings. Typed decode is planned for Batch L.
+ * The TRM does not restate the encodings, so the raw accessors return the field
+ * bits unchanged. The typed accessors beside them decode those bits per USB PD
+ * R3.3 Table 6.70 (Sink_Capabilities_Extended Data Block): SKEDB version, load
+ * step, the Sink Load Characteristics word, the compliance flags, the
+ * touch-temperature standard, the battery counts, the Sink Modes flags, and the
+ * three SPR PDP bytes.
+ *
+ * The TRM numbers its bytes from the start of this register. The USB PD
+ * Sink_Capabilities_Extended Data Block (SKEDB) starts with VID, PID, XID, and the
+ * firmware and hardware versions, which the controller prepends (see Reply
+ * content), so TRM byte n is SKEDB byte n + 10 for n 0 to 10. The three EPR Sink
+ * PDP bytes (SKEDB 21 to 23) fall in the TRM's reserved bits 111:88.
  *
  * Reply content: when the controller answers Get_Sink_Cap_Extended it first sends
  * the VID, PID, and XID fields (from the firmware configuration made with the
@@ -104,6 +113,103 @@ public:
     uint8_t sinkOperationalPdp() const;
     /// @brief Sink Maximum PDP (bits 87:80)
     uint8_t sinkMaximumPdp() const;
+
+    // --- Typed decode, USB PD R3.3 Table 6.70 (built on the raw accessors above) ---
+
+    /// @brief Load step rate, Load Step bits 1:0 (USB PD R3.3 Table 6.70)
+    enum class LoadStep : uint8_t {
+        Rate150mAPerUs = 0,  ///< 00b - 150 mA/us load step (default)
+        Rate500mAPerUs = 1   ///< 01b - 500 mA/us load step
+    };
+
+    /**
+     * @brief Touch Temperature standard (USB PD R3.3 Table 6.70)
+     *
+     * The encoding differs from the Source_Capabilities_Extended one in register
+     * 0x77: here 0 is "No applicable standard" and 1 is IEC 60950-1.
+     */
+    enum class TouchTemperature : uint8_t {
+        NoApplicableStandard = 0,  ///< 0 - No applicable standard
+        Iec60950_1 = 1,            ///< 1 - IEC 60950-1 (default)
+        Iec62368_1Ts1 = 2,         ///< 2 - IEC 62368-1 TS1
+        Iec62368_1Ts2 = 3          ///< 3 - IEC 62368-1 TS2
+    };
+
+    /// @brief Text for a LoadStep; codes 2 and 3 are "Invalid (assume 150 mA/us)"
+    static const char *toString(LoadStep val);
+    /// @brief Text for a TouchTemperature; codes 4 to 255 are "Invalid (assume IEC 60950-1)"
+    static const char *toString(TouchTemperature val);
+
+    /// @brief True when SKEDB Version is 1 (Version 1.0); 0 and 2 to 255 are invalid and the receiver ignores the message (USB PD R3.3 Table 6.70)
+    bool skedbVersionValid() const;
+
+    /**
+     * @brief Load step rate, Load Step bits 1:0 (USB PD R3.3 Table 6.70)
+     *
+     * Named loadStepRate() because loadStep() is the raw byte. Codes 2 and 3 are
+     * invalid and the receiver assumes the default; they pass through cast into
+     * the enum.
+     */
+    LoadStep loadStepRate() const;
+
+    /**
+     * @brief Sink Load overload in percent, Sink Load Characteristics bits 4:0 (USB PD R3.3 Table 6.70)
+     *
+     * The field counts 10% steps from 0 to 25; 26 to 31 are invalid and treated
+     * as 25. Returns 0 to 250. The specification says to ignore the period and
+     * duty cycle when these bits are 0; the period and duty accessors decode
+     * them anyway.
+     */
+    uint16_t sinkLoadOverloadPercent() const;
+    /// @brief Sink Load overload period in ms, Sink Load Characteristics bits 10:5 times 20 ms (0 to 1260; USB PD R3.3 Table 6.70)
+    uint16_t sinkLoadOverloadPeriod_ms() const;
+    /// @brief Sink Load duty cycle in percent, Sink Load Characteristics bits 14:11 times 5 (0 to 75; the field is 4 bits wide, USB PD R3.3 Table 6.70)
+    uint8_t sinkLoadDutyCyclePercent() const;
+    /// @brief Sink can tolerate VBUS droop of an additional 5 percent during overload, Sink Load Characteristics bit 15 (USB PD R3.3 Table 6.70)
+    bool sinkLoadVbusDroopTolerated() const;
+
+    /// @brief LPS compliance, Compliance bit 0 (USB PD R3.3 Table 6.70)
+    bool lpsCompliant() const;
+    /// @brief PS1 compliance, Compliance bit 1 (USB PD R3.3 Table 6.70)
+    bool ps1Compliant() const;
+    /// @brief PS2 compliance, Compliance bit 2 (USB PD R3.3 Table 6.70)
+    bool ps2Compliant() const;
+
+    /// @brief Touch Temperature standard (USB PD R3.3 Table 6.70); codes above 3 pass through and are invalid
+    TouchTemperature touchTemperatureStandard() const;
+
+    /// @brief Count of fixed batteries, Battery Info bits 3:0; values 5 to 15 are invalid and mean 0 (USB PD R3.3 Table 6.70)
+    uint8_t fixedBatteryCount() const;
+    /// @brief Count of hot swappable battery slots, Battery Info bits 7:4; values 5 to 15 are invalid and mean 0 (USB PD R3.3 Table 6.70)
+    uint8_t hotSwappableBatterySlotCount() const;
+
+    /// @brief PPS charging supported, Sink Modes bit 0 (USB PD R3.3 Table 6.70)
+    bool ppsChargingSupported() const;
+    /// @brief VBUS powered, Sink Modes bit 1 (USB PD R3.3 Table 6.70)
+    bool vbusPowered() const;
+    /// @brief AC supply powered, Sink Modes bit 2 (USB PD R3.3 Table 6.70)
+    bool acSupplyPowered() const;
+    /// @brief Battery powered, Sink Modes bit 3 (USB PD R3.3 Table 6.70)
+    bool batteryPowered() const;
+    /// @brief Battery essentially unlimited, Sink Modes bit 4 (USB PD R3.3 Table 6.70)
+    bool batteryEssentiallyUnlimited() const;
+    /// @brief AVS supported, Sink Modes bit 5 (USB PD R3.3 Table 6.70)
+    bool avsSupported() const;
+    /// @brief VCONN powered accessory, Sink Modes bit 6 (USB PD R3.3 Table 6.70); bit 7 is not defined by the specification
+    bool vconnPoweredAccessory() const;
+
+    /// @brief True when SPR Sink Minimum PDP is 0 to 100 W; 101 to 255 are invalid (USB PD R3.3 Table 6.70)
+    bool sinkMinimumPdpValid() const;
+    /// @brief SPR Sink Minimum PDP in watts when valid, else 0
+    uint8_t sinkMinimumPdp_W() const;
+    /// @brief True when SPR Sink Operational PDP is 0 to 100 W; 101 to 255 are invalid (USB PD R3.3 Table 6.70)
+    bool sinkOperationalPdpValid() const;
+    /// @brief SPR Sink Operational PDP in watts when valid, else 0
+    uint8_t sinkOperationalPdp_W() const;
+    /// @brief True when SPR Sink Maximum PDP is 0 to 100 W; 101 to 255 are invalid (USB PD R3.3 Table 6.70)
+    bool sinkMaximumPdpValid() const;
+    /// @brief SPR Sink Maximum PDP in watts when valid, else 0
+    uint8_t sinkMaximumPdp_W() const;
 
     // --- Setters: each a single setBits() call (setBits() itself guards !isValid()) ---
 

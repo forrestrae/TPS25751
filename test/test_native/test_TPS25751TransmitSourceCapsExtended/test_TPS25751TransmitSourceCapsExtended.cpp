@@ -6,8 +6,9 @@
  *
  * TX_SOURCE_CAPABILITIES_EXTENDED_DATA_BLOCK (0x77) is a 15-byte R/W register,
  * reset all zero. Bit n lives in byte n / 8, bit n % 8; multi-byte fields are
- * little-endian. Every field is raw: the encodings belong to the USB PD
- * specification, so these tests assert raw values only.
+ * little-endian. The raw accessors return field bits unchanged; the typed accessors
+ * decode them per the USB PD specification, and the Typed decode section below
+ * tests those.
  *
  * Distinct fixture (every field different, byte order visible):
  *   byte 0  = 0x11  Voltage Regulation
@@ -430,6 +431,275 @@ void test_debug_print_reset_zero_pads_and_reports_reserved()
 
 // --- Rule of Five ----------------------------------------------------------------
 
+// --- Typed decode (USB PD R3.3 Table 6.59) ---------------------------------------------
+//
+// TRM byte n is SCEDB byte n + 10. The typed accessors read sub-fields of the raw
+// bytes: Voltage Regulation bits 1:0 load step and bit 2 IoC; Compliance bits 0 to
+// 2; Touch Current bits 0 to 2; Peak Current word bits 4:0 overload, 10:5 period,
+// 14:11 duty, 15 droop; Source Inputs bits 0 to 2.
+
+void test_typed_load_step_and_ioc()
+{
+    Caps reg(RESET_BUFFER);
+    // Reset: load step code 0, IoC bit clear.
+    TEST_ASSERT_TRUE(reg.loadStep() == Caps::LoadStep::Rate150mAPerUs);
+    TEST_ASSERT_EQUAL_UINT8(25, reg.iocPercent());
+
+    reg.setVoltageRegulation(0x01);  // load step 01b
+    TEST_ASSERT_TRUE(reg.loadStep() == Caps::LoadStep::Rate500mAPerUs);
+    TEST_ASSERT_EQUAL_UINT8(25, reg.iocPercent());
+
+    reg.setVoltageRegulation(0x02);  // 10b invalid
+    TEST_ASSERT_EQUAL_UINT8(2, static_cast<uint8_t>(reg.loadStep()));
+    reg.setVoltageRegulation(0x03);  // 11b invalid
+    TEST_ASSERT_EQUAL_UINT8(3, static_cast<uint8_t>(reg.loadStep()));
+
+    reg.setVoltageRegulation(0x04);  // IoC bit 2 set, load step 0
+    TEST_ASSERT_TRUE(reg.loadStep() == Caps::LoadStep::Rate150mAPerUs);
+    TEST_ASSERT_EQUAL_UINT8(90, reg.iocPercent());
+
+    reg.setVoltageRegulation(0xF8);  // reserved bits 7:3 only: no effect on either field
+    TEST_ASSERT_TRUE(reg.loadStep() == Caps::LoadStep::Rate150mAPerUs);
+    TEST_ASSERT_EQUAL_UINT8(25, reg.iocPercent());
+
+    TEST_ASSERT_EQUAL_STRING("150 mA/us", Caps::toString(Caps::LoadStep::Rate150mAPerUs));
+    TEST_ASSERT_EQUAL_STRING("500 mA/us", Caps::toString(Caps::LoadStep::Rate500mAPerUs));
+    TEST_ASSERT_EQUAL_STRING("Invalid (assume 150 mA/us)", Caps::toString(static_cast<Caps::LoadStep>(2)));
+    TEST_ASSERT_EQUAL_STRING("Invalid (assume 150 mA/us)", Caps::toString(static_cast<Caps::LoadStep>(3)));
+}
+
+void test_typed_hold_up_time()
+{
+    Caps reg(RESET_BUFFER);
+    TEST_ASSERT_FALSE(reg.holdUpTimeSupported());
+    TEST_ASSERT_EQUAL_UINT8(0, reg.holdUpTime_ms());
+
+    reg.setHoldUpTime(3);
+    TEST_ASSERT_TRUE(reg.holdUpTimeSupported());
+    TEST_ASSERT_EQUAL_UINT8(3, reg.holdUpTime_ms());
+
+    reg.setHoldUpTime(255);
+    TEST_ASSERT_EQUAL_UINT8(255, reg.holdUpTime_ms());
+}
+
+void test_typed_compliance_bits()
+{
+    Caps reg(RESET_BUFFER);
+    TEST_ASSERT_FALSE(reg.lpsCompliant());
+    TEST_ASSERT_FALSE(reg.ps1Compliant());
+    TEST_ASSERT_FALSE(reg.ps2Compliant());
+
+    reg.setCompliance(0x01);
+    TEST_ASSERT_TRUE(reg.lpsCompliant());
+    TEST_ASSERT_FALSE(reg.ps1Compliant());
+    TEST_ASSERT_FALSE(reg.ps2Compliant());
+
+    reg.setCompliance(0x02);
+    TEST_ASSERT_FALSE(reg.lpsCompliant());
+    TEST_ASSERT_TRUE(reg.ps1Compliant());
+    TEST_ASSERT_FALSE(reg.ps2Compliant());
+
+    reg.setCompliance(0x04);
+    TEST_ASSERT_FALSE(reg.lpsCompliant());
+    TEST_ASSERT_FALSE(reg.ps1Compliant());
+    TEST_ASSERT_TRUE(reg.ps2Compliant());
+
+    reg.setCompliance(0xF8);  // reserved bits 7:3 do not map to a flag
+    TEST_ASSERT_FALSE(reg.lpsCompliant());
+    TEST_ASSERT_FALSE(reg.ps1Compliant());
+    TEST_ASSERT_FALSE(reg.ps2Compliant());
+}
+
+void test_typed_touch_current_bits()
+{
+    Caps reg(RESET_BUFFER);
+    TEST_ASSERT_FALSE(reg.lowTouchCurrentEps());
+    TEST_ASSERT_FALSE(reg.groundPinSupported());
+    TEST_ASSERT_FALSE(reg.groundPinProtectiveEarth());
+
+    reg.setTouchCurrent(0x01);
+    TEST_ASSERT_TRUE(reg.lowTouchCurrentEps());
+    TEST_ASSERT_FALSE(reg.groundPinSupported());
+    TEST_ASSERT_FALSE(reg.groundPinProtectiveEarth());
+
+    reg.setTouchCurrent(0x02);
+    TEST_ASSERT_FALSE(reg.lowTouchCurrentEps());
+    TEST_ASSERT_TRUE(reg.groundPinSupported());
+    TEST_ASSERT_FALSE(reg.groundPinProtectiveEarth());
+
+    reg.setTouchCurrent(0x04);
+    TEST_ASSERT_FALSE(reg.lowTouchCurrentEps());
+    TEST_ASSERT_FALSE(reg.groundPinSupported());
+    TEST_ASSERT_TRUE(reg.groundPinProtectiveEarth());
+}
+
+// Peak Current word: overload 25 = 0x19 in bits 4:0, period 63 << 5 = 0x7E0,
+// duty 15 << 11 = 0x7800, droop 1 << 15 = 0x8000. Sum 0x19 + 0x7E0 + 0x7800 + 0x8000 = 0xFFF9.
+void test_typed_peak_current_maximum_word()
+{
+    Caps reg(RESET_BUFFER);
+    reg.setPeakCurrent(1, 0xFFF9);
+
+    TEST_ASSERT_EQUAL_UINT16(250, reg.peakCurrentOverloadPercent(1));     // 25 * 10
+    TEST_ASSERT_EQUAL_UINT16(1260, reg.peakCurrentOverloadPeriod_ms(1));  // 63 * 20
+    TEST_ASSERT_EQUAL_UINT8(75, reg.peakCurrentDutyCyclePercent(1));      // 15 * 5
+    TEST_ASSERT_TRUE(reg.peakCurrentVbusDroop(1));
+}
+
+// Overload 30 (0x1E) is invalid and is treated as 25, so 250 percent. Period and
+// duty stay 0 and droop clear.
+void test_typed_peak_current_overload_above_25_clamps()
+{
+    Caps reg(RESET_BUFFER);
+    reg.setPeakCurrent(2, 0x001E);
+
+    TEST_ASSERT_EQUAL_UINT16(250, reg.peakCurrentOverloadPercent(2));
+    TEST_ASSERT_EQUAL_UINT16(0, reg.peakCurrentOverloadPeriod_ms(2));
+    TEST_ASSERT_EQUAL_UINT8(0, reg.peakCurrentDutyCyclePercent(2));
+    TEST_ASSERT_FALSE(reg.peakCurrentVbusDroop(2));
+
+    reg.setPeakCurrent(2, 0x001F);  // 31 also clamps
+    TEST_ASSERT_EQUAL_UINT16(250, reg.peakCurrentOverloadPercent(2));
+    reg.setPeakCurrent(2, 0x0001);  // smallest nonzero step: 10 percent
+    TEST_ASSERT_EQUAL_UINT16(10, reg.peakCurrentOverloadPercent(2));
+}
+
+// Peak Current 3 occupies TRM bytes 8 and 9: F9 FF read little-endian is 0xFFF9.
+// Peak Current 1 and 2 stay zero, which proves the index selects the right bytes.
+void test_typed_peak_current_index_selects_the_word()
+{
+    uint8_t buf[CAPS_SIZE] = {0};
+    buf[8] = 0xF9;
+    buf[9] = 0xFF;
+    Caps reg(buf);
+
+    TEST_ASSERT_EQUAL_UINT16(0, reg.peakCurrentOverloadPercent(1));
+    TEST_ASSERT_EQUAL_UINT16(0, reg.peakCurrentOverloadPercent(2));
+    TEST_ASSERT_EQUAL_UINT16(250, reg.peakCurrentOverloadPercent(3));
+    TEST_ASSERT_EQUAL_UINT16(1260, reg.peakCurrentOverloadPeriod_ms(3));
+    TEST_ASSERT_EQUAL_UINT8(75, reg.peakCurrentDutyCyclePercent(3));
+    TEST_ASSERT_TRUE(reg.peakCurrentVbusDroop(3));
+    TEST_ASSERT_FALSE(reg.peakCurrentVbusDroop(1));
+}
+
+void test_typed_peak_current_out_of_range_index_is_zero()
+{
+    Caps reg(ALL_ONES_DATA);  // every word 0xFFFF, so any leak would be visible
+    TEST_ASSERT_EQUAL_UINT16(0, reg.peakCurrentOverloadPercent(0));
+    TEST_ASSERT_EQUAL_UINT16(0, reg.peakCurrentOverloadPercent(4));
+    TEST_ASSERT_EQUAL_UINT16(0, reg.peakCurrentOverloadPeriod_ms(0));
+    TEST_ASSERT_EQUAL_UINT16(0, reg.peakCurrentOverloadPeriod_ms(4));
+    TEST_ASSERT_EQUAL_UINT8(0, reg.peakCurrentDutyCyclePercent(0));
+    TEST_ASSERT_EQUAL_UINT8(0, reg.peakCurrentDutyCyclePercent(255));
+    TEST_ASSERT_FALSE(reg.peakCurrentVbusDroop(0));
+    TEST_ASSERT_FALSE(reg.peakCurrentVbusDroop(4));
+}
+
+void test_typed_touch_temperature_standard()
+{
+    Caps reg(RESET_BUFFER);
+    reg.setTouchTemperature(0);
+    TEST_ASSERT_TRUE(reg.touchTemperatureStandard() == Caps::TouchTemperature::Iec60950_1);
+    reg.setTouchTemperature(1);
+    TEST_ASSERT_TRUE(reg.touchTemperatureStandard() == Caps::TouchTemperature::Iec62368_1Ts1);
+    reg.setTouchTemperature(2);
+    TEST_ASSERT_TRUE(reg.touchTemperatureStandard() == Caps::TouchTemperature::Iec62368_1Ts2);
+    reg.setTouchTemperature(3);
+    TEST_ASSERT_EQUAL_UINT8(3, static_cast<uint8_t>(reg.touchTemperatureStandard()));
+
+    TEST_ASSERT_EQUAL_STRING("IEC 60950-1", Caps::toString(Caps::TouchTemperature::Iec60950_1));
+    TEST_ASSERT_EQUAL_STRING("IEC 62368-1 TS1", Caps::toString(Caps::TouchTemperature::Iec62368_1Ts1));
+    TEST_ASSERT_EQUAL_STRING("IEC 62368-1 TS2", Caps::toString(Caps::TouchTemperature::Iec62368_1Ts2));
+    TEST_ASSERT_EQUAL_STRING("Invalid (assume IEC 60950-1)", Caps::toString(static_cast<Caps::TouchTemperature>(3)));
+    TEST_ASSERT_EQUAL_STRING("Invalid (assume IEC 60950-1)", Caps::toString(static_cast<Caps::TouchTemperature>(0xFF)));
+}
+
+void test_typed_source_inputs_bits()
+{
+    Caps reg(RESET_BUFFER);
+    TEST_ASSERT_FALSE(reg.externalSupplyPresent());
+    TEST_ASSERT_FALSE(reg.externalSupplyUnconstrained());
+    TEST_ASSERT_FALSE(reg.internalBatteryPresent());
+
+    reg.setSourceInputs(0x01);
+    TEST_ASSERT_TRUE(reg.externalSupplyPresent());
+    TEST_ASSERT_FALSE(reg.externalSupplyUnconstrained());
+    TEST_ASSERT_FALSE(reg.internalBatteryPresent());
+
+    reg.setSourceInputs(0x03);  // present and unconstrained
+    TEST_ASSERT_TRUE(reg.externalSupplyPresent());
+    TEST_ASSERT_TRUE(reg.externalSupplyUnconstrained());
+
+    reg.setSourceInputs(0x04);
+    TEST_ASSERT_FALSE(reg.externalSupplyPresent());
+    TEST_ASSERT_TRUE(reg.internalBatteryPresent());
+
+    reg.setSourceInputs(0xF8);  // reserved bits 7:3 only
+    TEST_ASSERT_FALSE(reg.externalSupplyPresent());
+    TEST_ASSERT_FALSE(reg.externalSupplyUnconstrained());
+    TEST_ASSERT_FALSE(reg.internalBatteryPresent());
+}
+
+void test_typed_source_pdp()
+{
+    Caps reg(RESET_BUFFER);
+    // 0 is a valid rating (0 W).
+    TEST_ASSERT_TRUE(reg.sourcePdpValid());
+    TEST_ASSERT_EQUAL_UINT8(0, reg.sourcePdp_W());
+
+    reg.setSourcePdp(100);  // largest valid rating
+    TEST_ASSERT_TRUE(reg.sourcePdpValid());
+    TEST_ASSERT_EQUAL_UINT8(100, reg.sourcePdp_W());
+
+    reg.setSourcePdp(101);  // smallest invalid value
+    TEST_ASSERT_FALSE(reg.sourcePdpValid());
+    TEST_ASSERT_EQUAL_UINT8(0, reg.sourcePdp_W());
+    // The raw accessor still shows the value.
+    TEST_ASSERT_EQUAL_UINT8(101, reg.sourcePdp());
+}
+
+void test_typed_bench_value_source_pdp_is_invalid()
+{
+    // Hardware reads Source PDP = 0x7F (127), which the specification marks invalid.
+    Caps reg(BENCH_BUFFER);
+    TEST_ASSERT_EQUAL_UINT8(0x7F, reg.sourcePdp());
+    TEST_ASSERT_FALSE(reg.sourcePdpValid());
+    TEST_ASSERT_EQUAL_UINT8(0, reg.sourcePdp_W());
+}
+
+void test_debug_print_typed_decode_lines()
+{
+    Caps reg(RESET_BUFFER);
+    reg.setVoltageRegulation(0x05);  // 500 mA/us, IoC 90 percent
+    reg.setHoldUpTime(3);
+    reg.setCompliance(0x05);         // LPS and PS2
+    reg.setTouchCurrent(0x02);       // ground pin
+    reg.setPeakCurrent(1, 0xFFF9);
+    reg.setTouchTemperature(1);
+    reg.setSourceInputs(0x05);       // external present, internal battery
+    reg.setSourcePdp(60);
+    const std::string out = captureDebugPrint(reg);
+
+    TEST_ASSERT_NOT_EQUAL(std::string::npos, out.find("Load Step: 500 mA/us, IoC: 90%"));
+    TEST_ASSERT_NOT_EQUAL(std::string::npos, out.find("Hold Up Time: 3 ms"));
+    TEST_ASSERT_NOT_EQUAL(std::string::npos, out.find("Compliance: LPS: Yes, PS1: No, PS2: Yes"));
+    TEST_ASSERT_NOT_EQUAL(std::string::npos, out.find("Touch Current: low touch current EPS: No, ground pin: Yes, protective earth: No"));
+    TEST_ASSERT_NOT_EQUAL(std::string::npos, out.find("Peak Current 1: 250% overload, 1260 ms, 75% duty, VBUS droop: Yes"));
+    TEST_ASSERT_NOT_EQUAL(std::string::npos, out.find("Peak Current 2: 0% overload, 0 ms, 0% duty, VBUS droop: No"));
+    TEST_ASSERT_NOT_EQUAL(std::string::npos, out.find("Touch Temperature standard: IEC 62368-1 TS1"));
+    TEST_ASSERT_NOT_EQUAL(std::string::npos, out.find("Source Inputs: external supply: Yes, unconstrained: No, internal battery: Yes"));
+    TEST_ASSERT_NOT_EQUAL(std::string::npos, out.find("SPR Source PDP: 60 W"));
+    // The existing raw lines remain.
+    TEST_ASSERT_NOT_EQUAL(std::string::npos, out.find("Peak Current 1: 0xFFF9"));
+}
+
+void test_debug_print_typed_decode_invalid_pdp_and_holdup()
+{
+    const std::string out = captureDebugPrint(Caps(BENCH_BUFFER));
+    TEST_ASSERT_NOT_EQUAL(std::string::npos, out.find("Hold Up Time: not supported"));
+    TEST_ASSERT_NOT_EQUAL(std::string::npos, out.find("SPR Source PDP: invalid (above 100 W)"));
+}
+
 void test_copy_constructor_deep_copies()
 {
     Caps source(DISTINCT_BUFFER);
@@ -506,6 +776,21 @@ int main(int, char **)
 
     RUN_TEST(test_debug_print_distinct_fixture);
     RUN_TEST(test_debug_print_reset_zero_pads_and_reports_reserved);
+
+    RUN_TEST(test_typed_load_step_and_ioc);
+    RUN_TEST(test_typed_hold_up_time);
+    RUN_TEST(test_typed_compliance_bits);
+    RUN_TEST(test_typed_touch_current_bits);
+    RUN_TEST(test_typed_peak_current_maximum_word);
+    RUN_TEST(test_typed_peak_current_overload_above_25_clamps);
+    RUN_TEST(test_typed_peak_current_index_selects_the_word);
+    RUN_TEST(test_typed_peak_current_out_of_range_index_is_zero);
+    RUN_TEST(test_typed_touch_temperature_standard);
+    RUN_TEST(test_typed_source_inputs_bits);
+    RUN_TEST(test_typed_source_pdp);
+    RUN_TEST(test_typed_bench_value_source_pdp_is_invalid);
+    RUN_TEST(test_debug_print_typed_decode_lines);
+    RUN_TEST(test_debug_print_typed_decode_invalid_pdp_and_holdup);
 
     RUN_TEST(test_copy_constructor_deep_copies);
     RUN_TEST(test_move_constructor_transfers_ownership);

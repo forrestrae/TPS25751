@@ -27,6 +27,11 @@ void printByteField(Stream &s, const __FlashStringHelper *label, uint8_t value)
     s.println(F(")"));
 }
 
+const char *yesNo(bool value)
+{
+    return value ? "Yes" : "No";
+}
+
 }  // namespace
 
 // --- Decode ---------------------------------------------------------------------
@@ -80,6 +85,129 @@ uint8_t TPS25751TransmitSourceCapsExtended::numberHotSwappableBatteries() const
 uint8_t TPS25751TransmitSourceCapsExtended::sourcePdp() const
 {
     return extractBits(kSourcePdpBit, 7);
+}
+
+// --- Typed decode (USB PD R3.3 Table 6.59) -----------------------------------------
+
+const char *TPS25751TransmitSourceCapsExtended::toString(LoadStep val)
+{
+    switch (val) {
+        case LoadStep::Rate150mAPerUs: return "150 mA/us";
+        case LoadStep::Rate500mAPerUs: return "500 mA/us";
+        default: return "Invalid (assume 150 mA/us)";
+    }
+}
+
+const char *TPS25751TransmitSourceCapsExtended::toString(TouchTemperature val)
+{
+    switch (val) {
+        case TouchTemperature::Iec60950_1: return "IEC 60950-1";
+        case TouchTemperature::Iec62368_1Ts1: return "IEC 62368-1 TS1";
+        case TouchTemperature::Iec62368_1Ts2: return "IEC 62368-1 TS2";
+        default: return "Invalid (assume IEC 60950-1)";
+    }
+}
+
+TPS25751TransmitSourceCapsExtended::LoadStep TPS25751TransmitSourceCapsExtended::loadStep() const
+{
+    return static_cast<LoadStep>(voltageRegulation() & 0x03u);
+}
+
+uint8_t TPS25751TransmitSourceCapsExtended::iocPercent() const
+{
+    return (voltageRegulation() & 0x04u) ? 90 : 25;
+}
+
+bool TPS25751TransmitSourceCapsExtended::holdUpTimeSupported() const
+{
+    return holdUpTime() != 0;
+}
+
+uint8_t TPS25751TransmitSourceCapsExtended::holdUpTime_ms() const
+{
+    return holdUpTime();
+}
+
+bool TPS25751TransmitSourceCapsExtended::lpsCompliant() const
+{
+    return (compliance() & 0x01u) != 0;
+}
+
+bool TPS25751TransmitSourceCapsExtended::ps1Compliant() const
+{
+    return (compliance() & 0x02u) != 0;
+}
+
+bool TPS25751TransmitSourceCapsExtended::ps2Compliant() const
+{
+    return (compliance() & 0x04u) != 0;
+}
+
+bool TPS25751TransmitSourceCapsExtended::lowTouchCurrentEps() const
+{
+    return (touchCurrent() & 0x01u) != 0;
+}
+
+bool TPS25751TransmitSourceCapsExtended::groundPinSupported() const
+{
+    return (touchCurrent() & 0x02u) != 0;
+}
+
+bool TPS25751TransmitSourceCapsExtended::groundPinProtectiveEarth() const
+{
+    return (touchCurrent() & 0x04u) != 0;
+}
+
+uint16_t TPS25751TransmitSourceCapsExtended::peakCurrentOverloadPercent(uint8_t index) const
+{
+    uint16_t steps = peakCurrent(index) & 0x1Fu;  // bits 4:0
+    if (steps > 25) steps = 25;                   // 26..31 invalid, treated as 25
+    return static_cast<uint16_t>(steps * 10);
+}
+
+uint16_t TPS25751TransmitSourceCapsExtended::peakCurrentOverloadPeriod_ms(uint8_t index) const
+{
+    return static_cast<uint16_t>(((peakCurrent(index) >> 5) & 0x3Fu) * 20);  // bits 10:5, 20 ms steps
+}
+
+uint8_t TPS25751TransmitSourceCapsExtended::peakCurrentDutyCyclePercent(uint8_t index) const
+{
+    return static_cast<uint8_t>(((peakCurrent(index) >> 11) & 0x0Fu) * 5);  // bits 14:11, 5 % steps
+}
+
+bool TPS25751TransmitSourceCapsExtended::peakCurrentVbusDroop(uint8_t index) const
+{
+    return (peakCurrent(index) & 0x8000u) != 0;
+}
+
+TPS25751TransmitSourceCapsExtended::TouchTemperature TPS25751TransmitSourceCapsExtended::touchTemperatureStandard() const
+{
+    return static_cast<TouchTemperature>(touchTemperature());
+}
+
+bool TPS25751TransmitSourceCapsExtended::externalSupplyPresent() const
+{
+    return (sourceInputs() & 0x01u) != 0;
+}
+
+bool TPS25751TransmitSourceCapsExtended::externalSupplyUnconstrained() const
+{
+    return (sourceInputs() & 0x02u) != 0;
+}
+
+bool TPS25751TransmitSourceCapsExtended::internalBatteryPresent() const
+{
+    return (sourceInputs() & 0x04u) != 0;
+}
+
+bool TPS25751TransmitSourceCapsExtended::sourcePdpValid() const
+{
+    return sourcePdp() <= 100;
+}
+
+uint8_t TPS25751TransmitSourceCapsExtended::sourcePdp_W() const
+{
+    return sourcePdpValid() ? sourcePdp() : 0;
 }
 
 // --- Setters: each a single setBits() call; setBits() itself guards !isValid() ---
@@ -181,6 +309,66 @@ void TPS25751TransmitSourceCapsExtended::debugPrint(Stream &s) const
         s.print(F("Reserved bits set (119:111): 0x"));
         printHex16(s, reserved);
         s.println();
+    }
+
+    // Typed decode, USB PD R3.3 Table 6.59.
+    s.print(F("Load Step: "));
+    s.print(toString(loadStep()));
+    s.print(F(", IoC: "));
+    s.print(iocPercent());
+    s.println(F("%"));
+    s.print(F("Hold Up Time: "));
+    if (holdUpTimeSupported())
+    {
+        s.print(holdUpTime_ms());
+        s.println(F(" ms"));
+    }
+    else
+    {
+        s.println(F("not supported"));
+    }
+    s.print(F("Compliance: LPS: "));
+    s.print(yesNo(lpsCompliant()));
+    s.print(F(", PS1: "));
+    s.print(yesNo(ps1Compliant()));
+    s.print(F(", PS2: "));
+    s.println(yesNo(ps2Compliant()));
+    s.print(F("Touch Current: low touch current EPS: "));
+    s.print(yesNo(lowTouchCurrentEps()));
+    s.print(F(", ground pin: "));
+    s.print(yesNo(groundPinSupported()));
+    s.print(F(", protective earth: "));
+    s.println(yesNo(groundPinProtectiveEarth()));
+    for (uint8_t i = 1; i <= kPeakCurrentCount; i++)
+    {
+        s.print(F("Peak Current "));
+        s.print(i);
+        s.print(F(": "));
+        s.print(peakCurrentOverloadPercent(i));
+        s.print(F("% overload, "));
+        s.print(peakCurrentOverloadPeriod_ms(i));
+        s.print(F(" ms, "));
+        s.print(peakCurrentDutyCyclePercent(i));
+        s.print(F("% duty, VBUS droop: "));
+        s.println(yesNo(peakCurrentVbusDroop(i)));
+    }
+    s.print(F("Touch Temperature standard: "));
+    s.println(toString(touchTemperatureStandard()));
+    s.print(F("Source Inputs: external supply: "));
+    s.print(yesNo(externalSupplyPresent()));
+    s.print(F(", unconstrained: "));
+    s.print(yesNo(externalSupplyUnconstrained()));
+    s.print(F(", internal battery: "));
+    s.println(yesNo(internalBatteryPresent()));
+    s.print(F("SPR Source PDP: "));
+    if (sourcePdpValid())
+    {
+        s.print(sourcePdp_W());
+        s.println(F(" W"));
+    }
+    else
+    {
+        s.println(F("invalid (above 100 W)"));
     }
 
     s.println(F("========================================"));

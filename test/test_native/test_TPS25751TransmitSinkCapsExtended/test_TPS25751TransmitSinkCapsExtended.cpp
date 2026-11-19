@@ -6,8 +6,9 @@
  *
  * TRANSMIT_SINK_CAPABILITIES_EXTENDED_DATA_BLOCK (0x7E) is a 14-byte R/W register,
  * reset all zero. Bit n lives in byte n / 8, bit n % 8; multi-byte fields are
- * little-endian. Every field is raw: the encodings belong to the USB PD
- * specification, so these tests assert raw values only.
+ * little-endian. The raw accessors return field bits unchanged; the typed accessors
+ * decode them per the USB PD specification, and the Typed decode section below
+ * tests those.
  *
  * Distinct fixture:
  *   byte 0 = 0x11 SKEDB Version      byte 1 = 0x22 Load Step
@@ -311,6 +312,225 @@ void test_debug_print_reset_zero_pads_and_reports_reserved()
     TEST_ASSERT_NOT_EQUAL(std::string::npos, out.find("Reserved bits set (111:88): 0x000001"));
 }
 
+// --- Typed decode (USB PD R3.3 Table 6.70) ---------------------------------------------
+//
+// TRM byte n is SKEDB byte n + 10. The typed accessors read sub-fields of the raw
+// bytes: Load Step bits 1:0; Sink Load Characteristics word bits 4:0 overload, 10:5
+// period, 14:11 duty, 15 droop; Compliance bits 0 to 2; Battery Info nibbles; Sink
+// Modes bits 0 to 6.
+
+void test_typed_skedb_version()
+{
+    Sink reg(RESET_BUFFER);
+    TEST_ASSERT_FALSE(reg.skedbVersionValid());  // 0 is invalid
+    reg.setSkedbVersion(1);
+    TEST_ASSERT_TRUE(reg.skedbVersionValid());
+    reg.setSkedbVersion(2);
+    TEST_ASSERT_FALSE(reg.skedbVersionValid());
+    reg.setSkedbVersion(255);
+    TEST_ASSERT_FALSE(reg.skedbVersionValid());
+}
+
+void test_typed_load_step_rate()
+{
+    Sink reg(RESET_BUFFER);
+    TEST_ASSERT_TRUE(reg.loadStepRate() == Sink::LoadStep::Rate150mAPerUs);
+    reg.setLoadStep(0x01);
+    TEST_ASSERT_TRUE(reg.loadStepRate() == Sink::LoadStep::Rate500mAPerUs);
+    reg.setLoadStep(0x02);
+    TEST_ASSERT_EQUAL_UINT8(2, static_cast<uint8_t>(reg.loadStepRate()));
+    reg.setLoadStep(0x03);
+    TEST_ASSERT_EQUAL_UINT8(3, static_cast<uint8_t>(reg.loadStepRate()));
+    reg.setLoadStep(0xFC);  // reserved bits 7:2 only: rate reads 0
+    TEST_ASSERT_TRUE(reg.loadStepRate() == Sink::LoadStep::Rate150mAPerUs);
+    // The raw byte accessor is unchanged.
+    TEST_ASSERT_EQUAL_HEX8(0xFC, reg.loadStep());
+
+    TEST_ASSERT_EQUAL_STRING("150 mA/us", Sink::toString(Sink::LoadStep::Rate150mAPerUs));
+    TEST_ASSERT_EQUAL_STRING("500 mA/us", Sink::toString(Sink::LoadStep::Rate500mAPerUs));
+    TEST_ASSERT_EQUAL_STRING("Invalid (assume 150 mA/us)", Sink::toString(static_cast<Sink::LoadStep>(2)));
+    TEST_ASSERT_EQUAL_STRING("Invalid (assume 150 mA/us)", Sink::toString(static_cast<Sink::LoadStep>(3)));
+}
+
+// Sink Load word: overload 25 = 0x19, period 63 << 5 = 0x7E0, duty 15 << 11 = 0x7800,
+// droop 1 << 15 = 0x8000. Sum 0x19 + 0x7E0 + 0x7800 + 0x8000 = 0xFFF9.
+void test_typed_sink_load_maximum_word()
+{
+    Sink reg(RESET_BUFFER);
+    reg.setSinkLoadCharacteristics(0xFFF9);
+
+    TEST_ASSERT_EQUAL_UINT16(250, reg.sinkLoadOverloadPercent());     // 25 * 10
+    TEST_ASSERT_EQUAL_UINT16(1260, reg.sinkLoadOverloadPeriod_ms());  // 63 * 20
+    TEST_ASSERT_EQUAL_UINT8(75, reg.sinkLoadDutyCyclePercent());      // 15 * 5
+    TEST_ASSERT_TRUE(reg.sinkLoadVbusDroopTolerated());
+}
+
+void test_typed_sink_load_zero_word_and_clamp()
+{
+    Sink reg(RESET_BUFFER);
+    TEST_ASSERT_EQUAL_UINT16(0, reg.sinkLoadOverloadPercent());
+    TEST_ASSERT_EQUAL_UINT16(0, reg.sinkLoadOverloadPeriod_ms());
+    TEST_ASSERT_EQUAL_UINT8(0, reg.sinkLoadDutyCyclePercent());
+    TEST_ASSERT_FALSE(reg.sinkLoadVbusDroopTolerated());
+
+    reg.setSinkLoadCharacteristics(0x001E);  // overload 30 is invalid and treated as 25
+    TEST_ASSERT_EQUAL_UINT16(250, reg.sinkLoadOverloadPercent());
+    reg.setSinkLoadCharacteristics(0x0001);
+    TEST_ASSERT_EQUAL_UINT16(10, reg.sinkLoadOverloadPercent());
+
+    // Period and duty decode even when overload is 0: 1 << 5 = 0x20 gives 20 ms.
+    reg.setSinkLoadCharacteristics(0x0020);
+    TEST_ASSERT_EQUAL_UINT16(0, reg.sinkLoadOverloadPercent());
+    TEST_ASSERT_EQUAL_UINT16(20, reg.sinkLoadOverloadPeriod_ms());
+}
+
+void test_typed_compliance_bits()
+{
+    Sink reg(RESET_BUFFER);
+    TEST_ASSERT_FALSE(reg.lpsCompliant());
+    TEST_ASSERT_FALSE(reg.ps1Compliant());
+    TEST_ASSERT_FALSE(reg.ps2Compliant());
+
+    reg.setCompliance(0x01);
+    TEST_ASSERT_TRUE(reg.lpsCompliant());
+    TEST_ASSERT_FALSE(reg.ps1Compliant());
+    TEST_ASSERT_FALSE(reg.ps2Compliant());
+    reg.setCompliance(0x02);
+    TEST_ASSERT_FALSE(reg.lpsCompliant());
+    TEST_ASSERT_TRUE(reg.ps1Compliant());
+    TEST_ASSERT_FALSE(reg.ps2Compliant());
+    reg.setCompliance(0x04);
+    TEST_ASSERT_FALSE(reg.lpsCompliant());
+    TEST_ASSERT_FALSE(reg.ps1Compliant());
+    TEST_ASSERT_TRUE(reg.ps2Compliant());
+    reg.setCompliance(0xF8);  // reserved bits 7:3
+    TEST_ASSERT_FALSE(reg.lpsCompliant());
+    TEST_ASSERT_FALSE(reg.ps1Compliant());
+    TEST_ASSERT_FALSE(reg.ps2Compliant());
+}
+
+void test_typed_touch_temperature_standard()
+{
+    Sink reg(RESET_BUFFER);
+    // 0x7E code 0 is "No applicable standard", unlike 0x77 where 0 is IEC 60950-1.
+    TEST_ASSERT_TRUE(reg.touchTemperatureStandard() == Sink::TouchTemperature::NoApplicableStandard);
+    reg.setTouchTemperature(1);
+    TEST_ASSERT_TRUE(reg.touchTemperatureStandard() == Sink::TouchTemperature::Iec60950_1);
+    reg.setTouchTemperature(2);
+    TEST_ASSERT_TRUE(reg.touchTemperatureStandard() == Sink::TouchTemperature::Iec62368_1Ts1);
+    reg.setTouchTemperature(3);
+    TEST_ASSERT_TRUE(reg.touchTemperatureStandard() == Sink::TouchTemperature::Iec62368_1Ts2);
+    reg.setTouchTemperature(4);
+    TEST_ASSERT_EQUAL_UINT8(4, static_cast<uint8_t>(reg.touchTemperatureStandard()));
+
+    TEST_ASSERT_EQUAL_STRING("No applicable standard", Sink::toString(Sink::TouchTemperature::NoApplicableStandard));
+    TEST_ASSERT_EQUAL_STRING("IEC 60950-1", Sink::toString(Sink::TouchTemperature::Iec60950_1));
+    TEST_ASSERT_EQUAL_STRING("IEC 62368-1 TS1", Sink::toString(Sink::TouchTemperature::Iec62368_1Ts1));
+    TEST_ASSERT_EQUAL_STRING("IEC 62368-1 TS2", Sink::toString(Sink::TouchTemperature::Iec62368_1Ts2));
+    TEST_ASSERT_EQUAL_STRING("Invalid (assume IEC 60950-1)", Sink::toString(static_cast<Sink::TouchTemperature>(4)));
+    TEST_ASSERT_EQUAL_STRING("Invalid (assume IEC 60950-1)", Sink::toString(static_cast<Sink::TouchTemperature>(255)));
+}
+
+// Battery Info 0x21: low nibble 1 fixed battery, high nibble 2 hot swappable slots.
+void test_typed_battery_info_nibbles()
+{
+    Sink reg(RESET_BUFFER);
+    reg.setBatteryInfo(0x21);
+    TEST_ASSERT_EQUAL_UINT8(1, reg.fixedBatteryCount());
+    TEST_ASSERT_EQUAL_UINT8(2, reg.hotSwappableBatterySlotCount());
+
+    reg.setBatteryInfo(0xF5);  // raw nibbles: 5 and 15 are invalid and the accessor does not mask them
+    TEST_ASSERT_EQUAL_UINT8(5, reg.fixedBatteryCount());
+    TEST_ASSERT_EQUAL_UINT8(15, reg.hotSwappableBatterySlotCount());
+}
+
+void test_typed_sink_modes_bits()
+{
+    Sink reg(RESET_BUFFER);
+    TEST_ASSERT_FALSE(reg.ppsChargingSupported());
+    TEST_ASSERT_FALSE(reg.vconnPoweredAccessory());
+
+    // One bit at a time: bit n of Sink Modes selects exactly one flag.
+    bool (*const flags[7])(const Sink &) = {
+        [](const Sink &r) { return r.ppsChargingSupported(); },
+        [](const Sink &r) { return r.vbusPowered(); },
+        [](const Sink &r) { return r.acSupplyPowered(); },
+        [](const Sink &r) { return r.batteryPowered(); },
+        [](const Sink &r) { return r.batteryEssentiallyUnlimited(); },
+        [](const Sink &r) { return r.avsSupported(); },
+        [](const Sink &r) { return r.vconnPoweredAccessory(); }};
+    for (unsigned bit = 0; bit < 7; bit++)
+    {
+        reg.setSinkModes(static_cast<uint8_t>(1u << bit));
+        for (unsigned f = 0; f < 7; f++) TEST_ASSERT_EQUAL(f == bit, flags[f](reg));
+    }
+
+    reg.setSinkModes(0x7F);  // every defined bit
+    for (unsigned f = 0; f < 7; f++) TEST_ASSERT_TRUE(flags[f](reg));
+
+    reg.setSinkModes(0x80);  // bit 7 is undefined: no flag
+    for (unsigned f = 0; f < 7; f++) TEST_ASSERT_FALSE(flags[f](reg));
+}
+
+void test_typed_pdp_validity()
+{
+    Sink reg(RESET_BUFFER);
+    reg.setSinkMinimumPdp(100);
+    reg.setSinkOperationalPdp(100);
+    reg.setSinkMaximumPdp(100);
+    TEST_ASSERT_TRUE(reg.sinkMinimumPdpValid());
+    TEST_ASSERT_TRUE(reg.sinkOperationalPdpValid());
+    TEST_ASSERT_TRUE(reg.sinkMaximumPdpValid());
+    TEST_ASSERT_EQUAL_UINT8(100, reg.sinkMinimumPdp_W());
+    TEST_ASSERT_EQUAL_UINT8(100, reg.sinkOperationalPdp_W());
+    TEST_ASSERT_EQUAL_UINT8(100, reg.sinkMaximumPdp_W());
+
+    reg.setSinkMinimumPdp(101);
+    reg.setSinkOperationalPdp(101);
+    reg.setSinkMaximumPdp(101);
+    TEST_ASSERT_FALSE(reg.sinkMinimumPdpValid());
+    TEST_ASSERT_FALSE(reg.sinkOperationalPdpValid());
+    TEST_ASSERT_FALSE(reg.sinkMaximumPdpValid());
+    TEST_ASSERT_EQUAL_UINT8(0, reg.sinkMinimumPdp_W());
+    TEST_ASSERT_EQUAL_UINT8(0, reg.sinkOperationalPdp_W());
+    TEST_ASSERT_EQUAL_UINT8(0, reg.sinkMaximumPdp_W());
+
+    // Each PDP is independent: only the minimum valid.
+    reg.setSinkMinimumPdp(15);
+    TEST_ASSERT_TRUE(reg.sinkMinimumPdpValid());
+    TEST_ASSERT_EQUAL_UINT8(15, reg.sinkMinimumPdp_W());
+    TEST_ASSERT_FALSE(reg.sinkOperationalPdpValid());
+}
+
+void test_debug_print_typed_decode_lines()
+{
+    Sink reg(RESET_BUFFER);
+    reg.setSkedbVersion(1);
+    reg.setLoadStep(0x01);
+    reg.setSinkLoadCharacteristics(0xFFF9);
+    reg.setCompliance(0x03);       // LPS and PS1
+    reg.setTouchTemperature(1);
+    reg.setBatteryInfo(0x21);
+    reg.setSinkModes(0x03);        // PPS charging and VBUS powered
+    reg.setSinkMinimumPdp(15);
+    reg.setSinkOperationalPdp(45);
+    reg.setSinkMaximumPdp(101);
+    const std::string out = captureDebugPrint(reg);
+
+    TEST_ASSERT_NOT_EQUAL(std::string::npos, out.find("SKEDB Version valid: Yes"));
+    TEST_ASSERT_NOT_EQUAL(std::string::npos, out.find("Load Step rate: 500 mA/us"));
+    TEST_ASSERT_NOT_EQUAL(std::string::npos, out.find("Sink Load: 250% overload, 1260 ms, 75% duty, VBUS droop tolerated: Yes"));
+    TEST_ASSERT_NOT_EQUAL(std::string::npos, out.find("Compliance: LPS: Yes, PS1: Yes, PS2: No"));
+    TEST_ASSERT_NOT_EQUAL(std::string::npos, out.find("Touch Temperature standard: IEC 60950-1"));
+    TEST_ASSERT_NOT_EQUAL(std::string::npos, out.find("Batteries: 1 fixed, 2 hot swappable slots"));
+    TEST_ASSERT_NOT_EQUAL(std::string::npos, out.find("Sink Modes: PPS charging: Yes, VBUS powered: Yes, AC powered: No"));
+    TEST_ASSERT_NOT_EQUAL(std::string::npos, out.find("SPR Sink Minimum PDP: 15 W"));
+    TEST_ASSERT_NOT_EQUAL(std::string::npos, out.find("SPR Sink Operational PDP: 45 W"));
+    TEST_ASSERT_NOT_EQUAL(std::string::npos, out.find("SPR Sink Maximum PDP: invalid (101)"));
+    // The existing raw lines remain.
+    TEST_ASSERT_NOT_EQUAL(std::string::npos, out.find("Sink Load Characteristics: 0xFFF9"));
+}
+
 void test_copy_constructor_deep_copies()
 {
     Sink source(DISTINCT_BUFFER);
@@ -379,6 +599,17 @@ int main(int, char **)
 
     RUN_TEST(test_debug_print_distinct_fixture);
     RUN_TEST(test_debug_print_reset_zero_pads_and_reports_reserved);
+
+    RUN_TEST(test_typed_skedb_version);
+    RUN_TEST(test_typed_load_step_rate);
+    RUN_TEST(test_typed_sink_load_maximum_word);
+    RUN_TEST(test_typed_sink_load_zero_word_and_clamp);
+    RUN_TEST(test_typed_compliance_bits);
+    RUN_TEST(test_typed_touch_temperature_standard);
+    RUN_TEST(test_typed_battery_info_nibbles);
+    RUN_TEST(test_typed_sink_modes_bits);
+    RUN_TEST(test_typed_pdp_validity);
+    RUN_TEST(test_debug_print_typed_decode_lines);
 
     RUN_TEST(test_copy_constructor_deep_copies);
     RUN_TEST(test_move_constructor_transfers_ownership);

@@ -11,9 +11,17 @@
  * the controller sends in reply to a USB PD 3.x Get_Source_Cap_Extended message.
  *
  * Every field is "as defined by the USB PD specification" (Source_Capabilities_Extended).
- * The TRM does not restate the encodings and the register-docs server does not
- * serve the USB PD specification, so this class exposes raw values only: no
- * units, enums, or bit meanings. Typed decode is planned for Batch L.
+ * The TRM does not restate the encodings, so the raw accessors return the field
+ * bits unchanged. The typed accessors beside them decode those bits per USB PD
+ * R3.3 Table 6.59 (Source_Capabilities_Extended Data Block): load step and IoC,
+ * hold up time, the compliance and touch-current flags, each Peak Current word,
+ * the touch-temperature standard, the source-input flags, and the SPR Source PDP.
+ *
+ * The TRM numbers its bytes from the start of this register. The USB PD
+ * Source_Capabilities_Extended Data Block (SCEDB) starts with VID, PID, XID, and
+ * the firmware and hardware versions, which the controller prepends (see Reply
+ * content), so TRM byte n is SCEDB byte n + 10 for n 0 to 13. The TRM has no field
+ * for SCEDB byte 24 (EPR Source PDP Rating).
  *
  * Reply content: when the controller answers Get_Source_Cap_Extended it first
  * sends the VID, PID, and XID fields (from the firmware configuration made with
@@ -119,6 +127,95 @@ public:
     uint8_t numberHotSwappableBatteries() const;
     /// @brief Source PDP (bits 110:104, 7 bits)
     uint8_t sourcePdp() const;
+
+    // --- Typed decode, USB PD R3.3 Table 6.59 (built on the raw accessors above) ---
+
+    /// @brief Load step rate, Voltage Regulation bits 1:0 (USB PD R3.3 Table 6.59)
+    enum class LoadStep : uint8_t {
+        Rate150mAPerUs = 0,  ///< 00b - 150 mA/us load step (default)
+        Rate500mAPerUs = 1   ///< 01b - 500 mA/us load step
+    };
+
+    /// @brief Touch Temperature standard, byte 10 of the SCEDB (USB PD R3.3 Table 6.59)
+    enum class TouchTemperature : uint8_t {
+        Iec60950_1 = 0,     ///< 0 - IEC 60950-1 (default)
+        Iec62368_1Ts1 = 1,  ///< 1 - IEC 62368-1 TS1
+        Iec62368_1Ts2 = 2   ///< 2 - IEC 62368-1 TS2
+    };
+
+    /// @brief Text for a LoadStep; codes 2 and 3 are "Invalid (assume 150 mA/us)"
+    static const char *toString(LoadStep val);
+    /// @brief Text for a TouchTemperature; any other code is "Invalid (assume IEC 60950-1)"
+    static const char *toString(TouchTemperature val);
+
+    /**
+     * @brief Load step rate, Voltage Regulation bits 1:0 (USB PD R3.3 Table 6.59)
+     *
+     * Codes 2 and 3 are invalid and the receiver assumes the default; they pass
+     * through cast into the enum.
+     */
+    LoadStep loadStep() const;
+    /// @brief Overload current ratio in percent, Voltage Regulation bit 2: 25 when 0, 90 when 1 (IoC, USB PD R3.3 Table 6.59)
+    uint8_t iocPercent() const;
+
+    /// @brief True when Hold Up Time is nonzero (0 means the feature is not supported; USB PD R3.3 Table 6.59)
+    bool holdUpTimeSupported() const;
+    /// @brief Hold Up Time in milliseconds: the raw value, 0 when not supported (USB PD R3.3 Table 6.59)
+    uint8_t holdUpTime_ms() const;
+
+    /// @brief LPS compliance, Compliance bit 0 (USB PD R3.3 Table 6.59)
+    bool lpsCompliant() const;
+    /// @brief PS1 compliance, Compliance bit 1 (USB PD R3.3 Table 6.59)
+    bool ps1Compliant() const;
+    /// @brief PS2 compliance, Compliance bit 2 (USB PD R3.3 Table 6.59)
+    bool ps2Compliant() const;
+
+    /// @brief Low touch current EPS, Touch Current bit 0 (USB PD R3.3 Table 6.59)
+    bool lowTouchCurrentEps() const;
+    /// @brief Ground pin supported, Touch Current bit 1 (USB PD R3.3 Table 6.59)
+    bool groundPinSupported() const;
+    /// @brief Ground pin intended for protective earth, Touch Current bit 2 (USB PD R3.3 Table 6.59)
+    bool groundPinProtectiveEarth() const;
+
+    /**
+     * @brief Peak Current n percent overload, word bits 4:0 (USB PD R3.3 Table 6.59)
+     *
+     * The field counts 10% steps from 0 to 25; 26 to 31 are invalid and treated
+     * as 25. Returns 0 to 250 percent, and 0 for an index other than 1, 2, 3.
+     */
+    uint16_t peakCurrentOverloadPercent(uint8_t index) const;
+    /// @brief Peak Current n overload period in ms, word bits 10:5 times 20 ms (0 to 1260); 0 for an index other than 1, 2, 3
+    uint16_t peakCurrentOverloadPeriod_ms(uint8_t index) const;
+    /**
+     * @brief Peak Current n duty cycle in percent, word bits 14:11 times 5 (0 to 75)
+     *
+     * The specification text says 0 to 31 in 5% steps, but the field is 4 bits
+     * wide, so the largest value is 15 (75 percent). Returns 0 for an index other
+     * than 1, 2, 3.
+     */
+    uint8_t peakCurrentDutyCyclePercent(uint8_t index) const;
+    /// @brief Peak Current n VBUS droop, word bit 15: true when VBUS may droop an additional 5 percent; false for an index other than 1, 2, 3
+    bool peakCurrentVbusDroop(uint8_t index) const;
+
+    /// @brief Touch Temperature standard (USB PD R3.3 Table 6.59); other codes pass through and are invalid
+    TouchTemperature touchTemperatureStandard() const;
+
+    /// @brief External Supply present, Source Inputs bit 0 (USB PD R3.3 Table 6.59)
+    bool externalSupplyPresent() const;
+    /// @brief External Supply unconstrained, Source Inputs bit 1; meaningful only when externalSupplyPresent() is true (USB PD R3.3 Table 6.59)
+    bool externalSupplyUnconstrained() const;
+    /// @brief Internal Battery present, Source Inputs bit 2 (USB PD R3.3 Table 6.59)
+    bool internalBatteryPresent() const;
+
+    /**
+     * @brief True when Source PDP is a valid SPR rating (0 to 100 W; USB PD R3.3 Table 6.59)
+     *
+     * The TRM field is 7 bits and the specification field is 8, so the TRM view
+     * cannot hold 101 to 255. The hardware reads 0x7F (127), which is invalid.
+     */
+    bool sourcePdpValid() const;
+    /// @brief SPR Source PDP in watts when valid, else 0 (USB PD R3.3 Table 6.59)
+    uint8_t sourcePdp_W() const;
 
     // --- Setters: each a single setBits() call (setBits() itself guards !isValid()) ---
 

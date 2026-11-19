@@ -230,6 +230,183 @@ void test_debug_print_shows_only_valid_vdos_zero_padded()
     TEST_ASSERT_TRUE(out.find("Product VDO") == std::string::npos);
 }
 
+// --- Typed VDO decode (USB PD R3.3 Tables 6.34, 6.38, 6.39) ---------------------------
+
+using SOP = TPS25751ReceivedSOPIdentity;
+
+// ID Header VDO: Host 0, Device 1 (bit 30 = 0x40000000), Product Type UFP 010b
+// (2 << 27 = 0x10000000), Alternate Modes 1 (bit 26 = 0x04000000), Product Type DFP
+// 000b, Connector 10b (2 << 21 = 0x00400000), VID 0x05AC.
+// Sum: 0x40000000 + 0x10000000 + 0x04000000 + 0x00400000 + 0x05AC = 0x544005AC.
+// Little-endian in bytes 1 to 4: AC 05 40 54.
+void test_id_header_fixture_decodes()
+{
+    const uint32_t v[1] = {0x544005ACu};
+    SOP reg = make((1 << 6) | 1, v, 1);
+
+    TEST_ASSERT_EQUAL_HEX8(0xAC, reg.raw()[1]);
+    TEST_ASSERT_EQUAL_HEX8(0x05, reg.raw()[2]);
+    TEST_ASSERT_EQUAL_HEX8(0x40, reg.raw()[3]);
+    TEST_ASSERT_EQUAL_HEX8(0x54, reg.raw()[4]);
+
+    TEST_ASSERT_FALSE(reg.usbHostCapable());
+    TEST_ASSERT_TRUE(reg.usbDeviceCapable());
+    TEST_ASSERT_TRUE(reg.productTypeUfp() == SOP::ProductTypeUfp::PdusbPeripheral);
+    TEST_ASSERT_EQUAL_UINT8(2, reg.rawProductTypeUfp());
+    TEST_ASSERT_TRUE(reg.alternateModesSupported());
+    TEST_ASSERT_TRUE(reg.productTypeDfp() == SOP::ProductTypeDfp::NotDfp);
+    TEST_ASSERT_EQUAL_UINT8(0, reg.rawProductTypeDfp());
+    TEST_ASSERT_TRUE(reg.connectorType() == SOP::ConnectorType::TypeCReceptacle);
+    TEST_ASSERT_EQUAL_UINT8(2, reg.rawConnectorType());
+    TEST_ASSERT_EQUAL_HEX16(0x05AC, reg.usbVendorId());
+}
+
+// Host 1 (bit 31 = 0x80000000), Device 0, UFP 000b, Alt Modes 0, DFP 010b
+// (2 << 23 = 0x01000000), Connector 11b (3 << 21 = 0x00600000), VID 0x1234.
+// Sum: 0x80000000 + 0x01000000 + 0x00600000 + 0x1234 = 0x81601234.
+void test_id_header_host_dfp_plug_fixture()
+{
+    const uint32_t v[1] = {0x81601234u};
+    SOP reg = make((1 << 6) | 1, v, 1);
+
+    TEST_ASSERT_TRUE(reg.usbHostCapable());
+    TEST_ASSERT_FALSE(reg.usbDeviceCapable());
+    TEST_ASSERT_TRUE(reg.productTypeUfp() == SOP::ProductTypeUfp::NotUfp);
+    TEST_ASSERT_FALSE(reg.alternateModesSupported());
+    TEST_ASSERT_TRUE(reg.productTypeDfp() == SOP::ProductTypeDfp::PdusbHost);
+    TEST_ASSERT_TRUE(reg.connectorType() == SOP::ConnectorType::TypeCPlug);
+    TEST_ASSERT_EQUAL_HEX16(0x1234, reg.usbVendorId());
+}
+
+// Cert Stat VDO is the XID: 0x12345678 in bytes 5 to 8 (78 56 34 12).
+void test_cert_stat_xid_fixture()
+{
+    const uint32_t v[2] = {0, 0x12345678u};
+    SOP reg = make((1 << 6) | 2, v, 2);
+
+    TEST_ASSERT_EQUAL_HEX8(0x78, reg.raw()[5]);
+    TEST_ASSERT_EQUAL_HEX8(0x12, reg.raw()[8]);
+    TEST_ASSERT_EQUAL_HEX32(0x12345678u, reg.xid());
+}
+
+// Product VDO: PID 0x12A8 in bits 31:16, bcdDevice 0x0110 in bits 15:0, so the
+// VDO is 0x12A80110, in bytes 9 to 12 (10 01 A8 12).
+void test_product_vdo_fixture()
+{
+    const uint32_t v[3] = {0, 0, 0x12A80110u};
+    SOP reg = make((1 << 6) | 3, v, 3);
+
+    TEST_ASSERT_EQUAL_HEX8(0x10, reg.raw()[9]);
+    TEST_ASSERT_EQUAL_HEX8(0x12, reg.raw()[12]);
+    TEST_ASSERT_EQUAL_HEX16(0x12A8, reg.usbProductId());
+    TEST_ASSERT_EQUAL_HEX16(0x0110, reg.bcdDevice());
+}
+
+void test_product_type_ufp_codes()
+{
+    // Product Type UFP sits in bits 29:27, so code n is n << 27.
+    for (uint32_t code = 0; code < 8; code++)
+    {
+        const uint32_t v[1] = {code << 27};
+        SOP reg = make((1 << 6) | 1, v, 1);
+        TEST_ASSERT_EQUAL_UINT8(code, reg.rawProductTypeUfp());
+        TEST_ASSERT_EQUAL_UINT8(code, static_cast<uint8_t>(reg.productTypeUfp()));
+    }
+    TEST_ASSERT_EQUAL_STRING("Not a UFP", toString(SOP::ProductTypeUfp::NotUfp));
+    TEST_ASSERT_EQUAL_STRING("PDUSB Hub", toString(SOP::ProductTypeUfp::PdusbHub));
+    TEST_ASSERT_EQUAL_STRING("PDUSB Peripheral", toString(SOP::ProductTypeUfp::PdusbPeripheral));
+    TEST_ASSERT_EQUAL_STRING("PSD", toString(SOP::ProductTypeUfp::Psd));
+    TEST_ASSERT_EQUAL_STRING("Alternate Mode Adapter (AMA, deprecated)", toString(SOP::ProductTypeUfp::Ama));
+    TEST_ASSERT_EQUAL_STRING("Invalid", toString(static_cast<SOP::ProductTypeUfp>(4)));
+    TEST_ASSERT_EQUAL_STRING("Invalid", toString(static_cast<SOP::ProductTypeUfp>(6)));
+    TEST_ASSERT_EQUAL_STRING("Invalid", toString(static_cast<SOP::ProductTypeUfp>(7)));
+}
+
+void test_product_type_dfp_codes()
+{
+    // Product Type DFP sits in bits 25:23, so code n is n << 23.
+    for (uint32_t code = 0; code < 8; code++)
+    {
+        const uint32_t v[1] = {code << 23};
+        SOP reg = make((1 << 6) | 1, v, 1);
+        TEST_ASSERT_EQUAL_UINT8(code, reg.rawProductTypeDfp());
+        TEST_ASSERT_EQUAL_UINT8(code, static_cast<uint8_t>(reg.productTypeDfp()));
+    }
+    TEST_ASSERT_EQUAL_STRING("Not a DFP", toString(SOP::ProductTypeDfp::NotDfp));
+    TEST_ASSERT_EQUAL_STRING("PDUSB Hub", toString(SOP::ProductTypeDfp::PdusbHub));
+    TEST_ASSERT_EQUAL_STRING("PDUSB Host", toString(SOP::ProductTypeDfp::PdusbHost));
+    TEST_ASSERT_EQUAL_STRING("Power Brick", toString(SOP::ProductTypeDfp::PowerBrick));
+    TEST_ASSERT_EQUAL_STRING("Alternate Mode Controller (AMC)", toString(SOP::ProductTypeDfp::AlternateModeController));
+    TEST_ASSERT_EQUAL_STRING("Invalid", toString(static_cast<SOP::ProductTypeDfp>(5)));
+    TEST_ASSERT_EQUAL_STRING("Invalid", toString(static_cast<SOP::ProductTypeDfp>(6)));
+    TEST_ASSERT_EQUAL_STRING("Invalid", toString(static_cast<SOP::ProductTypeDfp>(7)));
+}
+
+void test_connector_type_codes()
+{
+    // Connector Type sits in bits 22:21, so code n is n << 21.
+    for (uint32_t code = 0; code < 4; code++)
+    {
+        const uint32_t v[1] = {code << 21};
+        SOP reg = make((1 << 6) | 1, v, 1);
+        TEST_ASSERT_EQUAL_UINT8(code, reg.rawConnectorType());
+        TEST_ASSERT_EQUAL_UINT8(code, static_cast<uint8_t>(reg.connectorType()));
+    }
+    TEST_ASSERT_EQUAL_STRING("Unknown (deprecated)", toString(SOP::ConnectorType::Unknown));
+    TEST_ASSERT_EQUAL_STRING("USB Type-C Receptacle", toString(SOP::ConnectorType::TypeCReceptacle));
+    TEST_ASSERT_EQUAL_STRING("USB Type-C Plug", toString(SOP::ConnectorType::TypeCPlug));
+    TEST_ASSERT_EQUAL_STRING("Invalid", toString(static_cast<SOP::ConnectorType>(1)));
+}
+
+void test_typed_fields_do_not_leak_across_fields()
+{
+    // Only Connector set to 11b: no other ID Header field may change.
+    const uint32_t v[1] = {3u << 21};
+    SOP reg = make((1 << 6) | 1, v, 1);
+    TEST_ASSERT_FALSE(reg.usbHostCapable());
+    TEST_ASSERT_FALSE(reg.usbDeviceCapable());
+    TEST_ASSERT_EQUAL_UINT8(0, reg.rawProductTypeUfp());
+    TEST_ASSERT_FALSE(reg.alternateModesSupported());
+    TEST_ASSERT_EQUAL_UINT8(0, reg.rawProductTypeDfp());
+    TEST_ASSERT_EQUAL_HEX16(0, reg.usbVendorId());
+}
+
+void test_debug_print_typed_decode_lines()
+{
+    const uint32_t v[3] = {0x544005ACu, 0x12345678u, 0x12A80110u};
+    SOP reg = make((1 << 6) | 3, v, 3);
+    const std::string out = captureDebugPrint(reg);
+
+    TEST_ASSERT_TRUE(out.find("ID Header VDO: 0x544005AC") != std::string::npos);  // existing line kept
+    TEST_ASSERT_TRUE(out.find("ID Header: VID 0x05AC, Host: No, Device: Yes, UFP: PDUSB Peripheral, DFP: Not a DFP, Alt Modes: Yes, Connector: USB Type-C Receptacle") != std::string::npos);
+    TEST_ASSERT_TRUE(out.find("Cert Stat: XID 0x12345678") != std::string::npos);
+    TEST_ASSERT_TRUE(out.find("Product: PID 0x12A8, bcdDevice 0x0110") != std::string::npos);
+}
+
+void test_debug_print_typed_decode_respects_count()
+{
+    const uint32_t v[3] = {0x544005ACu, 0x12345678u, 0x12A80110u};
+    SOP reg = make((1 << 6) | 1, v, 3);  // count 1: only the ID Header is valid
+    const std::string out = captureDebugPrint(reg);
+
+    TEST_ASSERT_TRUE(out.find("ID Header: VID 0x05AC") != std::string::npos);
+    TEST_ASSERT_TRUE(out.find("Cert Stat:") == std::string::npos);
+    TEST_ASSERT_TRUE(out.find("Product:") == std::string::npos);
+}
+
+void test_debug_print_typed_decode_skipped_without_ack()
+{
+    const uint32_t v[1] = {0x544005ACu};
+    SOP nak = make((2 << 6) | 1, v, 1);  // NAK/timeout with a stale VDO
+    const std::string out = captureDebugPrint(nak);
+    TEST_ASSERT_TRUE(out.find("Identity not valid") != std::string::npos);
+    TEST_ASSERT_TRUE(out.find("ID Header: VID") == std::string::npos);
+
+    SOP none = make((1 << 6) | 0, v, 1);  // Ack but zero valid VDOs
+    const std::string out2 = captureDebugPrint(none);
+    TEST_ASSERT_TRUE(out2.find("Identity not valid") != std::string::npos);
+}
+
 // --- Rule of Five ----------------------------------------------------------------
 
 void test_copy_and_move()
@@ -282,6 +459,18 @@ int main(int, char **)
     RUN_TEST(test_vdo_out_of_range_returns_zero);
 
     RUN_TEST(test_debug_print_shows_only_valid_vdos_zero_padded);
+
+    RUN_TEST(test_id_header_fixture_decodes);
+    RUN_TEST(test_id_header_host_dfp_plug_fixture);
+    RUN_TEST(test_cert_stat_xid_fixture);
+    RUN_TEST(test_product_vdo_fixture);
+    RUN_TEST(test_product_type_ufp_codes);
+    RUN_TEST(test_product_type_dfp_codes);
+    RUN_TEST(test_connector_type_codes);
+    RUN_TEST(test_typed_fields_do_not_leak_across_fields);
+    RUN_TEST(test_debug_print_typed_decode_lines);
+    RUN_TEST(test_debug_print_typed_decode_respects_count);
+    RUN_TEST(test_debug_print_typed_decode_skipped_without_ack);
 
     RUN_TEST(test_copy_and_move);
 

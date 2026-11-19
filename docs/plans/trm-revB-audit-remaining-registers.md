@@ -175,9 +175,17 @@ v01's "Documentation Update Checklist (per batch)" applies with these changes:
 
 ## Changes
 
-### Batch G: Version (Fh) and PD3 Configuration (42h)
+### Batch G: Version (Fh) and PD3 Configuration (42h) [partial]
 
 Both registers are 4 bytes with fields well inside `extractBits`/`setBits` range.
+
+- Status: software complete on `fix/rev-b-trm`; the hardware checks below are not yet done. They need the bench and are the only open items.
+- Verified: `pio test -e native` 404/404, with new suites `test_TPS25751Version` (15 tests) and `test_TPS25751PD3Config` (28 tests). `pio run -e example-read-registers` compiled all 125 units with the build cache bypassed, with no warnings. `scripts/verify.py` passed at b02e0ca. `release_level.py main..fix/rev-b-trm` reports minor. The manual cross-check against MCP `get_register(VERSION)` and `get_register(PD3_CONFIGURATION)` matched every field: Version bits 31:0 split as 31:16, 15:8, and 7:0; PD3 bits 20, 19, 18, 17, 11, 10, 8, 7, and 4; reserved mask 0xFFE1F26F; 4-byte `RegisterInfo` at 0x0F and 0x42. Tables 3-7 (p.18) and 3-26 (p.46) are confirmed in the rev B PDF. Commits 256b7f3 (Version), 14e9b39 (PD3 Configuration), d3bf4b8 (example), dbcf020 (AGENTS.md, STANDARDS.md step 1, audit link), and b02e0ca (review guideline).
+- Review gate: `/code-review high` reported six findings, none a correctness defect in the decode. Fixed: PD3 `debugPrint()` now zero-pads the raw value to 8 hex digits; the example banner uses `F()`; the implementer's combined commit was split into one commit per register. Not changed: the example's validated PD3 read returns nothing if firmware sets a reserved bit, which is the plan's rule under "Validation tiers" and is checked on hardware below; the native harness does not compile the factory, so no factory test exists for any register (a harness gap that predates this batch); the validation preamble repeated in every class (a base-class change outside this batch). The gate also found that the PlatformIO build cache hides warnings, now recorded in CODE_REVIEW_GUIDELINES.md.
+- Hardware, not yet done (Teensy 4.0, TPS25751 in APP mode, `pio run -e example-read-registers -t upload`, then `pio device monitor`):
+  1. Fh: record the `VERSION` block's raw value and `VVVV.MM.RR`. Compare with the firmware version from TI's tooling if available, to confirm VVVV sits in bytes 3 and 4. Not yet done.
+  2. 42h read: record the `PD3_CONFIGURATION` raw value; expect 0x00080010 unless the EEPROM configuration differs. If the sketch prints "Failed to create/read PD3 Configuration register", a reserved bit is set: read with `readPD3ConfigRegister(false)`, record the value, and drop that reserved check per "Validation tiers". Not yet done.
+  3. 42h write: read with `readPD3Config()`, toggle `setSupportGetRevision()`, `writePD3Config()`, read back and confirm only bit 19 changed, then write the original value back and confirm it. This needs a scratch sketch, since no example writes a register. Not yet done.
 
 Fh Version, class `TPS25751Version`, read-only, 4 bytes, p.18.
 

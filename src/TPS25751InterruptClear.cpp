@@ -131,7 +131,7 @@ void TPS25751InterruptClear::clearAll()
 
 void TPS25751InterruptClear::debugPrint(Stream &s) const
 {
-    s.println(F("=== Interrupt Clear Register (0x18) [write-only] ==="));
+    s.println(F("=== Interrupt Clear Register (0x18) [R/W, write 1 to clear] ==="));
 
     if (!isValid()) {
         s.println(F("  <invalid>"));
@@ -160,7 +160,8 @@ void TPS25751InterruptClear::debugPrint(Stream &s) const
 
 bool TPS25751InterruptClear::isSemanticallyValid() const
 {
-    // INT_CLEAR1 is write-only: read-back is not meaningful, and the all-zero
+    // INT_CLEAR1 is R/W per the TRM but the library only writes it: read-back
+    // is not meaningful, and the all-zero
     // "clear nothing" buffer is a valid state (unlike field-structured
     // registers), so this deliberately does NOT call hasValidData() -- see
     // TPS25751CustomerUse for the same reasoning.

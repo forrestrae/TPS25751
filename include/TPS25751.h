@@ -188,7 +188,9 @@ public:
     /**
      * @brief Write the Interrupt Clear register (0x18)
      *
-     * INT_CLEAR1 is write-only: there is no corresponding readInterruptClear().
+     * The TRM marks INT_CLEAR1 R/W (SLVUCR8B p.23), but the library only writes
+     * it: there is no readInterruptClear(), because read-back carries no event
+     * state.
      *
      * @param interruptClear Register object holding the staged clear bits to write
      * @return false if @p interruptClear is not valid or not the expected

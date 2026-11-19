@@ -4,7 +4,7 @@
  *
  * Run with: pio test -e native
  *
- * INT_CLEAR1 (0x18) is a write-only staging buffer sharing INT_EVENT1's
+ * INT_CLEAR1 (0x18) is a clear-request staging buffer (R/W per the TRM, written only by the library) sharing INT_EVENT1's
  * (0x14) 88-bit (11-byte) bit layout: writing 1 to a bit clears that source
  * in INT_EVENT1. Byte/bit placement for a bit index `n` is `byte = n / 8`,
  * `offset = n % 8` (matching TPS25751Register::setBits()).
@@ -126,7 +126,7 @@ void test_all_ones_fails_has_valid_data_but_is_semantically_valid()
     // Unlike field-structured registers (e.g. SLEEP_CONTROL), isSemanticallyValid()
     // here deliberately does NOT call hasValidData() -- INT_CLEAR1 has no field
     // structure to validate and "clear everything including reserved bits" is not
-    // an error state for a write-only staging buffer, just an unusual one.
+    // an error state for a clear-request staging buffer, just an unusual one.
     TPS25751InterruptClear reg(ALL_ONES_DATA);
     TEST_ASSERT_FALSE(reg.hasValidData());
     TEST_ASSERT_TRUE(reg.isSemanticallyValid());

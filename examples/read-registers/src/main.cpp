@@ -228,8 +228,9 @@ void print_interrupt_mask()
     Serial.println();
 
     // INT_MASK1 (0x16) is readable; it gates which INT_EVENT1 sources may
-    // assert IRQ. The companion INT_CLEAR1 (0x18) is write-only and so is not
-    // demonstrated here (this sketch is read-only / non-destructive).
+    // assert IRQ. The companion INT_CLEAR1 (0x18) is not demonstrated here:
+    // writing it is destructive (it clears events) and this sketch is
+    // read-only / non-destructive.
     TPS25751InterruptMask interruptMask;
     if (pd.readInterruptMask(interruptMask))
         interruptMask.debugPrint();

@@ -8,7 +8,7 @@
  * @file TPS25751InterruptClear.h
  * @brief INT_CLEAR1 register (0x18) class implementation
  *
- * INT_CLEAR1 is a write-only staging buffer: "Writing 1 to a specific bit
+ * INT_CLEAR1 is a clear-request staging buffer: "Writing 1 to a specific bit
  * will clear that specific event in INT_EVENT1." A caller sets the bits
  * corresponding to the INT_EVENT1 sources it wants acknowledged/cleared,
  * then writes the buffer via TPS25751::writeInterruptClear(). This class
@@ -16,8 +16,9 @@
  * (as clear<Name>() setters rather than read accessors) -- see that class
  * for the read-only INT_EVENT1 register this one acknowledges.
  *
- * @note This register has no meaningful read-back semantics: it is a
- * write-only clear-request buffer, not a mirror of INT_EVENT1's state.
+ * @note The TRM marks this register R/W, but read-back has no useful
+ * semantics: it is a clear-request buffer, not a mirror of INT_EVENT1's
+ * state, so the library only writes it.
  * There are intentionally no decode accessors, no hasAny*()/count helpers,
  * and isSemanticallyValid() does not gate on hasValidData() (see that
  * method's doc comment and TPS25751CustomerUse for the same pattern) --
@@ -26,7 +27,7 @@
  * Register Details:
  * - Address: 0x18
  * - Size: 11 bytes (88 bits)
- * - Access: Write-only
+ * - Access: R/W (SLVUCR8B p.23); the library only writes it
  *
  * @see TI TPS25751 Technical Reference Manual SLVUCR8B (Rev. B), Table 3-10, p.23
  * (Interrupt Clear for I2Ct_IRQ)
@@ -157,7 +158,7 @@ public:
     /**
      * @brief Validates the interrupt-clear register structurally
      *
-     * INT_CLEAR1 is a write-only staging buffer, so read-back is not
+     * INT_CLEAR1 is a clear-request staging buffer the library only writes, so read-back is not
      * meaningful and there is no logical state to validate beyond structure.
      * Unlike most registers, this deliberately does NOT call the inherited
      * hasValidData() -- an all-zero "clear nothing" buffer is the common,

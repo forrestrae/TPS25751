@@ -439,35 +439,15 @@ bool isReadOnly() const override {
 > calling `extractBits()` at all. Any future register whose highest bit offset
 > exceeds 255 must use the same technique.
 
-### Write-Only Registers (W)
+### Registers written to trigger an action
 
 **Examples:** COMMAND, INT_CLEAR1
 
-**Characteristics:**
-- Can only be written
-- Reading returns undefined values
-- Used for triggering actions
-
-**Implementation:**
-```cpp
-bool isReadOnly() const override {
-    return false;  // Can be written
-}
-
-// Reading may not be meaningful
-bool validateData() const override {
-    // Skip data validation for write-only registers
-    return true;
-}
-```
-
-**Usage pattern:**
-```cpp
-TPS25751Command cmd;
-cmd.setCommand(CommandCode::SOFTWARE_RESET);
-tps.writeRegister(cmd);
-// Don't try to read back - it's write-only!
-```
+The TRM (SLVUCR8B) marks no TPS25751 register write-only. COMMAND (p.16) and
+INT_CLEAR1 (p.23) are R/W registers that the host writes to trigger an action.
+`TPS25751::executeCommand()` reads COMMAND to poll for completion. Reading
+INT_CLEAR1 back carries no event state, so the library has no
+`readInterruptClear()` and only writes it.
 
 ### Read/Write Registers (R/W)
 

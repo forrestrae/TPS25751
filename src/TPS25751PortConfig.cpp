@@ -55,7 +55,35 @@ const char* toString(VbusUVPTripHV val) {
         default: return "Unknown";
     }
 }
+const char* toString(USB3Rate val) {
+    switch (val) {
+        case USB3Rate::NotSupported: return "USB3 not supported";
+        case USB3Rate::Gen1: return "USB3 Gen1";
+        case USB3Rate::Gen2: return "USB3 Gen2";
+        case USB3Rate::Reserved: return "Reserved";
+        default: return "Unknown";
+    }
+}
 
+const char* toString(ApdoIlimOvershoot val) {
+    switch (val) {
+        case ApdoIlimOvershoot::Overshoot25mA: return "25 mA overshoot";
+        case ApdoIlimOvershoot::Above50mA: return "50 mA above PDO current";
+        case ApdoIlimOvershoot::Above75mA: return "75 mA above PDO current";
+        case ApdoIlimOvershoot::Static2900mA: return "Static 2900 mA";
+        default: return "Unknown";
+    }
+}
+
+const char* toString(ApdoVbusUvpThreshold val) {
+    switch (val) {
+        case ApdoVbusUvpThreshold::Percent90: return "90%";
+        case ApdoVbusUvpThreshold::Percent88: return "88%";
+        case ApdoVbusUvpThreshold::Percent92: return "92%";
+        case ApdoVbusUvpThreshold::Reserved: return "Reserved";
+        default: return "Unknown";
+    }
+}
 
 TypeCStateMachine TPS25751PortConfig::typeCStateMachine() const
 {
@@ -87,6 +115,31 @@ VbusUVPTripHV TPS25751PortConfig::vbusUVPTripHV() const
     return extractEnum<VbusUVPTripHV>(24, 3, static_cast<uint8_t>(VbusUVPTripHV::Margin50), VbusUVPTripHV::Margin5);
 }
 
+USB3Rate TPS25751PortConfig::usb3Rate() const
+{
+    return extractEnum<USB3Rate>(13, 2, static_cast<uint8_t>(USB3Rate::Reserved), USB3Rate::NotSupported);
+}
+
+bool TPS25751PortConfig::debugAccessorySupport() const
+{
+    return extractBits(12, 1);
+}
+
+bool TPS25751PortConfig::usbCommunicationCapable() const
+{
+    return extractBits(11, 1);
+}
+
+ApdoIlimOvershoot TPS25751PortConfig::apdoIlimOvershoot() const
+{
+    return extractEnum<ApdoIlimOvershoot>(29, 2, static_cast<uint8_t>(ApdoIlimOvershoot::Static2900mA), ApdoIlimOvershoot::Overshoot25mA);
+}
+
+ApdoVbusUvpThreshold TPS25751PortConfig::apdoVbusUvpThreshold() const
+{
+    return extractEnum<ApdoVbusUvpThreshold>(27, 2, static_cast<uint8_t>(ApdoVbusUvpThreshold::Reserved), ApdoVbusUvpThreshold::Percent90);
+}
+
 void TPS25751PortConfig::debugPrint(Stream &s) const {
     s.println(F("=== Port Configuration Register (0x28) ==="));
     s.print(F("  Type-C State Machine: ")); s.println(toString(typeCStateMachine()));
@@ -95,6 +148,11 @@ void TPS25751PortConfig::debugPrint(Stream &s) const {
     s.print(F("  VBUS OVP Usage: ")); s.println(toString(vbusOVPUsage()));
     s.print(F("  OVP for PP5V: ")); s.println(toString(ovpPP5V()));
     s.print(F("  VBUS Sink UVP Trip HV: ")); s.println(toString(vbusUVPTripHV()));
+    s.print(F("  USB3 Rate: ")); s.println(toString(usb3Rate()));
+    s.print(F("  DebugAccessory Support: ")); s.println(debugAccessorySupport());
+    s.print(F("  USB Communication Capable: ")); s.println(usbCommunicationCapable());
+    s.print(F("  APDO ILIM Over Shoot: ")); s.println(toString(apdoIlimOvershoot()));
+    s.print(F("  APDO VBUS UVP Threshold: ")); s.println(toString(apdoVbusUvpThreshold()));
     s.println();
 }
 
@@ -144,6 +202,12 @@ bool TPS25751PortConfig::isSemanticallyValid() const {
     // Check for reserved enum values
     if (support == TypeCSupportOptions::Reserved) {
         return false;  // Reserved value used
+    }
+    if (usb3Rate() == USB3Rate::Reserved) {
+        return false;  // USB3 Rate 3h is Reserved (SLVUCR8B p.29)
+    }
+    if (apdoVbusUvpThreshold() == ApdoVbusUvpThreshold::Reserved) {
+        return false;  // APDO VBUS UVP Threshold 3h is Reserved (SLVUCR8B p.29)
     }
     
     return true;

@@ -202,7 +202,15 @@ void print_sleep_and_customer_use()
 
     TPS25751SleepControl sleepControl;
     if (pd.readSleepControl(sleepControl))
+    {
         sleepControl.debugPrint();
+
+        // Raw register byte, for comparing against the TRM reset value (03h).
+        Serial.print(F("SLEEP_CONTROL raw: 0x"));
+        if (sleepControl.raw()[0] < 0x10)
+            Serial.print('0');
+        Serial.println(sleepControl.raw()[0], HEX);
+    }
     else
         Serial.println(F("Failed to read Sleep Control register"));
 

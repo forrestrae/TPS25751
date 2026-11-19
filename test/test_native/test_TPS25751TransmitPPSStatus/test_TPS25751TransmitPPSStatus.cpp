@@ -540,6 +540,15 @@ void test_debug_print_reports_reserved_bits()
     TEST_ASSERT_NOT_EQUAL(std::string::npos, out.find("Reserved bits set: 0x10000000"));
 }
 
+void test_debug_print_zero_pads_reserved_bits()
+{
+    // Bit 24 alone: Stream's HEX would print 1000000 (7 digits).
+    Pps reg = makePps(1u << 24);
+    const std::string out = captureDebugPrint(reg);
+
+    TEST_ASSERT_NOT_EQUAL(std::string::npos, out.find("Reserved bits set: 0x01000000"));
+}
+
 // --- Rule of Five ----------------------------------------------------------------
 
 void test_copy_constructor_deep_copies()
@@ -630,6 +639,7 @@ int main(int, char **)
     RUN_TEST(test_debug_print_bench_value);
     RUN_TEST(test_debug_print_reset_and_sentinels);
     RUN_TEST(test_debug_print_reports_reserved_bits);
+    RUN_TEST(test_debug_print_zero_pads_reserved_bits);
 
     RUN_TEST(test_copy_constructor_deep_copies);
     RUN_TEST(test_move_constructor_transfers_ownership);

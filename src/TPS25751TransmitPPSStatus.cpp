@@ -2,6 +2,20 @@
 
 #include "TPS25751TransmitPPSStatus.h"
 
+namespace {
+
+void printHex32(Stream &s, uint32_t value)
+{
+    // Zero-padded to 8 hex digits to match the TRM's 00000000h notation;
+    // Stream's HEX output drops leading zeros.
+    for (int shift = 28; shift >= 0; shift -= 4)
+    {
+        s.print(static_cast<unsigned int>((value >> shift) & 0xFu), HEX);
+    }
+}
+
+}  // namespace
+
 // --- String conversion ------------------------------------------------------------
 
 const char *TPS25751TransmitPPSStatus::toString(PresentTemperatureFlag val)
@@ -135,14 +149,9 @@ void TPS25751TransmitPPSStatus::debugPrint(Stream &s) const
     s.println(F(" bytes"));
     s.println(F("========================================"));
 
-    // Zero-padded to 8 hex digits to match the TRM's 00000000h notation;
-    // Stream's HEX output drops leading zeros.
     const uint32_t value = extractBits32(0, 32);
     s.print(F("Raw: 0x"));
-    for (int shift = 28; shift >= 0; shift -= 4)
-    {
-        s.print(static_cast<unsigned int>((value >> shift) & 0xFu), HEX);
-    }
+    printHex32(s, value);
     s.println();
 
     s.print(F("Output Voltage: "));
@@ -186,7 +195,8 @@ void TPS25751TransmitPPSStatus::debugPrint(Stream &s) const
     if (reserved != 0)
     {
         s.print(F("Reserved bits set: 0x"));
-        s.println(static_cast<unsigned long>(reserved), HEX);
+        printHex32(s, reserved);
+        s.println();
     }
 
     s.println(F("========================================"));

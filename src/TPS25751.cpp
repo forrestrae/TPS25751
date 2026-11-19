@@ -210,14 +210,14 @@ bool TPS25751::readTransmitPPSStatus(TPS25751TransmitPPSStatus &ppsStatus) const
     return readRegister(TPS25751Registers::Registers::TRANSMIT_PPS_STATUS, ppsStatus);
 }
 
-bool TPS25751::readTransmitSinkCapsExtended(TPS25751TransmitSinkCapsExtended &caps) const
-{
-    return readRegister(TPS25751Registers::Registers::TRANSMIT_SINK_CAPABILITIES_EXTENDED, caps);
-}
-
 bool TPS25751::readTransmitSourceCapsExtended(TPS25751TransmitSourceCapsExtended &caps) const
 {
     return readRegister(TPS25751Registers::Registers::TRANSMIT_SOURCE_CAPABILITIES_EXTENDED, caps);
+}
+
+bool TPS25751::readTransmitSinkCapsExtended(TPS25751TransmitSinkCapsExtended &caps) const
+{
+    return readRegister(TPS25751Registers::Registers::TRANSMIT_SINK_CAPABILITIES_EXTENDED, caps);
 }
 
 bool TPS25751::writeSleepControl(const TPS25751SleepControl &sleepControl) const
@@ -290,12 +290,12 @@ bool TPS25751::writeTransmitPPSStatus(const TPS25751TransmitPPSStatus &ppsStatus
     return writeRegister(ppsStatus);
 }
 
-bool TPS25751::writeTransmitSinkCapsExtended(const TPS25751TransmitSinkCapsExtended &caps) const
+bool TPS25751::writeTransmitSourceCapsExtended(const TPS25751TransmitSourceCapsExtended &caps) const
 {
     return writeRegister(caps);
 }
 
-bool TPS25751::writeTransmitSourceCapsExtended(const TPS25751TransmitSourceCapsExtended &caps) const
+bool TPS25751::writeTransmitSinkCapsExtended(const TPS25751TransmitSinkCapsExtended &caps) const
 {
     return writeRegister(caps);
 }
@@ -609,20 +609,20 @@ std::unique_ptr<TPS25751TransmitPPSStatus> TPS25751::readTransmitPPSStatusRegist
     return std::unique_ptr<TPS25751TransmitPPSStatus>(typedReg);
 }
 
-std::unique_ptr<TPS25751TransmitSinkCapsExtended> TPS25751::readTransmitSinkCapsExtendedRegister(bool validate) const {
-    auto reg = readAndValidateRegisterByAddress(TPS25751Registers::Address::TRANSMIT_SINK_CAPABILITIES_EXTENDED, validate);
-    if (!reg) return nullptr;
-
-    TPS25751TransmitSinkCapsExtended* typedReg = static_cast<TPS25751TransmitSinkCapsExtended*>(reg.release());
-    return std::unique_ptr<TPS25751TransmitSinkCapsExtended>(typedReg);
-}
-
 std::unique_ptr<TPS25751TransmitSourceCapsExtended> TPS25751::readTransmitSourceCapsExtendedRegister(bool validate) const {
     auto reg = readAndValidateRegisterByAddress(TPS25751Registers::Address::TRANSMIT_SOURCE_CAPABILITIES_EXTENDED, validate);
     if (!reg) return nullptr;
 
     TPS25751TransmitSourceCapsExtended* typedReg = static_cast<TPS25751TransmitSourceCapsExtended*>(reg.release());
     return std::unique_ptr<TPS25751TransmitSourceCapsExtended>(typedReg);
+}
+
+std::unique_ptr<TPS25751TransmitSinkCapsExtended> TPS25751::readTransmitSinkCapsExtendedRegister(bool validate) const {
+    auto reg = readAndValidateRegisterByAddress(TPS25751Registers::Address::TRANSMIT_SINK_CAPABILITIES_EXTENDED, validate);
+    if (!reg) return nullptr;
+
+    TPS25751TransmitSinkCapsExtended* typedReg = static_cast<TPS25751TransmitSinkCapsExtended*>(reg.release());
+    return std::unique_ptr<TPS25751TransmitSinkCapsExtended>(typedReg);
 }
 
 std::unique_ptr<TPS25751ReceivedSOPIdentity> TPS25751::readReceivedSOPIdentityRegister(bool validate) const {

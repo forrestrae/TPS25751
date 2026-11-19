@@ -31,8 +31,8 @@
 #include "TPS25751GlobalSystemConfig.h"
 #include "TPS25751TransmitSourceInfo.h"
 #include "TPS25751TransmitPPSStatus.h"
-#include "TPS25751TransmitSinkCapsExtended.h"
 #include "TPS25751TransmitSourceCapsExtended.h"
+#include "TPS25751TransmitSinkCapsExtended.h"
 #include "TPS25751ReceivedSOPIdentity.h"
 #include "TPS25751Debug.h"
 
@@ -108,10 +108,10 @@ std::unique_ptr<TPS25751Register> TPS25751RegisterFactoryImpl::createRegister(TP
             return createTransmitSourceInfoRegister();
         case TPS25751Registers::Address::TRANSMIT_PPS_STATUS:
             return createTransmitPPSStatusRegister();
-        case TPS25751Registers::Address::TRANSMIT_SINK_CAPABILITIES_EXTENDED:
-            return createTransmitSinkCapsExtendedRegister();
         case TPS25751Registers::Address::TRANSMIT_SOURCE_CAPABILITIES_EXTENDED:
             return createTransmitSourceCapsExtendedRegister();
+        case TPS25751Registers::Address::TRANSMIT_SINK_CAPABILITIES_EXTENDED:
+            return createTransmitSinkCapsExtendedRegister();
         case TPS25751Registers::Address::RECEIVED_SOP_IDENTITY:
             return createReceivedSOPIdentityRegister();
         default:
@@ -194,10 +194,10 @@ std::unique_ptr<TPS25751Register> TPS25751RegisterFactoryImpl::createRegister(TP
             return createTransmitSourceInfoRegister(data, length);
         case TPS25751Registers::Address::TRANSMIT_PPS_STATUS:
             return createTransmitPPSStatusRegister(data, length);
-        case TPS25751Registers::Address::TRANSMIT_SINK_CAPABILITIES_EXTENDED:
-            return createTransmitSinkCapsExtendedRegister(data, length);
         case TPS25751Registers::Address::TRANSMIT_SOURCE_CAPABILITIES_EXTENDED:
             return createTransmitSourceCapsExtendedRegister(data, length);
+        case TPS25751Registers::Address::TRANSMIT_SINK_CAPABILITIES_EXTENDED:
+            return createTransmitSinkCapsExtendedRegister(data, length);
         case TPS25751Registers::Address::RECEIVED_SOP_IDENTITY:
             return createReceivedSOPIdentityRegister(data, length);
         default:
@@ -275,10 +275,10 @@ std::unique_ptr<TPS25751Register> TPS25751RegisterFactoryImpl::createRegister(co
             return std::make_unique<TPS25751TransmitSourceInfo>(regInfo);
         case TPS25751Registers::Address::TRANSMIT_PPS_STATUS:
             return std::make_unique<TPS25751TransmitPPSStatus>(regInfo);
-        case TPS25751Registers::Address::TRANSMIT_SINK_CAPABILITIES_EXTENDED:
-            return std::make_unique<TPS25751TransmitSinkCapsExtended>(regInfo);
         case TPS25751Registers::Address::TRANSMIT_SOURCE_CAPABILITIES_EXTENDED:
             return std::make_unique<TPS25751TransmitSourceCapsExtended>(regInfo);
+        case TPS25751Registers::Address::TRANSMIT_SINK_CAPABILITIES_EXTENDED:
+            return std::make_unique<TPS25751TransmitSinkCapsExtended>(regInfo);
         case TPS25751Registers::Address::RECEIVED_SOP_IDENTITY:
             return std::make_unique<TPS25751ReceivedSOPIdentity>(regInfo);
         default:
@@ -549,20 +549,20 @@ std::unique_ptr<TPS25751Register> TPS25751RegisterFactoryImpl::createTransmitPPS
     return std::make_unique<TPS25751TransmitPPSStatus>(data, length);
 }
 
-std::unique_ptr<TPS25751Register> TPS25751RegisterFactoryImpl::createTransmitSinkCapsExtendedRegister() const {
-    return std::make_unique<TPS25751TransmitSinkCapsExtended>();
-}
-
-std::unique_ptr<TPS25751Register> TPS25751RegisterFactoryImpl::createTransmitSinkCapsExtendedRegister(const uint8_t* data, size_t length) const {
-    return std::make_unique<TPS25751TransmitSinkCapsExtended>(data, length);
-}
-
 std::unique_ptr<TPS25751Register> TPS25751RegisterFactoryImpl::createTransmitSourceCapsExtendedRegister() const {
     return std::make_unique<TPS25751TransmitSourceCapsExtended>();
 }
 
 std::unique_ptr<TPS25751Register> TPS25751RegisterFactoryImpl::createTransmitSourceCapsExtendedRegister(const uint8_t* data, size_t length) const {
     return std::make_unique<TPS25751TransmitSourceCapsExtended>(data, length);
+}
+
+std::unique_ptr<TPS25751Register> TPS25751RegisterFactoryImpl::createTransmitSinkCapsExtendedRegister() const {
+    return std::make_unique<TPS25751TransmitSinkCapsExtended>();
+}
+
+std::unique_ptr<TPS25751Register> TPS25751RegisterFactoryImpl::createTransmitSinkCapsExtendedRegister(const uint8_t* data, size_t length) const {
+    return std::make_unique<TPS25751TransmitSinkCapsExtended>(data, length);
 }
 
 std::unique_ptr<TPS25751Register> TPS25751RegisterFactoryImpl::createReceivedSOPIdentityRegister(const uint8_t* data, size_t length) const {

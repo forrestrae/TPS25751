@@ -37,8 +37,8 @@ class TPS25751PD3Config;
 class TPS25751GlobalSystemConfig;
 class TPS25751TransmitSourceInfo;
 class TPS25751TransmitPPSStatus;
-class TPS25751TransmitSinkCapsExtended;
 class TPS25751TransmitSourceCapsExtended;
+class TPS25751TransmitSinkCapsExtended;
 class TPS25751ReceivedSOPIdentity;
 
 /**
@@ -119,8 +119,8 @@ private:
     std::unique_ptr<TPS25751Register> createGlobalSystemConfigRegister() const;
     std::unique_ptr<TPS25751Register> createTransmitSourceInfoRegister() const;
     std::unique_ptr<TPS25751Register> createTransmitPPSStatusRegister() const;
-    std::unique_ptr<TPS25751Register> createTransmitSinkCapsExtendedRegister() const;
     std::unique_ptr<TPS25751Register> createTransmitSourceCapsExtendedRegister() const;
+    std::unique_ptr<TPS25751Register> createTransmitSinkCapsExtendedRegister() const;
     std::unique_ptr<TPS25751Register> createReceivedSOPIdentityRegister() const;
 
     std::unique_ptr<TPS25751Register> createStatusRegister(const uint8_t* data, size_t length) const;
@@ -155,8 +155,8 @@ private:
     std::unique_ptr<TPS25751Register> createGlobalSystemConfigRegister(const uint8_t* data, size_t length) const;
     std::unique_ptr<TPS25751Register> createTransmitSourceInfoRegister(const uint8_t* data, size_t length) const;
     std::unique_ptr<TPS25751Register> createTransmitPPSStatusRegister(const uint8_t* data, size_t length) const;
-    std::unique_ptr<TPS25751Register> createTransmitSinkCapsExtendedRegister(const uint8_t* data, size_t length) const;
     std::unique_ptr<TPS25751Register> createTransmitSourceCapsExtendedRegister(const uint8_t* data, size_t length) const;
+    std::unique_ptr<TPS25751Register> createTransmitSinkCapsExtendedRegister(const uint8_t* data, size_t length) const;
     std::unique_ptr<TPS25751Register> createReceivedSOPIdentityRegister(const uint8_t* data, size_t length) const;
 };
 

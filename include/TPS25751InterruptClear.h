@@ -28,7 +28,8 @@
  * - Size: 11 bytes (88 bits)
  * - Access: Write-only
  *
- * @see TI TPS25751 Technical Reference Manual, Table 3-27 family (INT_CLEAR1)
+ * @see TI TPS25751 Technical Reference Manual SLVUCR8B (Rev. B), Table 3-10, p.23
+ * (Interrupt Clear for I2Ct_IRQ)
  */
 class TPS25751InterruptClear : public TPS25751Register
 {

@@ -17,8 +17,11 @@ enum class Address : uint8_t {
     CUSTOMER_USE = 0x06,
     COMMAND = 0x08,
     DATA = 0x09,
+    /// Interrupt Event for I2Ct_IRQ (SLVUCR8B Rev. B, p.19). TI short name INT_EVENT1.
     INT_EVENT1 = 0x14,
+    /// Interrupt Mask for I2Ct_IRQ (SLVUCR8B Rev. B, p.21). TI short name INT_MASK1.
     INT_MASK1 = 0x16,
+    /// Interrupt Clear for I2Ct_IRQ (SLVUCR8B Rev. B, p.23). Library short name, extending TI's INT_EVENT1 pattern.
     INT_CLEAR1 = 0x18,
     STATUS = 0x1A,
     POWER_PATH_STATUS = 0x26,

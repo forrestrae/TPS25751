@@ -17,8 +17,11 @@
  * Access: Read-only
  *
  * This class provides accessor methods for all non-reserved interrupt flags.
- * Use the corresponding INTERRUPT_MASK and INTERRUPT_CLEAR registers (0x16, 0x18)
+ * Use the corresponding INT_MASK1 and INT_CLEAR1 registers (0x16, 0x18)
  * to control interrupt behavior.
+ *
+ * @see TI TPS25751 Technical Reference Manual SLVUCR8B (Rev. B), Table 3-8, p.19
+ * (Interrupt Event for I2Ct_IRQ)
  */
 class TPS25751InterruptEvent : public TPS25751Register
 {

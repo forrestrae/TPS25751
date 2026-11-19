@@ -9,8 +9,10 @@
  * @brief INT_MASK1 register (0x16) class implementation
  *
  * The INT_MASK1 register controls which INT_EVENT1 (0x14) interrupt sources
- * are permitted to assert: "A bit in INT_EVENT1 cannot be set if it is
- * cleared in this register." A mask bit of 1 means the corresponding source
+ * are permitted to assert: "Interrupt mask bit field for INT_EVENT1. Bytes 1
+ * to 10 of this register must be configured through the Application
+ * Customization Tool to enable the corresponding interrupt events." A mask
+ * bit of 1 means the corresponding source
  * is enabled (allowed to set its INT_EVENT1 bit); a mask bit of 0 disables
  * (blocks) that source. This class mirrors TPS25751InterruptEvent's bit
  * layout and accessor names exactly -- see that class for the read-only
@@ -21,7 +23,8 @@
  * - Size: 11 bytes (88 bits)
  * - Access: Read/Write
  *
- * @see TI TPS25751 Technical Reference Manual, Table 3-27 family (INT_MASK1)
+ * @see TI TPS25751 Technical Reference Manual SLVUCR8B (Rev. B), Table 3-9, p.21
+ * (Interrupt Mask for I2Ct_IRQ)
  */
 class TPS25751InterruptMask : public TPS25751Register
 {

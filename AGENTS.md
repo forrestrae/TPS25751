@@ -15,8 +15,8 @@ The TPS25751 library is an object-oriented C++ library for interfacing with the 
 - RAII memory management for embedded systems
 - Platform-optimized for Teensy 4.x (ARM Cortex-M7, no RTTI)
 
-**Last Updated:** 2026-11-18
-**Current Phase:** Rev B register coverage, 35 of the 37 registers in TRM SLVUCR8B.
+**Last Updated:** 2026-11-19
+**Current Phase:** Rev B register coverage complete, 37 of the 37 registers in TRM SLVUCR8B.
 [trm-revB-audit-remaining-registers.md](docs/plans/trm-revB-audit-remaining-registers.md)
 adds the ten registers rev B documents that the library did not decode, in Batches G
 to K on `fix/rev-b-trm`. Batch G added VERSION (0x0F, read-only) and PD3_CONFIGURATION
@@ -28,7 +28,10 @@ TRANSMITTED_PPS_STATUS (0x7A, R/W), the source-side info blocks the controller s
 reply to Get_Source_Info and Get_PPS_Status. Batch J added TX_SOURCE_CAPABILITIES_EXTENDED
 (0x77, R/W) and TRANSMIT_SINK_CAPABILITIES_EXTENDED (0x7E, R/W), the data blocks the
 controller sends in reply to Get_Source_Cap_Extended and Get_Sink_Cap_Extended, as raw
-fields until Batch L adds typed decode. Earlier history: the 27 registers of plan-impl-v01 were complete on
+fields until Batch L adds typed decode. Batch K added TRANSMITTED_BATTERY_STATUS (0x7B,
+R/W) and TX_BATTERY_CAPABILITIES (0x7D, R/W, the first R/W register with fields past bit
+255), the blocks the controller sends in reply to Get_Battery_Status and
+Get_Battery_Capabilities, also raw until Batch L. Earlier history: the 27 registers of plan-impl-v01 were complete on
 2026-07-08 (Batch F added
 LIQUID_DETECTION_CONFIG: a R/W 12-byte liquid/moisture-detection configuration block
 — wait intervals (rev B "Wait Time"), ADC sample count/cadence, ADC threshold pairs with hysteresis, and
@@ -176,7 +179,7 @@ Serial.println(F("String in flash"));                // Use F() macro
 
 ## Implementation Status
 
-**Implemented Registers:** 35/37
+**Implemented Registers:** 37/37
 - STATUS, MODE, POWER_PATH_STATUS, BOOT_FLAGS, PORT_CONFIG
 - TYPEC_STATE, INTERRUPT_EVENT, POWER_STATUS, PD_STATUS
 - ACTIVE_PDO_CONTRACT, ACTIVE_RDO_CONTRACT, PORT_CONTROL
@@ -246,8 +249,19 @@ Serial.println(F("String in flash"));                // Use F() macro
   specification, so typed decode waits for Batch L. The controller prepends VID, PID,
   XID, and the firmware and hardware versions to these bytes. PD3_CONFIGURATION bits 8
   and 17 gate the controller's replies from them.
+- TRANSMITTED_BATTERY_STATUS, TX_BATTERY_CAPABILITIES (Batch K, 2026-11-19): 0x7B
+  (16 B, reset FFFF0200h in the low word) holds four 4-byte Battery Status Data Objects
+  and 0x7D (36 B) four 9-byte Battery Capabilities entries, all raw, with indexed
+  setters, `writeTransmitBatteryStatus()`, and `writeTransmitBatteryCapabilities()`.
+  Battery 3 of 0x7D sits at bits 287:216, past `extractBits()`/`setBits()`'s
+  `uint8_t bitPos`, so that class reads and writes every entry through class-private
+  byte helpers. The TRM labels those bits "battery index 0"; the library treats them as
+  battery 3. PD3_CONFIGURATION bits 11 and 10 gate the controller's replies from them.
+  `readRegisterByAddress()` returns an object for all 37 addresses on hardware after
+  Batch K's fix to `getRegisterInfo()`, which lacked a CUSTOMER_USE case.
 
-**Status:** 35 of 37 registers implemented. Batch K adds 7Bh and 7Dh.
+**Status:** 37 of 37 registers implemented. Batch L (typed USB PD decode for 0x48,
+0x77, 0x7E, 0x7B, and 0x7D) waits for an MCP server that serves the USB PD specification.
 - See [trm-revB-audit-remaining-registers.md](docs/plans/trm-revB-audit-remaining-registers.md) for the current roadmap
   and [plan-impl-v01.md](docs/plans/plan-impl-v01.md) for the completed rev A roadmap
 
@@ -304,7 +318,7 @@ Each register has its own class inheriting from `TPS25751Register`:
 - `TPS25751Command`: COMMAND register (0x08) — 4CC task code, clear/rejected state
 - `TPS25751Data`: DATA register (0x09) — generic 64-byte 4CC task payload (no fixed layout)
 - `TPS25751SleepControl`: SLEEP_CONTROL register (0x70) — sleep-mode enable + sleep-time; R/W with field setters
-- `TPS25751CustomerUse`: CUSTOMER_USE register (0x06) — opaque 8-byte application blob; R/W raw/64-bit accessors
+- `TPS25751CustomerUse`: CUSTOMER_USE register (0x06) — opaque 8-byte application blob; R/W raw/64-bit accessors. Rev B (SLVUCR8B p.15) marks the field read-only, changeable only during application customization, and on hardware the controller ACKs a write and keeps the old value; `writeCustomerUse()` remains for now (see CONSTRAINTS.md, Read/Write Registers)
 - `TPS25751InterruptMask`: INT_MASK1 register (0x16) — per-source interrupt enable mask mirroring INT_EVENT1's 38-source bit map (rev B adds MIDB Received bit 29 and Discover Mode Completed bit 51); R/W with `set<Source>(bool)` setters (a 1 unmasks/enables that source)
 - `TPS25751InterruptClear`: INT_CLEAR1 register (0x18) — event-clear staging buffer (R/W per the TRM, p.23; the library only writes it); `clear<Source>()` / `clear(bitPos)` / `clearAll()` helpers (write a 1 to acknowledge that INT_EVENT1 source)
 - `TPS25751ADCResults`: ADC_RESULTS register (0x6A) — read-only 13-byte internal-ADC telemetry block; per-pin voltage and power-path current (IVBUS_Mean byte 5, IVBUS_Peak byte 11 per rev B) with `raw*()` + unit-converted (`*Millivolts()`/`*Milliamps()`) accessors. Byte layout is not alphabetical (transcribed from the TRM); not updated in Unconnected-Sleep mode
@@ -320,6 +334,8 @@ Each register has its own class inheriting from `TPS25751Register`:
 - `TPS25751TransmitSourceInfo`: TX_SOURCE_INFO register (0x78), R/W, 8 bytes, reset 8000000080000000h. Nested `PortType` enum (Managed, Guaranteed) for the two Port Type bits, `portTypeUpper()` (bit 63) and `portTypeLower()` (bit 31); the TRM gives both the same text and does not explain the duplication. `dpsPort()` (62); raw and `_mW` accessors for Port Maximum PDP and Port Guaranteed PDP at 0.5 W/LSB (49:41, 40:32) and Port Maximum, Present, and Reported PDP at 1 W/LSB (23:16, 15:8, 7:0). Raw setters mask to the field width; unit setters round down and clamp to the field maximum. `kAddress` and `writeTransmitSourceInfo()`. The TRM says the PD firmware updates the register automatically, so a host write can be overwritten. Semantic validation: reserved bits 61:50 and 30:24 read 0; DPSPort set requires bit 63 Managed (TRM); Guaranteed PDP at most Maximum PDP when the maximum is nonzero (inferred from the field descriptions, not stated by the TRM). Gated by PD3_CONFIGURATION bit 18 (`supportGetSourceInfo()`)
 - `TPS25751TransmitPPSStatus`: TRANSMITTED_PPS_STATUS_DATA_BLOCK register (0x7A), R/W, 4 bytes. Output Voltage (15:0, 20 mV/LSB, 0xFFFF not supported) and Output Current (23:16, 50 mA/LSB, 0xFF not supported) with raw, `*Supported()`, and unit accessors (unit accessors return 0 for the sentinel); nested `PresentTemperatureFlag` (26:25; 00b, the reset, is undefined in the TRM) and `OperatingMode` (27, CV or CL) enums. Unit setters round down and clamp one below the sentinel; `setOutputVoltageNotSupported()` and `setOutputCurrentNotSupported()` write the sentinels. `kAddress` and `writeTransmitPPSStatus()`. Semantic validation: reserved bits 31:28 and 24 read 0. Gated by PD3_CONFIGURATION bit 20 (`supportPpsStatus()`)
 - `TPS25751TransmitSourceCapsExtended`: TX_SOURCE_CAPABILITIES_EXTENDED_DATA_BLOCK register (0x77), R/W, 15 bytes. Raw accessors and `setBits()` setters for Voltage Regulation, Hold Up Time, Compliance, Touch Current (bytes 0 to 3), `peakCurrent(1..3)` (16-bit little-endian at bits 47:32, 63:48, 79:64; 0 for any other index), Touch Temperature (87:80), Source Inputs (95:88), Number Fixed Batteries (99:96), Number Hot Swappable Batteries (103:100), and Source PDP (110:104, 7 bits). `kAddress` and `writeTransmitSourceCapsExtended()`. No units or meanings: the TRM defers the encodings to the USB PD specification, and typed decode waits for Batch L. Semantic validation: reserved bits 119:111 read 0, each battery count at most 4 (TRM "Max of 4"). The battery counts should agree with 0x7B and 0x7D, which one register cannot check. Source Inputs bit 0 can be changed by the Barrel_Jack_Event GPIO event. Hardware reads Source PDP 0x7F, not the documented reset of 0 (see CONSTRAINTS.md, Read/Write Registers). Gated by PD3_CONFIGURATION bit 8 (`supportSourceExtended()`; the TRM calls it SourceCapExtMsg on p.54)
+- `TPS25751TransmitBatteryStatus`: TRANSMITTED_BATTERY_STATUS_DATA_OBJECTS_(BSDO) register (0x7B), R/W, 16 bytes, reset FFFF0200h in the low word (Battery 0 Battery Info 2h, Present Capacity FFFFh). Four 4-byte entries at byte 4i: a reserved byte, Battery Info (byte 4i+1), and Present Capacity (bytes 4i+2 and 4i+3, little-endian). Indexed `batteryInfo(i)`/`rawPresentCapacity(i)` and `setBits()` setters for i 0 to 3 (0 or no-op for i of 4 or more); TI names battery 3's capacity "Battery 3 Present Info". `kAddress` and `writeTransmitBatteryStatus()`. Raw only; typed decode waits for Batch L. Semantic validation: reserved bytes 0, 4, 8, and 12 read 0. The reset contains 0xFF bytes but passes the all-0xFF data check. The 0x77 battery counts should agree with the populated entries, which one register cannot check. Gated by PD3_CONFIGURATION bit 11 (`supportBatteryStatus()`)
+- `TPS25751TransmitBatteryCapabilities`: TX_BATTERY_CAPABILITIES register (0x7D), R/W, 36 bytes. Four 9-byte entries at byte 9i: VID (+0), PID (+2), Battery Design Capacity (+4), Battery Last Full Charge Capacity (+6), all 16-bit little-endian, and Battery Type (+8). Indexed accessors and setters for battery 0 to 3 (0 or no-op for 4 or more). The library's first R/W register with fields past bit 255: battery 3 occupies bytes 27 to 35 (bits 287:216), so the class never calls `extractBits()`/`setBits()` and uses class-private bounds-checked `readLE16`/`readByte`/`writeLE16`/`writeByte` helpers for every entry, extending the `TPS25751IOConfig` read technique to writes. The TRM describes bits 287:216 as "battery index 0" while naming them VID 3 and PID 3; the library treats them as battery 3 (see CONSTRAINTS.md, Read/Write Registers). `kAddress` and `writeTransmitBatteryCapabilities()`. Raw only; typed decode waits for Batch L. No reserved bits and no TRM field rule, so semantic validation is the base checks only. Gated by PD3_CONFIGURATION bit 10 (`supportBatteryCapabilities()`)
 - `TPS25751TransmitSinkCapsExtended`: TRANSMIT_SINK_CAPABILITIES_EXTENDED_DATA_BLOCK register (0x7E), R/W, 14 bytes. Raw accessors and `setBits()` setters for SKEDB Version, Load Step, Sink Load Characteristics (31:16, 16-bit little-endian), Compliance, Touch Temperature (47:40; TI spells it "Touch Temprature"), Battery Info, Sink Modes, and Sink Minimum, Operational, and Maximum PDP (bytes 8 to 10). `kAddress` and `writeTransmitSinkCapsExtended()`. Raw only; typed decode waits for Batch L. Semantic validation: reserved bits 111:88 read 0; no PDP ordering rule, because the TRM gives no encoding for the PDP bytes. The TRM says the controller does not use these values to affect its behavior. Gated by PD3_CONFIGURATION bit 17 (`supportSinkCapExtended()`)
 
 ### 4CC Command-Task Interface & I2Cc Downstream-Device Proxy

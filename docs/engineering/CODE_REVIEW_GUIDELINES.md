@@ -97,6 +97,19 @@ the Batch B+ registers) adds field setters or a `TPS25751::writeX()` method:
   controller's length byte, which can differ from the TRM's bit width rounded up
   (GLOBAL_SYSTEM_CONFIGURATION: 116 bits in the TRM, 14 bytes on hardware). Do not
   sign off a new register's size until a hardware read has confirmed the length byte.
+- **A new `Address` needs a case in both lookup switches**: `getRegisterSize()` and
+  `getRegisterInfo()` in `TPS25751RegisterAddress.h` both end in `default`, so the
+  compiler does not report a missing enumerator. A missing `getRegisterInfo()` case
+  makes `readRegisterByAddress()` return null and `writeRegister<T>()` return false
+  without writing, while the direct `readX()` path still works. CUSTOMER_USE lacked
+  that case from the first commit until Batch K's bench walk over all 37 addresses
+  found it. `test_TPS25751RegisterAddress` lists every register and checks both
+  switches; add each new register to its table.
+- **Check the TRM access type before adding a write path**: the TRM can mark a
+  register read-only at runtime even when it looks like host storage. CUSTOMER_USE
+  is `[R]` in rev B ("can only be changed during application customization"), and
+  the controller ACKs a write and keeps the old value, so a successful I2C write is
+  not evidence the register changed. Confirm R/W on hardware with a read-back.
 
 ### Downstream-Device Write-Path Traps (ADR-009)
 

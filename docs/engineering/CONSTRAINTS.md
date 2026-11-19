@@ -438,6 +438,18 @@ bool isReadOnly() const override {
 > `TPS25751TransmitSourceCaps::getPDO()`'s byte-assembly pattern — rather than
 > calling `extractBits()` at all. Any future register whose highest bit offset
 > exceeds 255 must use the same technique.
+>
+> TX_BATTERY_CAPABILITIES (0x7D, Batch K) is the first R/W register past bit
+> 255. Battery 3 occupies bits 287:216 (bytes 27 to 35), so its Design Capacity
+> starts at bit 248 and ends at 263, and its Last Full Charge Capacity and Battery
+> Type start at bits 264 and 280. `TPS25751TransmitBatteryCapabilities` therefore
+> never calls `extractBits*()` or `setBits()`, for any entry. It reads and writes
+> every field through class-private helpers (`readLE16`, `readByte`, `writeLE16`,
+> `writeByte`) that check `isValid()` and `byteOffset + 1 < _len` in `size_t`, so a
+> 16-bit access cannot touch `_raw[_len]` and no offset arithmetic wraps. Casting a
+> large offset to `uint8_t` would wrap to a low bit and corrupt battery 0. The helpers
+> stay class-local: widening the base-class `bitPos` to `uint16_t` would remove them
+> and IO_CONFIG's, but it changes the base-class API and needs its own ADR.
 
 ### Registers written to trigger an action
 
@@ -602,6 +614,43 @@ Get_Source_Cap_Extended and Get_Sink_Cap_Extended with Not_Supported, and neithe
 register's contents go out on the wire. The field encodings come from the USB PD
 specification, which the register-docs server does not serve, so both classes
 expose raw values only.
+
+**TX_BATTERY_CAPABILITIES (0x7D): the TRM labels battery 3 as battery 0.**
+SLVUCR8B Rev. B (p.58, Table 3-37) describes the five fields at bits 287:216 as
+"battery index 0", but names them VID 3 and PID 3, and they sit at the fourth
+72-bit stride. Three field names (Battery Type, Battery Design Capacity, Battery
+Last Full Charge Capacity) also repeat four times. The library reads bits 287:216
+as battery 3, the only reading consistent with the field names and the stride, and
+identifies every field by bit range. On 7Bh, the TRM (p.57, Table 3-36) names
+battery 3's capacity "Battery 3 Present Info" where batteries 0 to 2 use "Present
+Capacity"; the library uses one name, `rawPresentCapacity(3)`. Both defects are
+recorded in the register-docs server's `known_document_issues.json`.
+
+**TRANSMITTED_BATTERY_STATUS (0x7B) and TX_BATTERY_CAPABILITIES (0x7D) on hardware.**
+On 2026-11-19 the same board, sinking from a PD charger, reported length bytes of
+16 and 36, as the TRM widths imply. 0x7B read `00 02 FF FF` followed by twelve zero
+bytes, the documented reset FFFF0200h, with no reserved byte set, so
+`TPS25751TransmitBatteryStatus` keeps its reserved-byte checks. The reset contains
+0xFF bytes but is not all 0xFF, so it passes the data tier. 0x7D read all zero.
+Raw writes of distinct bytes read back exactly on both registers over four reads
+250 ms apart, the firmware did not overwrite them, and the restores read back
+exactly. Through the classes, setting every battery 3 field of 0x7D and calling
+`writeTransmitBatteryCapabilities()` left bytes 0 to 26, including a nonzero byte
+26 (battery 2's Battery Type), unchanged on the controller. 0x77 reads zero fixed
+and zero hot-swappable batteries while 0x7B battery 0 holds the reset value; whether
+that entry counts as populated depends on the Battery Info encoding, which is a USB
+PD specification structure (Batch L). The board's PD3_CONFIGURATION has bits 11 and
+10 clear, so the controller answers Get_Battery_Status and Get_Battery_Capabilities
+with Not_Supported.
+
+**CUSTOMER_USE (0x06) is read-only at runtime in rev B.** SLVUCR8B Rev. B (p.15)
+marks the field `[R]`: it "can only be changed during application customization,
+not at runtime." The library has exposed `writeCustomerUse()` since Batch A. Until
+2026-11-19 that call returned false without writing, because `getRegisterInfo()`
+had no CUSTOMER_USE case. With the case added, the write reaches the bus and the
+controller ACKs it, but a read-back 100 ms later still shows the old value (bench,
+2026-11-19). Treat CUSTOMER_USE as read-only; whether to remove `writeCustomerUse()`
+is an open API decision, since removal is a breaking change.
 
 ---
 
@@ -1092,6 +1141,7 @@ void foo() {
 | 1.5 | 2026-11-18 | Claude Code | Batch H of the rev B plan: GLOBAL_SYSTEM_CONFIGURATION (0x27) reports 14 bytes on hardware and the firmware sets bits in all its reserved ranges; RECEIVED_SOP_IDENTITY (0x48) status comes from Response Type, not INT_EVENT1 bit 51 (Read/Write Registers section) |
 | 1.6 | 2026-11-18 | Claude Code | LIQUID_DETECTION_CONFIG (0x98) reports 12 bytes on hardware, not 11 (Read/Write Registers section); PDO classes decode only the SPR PPS APDO subtype after a subtype 10b APDO in 0x32 failed validation (USB Power Delivery Complexity section); the firmware still uses the rev A Power Path layout in 0x32 bits 21:10 |
 | 1.7 | 2026-11-18 | Claude Code | Batch J of the rev B plan: TX_SOURCE_CAPABILITIES_EXTENDED (0x77) reads Source PDP 0x7F from firmware configuration, not the documented reset; 0x77 and TRANSMIT_SINK_CAPABILITIES_EXTENDED (0x7E) report 15 and 14 bytes as the TRM implies, and the firmware sets none of their reserved bits (Read/Write Registers section) |
+| 1.8 | 2026-11-19 | Claude Code | Batch K of the rev B plan: TX_BATTERY_CAPABILITIES (0x7D) is the first R/W register past bit 255 and uses class-local byte helpers (Read-Only Registers section, IO_CONFIG note); the TRM labels 0x7D battery 3 as battery 0; 0x7B and 0x7D report 16 and 36 bytes and round-trip on hardware; CUSTOMER_USE (0x06) ignores runtime writes (Read/Write Registers section) |
 
 ---
 

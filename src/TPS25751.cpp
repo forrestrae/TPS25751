@@ -210,6 +210,11 @@ bool TPS25751::readTransmitPPSStatus(TPS25751TransmitPPSStatus &ppsStatus) const
     return readRegister(TPS25751Registers::Registers::TRANSMIT_PPS_STATUS, ppsStatus);
 }
 
+bool TPS25751::readTransmitSourceCapsExtended(TPS25751TransmitSourceCapsExtended &caps) const
+{
+    return readRegister(TPS25751Registers::Registers::TRANSMIT_SOURCE_CAPABILITIES_EXTENDED, caps);
+}
+
 bool TPS25751::writeSleepControl(const TPS25751SleepControl &sleepControl) const
 {
     // Delegates to the typed writeRegister<T>() (keyed on kAddress) so there is
@@ -278,6 +283,11 @@ bool TPS25751::writeTransmitSourceInfo(const TPS25751TransmitSourceInfo &sourceI
 bool TPS25751::writeTransmitPPSStatus(const TPS25751TransmitPPSStatus &ppsStatus) const
 {
     return writeRegister(ppsStatus);
+}
+
+bool TPS25751::writeTransmitSourceCapsExtended(const TPS25751TransmitSourceCapsExtended &caps) const
+{
+    return writeRegister(caps);
 }
 
 // Type-safe register reading methods
@@ -587,6 +597,14 @@ std::unique_ptr<TPS25751TransmitPPSStatus> TPS25751::readTransmitPPSStatusRegist
 
     TPS25751TransmitPPSStatus* typedReg = static_cast<TPS25751TransmitPPSStatus*>(reg.release());
     return std::unique_ptr<TPS25751TransmitPPSStatus>(typedReg);
+}
+
+std::unique_ptr<TPS25751TransmitSourceCapsExtended> TPS25751::readTransmitSourceCapsExtendedRegister(bool validate) const {
+    auto reg = readAndValidateRegisterByAddress(TPS25751Registers::Address::TRANSMIT_SOURCE_CAPABILITIES_EXTENDED, validate);
+    if (!reg) return nullptr;
+
+    TPS25751TransmitSourceCapsExtended* typedReg = static_cast<TPS25751TransmitSourceCapsExtended*>(reg.release());
+    return std::unique_ptr<TPS25751TransmitSourceCapsExtended>(typedReg);
 }
 
 std::unique_ptr<TPS25751ReceivedSOPIdentity> TPS25751::readReceivedSOPIdentityRegister(bool validate) const {

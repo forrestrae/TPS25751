@@ -35,6 +35,7 @@
 #include "TPS25751GlobalSystemConfig.h"
 #include "TPS25751TransmitSourceInfo.h"
 #include "TPS25751TransmitPPSStatus.h"
+#include "TPS25751TransmitSourceCapsExtended.h"
 #include "TPS25751ReceivedSOPIdentity.h"
 #include "TPS25751RegisterAddress.h"
 #include "TPS25751RegisterFactory.h"
@@ -180,6 +181,13 @@ public:
     bool readTransmitPPSStatus(TPS25751TransmitPPSStatus &ppsStatus) const;
 
     /**
+     * @brief Read the TX Source Capabilities Extended register (0x77)
+     * @param caps Register object to populate (15 bytes)
+     * @return true if the read succeeded
+     */
+    bool readTransmitSourceCapsExtended(TPS25751TransmitSourceCapsExtended &caps) const;
+
+    /**
      * @brief Write the Sleep Control register (0x70)
      * @param sleepControl Register object holding the bytes to write
      * @return false if @p sleepControl is not valid or not the expected size;
@@ -304,6 +312,20 @@ public:
      *         otherwise the result of the underlying I2C write
      */
     bool writeTransmitPPSStatus(const TPS25751TransmitPPSStatus &ppsStatus) const;
+
+    /**
+     * @brief Write the TX Source Capabilities Extended (0x77) register
+     *
+     * The controller builds its Get_Source_Cap_Extended reply from this register only while
+     * PD3_CONFIGURATION (0x42) bit 8
+     * (TPS25751PD3Config::supportSourceExtended()); with it clear the controller
+     * answers Get_Source_Cap_Extended with Not_Supported.
+     *
+     * @param caps Register object holding the bytes to write
+     * @return false if @p caps is not valid or not the expected size;
+     *         otherwise the result of the underlying I2C write
+     */
+    bool writeTransmitSourceCapsExtended(const TPS25751TransmitSourceCapsExtended &caps) const;
 
     // Type-safe register reading methods
     bool readRegister(TPS25751Registers::RegisterInfo regInfo, uint8_t *buffer) const;
@@ -577,6 +599,13 @@ public:
      * @return Unique pointer to the register (nullptr if failed)
      */
     std::unique_ptr<TPS25751TransmitPPSStatus> readTransmitPPSStatusRegister(bool validate = true) const;
+
+    /**
+     * @brief Read TX Source Capabilities Extended (0x77) register using factory pattern
+     * @param validate Whether to validate the register after reading
+     * @return Unique pointer to the register (nullptr if failed)
+     */
+    std::unique_ptr<TPS25751TransmitSourceCapsExtended> readTransmitSourceCapsExtendedRegister(bool validate = true) const;
 
     /**
      * @brief Read Received SOP Identity Data Object (0x48) register using factory pattern

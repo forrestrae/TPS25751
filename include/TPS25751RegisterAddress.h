@@ -50,6 +50,8 @@ enum class Address : uint8_t {
     ADC_RESULTS = 0x6A,
     SLEEP_CONTROL = 0x70,
     GPIO_STATUS = 0x72,
+    /// Tx Source Capabilities Extended Data Block (SLVUCR8B Rev. B, p.54). TI short name TX_SOURCE_CAPABILITIES_EXTENDED_DATA_BLOCK.
+    TRANSMIT_SOURCE_CAPABILITIES_EXTENDED = 0x77,
     /// TX Source Info (SLVUCR8B Rev. B, p.55). TI short name TX_SOURCE_INFO.
     TRANSMIT_SOURCE_INFO = 0x78,
     /// Transmitted PPS Status Data Block (SLVUCR8B Rev. B, p.56). TI short name TRANSMITTED_PPS_STATUS_DATA_BLOCK.
@@ -106,6 +108,7 @@ namespace Registers {
     constexpr RegisterInfo ADC_RESULTS{Address::ADC_RESULTS, 13};
     constexpr RegisterInfo SLEEP_CONTROL{Address::SLEEP_CONTROL, 1};
     constexpr RegisterInfo GPIO_STATUS{Address::GPIO_STATUS, 8};
+    constexpr RegisterInfo TRANSMIT_SOURCE_CAPABILITIES_EXTENDED{Address::TRANSMIT_SOURCE_CAPABILITIES_EXTENDED, 15};  // hardware length byte 15 (2026-11-18)
     constexpr RegisterInfo TRANSMIT_SOURCE_INFO{Address::TRANSMIT_SOURCE_INFO, 8};  // hardware length byte 8 (2026-11-18)
     constexpr RegisterInfo TRANSMIT_PPS_STATUS{Address::TRANSMIT_PPS_STATUS, 4};  // hardware length byte 4 (2026-11-18)
     constexpr RegisterInfo LIQUID_DETECTION_CONFIG{Address::LIQUID_DETECTION_CONFIG, 12};  // TRM: 83 bits; the controller's length byte is 12 (hardware, 2026-11-18)
@@ -148,6 +151,7 @@ constexpr uint8_t getRegisterSize(Address addr) {
         case Address::ADC_RESULTS: return Registers::ADC_RESULTS.size;
         case Address::SLEEP_CONTROL: return Registers::SLEEP_CONTROL.size;
         case Address::GPIO_STATUS: return Registers::GPIO_STATUS.size;
+        case Address::TRANSMIT_SOURCE_CAPABILITIES_EXTENDED: return Registers::TRANSMIT_SOURCE_CAPABILITIES_EXTENDED.size;
         case Address::TRANSMIT_SOURCE_INFO: return Registers::TRANSMIT_SOURCE_INFO.size;
         case Address::TRANSMIT_PPS_STATUS: return Registers::TRANSMIT_PPS_STATUS.size;
         case Address::LIQUID_DETECTION_CONFIG: return Registers::LIQUID_DETECTION_CONFIG.size;
@@ -191,6 +195,7 @@ inline const RegisterInfo* getRegisterInfo(Address addr) {
         case Address::ADC_RESULTS: return &Registers::ADC_RESULTS;
         case Address::SLEEP_CONTROL: return &Registers::SLEEP_CONTROL;
         case Address::GPIO_STATUS: return &Registers::GPIO_STATUS;
+        case Address::TRANSMIT_SOURCE_CAPABILITIES_EXTENDED: return &Registers::TRANSMIT_SOURCE_CAPABILITIES_EXTENDED;
         case Address::TRANSMIT_SOURCE_INFO: return &Registers::TRANSMIT_SOURCE_INFO;
         case Address::TRANSMIT_PPS_STATUS: return &Registers::TRANSMIT_PPS_STATUS;
         case Address::LIQUID_DETECTION_CONFIG: return &Registers::LIQUID_DETECTION_CONFIG;

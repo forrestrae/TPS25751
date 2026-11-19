@@ -10,7 +10,7 @@ Register byte sizes in `include/TPS25751RegisterAddress.h` match rev B for all 2
 
 No code or test assumes the rev A 29h Port Control reset (03915052h) or the rev A INT_MASK reset (030000h). The library never decoded 28h bits 63-32, so the RESERVED change there needs no code change. The Sleep Control reset change (01h to 03h) was assumed in code comments, a test, and CONSTRAINTS.md.
 
-Status as of 2026-11-18: 13 steps done, 0 partial, 0 not started, 0 deferred.
+Status as of 2026-11-18: 14 steps done (steps 1 to 13 and 16), 0 partial, 0 not started, 0 deferred. Finding 14 is closed with no change.
 
 ## Approach
 
@@ -125,9 +125,17 @@ Note the VBUS OVP Usage discrepancy at `include/TPS25751PortConfig.h:21-27` (rev
 
 - Verified: `include/TPS25751PortConfig.h` documents the VBUS OVP Usage discrepancy above `VbusOVPUsage`, and TI's spellings are quoted in the Event, Mask, Clear, ActiveRDOContract, AutoNegotiateSink, Status, and ADCResults headers. Comment-only step, so no new test applies; the native suite was run as a regression check. MCP `explain_bitfield(PORT_CONFIGURATION, "VBUS OVP Usage")` returned 0h = 0.41 V/ms and 3h = 3.39 V/ms. Commit 4dd9aa3.
 
+### 16. INT_CLEAR1 access type (18h) [done]
+
+Describe INT_CLEAR1 as R/W, as both TRM revisions do (finding 16). The library only writes it, so no `readInterruptClear()` is added.
+
+- Files: `include/TPS25751.h`, `include/TPS25751InterruptClear.h`, `src/TPS25751InterruptClear.cpp`, `examples/read-registers/src/main.cpp`, `test/test_native/test_TPS25751InterruptClear/test_TPS25751InterruptClear.cpp`, `AGENTS.md`, `docs/engineering/CONSTRAINTS.md`.
+- Tests: no behavior change apart from the `debugPrint()` heading, which no test asserts. The native suite was run as a regression check.
+- Verified: the "write-only" wording is gone from the headers, source, example, tests, and AGENTS.md. The CONSTRAINTS.md "Write-Only Registers (W)" section is replaced with a note that the TRM marks no register write-only. The `debugPrint()` heading reads `[R/W, write 1 to clear]`. MCP `get_register(INTERRUPT_CLEAR_FOR_I2CT_IRQ)` returned every field as R/W, SLVUCR8B p.23. Commit 160a2f0. The interrupt register headers also cite the rev B titles and tables (Tables 3-8, 3-9, and 3-10), commit 6e36fab, and the native environment now compiles as `-std=gnu++17`, commit c823cf9. The plan is `docs/plans/int-register-rename.md`.
+
 ## Out of scope
 
-Renaming the `INT_EVENT1`, `INT_MASK1`, and `INT_CLEAR1` address enums (finding 14) is cosmetic and would break the API, so it waits for a planned breaking release.
+The address enums `INT_EVENT1`, `INT_MASK1`, and `INT_CLEAR1` keep their names (finding 14). Rev B still uses these short names, so a rename would warn users for using the name the TRM uses. See `docs/plans/int-register-rename.md`.
 
 The library does not support these rev B registers. They are listed in suggested order by usefulness to a sink/source host, for a later register batch:
 
@@ -183,7 +191,7 @@ The library does not support these rev B registers. They are listed in suggested
    ```bash
    pio test -e native
    ```
-   A single suite runs with `pio test -e native -f "test_native/<suite>"`. Last result, 2026-11-18 on `fix/rev-b-trm` after steps 1 to 13: 17 suites, 359 of 359 test cases passed.
+   A single suite runs with `pio test -e native -f "test_native/<suite>"`. Last result, 2026-11-18 on `fix/rev-b-trm` after steps 1 to 13 and 16: 17 suites, 359 of 359 test cases passed.
 2. MCP confirmation: each step's rev B fact was re-checked with `explain_bitfield`, `get_register`, or `list_registers`; the call and result are recorded under that step.
 3. Register sizes: `list_registers` against `include/TPS25751RegisterAddress.h` gives 27 of 27 matches.
 4. Hardware (done, closes step 1): 0x70 (SLEEP_CONTROL) read 0x03 on 2026-11-18 after a power cycle, on a Teensy 4.0 host with a TPS25751 in Application mode, using `example-read-registers` (no writes to 0x70). CONSTRAINTS.md previously called 0x01 "exactly what the TRM specifies", so the old value was TRM-derived, not observed on hardware. The board loads its configuration from EEPROM, so the read matches rev B without isolating the silicon reset from an EEPROM-set value.
@@ -256,8 +264,11 @@ Finding numbers 1 to 13 match the step numbers in "Changes". Line numbers refer 
 13. 28h VBUS OVP Usage bits 17-16 (p.29): rev B lists 0h = "0.41 V/ms (typical)" and 3h = "3.39 V/ms (typical)", where rev A said 100% and 114%. Slew rates in an OVP trip-point field look like a TI transcription error. Keep `VbusOVPUsage::OVP100/OVP114` (`include/TPS25751PortConfig.h:21-27`) and add a comment citing the discrepancy; raise it with TI if it matters.
 
 14. Address-enum names `INT_EVENT1`, `INT_MASK1`, `INT_CLEAR1` reflect the rev A "for I2C1" register names (rev B: "for I2Ct_IRQ"). Cosmetic; renaming is an API break, so leave unless a breaking release is planned.
+    - Resolution (2026-11-18): the premise does not hold, so the names stay. The enumerators are TI's short names, not the rev A titles, and rev B keeps them. A text extraction of both TRM PDFs finds `INT_EVENT1` 32 times in each revision and `INT_MASK1` once in rev B. Rev B's own descriptions use them: 14h says "Only the interrupt events enabled in INT_MASK1 (0x16) will be asserted", and 16h and 18h each open with "Interrupt ... bit field for INT_EVENT1". The unsuffixed forms appear once, in Table 3-3 (p.14). `INT_CLEAR1` appears in neither revision; the library extended the pattern. What changed in rev B is the register titles (for example "Interrupt Event for I2Ct_IRQ", p.19). See `docs/plans/int-register-rename.md`.
 
 15. No change needed: register sizes for all 27 supported registers; 26h, 2Dh, 3Fh, 40h, 1Ah bit positions read by the library are all still defined (rev B only merged RESERVED rows); 2Dh Patch Config Source 4h is already `Reserved4`; 5Ch IO Config reset changes (GPIO Output Enable 14CFh to CCFh, GPIO Interrupt Enable 400h to 0) are not assumed by code or tests; `README.md:107` links the unversioned `slvucr8`, which resolves to the latest revision.
+
+16. 18h Interrupt Clear (p.23): every field is R/W in both revisions (rev A Table 3-9, rev B Table 3-10), and rev B marks no field in any register as write-only. The library documented INT_CLEAR1 as write-only in eleven places, and `docs/engineering/CONSTRAINTS.md` listed COMMAND (R/W, p.16) and INT_CLEAR1 as write-only examples. Fixed by step 16: the comments and the CONSTRAINTS.md section now say R/W, and the library still only writes 18h. What a read of 18h returns on hardware is not documented and has not been observed.
 
 ## Appendix B: Spelling of TI's misspelled names
 

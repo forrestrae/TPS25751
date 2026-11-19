@@ -24,13 +24,13 @@ void printHex16(Stream &s, uint16_t value)
 uint8_t TPS25751TransmitBatteryStatus::batteryInfo(uint8_t battery) const
 {
     if (battery >= kBatteryCount) return 0;
-    return extractBits(static_cast<uint8_t>(32 * battery + 8), 8);
+    return extractBits(batteryInfoBit(battery), 8);
 }
 
 uint16_t TPS25751TransmitBatteryStatus::rawPresentCapacity(uint8_t battery) const
 {
     if (battery >= kBatteryCount) return 0;
-    return extractBits16(static_cast<uint8_t>(32 * battery + 16), 16);
+    return extractBits16(presentCapacityBit(battery), 16);
 }
 
 // --- Setters: each a single setBits() call after the index guard -----------------
@@ -38,13 +38,13 @@ uint16_t TPS25751TransmitBatteryStatus::rawPresentCapacity(uint8_t battery) cons
 void TPS25751TransmitBatteryStatus::setBatteryInfo(uint8_t battery, uint8_t value)
 {
     if (!isValid() || battery >= kBatteryCount) return;
-    setBits(static_cast<uint8_t>(32 * battery + 8), 8, value);
+    setBits(batteryInfoBit(battery), 8, value);
 }
 
 void TPS25751TransmitBatteryStatus::setRawPresentCapacity(uint8_t battery, uint16_t value)
 {
     if (!isValid() || battery >= kBatteryCount) return;
-    setBits(static_cast<uint8_t>(32 * battery + 16), 16, value);
+    setBits(presentCapacityBit(battery), 16, value);
 }
 
 // --- Debug ------------------------------------------------------------------------

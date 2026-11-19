@@ -156,4 +156,11 @@ public:
      * register 0x77 cannot be checked from this register alone.
      */
     bool isSemanticallyValid() const override;
+
+private:
+    /// First bit of battery @p battery's Battery Info field: entry start (kEntrySize * 8 * battery) + 8.
+    /// The caller range-checks @p battery; the result is at most 104.
+    static uint8_t batteryInfoBit(uint8_t battery) { return static_cast<uint8_t>(kEntrySize * 8 * battery + 8); }
+    /// First bit of battery @p battery's Present Capacity field: entry start + 16 (at most 112).
+    static uint8_t presentCapacityBit(uint8_t battery) { return static_cast<uint8_t>(kEntrySize * 8 * battery + 16); }
 };

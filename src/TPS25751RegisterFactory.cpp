@@ -29,6 +29,7 @@
 #include "TPS25751Version.h"
 #include "TPS25751PD3Config.h"
 #include "TPS25751GlobalSystemConfig.h"
+#include "TPS25751ReceivedSOPIdentity.h"
 #include "TPS25751Debug.h"
 
 // Static factory instance
@@ -99,6 +100,8 @@ std::unique_ptr<TPS25751Register> TPS25751RegisterFactoryImpl::createRegister(TP
             return createPD3ConfigRegister();
         case TPS25751Registers::Address::GLOBAL_SYSTEM_CONFIGURATION:
             return createGlobalSystemConfigRegister();
+        case TPS25751Registers::Address::RECEIVED_SOP_IDENTITY:
+            return createReceivedSOPIdentityRegister();
         default:
             TPS_DEBUG_ERROR(DEBUG_CAT_REGISTER, "Unsupported register address: 0x%02X", static_cast<uint8_t>(addr));
             return nullptr;
@@ -175,6 +178,8 @@ std::unique_ptr<TPS25751Register> TPS25751RegisterFactoryImpl::createRegister(TP
             return createPD3ConfigRegister(data, length);
         case TPS25751Registers::Address::GLOBAL_SYSTEM_CONFIGURATION:
             return createGlobalSystemConfigRegister(data, length);
+        case TPS25751Registers::Address::RECEIVED_SOP_IDENTITY:
+            return createReceivedSOPIdentityRegister(data, length);
         default:
             TPS_DEBUG_ERROR(DEBUG_CAT_REGISTER, "Unsupported register address: 0x%02X", static_cast<uint8_t>(addr));
             return nullptr;
@@ -246,6 +251,8 @@ std::unique_ptr<TPS25751Register> TPS25751RegisterFactoryImpl::createRegister(co
             return std::make_unique<TPS25751PD3Config>(regInfo);
         case TPS25751Registers::Address::GLOBAL_SYSTEM_CONFIGURATION:
             return std::make_unique<TPS25751GlobalSystemConfig>(regInfo);
+        case TPS25751Registers::Address::RECEIVED_SOP_IDENTITY:
+            return std::make_unique<TPS25751ReceivedSOPIdentity>(regInfo);
         default:
             TPS_DEBUG_ERROR(DEBUG_CAT_REGISTER, "Unsupported register address: 0x%02X", static_cast<uint8_t>(regInfo.address));
             return nullptr;
@@ -486,12 +493,20 @@ std::unique_ptr<TPS25751Register> TPS25751RegisterFactoryImpl::createGlobalSyste
     return std::make_unique<TPS25751GlobalSystemConfig>();
 }
 
+std::unique_ptr<TPS25751Register> TPS25751RegisterFactoryImpl::createReceivedSOPIdentityRegister() const {
+    return std::make_unique<TPS25751ReceivedSOPIdentity>();
+}
+
 std::unique_ptr<TPS25751Register> TPS25751RegisterFactoryImpl::createPD3ConfigRegister(const uint8_t* data, size_t length) const {
     return std::make_unique<TPS25751PD3Config>(data, length);
 }
 
 std::unique_ptr<TPS25751Register> TPS25751RegisterFactoryImpl::createGlobalSystemConfigRegister(const uint8_t* data, size_t length) const {
     return std::make_unique<TPS25751GlobalSystemConfig>(data, length);
+}
+
+std::unique_ptr<TPS25751Register> TPS25751RegisterFactoryImpl::createReceivedSOPIdentityRegister(const uint8_t* data, size_t length) const {
+    return std::make_unique<TPS25751ReceivedSOPIdentity>(data, length);
 }
 
 // Singleton factory instance management

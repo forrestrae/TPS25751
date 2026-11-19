@@ -43,6 +43,8 @@ enum class Address : uint8_t {
     PD_STATUS = 0x40,
     /// PD3 Configuration (SLVUCR8B Rev. B, p.46). TI short name PD3_CONFIGURATION.
     PD3_CONFIGURATION = 0x42,
+    /// Received SOP Identity Data Object (SLVUCR8B Rev. B, p.47). TI short name RECEIVED_SOP_IDENTITY_DATA_OBJECT.
+    RECEIVED_SOP_IDENTITY = 0x48,
     IO_CONFIG = 0x5C,
     TYPEC_STATE = 0x69,
     ADC_RESULTS = 0x6A,
@@ -94,6 +96,7 @@ namespace Registers {
     constexpr RegisterInfo POWER_STATUS{Address::POWER_STATUS, 2};
     constexpr RegisterInfo PD_STATUS{Address::PD_STATUS, 4};
     constexpr RegisterInfo PD3_CONFIGURATION{Address::PD3_CONFIGURATION, 4};
+    constexpr RegisterInfo RECEIVED_SOP_IDENTITY{Address::RECEIVED_SOP_IDENTITY, 25};
     constexpr RegisterInfo IO_CONFIG{Address::IO_CONFIG, 49};
     constexpr RegisterInfo TYPEC_STATE{Address::TYPEC_STATE, 4};
     constexpr RegisterInfo ADC_RESULTS{Address::ADC_RESULTS, 13};
@@ -133,6 +136,7 @@ constexpr uint8_t getRegisterSize(Address addr) {
         case Address::POWER_STATUS: return Registers::POWER_STATUS.size;
         case Address::PD_STATUS: return Registers::PD_STATUS.size;
         case Address::PD3_CONFIGURATION: return Registers::PD3_CONFIGURATION.size;
+        case Address::RECEIVED_SOP_IDENTITY: return Registers::RECEIVED_SOP_IDENTITY.size;
         case Address::IO_CONFIG: return Registers::IO_CONFIG.size;
         case Address::TYPEC_STATE: return Registers::TYPEC_STATE.size;
         case Address::ADC_RESULTS: return Registers::ADC_RESULTS.size;
@@ -173,6 +177,7 @@ inline const RegisterInfo* getRegisterInfo(Address addr) {
         case Address::POWER_STATUS: return &Registers::POWER_STATUS;
         case Address::PD_STATUS: return &Registers::PD_STATUS;
         case Address::PD3_CONFIGURATION: return &Registers::PD3_CONFIGURATION;
+        case Address::RECEIVED_SOP_IDENTITY: return &Registers::RECEIVED_SOP_IDENTITY;
         case Address::IO_CONFIG: return &Registers::IO_CONFIG;
         case Address::TYPEC_STATE: return &Registers::TYPEC_STATE;
         case Address::ADC_RESULTS: return &Registers::ADC_RESULTS;

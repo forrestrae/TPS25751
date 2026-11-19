@@ -33,6 +33,7 @@
 #include "TPS25751Version.h"
 #include "TPS25751PD3Config.h"
 #include "TPS25751GlobalSystemConfig.h"
+#include "TPS25751ReceivedSOPIdentity.h"
 #include "TPS25751RegisterAddress.h"
 #include "TPS25751RegisterFactory.h"
 #include "TPS25751Task.h"
@@ -514,6 +515,13 @@ public:
      * @return Unique pointer to the register (nullptr if failed)
      */
     std::unique_ptr<TPS25751GlobalSystemConfig> readGlobalSystemConfigRegister(bool validate = true) const;
+
+    /**
+     * @brief Read Received SOP Identity Data Object (0x48) register using factory pattern
+     * @param validate Whether to validate the register after reading
+     * @return Unique pointer to the register (nullptr if failed)
+     */
+    std::unique_ptr<TPS25751ReceivedSOPIdentity> readReceivedSOPIdentityRegister(bool validate = true) const;
 
     /**
      * @brief Read Port Control register using factory pattern

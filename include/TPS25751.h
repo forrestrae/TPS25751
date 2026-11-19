@@ -272,7 +272,7 @@ public:
      * @c RegisterT::kAddress. Because the target address comes from the register
      * class itself, a class can only ever be written to its own register — the
      * whole class of "same-size register mis-pairing" bugs (e.g. INT_MASK1 vs
-     * LIQUID_DETECTION_CONFIG, both 11 bytes) that the untyped
+     * INT_CLEAR1, both 11 bytes) that the untyped
      * @c writeRegister(RegisterInfo,...) path cannot catch is unrepresentable
      * here. Validates @c isValid() and size before touching the bus.
      *

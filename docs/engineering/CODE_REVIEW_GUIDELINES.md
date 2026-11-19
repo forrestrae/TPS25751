@@ -84,7 +84,7 @@ the Batch B+ registers) adds field setters or a `TPS25751::writeX()` method:
   planned typed `writeRegister<T>()` (keyed on a class-level `kAddress`) lands, the
   hand-written `writeSleepControl`/`writeCustomerUse`-style methods pair a class
   with a `RegisterInfo` by hand. The `isValidSize()` guard cannot catch a wrong
-  **same-size** pairing (INT_MASK1 0x16 and LIQUID_DETECTION_CONFIG 0x98 are both
+  **same-size** pairing (INT_MASK1 0x16 and INT_CLEAR1 0x18 are both
   11 bytes; RECEIVED_SINK_CAPS and TRANSMIT_SINK_CAPS are both 53). Verify each
   `writeX()` names the register whose bytes it actually writes.
 - **Firmware data in reserved bits must stay visible**: when hardware shows the

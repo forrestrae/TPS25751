@@ -16,8 +16,10 @@
  *
  * Register Details:
  * - Address: 0x98
- * - Size: 11 bytes (88 bits; only bits 82:0 are defined -- bits 87:83 are
- *   reserved and untouched by this class's setters)
+ * - Size: 12 bytes. The TRM gives 83 bits (11 bytes), but the controller
+ *   reports a length byte of 12, observed on hardware on 2026-11-18, and the
+ *   library's read path requires the two to match. Only bits 82:0 are defined;
+ *   bits 95:83 are untouched by this class's setters.
  * - Access: Read/Write
  * - Reset: all-zero
  *

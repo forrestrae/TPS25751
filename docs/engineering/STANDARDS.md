@@ -291,7 +291,7 @@ interrupt registers) use the host side's own equivalents, landed before Batch B:
   path: it validates `isValid()` + `isValidSize()` and writes the raw bytes back
   to the register the class *is*. Because the address comes from the class, a
   class can only be written to its own register — same-size mis-pairing (INT_MASK1
-  0x16 vs LIQUID_DETECTION_CONFIG 0x98, both 11 B) is unrepresentable. Any
+  0x16 vs INT_CLEAR1 0x18, both 11 B) is unrepresentable. Any
   `TPS25751::write<Register>()` convenience method is a thin forwarder to it.
 
 Setter rules (unchanged in spirit, now enforced by the primitive):

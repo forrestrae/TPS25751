@@ -102,7 +102,7 @@ namespace Registers {
     constexpr RegisterInfo ADC_RESULTS{Address::ADC_RESULTS, 13};
     constexpr RegisterInfo SLEEP_CONTROL{Address::SLEEP_CONTROL, 1};
     constexpr RegisterInfo GPIO_STATUS{Address::GPIO_STATUS, 8};
-    constexpr RegisterInfo LIQUID_DETECTION_CONFIG{Address::LIQUID_DETECTION_CONFIG, 11};
+    constexpr RegisterInfo LIQUID_DETECTION_CONFIG{Address::LIQUID_DETECTION_CONFIG, 12};  // TRM: 83 bits; the controller's length byte is 12 (hardware, 2026-11-18)
 }
 
 /**

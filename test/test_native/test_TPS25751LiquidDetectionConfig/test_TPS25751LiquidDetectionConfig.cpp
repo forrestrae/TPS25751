@@ -34,7 +34,7 @@
 
 namespace {
 
-constexpr size_t LDC_SIZE = TPS25751Registers::Registers::LIQUID_DETECTION_CONFIG.size;  // 11
+constexpr size_t LDC_SIZE = TPS25751Registers::Registers::LIQUID_DETECTION_CONFIG.size;  // 12, the hardware length byte
 
 constexpr uint8_t FULL_BUFFER[LDC_SIZE] = {
     0x2C, 0x01, 0x3C, 0x00, 0x08, 0x32, 0x64, 0x96, 0xC8, 0xA5, 0x03,
@@ -52,7 +52,7 @@ constexpr uint8_t INVALID_LIQUID_LOW_GT_HIGH[LDC_SIZE] = {
 
 constexpr uint8_t ALL_ZEROS_DATA[LDC_SIZE] = {0};
 constexpr uint8_t ALL_ONES_DATA[LDC_SIZE] = {
-    0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
+    0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
 };
 
 }  // namespace
@@ -90,6 +90,15 @@ void test_explicit_length_constructor()
     TEST_ASSERT_TRUE(reg.isValid());
     TEST_ASSERT_TRUE(reg.isValidSize(LDC_SIZE));
     TEST_ASSERT_EQUAL_UINT16(300, reg.rawWaitTimeNoLiquid());
+}
+
+// The TRM gives 83 bits (11 bytes), but the controller's length byte is 12
+// (bench read, 2026-11-18). TPS25751::readRegister() rejects any mismatch, so an
+// 11-byte RegisterInfo made every 0x98 read fail.
+void test_register_size_matches_hardware_length_byte()
+{
+    TEST_ASSERT_EQUAL_size_t(12, LDC_SIZE);
+    TEST_ASSERT_EQUAL_UINT8(12, TPS25751Registers::getRegisterSize(TPS25751Registers::Address::LIQUID_DETECTION_CONFIG));
 }
 
 void test_reginfo_constructor_allocates_zeroed_buffer()
@@ -413,6 +422,7 @@ int main(int, char **)
     RUN_TEST(test_default_constructor_allocates_zeroed_buffer);
     RUN_TEST(test_data_constructor_copies_buffer);
     RUN_TEST(test_explicit_length_constructor);
+    RUN_TEST(test_register_size_matches_hardware_length_byte);
     RUN_TEST(test_reginfo_constructor_allocates_zeroed_buffer);
     RUN_TEST(test_null_data_behaves_as_zeroed);
     RUN_TEST(test_wrong_size_fails_size_validation);

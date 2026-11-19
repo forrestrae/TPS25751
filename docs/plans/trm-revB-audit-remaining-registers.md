@@ -78,7 +78,7 @@ The split stays as v01 proved it: a stronger model orchestrates and gates, Sonne
 | I | 78h TX Source Info, 7Ah Transmitted PPS Status | Source-side R/W info words with unit conversion (0.5 W, 1 W, 20 mV, 50 mA) and "not supported" sentinels | Source-role replies, ranked next in the audit. |
 | J | 77h Tx Source Caps Extended, 7Eh Transmit Sink Caps Extended | Byte-aligned R/W extended-capability blocks of raw 8- and 16-bit fields | Same shape and the same "USB PD defines the encoding" treatment. |
 | K | 7Bh BSDO, 7Dh Tx Battery Capabilities | Indexed per-battery entries; 7Dh is the first R/W register past bit 255 | Battery-backed designs. Last, because it has the most new machinery. |
-| L (conditional) | Typed decode for 48h, 77h, 7Eh, 7Bh, 7Dh | USB PD specification tables served by the MCP server | Runs only for registers whose earlier batch shipped before the server served the USB PD specification. |
+| L | Typed decode for 48h, 77h, 7Eh, 7Bh, 7Dh, and the 7Ah PTF meaning | USB PD R3.3 tables served by the `usb-pd-docs` MCP server | Runs because Batches H, J, and K shipped before a server served the USB PD specification. |
 
 ### Decode technique
 
@@ -345,14 +345,41 @@ Apply v01's "Batch-D Tightening" by analogy: the orchestrator writes the full by
 
 Hardware for both: see the 7Bh and 7Dh rows in "Hardware validation".
 
-### Batch L (conditional): Typed decode from the USB PD specification
+### Batch L: Typed decode from the USB PD specification [in progress]
 
-Runs only if one or more of Batches H, J, and K shipped raw accessors because the MCP server did not yet serve the USB PD specification. It adds typed decode to those classes only. As of Batch J it is needed: Batch H shipped 48h with raw VDOs, and Batch J shipped 77h and 7Eh with raw fields. Each addition is new accessors beside the raw ones, so no existing call changes and the batch stays a minor release.
+Runs because Batches H, J, and K shipped raw accessors before an MCP server served the USB PD specification: Batch H shipped 48h with raw VDOs, Batch J shipped 77h and 7Eh with raw fields, and Batch K shipped 7Bh and 7Dh with raw entries. It adds typed decode to those five classes, plus the 7Ah PTF meaning. Every addition is a new accessor beside the raw ones; no existing accessor, setter, or validation rule changes, except the 7Ah PTF text below, which the user approved on 2026-11-19. Batch L itself is additive and minor. The release is still major (3.0.0), because the branch carries the earlier breaking removal of `writeCustomerUse()` (see "Release level").
 
-- Scope, per register: 48h ID Header, Cert Stat, and Product VDO fields; 77h and 7Eh field encodings and units; 7Bh Battery Info flags and Present Capacity units; 7Dh Battery Type and capacity units. If the server's specification data resolves the undefined 7Ah PTF 00b, add that meaning to `TPS25751TransmitPPSStatus` too.
-- Work order: paste the specification tables from the server, with the specification revision and table numbers, as v01 did for the TRM. Do not take any field from memory.
-- Tests: extend each existing suite with one fixture per decoded structure, packing the bytes from the pasted tables and commenting the arithmetic.
-- Hardware: re-run the 48h attached-source check and compare the typed decode with the partner's known identity (for example the charger's vendor). The rest is unit-test only.
+- Branch: `fix/rev-b-trm`. The implementer works in an isolated worktree based on its tip, and its commits come onto `fix/rev-b-trm` by fast-forward or cherry-pick. The whole branch ships as one release from one human push (decision 4).
+- Specification source: the `usb-pd-docs` MCP server (tools `mcp__usb-pd-docs__*`, the same engine as `tps25751-docs`), backed by `specifications/USB_PD/specification.json` in the sibling `device-register-mcp-server` repo and added to this repo's `.mcp.json` in adc507b. It serves USB PD R3.3 V1.0 (Rev. 3.3). The work order pastes each table from the server; no field encoding comes from memory.
+- Implementer `sonnet` at `high` effort; gate `/code-review high` plus a hand re-derivation of one decoded value per specification table (see "Models and effort").
+
+Coverage check, run on 2026-11-19 before the work order:
+
+| Register | Specification structure (R3.3) | Table, page | TRM byte to specification byte | Result |
+|---|---|---|---|---|
+| 48h VDO 0 | ID Header VDO | 6.34, p.159 | VDO bits are specification bits | Covered. 48h is the SOP response, so the SOP (UFP) and SOP (DFP) Product Type sets apply. |
+| 48h VDO 1 | Cert Stat VDO | 6.38, p.162 | Same | Covered: XID 31:0. |
+| 48h VDO 2 | Product VDO | 6.39, p.162 | Same | Covered: USB Product ID 31:16, bcdDevice 15:0. |
+| 77h | Source_Capabilities_Extended Data Block (SCEDB) | 6.59, p.185 | TRM byte n is SCEDB byte n + 10, for n 0 to 13 | Covered. The controller prepends SCEDB bytes 0 to 9 (VID, PID, XID, FW and HW versions). The EPR Source PDP Rating (SCEDB byte 24) has no TRM field. |
+| 7Eh | Sink_Capabilities_Extended Data Block (SKEDB) | 6.70, p.199 | TRM byte n is SKEDB byte n + 10, for n 0 to 10 | Covered. The three EPR Sink PDP bytes (SKEDB 21 to 23) fall in TRM reserved bits 111:88. |
+| 7Bh | Battery Status Data Object (BSDO) | 6.24, p.146 | Entry i bits are BSDO bits | Covered. |
+| 7Dh | Battery Capability Data Block (BCDB) | 6.64, p.194 | Entry i byte k is BCDB byte k | Covered. |
+| 7Ah | PPS Status Data Block (PPSSDB) | 6.67, p.197 | Same | Covered. PTF 00b is "Not Supported". |
+
+Notes from the check. The TRM gives 77h Source PDP as 7 bits (110:104); the specification field is a full byte with valid values 0 to 100 W, so every code with bit 7 set is invalid anyway, and the TRM width and the 111 reserved check stay. The hardware value 0x7F (127) decodes as invalid. The specification gives the Duty Cycle sub-field of Peak Current and Sink Load Characteristics as 4 bits with values "0..31"; only 0 to 15 fit, and the decode uses the 4 bits at 5% per LSB. The Product Type VDOs that can follow in 48h VDOs 3 to 5 (UFP VDO, DFP VDO; tables 6.40 to 6.44) are also on the server and are out of scope.
+
+Accessors, all decode-only (the raw setters stay the write path):
+
+- 48h `TPS25751ReceivedSOPIdentity`. ID Header (VDO 0): `usbHostCapable()` (31), `usbDeviceCapable()` (30), `productTypeUfp()` and `rawProductTypeUfp()` (29:27, enum `ProductTypeUfp`), `alternateModesSupported()` (26), `productTypeDfp()` and `rawProductTypeDfp()` (25:23, enum `ProductTypeDfp`), `connectorType()` and `rawConnectorType()` (22:21, enum `ConnectorType`), `usbVendorId()` (15:0). Cert Stat (VDO 1): `xid()`. Product (VDO 2): `usbProductId()` (31:16), `bcdDevice()` (15:0). The values mean something only when `responseType()` is `Ack` and `numberValidVdos()` covers the VDO.
+- 77h `TPS25751TransmitSourceCapsExtended`: `loadStep()` (Voltage Regulation 1:0, enum `LoadStep`), `iocPercent()` (bit 2: 25 or 90), `holdUpTimeSupported()` and `holdUpTime_ms()`, `lpsCompliant()`, `ps1Compliant()`, `ps2Compliant()`, `lowTouchCurrentEps()`, `groundPinSupported()`, `groundPinProtectiveEarth()`, per Peak Current i (1 to 3) `peakCurrentOverloadPercent(i)` (4:0, 10%/LSB, 26 to 31 treated as 25), `peakCurrentOverloadPeriod_ms(i)` (10:5, 20 ms/LSB), `peakCurrentDutyCyclePercent(i)` (14:11, 5%/LSB), `peakCurrentVbusDroop(i)` (15); `touchTemperatureStandard()` (enum `TouchTemperature`: IEC 60950-1, IEC 62368-1 TS1, TS2), `externalSupplyPresent()`, `externalSupplyUnconstrained()`, `internalBatteryPresent()` (Source Inputs bits 0 to 2), `sourcePdpValid()` and `sourcePdp_W()`.
+- 7Eh `TPS25751TransmitSinkCapsExtended`: `skedbVersionValid()` (1 is Version 1.0), `loadStep()` (enum `LoadStep`), `sinkLoadOverloadPercent()`, `sinkLoadOverloadPeriod_ms()`, `sinkLoadDutyCyclePercent()`, `sinkLoadVbusDroopTolerated()`, the three compliance flags, `touchTemperatureStandard()` (enum `TouchTemperature`: none, IEC 60950-1, TS1, TS2; a different encoding from 77h), `fixedBatteryCount()` and `hotSwappableBatterySlotCount()` (Battery Info nibbles), the seven Sink Modes flags, and `valid`/`_W` pairs for Sink Minimum, Operational, and Maximum PDP.
+- 7Bh `TPS25751TransmitBatteryStatus`, per battery i: `invalidBatteryReference(i)`, `batteryPresent(i)`, `chargingStatus(i)` (enum `ChargingStatus`), `presentCapacityKnown(i)`, `presentCapacity_mWh(i)` (0.1 Wh/LSB, FFFFh unknown).
+- 7Dh `TPS25751TransmitBatteryCapabilities`, per battery i: `invalidBatteryReference(i)` (Battery Type bit 0), `batteryPresent(i)` (Design Capacity not 0000h), `designCapacityKnown(i)`, `batteryDesignCapacity_mWh(i)`, `lastFullChargeCapacityKnown(i)`, `batteryLastFullChargeCapacity_mWh(i)` (0.1 Wh/LSB; 0000h not present, FFFFh unknown).
+- 7Ah `TPS25751TransmitPPSStatus`: `PresentTemperatureFlag::NotSupported = 0`, with `NotDefined` kept as a deprecated alias of the same value; `toString()` returns "Not supported" for 00b. The user approved the string change on 2026-11-19.
+- Every new enum gets a `toString()`; codes the specification marks invalid print "Invalid".
+- `debugPrint()` adds the typed decode below the existing lines, which stay as they are. `examples/read-registers` prints the typed decode where it prints the raw fields.
+- Tests: extend each existing suite (48h, 77h, 7Eh, 7Bh, 7Dh, 7Ah) with one fixture per decoded structure, packing the bytes from the pasted tables and commenting the arithmetic.
+- Hardware: re-run the 48h attached-partner check and compare the typed decode with the partner's known identity (an iPhone: VID 05ACh). Read 77h, 7Bh, and 7Dh and check that the typed decode of their current contents is sensible. The rest is unit-test only, because PD3_CONFIGURATION (0x0008001A) gates the replies off on this board.
 
 ## Files touched
 
@@ -372,8 +399,8 @@ Runs only if one or more of Batches H, J, and K shipped raw accessors because th
 | `include/TPS25751TransmitSinkCapsExtended.h`, `src/TPS25751TransmitSinkCapsExtended.cpp` (new) | J |
 | `include/TPS25751TransmitBatteryStatus.h`, `src/TPS25751TransmitBatteryStatus.cpp` (new) | K |
 | `include/TPS25751TransmitBatteryCapabilities.h`, `src/TPS25751TransmitBatteryCapabilities.cpp` (new) | K |
-| `test/test_native/test_TPS25751<Class>/` (one new suite per class) | G, H, I, J, K; L extends the H, J, and K suites |
-| 48h, 77h, 7Eh, 7Bh, and 7Dh class files above | L, if it runs |
+| `test/test_native/test_TPS25751<Class>/` (one new suite per class) | G, H, I, J, K; L extends the H, I (7Ah only), J, and K suites |
+| 48h, 77h, 7Eh, 7Bh, 7Dh, and 7Ah class files above | L |
 | `examples/read-registers/src/main.cpp`, `examples/README.md`, `examples/AGENTS.md` | G, H, I, J, K |
 | `AGENTS.md` | G, H, I, J, K |
 | `docs/plans/trm-revB-audit-remaining-registers.md` | G, H, I, J, K, L |

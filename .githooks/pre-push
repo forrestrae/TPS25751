@@ -1,0 +1,3 @@
+#!/bin/sh
+# Agents never push; a human push of main must satisfy the main-branch rule.
+exec python3 "$(git rev-parse --show-toplevel)/scripts/gitguard.py" pre-push "$@"

@@ -1,0 +1,28 @@
+{
+  "description": "Git workflow guard: keeps Codex inside the repository's git workflow (see AGENTS.md, 'Git Workflow').",
+  "hooks": {
+    "PreToolUse": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"$(git rev-parse --show-toplevel)/scripts/agent_guard.py\" codex pre-tool-use",
+            "timeout": 10,
+            "statusMessage": "Checking the git workflow guard"
+          }
+        ]
+      }
+    ],
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"$(git rev-parse --show-toplevel)/scripts/agent_guard.py\" codex session-start",
+            "timeout": 10
+          }
+        ]
+      }
+    ]
+  }
+}

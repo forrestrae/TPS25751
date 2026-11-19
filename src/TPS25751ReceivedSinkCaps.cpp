@@ -104,15 +104,26 @@ uint16_t TPS25751ReceivedSinkCaps::getVariableMaxCurrent_mA(uint8_t index) const
 }
 
 // Augmented/PPS PDO parsing (type 11)
+uint8_t TPS25751ReceivedSinkCaps::getAPDOSubtype(uint8_t index) const {
+    return apdoSubtype(getPDO(index));
+}
+
+bool TPS25751ReceivedSinkCaps::isSprPpsPDO(uint8_t index) const {
+    return isSprPpsApdo(getPDO(index));
+}
+
 uint16_t TPS25751ReceivedSinkCaps::getPPSMaxVoltage_mV(uint8_t index) const {
+    if (!isSprPpsPDO(index)) return 0;
     return extractPDOBits(index, 17, 8) * 100;  // Bits 24:17, 100mV units
 }
 
 uint16_t TPS25751ReceivedSinkCaps::getPPSMinVoltage_mV(uint8_t index) const {
+    if (!isSprPpsPDO(index)) return 0;
     return extractPDOBits(index, 8, 8) * 100;  // Bits 15:8, 100mV units
 }
 
 uint16_t TPS25751ReceivedSinkCaps::getPPSMaxCurrent_mA(uint8_t index) const {
+    if (!isSprPpsPDO(index)) return 0;
     return extractPDOBits(index, 0, 7) * 50;  // Bits 6:0, 50mA units
 }
 
@@ -162,6 +173,11 @@ void TPS25751ReceivedSinkCaps::debugPrint(Stream &s) const {
                 break;
 
             case PDOType::Augmented:
+                if (!isSprPpsPDO(i)) {
+                    s.print(F("Augmented, APDO subtype ")); s.print(getAPDOSubtype(i));
+                    s.println(F(" (not SPR PPS; not decoded)"));
+                    break;
+                }
                 s.println(F("Augmented (PPS)"));
                 s.print(F("  Max Voltage: ")); s.print(getPPSMaxVoltage_mV(i)); s.println(F(" mV"));
                 s.print(F("  Min Voltage: ")); s.print(getPPSMinVoltage_mV(i)); s.println(F(" mV"));
@@ -236,6 +252,9 @@ bool TPS25751ReceivedSinkCaps::isSemanticallyValid() const {
             }
 
             case PDOType::Augmented: {
+                // Only the SPR PPS APDO is decoded; another subtype is a valid PDO
+                // whose fields this library cannot check yet.
+                if (!isSprPpsPDO(i)) break;
                 // Min voltage should be less than or equal to max voltage
                 uint16_t minV = getPPSMinVoltage_mV(i);
                 uint16_t maxV = getPPSMaxVoltage_mV(i);

@@ -89,12 +89,22 @@ uint16_t TPS25751ActivePDOContract::variableMaxCurrent_mA() const {
     return currentBits * 10;  // 10mA units
 }
 
-// Augmented/PPS PDO (Type 11)
+// Augmented PDO (Type 11)
+uint8_t TPS25751ActivePDOContract::apdoSubtype() const {
+    return ::apdoSubtype(activePDO());
+}
+
+bool TPS25751ActivePDOContract::isSprPps() const {
+    return isSprPpsApdo(activePDO());
+}
+
 bool TPS25751ActivePDOContract::ppsPowerLimited() const {
+    if (!isSprPps()) return false;
     return extractBits(27, 1);
 }
 
 uint16_t TPS25751ActivePDOContract::ppsMaxVoltage_mV() const {
+    if (!isSprPps()) return 0;
     // Bits 24:17 (8-bit), matching the hardware-verified PPS decode in
     // TPS25751ReceivedSourceCaps/TransmitSourceCaps; bits 26:25 are reserved.
     uint16_t voltageBits = extractBits(17, 8);
@@ -102,12 +112,14 @@ uint16_t TPS25751ActivePDOContract::ppsMaxVoltage_mV() const {
 }
 
 uint16_t TPS25751ActivePDOContract::ppsMinVoltage_mV() const {
+    if (!isSprPps()) return 0;
     // Bits 15:8 (8-bit); bit 16 is reserved.
     uint16_t voltageBits = extractBits(8, 8);
     return voltageBits * 100;  // 100mV units for PPS
 }
 
 uint16_t TPS25751ActivePDOContract::ppsMaxCurrent_mA() const {
+    if (!isSprPps()) return 0;
     // Bits 6:0 (7-bit); bit 7 is reserved.
     uint16_t currentBits = extractBits(0, 7);
     return currentBits * 50;  // 50mA units for PPS
@@ -154,6 +166,12 @@ void TPS25751ActivePDOContract::debugPrint(Stream &s) const {
             break;
 
         case PDOType::Augmented:
+            if (!isSprPps()) {
+                s.print(F("  Augmented PDO, APDO subtype "));
+                s.print(apdoSubtype());
+                s.println(F(" (not SPR PPS; not decoded)"));
+                break;
+            }
             s.println(F("  Augmented/PPS PDO:"));
             s.print(F("    Power Limited: ")); s.println(ppsPowerLimited() ? F("Yes") : F("No"));
             s.print(F("    Max Voltage: ")); s.print(ppsMaxVoltage_mV()); s.println(F(" mV"));
@@ -223,6 +241,9 @@ bool TPS25751ActivePDOContract::isSemanticallyValid() const {
         }
 
         case PDOType::Augmented: {
+            // Only the SPR PPS APDO is decoded; another subtype is a valid PDO
+            // whose fields this library cannot check yet.
+            if (!isSprPps()) break;
             uint16_t maxV = ppsMaxVoltage_mV();
             uint16_t minV = ppsMinVoltage_mV();
             uint16_t current = ppsMaxCurrent_mA();

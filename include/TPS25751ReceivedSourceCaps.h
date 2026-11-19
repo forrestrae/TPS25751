@@ -70,6 +70,11 @@ public:
     uint16_t getVariableMaxCurrent_mA(uint8_t index) const;
 
     // Helper methods to parse Augmented/PPS PDO (type 11)
+    /// APDO subtype (bits 29:28) of PDO @p index; meaningful only for an Augmented PDO.
+    uint8_t getAPDOSubtype(uint8_t index) const;
+    /// True when PDO @p index is an SPR PPS APDO. The getPPS*() accessors decode only
+    /// such PDOs and return 0 (or false) for an Augmented PDO of any other subtype.
+    bool isSprPpsPDO(uint8_t index) const;
     bool getPPSPowerLimited(uint8_t index) const;
     uint16_t getPPSMaxVoltage_mV(uint8_t index) const;
     uint16_t getPPSMinVoltage_mV(uint8_t index) const;

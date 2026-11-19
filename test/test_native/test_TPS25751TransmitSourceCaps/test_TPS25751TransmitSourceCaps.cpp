@@ -376,6 +376,63 @@ void test_copy_constructor_deep_copies()
 
 // --- Runner -------------------------------------------------------------------
 
+// --- APDO subtypes other than SPR PPS ---------------------------------------
+//
+// Bench read of 0x32 on 2026-11-18 (EEPROM configuration): five PDOs, PDO 5 =
+// 0xE004B1F4. Bits 31:30 = 11b (Augmented) but bits 29:28 = 10b, not the SPR
+// PPS subtype 00b. Decoding it as PPS gave a 17700 mV minimum and a 200 mV
+// maximum, so the whole register failed semantic validation.
+namespace {
+constexpr uint8_t HW_0X32[TPS25751Registers::Registers::TRANSMIT_SOURCE_CAPABILITIES.size] = {
+    0x05, 0xAA, 0x2A,        // 5 PDOs; Power Path bytes as the firmware wrote them
+    0x2C, 0x91, 0x01, 0x20,  // PDO 1 0x2001912C: Fixed 5 V, 3 A
+    0x2C, 0xD1, 0x02, 0x00,  // PDO 2 0x0002D12C: Fixed 9 V, 3 A
+    0x2C, 0xB1, 0x04, 0x00,  // PDO 3 0x0004B12C: Fixed 15 V, 3 A
+    0xF4, 0x41, 0x06, 0x00,  // PDO 4 0x000641F4: Fixed 20 V, 5 A
+    0xF4, 0xB1, 0x04, 0xE0,  // PDO 5 0xE004B1F4: Augmented, APDO subtype 2
+};
+}  // namespace
+
+void test_hardware_caps_with_non_pps_apdo_are_semantically_valid()
+{
+    TPS25751TransmitSourceCaps reg(HW_0X32, sizeof(HW_0X32));
+
+    TEST_ASSERT_EQUAL_UINT8(5, reg.pdoCount());
+    TEST_ASSERT_TRUE(reg.isSemanticallyValid());
+}
+
+void test_non_pps_apdo_reports_subtype_and_no_pps_fields()
+{
+    TPS25751TransmitSourceCaps reg(HW_0X32, sizeof(HW_0X32));
+
+    TEST_ASSERT_EQUAL(PDOType::Augmented, reg.getPDOType(4));
+    TEST_ASSERT_EQUAL_UINT8(2, reg.getAPDOSubtype(4));
+    TEST_ASSERT_FALSE(reg.isSprPpsPDO(4));
+    TEST_ASSERT_EQUAL_UINT16(0, reg.getPPSMaxVoltage_mV(4));
+    TEST_ASSERT_EQUAL_UINT16(0, reg.getPPSMinVoltage_mV(4));
+    TEST_ASSERT_EQUAL_UINT16(0, reg.getPPSMaxCurrent_mA(4));
+    TEST_ASSERT_FALSE(reg.getPPSPowerLimited(4));
+    // A Fixed PDO is not an SPR PPS APDO either.
+    TEST_ASSERT_FALSE(reg.isSprPpsPDO(0));
+}
+
+void test_spr_pps_apdo_is_still_decoded_and_checked()
+{
+    TPS25751TransmitSourceCaps reg;
+    reg.setPDO(0, TPS25751TransmitSourceCaps::buildFixedSupplyPDO(5000, 3000));
+    reg.setPDO(1, TPS25751TransmitSourceCaps::buildPPSPDO(11000, 5000, 3000));
+    reg.setPDOCount(2);
+
+    TEST_ASSERT_TRUE(reg.isSprPpsPDO(1));
+    TEST_ASSERT_EQUAL_UINT8(0, reg.getAPDOSubtype(1));
+    TEST_ASSERT_EQUAL_UINT16(11000, reg.getPPSMaxVoltage_mV(1));
+    TEST_ASSERT_TRUE(reg.isSemanticallyValid());
+
+    // The PPS min <= max rule still applies to subtype 00b.
+    reg.setPDO(1, TPS25751TransmitSourceCaps::buildPPSPDO(5000, 11000, 3000));
+    TEST_ASSERT_FALSE(reg.isSemanticallyValid());
+}
+
 int main(int, char **)
 {
     UNITY_BEGIN();
@@ -406,6 +463,9 @@ int main(int, char **)
     RUN_TEST(test_pps_round_trip);
     RUN_TEST(test_pps_subtype_bits_are_zero);
     RUN_TEST(test_pps_units_are_100mv_and_50ma_not_50mv);
+    RUN_TEST(test_hardware_caps_with_non_pps_apdo_are_semantically_valid);
+    RUN_TEST(test_non_pps_apdo_reports_subtype_and_no_pps_fields);
+    RUN_TEST(test_spr_pps_apdo_is_still_decoded_and_checked);
 
     RUN_TEST(test_fixed_voltage_overflow_does_not_corrupt_type_bits);
     RUN_TEST(test_pps_current_overflow_does_not_corrupt_neighbouring_bits);

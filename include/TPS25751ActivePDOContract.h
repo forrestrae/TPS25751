@@ -11,8 +11,38 @@ enum class PDOType : uint8_t {
     FixedSupply = 0b00,     ///< Fixed voltage supply
     Battery = 0b01,         ///< Battery
     VariableSupply = 0b10,  ///< Variable voltage supply
-    Augmented = 0b11        ///< Augmented PDO (PPS)
+    Augmented = 0b11        ///< Augmented PDO (APDO); see apdoSubtype()
 };
+
+/// APDO subtype (bits 29:28 of an Augmented PDO) of the SPR PPS APDO, the only
+/// subtype this library decodes.
+constexpr uint8_t kApdoSubtypeSprPps = 0b00;
+
+/**
+ * @brief APDO subtype of a PDO word (bits 29:28)
+ *
+ * Meaningful only when bits 31:30 are 11b (PDOType::Augmented). Subtype 00b is
+ * the SPR PPS APDO. USB PD 3.1 and later use the other values for further APDO
+ * kinds, which this library does not decode yet. A TPS25751 test board's
+ * TRANSMIT_SOURCE_CAPABILITIES (0x32) carries a subtype 10b APDO, observed on
+ * hardware on 2026-11-18.
+ */
+inline uint8_t apdoSubtype(uint32_t pdo)
+{
+    return static_cast<uint8_t>((pdo >> 28) & 0x3);
+}
+
+/**
+ * @brief True when a PDO word is an SPR PPS APDO (bits 31:30 = 11b, bits 29:28 = 00b)
+ *
+ * The PPS accessors of every PDO class decode only such PDOs; they return 0 for
+ * an Augmented PDO of any other subtype, whose fields have a different layout.
+ */
+inline bool isSprPpsApdo(uint32_t pdo)
+{
+    return ((pdo >> 30) & 0x3) == static_cast<uint32_t>(PDOType::Augmented) &&
+           apdoSubtype(pdo) == kApdoSubtypeSprPps;
+}
 
 /**
  * @brief TPS25751 Active PDO Contract Register (0x34)
@@ -83,7 +113,10 @@ public:
     uint16_t variableMinVoltage_mV() const;    ///< Min voltage in millivolts (50mV units)
     uint16_t variableMaxCurrent_mA() const;    ///< Max current in milliamps (10mA units)
 
-    // Augmented/PPS PDO fields (type 11)
+    // Augmented PDO fields (type 11). The pps*() accessors decode only the SPR
+    // PPS APDO (subtype 00b) and return 0/false for any other subtype.
+    uint8_t apdoSubtype() const;               ///< APDO subtype, bits 29:28 (meaningful for Augmented only)
+    bool isSprPps() const;                     ///< True when the active PDO is an SPR PPS APDO
     bool ppsPowerLimited() const;
     uint16_t ppsMaxVoltage_mV() const;         ///< Max voltage in millivolts (100mV units for PPS)
     uint16_t ppsMinVoltage_mV() const;         ///< Min voltage in millivolts (100mV units for PPS)

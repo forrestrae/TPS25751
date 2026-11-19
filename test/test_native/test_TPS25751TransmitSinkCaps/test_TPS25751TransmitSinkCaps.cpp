@@ -294,6 +294,34 @@ void test_copy_constructor_deep_copies()
 
 // --- Runner -------------------------------------------------------------------
 
+// --- APDO subtypes other than SPR PPS ---------------------------------------
+//
+// An Augmented PDO with bits 29:28 = 10b is not an SPR PPS APDO. The PPS
+// accessors return 0 for it and semantic validation skips the PPS rules,
+// instead of rejecting the register on a meaningless min/max decode. The word
+// is the subtype 10b APDO read from 0x32 on the bench on 2026-11-18.
+void test_non_pps_apdo_is_skipped_by_pps_decode_and_validation()
+{
+    TPS25751TransmitSinkCaps reg;
+    reg.setPDO(0, TPS25751TransmitSinkCaps::buildFixedSupplyPDO(5000, 3000));
+    reg.setPDO(1, 0xE004B1F4u);
+    reg.setPDOCount(2);
+
+    TEST_ASSERT_EQUAL(PDOType::Augmented, reg.getPDOType(1));
+    TEST_ASSERT_EQUAL_UINT8(2, reg.getAPDOSubtype(1));
+    TEST_ASSERT_FALSE(reg.isSprPpsPDO(1));
+    TEST_ASSERT_EQUAL_UINT16(0, reg.getPPSMaxVoltage_mV(1));
+    TEST_ASSERT_EQUAL_UINT16(0, reg.getPPSMinVoltage_mV(1));
+    TEST_ASSERT_EQUAL_UINT16(0, reg.getPPSMaxCurrent_mA(1));
+    TEST_ASSERT_TRUE(reg.isSemanticallyValid());
+
+    // An SPR PPS APDO in the same slot is decoded and checked as before.
+    reg.setPDO(1, TPS25751TransmitSinkCaps::buildPPSPDO(11000, 5000, 3000));
+    TEST_ASSERT_TRUE(reg.isSprPpsPDO(1));
+    TEST_ASSERT_EQUAL_UINT16(5000, reg.getPPSMinVoltage_mV(1));
+    TEST_ASSERT_TRUE(reg.isSemanticallyValid());
+}
+
 int main(int, char **)
 {
     UNITY_BEGIN();
@@ -325,6 +353,7 @@ int main(int, char **)
     RUN_TEST(test_type_bits_for_all_builders);
 
     RUN_TEST(test_set_pdo_out_of_range_index_is_noop);
+    RUN_TEST(test_non_pps_apdo_is_skipped_by_pps_decode_and_validation);
     RUN_TEST(test_setters_no_op_on_invalid_register);
 
     RUN_TEST(test_copy_constructor_deep_copies);

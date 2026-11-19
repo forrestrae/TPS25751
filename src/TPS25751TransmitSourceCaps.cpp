@@ -111,19 +111,31 @@ uint16_t TPS25751TransmitSourceCaps::getVariableMaxCurrent_mA(uint8_t index) con
 }
 
 // Augmented/PPS PDO parsing (type 11, Source variant)
+uint8_t TPS25751TransmitSourceCaps::getAPDOSubtype(uint8_t index) const {
+    return apdoSubtype(getPDO(index));
+}
+
+bool TPS25751TransmitSourceCaps::isSprPpsPDO(uint8_t index) const {
+    return isSprPpsApdo(getPDO(index));
+}
+
 bool TPS25751TransmitSourceCaps::getPPSPowerLimited(uint8_t index) const {
+    if (!isSprPpsPDO(index)) return false;
     return extractPDOBits(index, 27, 1);  // Bit 27
 }
 
 uint16_t TPS25751TransmitSourceCaps::getPPSMaxVoltage_mV(uint8_t index) const {
+    if (!isSprPpsPDO(index)) return 0;
     return extractPDOBits(index, 17, 8) * 100;  // Bits 24:17, 100mV units
 }
 
 uint16_t TPS25751TransmitSourceCaps::getPPSMinVoltage_mV(uint8_t index) const {
+    if (!isSprPpsPDO(index)) return 0;
     return extractPDOBits(index, 8, 8) * 100;  // Bits 15:8, 100mV units
 }
 
 uint16_t TPS25751TransmitSourceCaps::getPPSMaxCurrent_mA(uint8_t index) const {
+    if (!isSprPpsPDO(index)) return 0;
     return extractPDOBits(index, 0, 7) * 50;  // Bits 6:0, 50mA units
 }
 
@@ -289,6 +301,11 @@ void TPS25751TransmitSourceCaps::debugPrint(Stream &s) const {
                 break;
 
             case PDOType::Augmented:
+                if (!isSprPpsPDO(i)) {
+                    s.print(F("Augmented, APDO subtype ")); s.print(getAPDOSubtype(i));
+                    s.println(F(" (not SPR PPS; not decoded)"));
+                    break;
+                }
                 s.println(F("Augmented (PPS)"));
                 s.print(F("  Power Limited: ")); s.println(getPPSPowerLimited(i) ? F("Yes") : F("No"));
                 s.print(F("  Max Voltage: ")); s.print(getPPSMaxVoltage_mV(i)); s.println(F(" mV"));
@@ -356,6 +373,9 @@ bool TPS25751TransmitSourceCaps::isSemanticallyValid() const {
             }
 
             case PDOType::Augmented: {
+                // Only the SPR PPS APDO is decoded; another subtype is a valid PDO
+                // whose fields this library cannot check yet.
+                if (!isSprPpsPDO(i)) break;
                 uint16_t minV = getPPSMinVoltage_mV(i);
                 uint16_t maxV = getPPSMaxVoltage_mV(i);
                 if (minV > maxV || minV == 0 || maxV == 0) return false;

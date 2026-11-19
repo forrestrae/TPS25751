@@ -51,6 +51,10 @@ constexpr uint8_t FIXED_ZERO_CURRENT[PDO_SIZE] = {0x00, 0x90, 0x01, 0x00, 0x00, 
 
 constexpr uint8_t NO_CONTRACT[PDO_SIZE] = {0, 0, 0, 0, 0, 0};
 
+// Augmented PDO with APDO subtype 10b (bits 29:28), not SPR PPS; PDO 0xE004B1F4,
+// the word read from 0x32 PDO 5 on the bench on 2026-11-18.
+constexpr uint8_t APDO_SUBTYPE_2[PDO_SIZE] = {0xF4, 0xB1, 0x04, 0xE0, 0x00, 0x00};
+
 // Runs reg.debugPrint() against the stdout-backed native Stream stub and
 // returns what it printed.
 std::string captureDebugPrint(const TPS25751ActivePDOContract &reg)
@@ -196,6 +200,37 @@ void test_debug_print_pps_path()
     TEST_ASSERT_TRUE(contains(out, "Max Current: 3000 mA"));
 }
 
+void test_non_pps_apdo_is_not_decoded_as_pps()
+{
+    TPS25751ActivePDOContract reg(APDO_SUBTYPE_2);
+
+    TEST_ASSERT_TRUE(reg.hasActiveContract());
+    TEST_ASSERT_EQUAL(PDOType::Augmented, reg.pdoType());
+    TEST_ASSERT_EQUAL_UINT8(2, reg.apdoSubtype());
+    TEST_ASSERT_FALSE(reg.isSprPps());
+    TEST_ASSERT_EQUAL_UINT16(0, reg.ppsMaxVoltage_mV());
+    TEST_ASSERT_EQUAL_UINT16(0, reg.ppsMinVoltage_mV());
+    TEST_ASSERT_EQUAL_UINT16(0, reg.ppsMaxCurrent_mA());
+    TEST_ASSERT_FALSE(reg.ppsPowerLimited());
+    TEST_ASSERT_TRUE(reg.isSemanticallyValid());
+}
+
+void test_spr_pps_contract_reports_subtype_zero()
+{
+    TPS25751ActivePDOContract reg(PPS);
+
+    TEST_ASSERT_EQUAL_UINT8(0, reg.apdoSubtype());
+    TEST_ASSERT_TRUE(reg.isSprPps());
+}
+
+void test_debug_print_non_pps_apdo_path()
+{
+    const std::string out = captureDebugPrint(TPS25751ActivePDOContract(APDO_SUBTYPE_2));
+
+    TEST_ASSERT_TRUE(contains(out, "APDO subtype 2 (not SPR PPS; not decoded)"));
+    TEST_ASSERT_FALSE(contains(out, "Max Voltage"));
+}
+
 int main(int, char **)
 {
     UNITY_BEGIN();
@@ -210,6 +245,9 @@ int main(int, char **)
     RUN_TEST(test_fixed_zero_current_is_semantically_invalid);
     RUN_TEST(test_debug_print_active_contract_path);
     RUN_TEST(test_debug_print_pps_path);
+    RUN_TEST(test_non_pps_apdo_is_not_decoded_as_pps);
+    RUN_TEST(test_spr_pps_contract_reports_subtype_zero);
+    RUN_TEST(test_debug_print_non_pps_apdo_path);
 
     return UNITY_END();
 }

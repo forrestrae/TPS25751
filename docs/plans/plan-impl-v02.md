@@ -1,0 +1,350 @@
+# Plan: Add the ten unsupported TPS25751 rev B registers
+
+## Context
+
+The library decodes 27 of the 37 registers in TRM SLVUCR8B (Rev. B, 2026-08). The rev B audit (`docs/plans/trm-revB-audit.md`, "Out of scope") lists the other ten and ranks them by usefulness to a sink/source host. This plan adds all ten in five batches of two, continuing the batch structure of `docs/plans/plan-impl-v01.md`. When it is done the library covers 37 of 37 registers.
+
+All ten are implemented. Eight are useful to any PD host: Version for diagnostics and patch checks, PD3 Configuration because it gates every Tx data block below, Global System Configuration and Received SOP Identity for diagnostics and board configuration, and the four Tx blocks the controller sends in reply to PD 3.x Get_* messages. The two battery registers (7Bh, 7Dh) matter only when the product answers Get_Battery_Status and Get_Battery_Capabilities. The test board carries a BQ25798 charger, so it is a battery-backed design, and the decision on 2026-11-18 was to implement them. They go last because they have the most new machinery (see "Decisions" under Approach).
+
+No batch starts until `fix/rev-b-trm` is integrated into `main`. Only Batch H needs code from that branch: its example and hardware check use `TPS25751PortControl::automaticIdRequest()` (29h bit 16, audit step 12) and `TPS25751InterruptEvent::discoverModeCompleted()` (bit 51, audit step 5), and neither exists on `main` at ca8a640. Every batch, though, edits files that `fix/rev-b-trm` also edits: `include/TPS25751RegisterAddress.h`, `AGENTS.md`, `examples/read-registers/src/main.cpp`, and the native `build_src_filter` in `platformio.ini`. `scripts/verify.py` requires each batch branch to be rebased onto `main`, so starting before that integration buys a guaranteed rebase conflict and nothing else.
+
+### Register facts from tps25751-docs
+
+`list_registers` returned 37 registers from SLVUCR8B. `get_register` was run for each of the ten. Widths and resets below are the server's; byte counts are the width rounded up to whole bytes. Pages 55, 57, and 58 were also checked against the rev B PDF in the server repo (`devices/tps25751/docs/`), because the server's text for 78h, 7Bh, and 7Dh looked wrong.
+
+| Offset | MCP name | Width (bytes) | Access | Reset | Page | Field data |
+|---|---|---|---|---|---|---|
+| Fh | VERSION | 32 (4) | R | 00000000h | 18 | Complete. One 32-bit field; the layout is given in prose: "byte 1 = RR, byte 2 = MM, etc." |
+| 42h | PD3_CONFIGURATION | 32 (4) | R/W | 00080010h | 46 | Complete. Bit 7 (Auto Get MIDB) says results land in TX_MIBDB_SOP (0x73), which is not among the server's 37 registers. TI misspellings in prose: "GetManufaturerInfo", "msesage". |
+| 27h | GLOBAL_SYSTEM_CONFIGURATION | 116 (15) | R/W | 28101h | 28 | Complete. Fields occupy bits 23:0 only; bits 115:24 are reserved. The reset decodes as PP3 Config 2h, ILIM Over Shoot 2h, PP1 Config 1h, PP Cable1 Switch Config 1h, matching the per-field resets. |
+| 48h | RECEIVED_SOP_IDENTITY_DATA_OBJECT | 200 (25) | R | 0 | 47 | Complete at register level. The six VDOs are opaque 32-bit words; their internal fields are defined by the USB PD specification, and the server has no data for them. |
+| 78h | TX_SOURCE_INFO | 64 (8) | R/W | 8000000080000000h | 55 | Complete but ambiguous, in the TRM itself. There are two Port Type bits (63 "PortType" and 31 "Port Type"), and the TRM does not say how the upper word's 0.5 W fields relate to the lower word's 1 W fields. The description says the PD firmware updates the register automatically, yet every field is R/W. The server's field name "PortGuaranteedPDP_0p5 W" has a stray space from a line wrap in the PDF. |
+| 7Ah | TRANSMITTED_PPS_STATUS_DATA_BLOCK | 32 (4) | R/W | 00000000h | 56 | Complete layout with two TRM gaps. PTF (bits 26:25) defines 01b, 10b, and 11b only; 00b, the reset value, has no stated meaning. The description calls the block "(BSDO)", a copy error from 7Bh. |
+| 77h | TX_SOURCE_CAPABILITIES_EXTENDED_DATA_BLOCK | 120 (15) | R/W | 0 | 54 | Complete layout. Field encodings are "as defined by the USB PD specification" and are not in the server. The description names the 42h gate bit "SourceCapExtMsg"; 42h calls bit 8 "Support Source Extended Message". |
+| 7Eh | TRANSMIT_SINK_CAPABILITIES_EXTENDED_DATA_BLOCK | 112 (14) | R/W | 0 | 59 | Complete layout, encodings deferred to the USB PD specification. TI spelling "Touch Temprature" (bits 47:40). |
+| 7Bh | TRANSMITTED_BATTERY_STATUS_DATA_OBJECTS_(BSDO) | 128 (16) | R/W | 000000000000000000000000FFFF0200h | 57 | Complete layout. Battery 3's capacity field (bits 127:112) is named "Battery 3 Present Info"; batteries 0 to 2 use "Present Capacity". The PDF (Table 3-36) has the same text, so this is a TRM naming error. |
+| 7Dh | TX_BATTERY_CAPABILITIES | 288 (36) | R/W | 0 | 58 | Layout complete, labels wrong in the TRM. Bits 287:216 are described as "battery index 0" while their fields are named PID 3 and VID 3, and four fields share each of the names "Battery Type", "Battery Design Capacity", and "Battery Last Full Charge Capacity". The PDF (Table 3-37) has the same text, so the server is faithful and the error is TI's. Name-based `explain_bitfield` lookups on this register are ambiguous; work orders must cite bit ranges. |
+
+The server answered every query with addresses, widths, resets, access types, and pages. Nothing in this plan fills a field gap from memory. Where the TRM defers to the USB PD specification (48h VDO internals; the 77h, 7Eh, 7Bh, and 7Dh field encodings), the batches ship raw accessors, and typed decode waits for the server to serve the USB PD specification (see Batch L).
+
+The TRM defects in the table are recorded in the server repo as seven new `open` entries in `devices/tps25751/known_document_issues.json` (2026-11-18): `7Dh-battery-3-labels`, `7Bh-battery-3-name`, `7Ah-description-and-PTF`, `78h-port-type-words`, `77h-gate-bit-name`, `42h-TX_MIBDB_SOP-undocumented` (0x73 is referenced on p.46 but documented nowhere in the TRM), and `rev-B-misspellings-2` (p.46 and p.59). Their evidence strings pass the server's PDF check. None is filed with TI yet. The stray space in the server's 78h field name "PortGuaranteedPDP_0p5 W" is an extraction artifact, not a TRM defect, so it is not in that file; it belongs in the server's registers JSON.
+
+## Approach
+
+### Workflow reused from plan-impl-v01
+
+Each batch runs the v01 process unchanged except where listed below:
+
+- Batch structure: one batch is one branch, one review, one merge, run as its own Claude Code session ("Implementation Order & Rationale" and "Launching the Plan" in v01).
+- Delegated Implementation Workflow: orchestrator writes the work order, a Sonnet `general-purpose` subagent implements in an isolated worktree, the orchestrator gates with `/code-review` at high effort plus a manual bit-offset cross-check against the MCP data ("Delegated Implementation Workflow", "Roles", "Per-Batch Loop", and "When Not to Delegate" in v01).
+- Pilot Retrospective amendments 1 to 5 stay in force: paste MCP facts into the work order; phrase base-class behavior as "verify against `<file>`"; be ready to run the correctness pass inline; name the base branch; use `setBits()`, `kAddress`, and `writeRegister<T>()` for every R/W register.
+- Documentation Update Checklist (per batch) from v01, with the changes in "Per-batch documentation" below.
+
+### Changes to the v01 workflow
+
+1. Each batch adds its addresses. In v01 all 27 addresses already lived in `TPS25751Registers::Address`. None of the ten do. Each batch adds an `Address` enumerator, a `Registers::` `RegisterInfo` constant, and a case in both `getRegisterSize()` and `getRegisterInfo()` in `include/TPS25751RegisterAddress.h`. Enumerator names follow the library's style rather than the MCP names: `VERSION`, `PD3_CONFIGURATION`, `GLOBAL_SYSTEM_CONFIGURATION`, `RECEIVED_SOP_IDENTITY`, `TRANSMIT_SOURCE_INFO`, `TRANSMIT_PPS_STATUS`, `TRANSMIT_SOURCE_CAPABILITIES_EXTENDED`, `TRANSMIT_SINK_CAPABILITIES_EXTENDED`, `TRANSMIT_BATTERY_STATUS`, `TRANSMIT_BATTERY_CAPABILITIES`. Each carries a `///` comment with the TRM title and rev B page, as the INT_* entries do.
+2. Batch letters continue at G. Tags `archive/feat/registers-batch-a` to `-e` already exist and `scripts/integrate.py` creates `archive/<branch>`, so reusing a letter would collide. Branches are `feat/registers-batch-g` to `feat/registers-batch-k`.
+3. Merge and release follow AGENTS.md "Git Workflow": Conventional Commits, `scripts/verify.py` on a rebased, clean branch, `scripts/integrate.py <branch>`, and a human push. The `#minor` token in v01's "Merge & release" no longer has any effect.
+4. Work orders cite rev B table numbers and pages, apply the audit's "Appendix B: Spelling of TI's misspelled names" policy (correct spelling in identifiers, TI's spelling quoted once in the doc comment), and identify fields by bit range wherever the TRM reuses a name (78h, 7Dh).
+5. Each new `.cpp` is added to `[env:native]` `build_src_filter` in `platformio.ini`.
+6. Kickoff prompts are v01's template with `plan-impl-v02.md` and the new branch name substituted, plus the implementer's model and effort from "Models and effort" below. Batch K gets the Batch-D Tightening reminder (see Batch K).
+7. Models and effort are fixed per batch rather than left to the session. v01 named only model classes ("Fable/Opus class" orchestrator, Sonnet implementer, Haiku for Batch A only) and set no effort levels.
+
+### Models and effort
+
+The split stays as v01 proved it: a stronger model orchestrates and gates, Sonnet implements. Batches A to F all passed the gate on Sonnet output, and the per-register work here is the same formulaic transcription, so a stronger implementer would add cost without removing a known failure mode. Effort rises where the batch adds something the library has not done before: unit conversion with sentinel values (Batch I) and R/W byte assembly past bit 255 (Batch K).
+
+| Batch | Orchestrator session (model, effort) | Implementer subagent (Agent `model`, `effort`) | Review gate |
+|---|---|---|---|
+| G | Opus 5.5 (`claude-opus-5-5`), high | `sonnet` (Sonnet 5.5), `medium` | `/code-review high` |
+| H | Opus 5.5, high | `sonnet`, `medium` | `/code-review high` |
+| I | Opus 5.5, high | `sonnet`, `high` | `/code-review high` |
+| J | Opus 5.5, high | `sonnet`, `medium` | `/code-review high` |
+| K | Opus 5.5, high | `sonnet`, `high` | `/code-review xhigh`; the human may also run `/code-review ultra` before integrating |
+| L | Opus 5.5, high | `sonnet`, `high` | `/code-review high`, plus a hand re-derivation of one decoded value per spec table, as v01's Batch-D Tightening required for PDOs |
+
+- Set the orchestrator's model and effort when starting the batch session (the app's model selector, or `claude --model claude-opus-5-5` with effort high). The orchestrator writes the work order, runs the gate, does the manual bit-offset cross-check, and owns every task v01's "When Not to Delegate" reserves for it, including the 7Dh write helpers if a gate finding pushes them toward the base class.
+- The orchestrator passes the implementer's `model` and `effort` explicitly on the Agent call, with `isolation: "worktree"`. This plan is the instruction that authorizes setting `effort`; without it the subagent runs at its default.
+- Haiku is not used. v01 allowed it for the Batch A pilot only, and Batch G, the cheapest batch here, still introduces a new address-table step (workflow change 1) that the pilot never exercised.
+- Fable 5.2 is not used by default. Escalate the orchestrator to Fable 5.2 for a batch only if that batch hits v01's escalation rule (two failed gates with correctness findings) and the orchestrator is taking over implementation.
+- If the escalation rule fires, the orchestrator implements at the same model and effort as its session; it does not start a third Sonnet attempt.
+
+### Batches and order
+
+| Batch | Registers | Shared machinery | Why this position |
+|---|---|---|---|
+| G | Fh Version, 42h PD3 Configuration | 4-byte registers, single `extractBits`/`setBits` fields | Cheapest and highest value. 42h is the enable for 77h, 78h, 7Ah, 7Bh, 7Dh, and 7Eh, so later batches cite its accessors. |
+| H | 27h Global System Configuration, 48h Received SOP Identity | Non-standard sizes (15 B from 116 bits, 25 B); 27h R/W, 48h read-only | Diagnostics and board configuration. The 27h read also shows whether the test board can source power, which Batch I's hardware check needs. |
+| I | 78h TX Source Info, 7Ah Transmitted PPS Status | Source-side R/W info words with unit conversion (0.5 W, 1 W, 20 mV, 50 mA) and "not supported" sentinels | Source-role replies, ranked next in the audit. |
+| J | 77h Tx Source Caps Extended, 7Eh Transmit Sink Caps Extended | Byte-aligned R/W extended-capability blocks of raw 8- and 16-bit fields | Same shape and the same "USB PD defines the encoding" treatment. |
+| K | 7Bh BSDO, 7Dh Tx Battery Capabilities | Indexed per-battery entries; 7Dh is the first R/W register past bit 255 | Battery-backed designs. Last, because it has the most new machinery. |
+| L (conditional) | Typed decode for 48h, 77h, 7Eh, 7Bh, 7Dh | USB PD specification tables served by the MCP server | Runs only for registers whose earlier batch shipped before the server served the USB PD specification. |
+
+### Decode technique
+
+`TPS25751Register::extractBits*()` and `setBits()` take a `uint8_t bitPos` (`include/TPS25751Register.h:76-120`). Of the ten, only 7Dh has a field above bit 255. The highest field bit in each of the others is: Fh 31, 42h 20, 27h 23 (reserved to 115), 48h 199, 78h 63, 7Ah 27, 77h 110 (reserved to 119), 7Eh 87 (reserved to 111), 7Bh 127. Those nine use `extractBits*()` and `setBits()` directly. For 48h, the highest call is `extractBits32(168, 32)`, which ends at bit 200, the end of the 25-byte buffer.
+
+7Dh (288 bits) holds four 72-bit battery entries. Battery 3 occupies bits 287:216, so its Design Capacity (bit 248, ending at 264), Last Full Charge Capacity (bit 264), and Battery Type (bit 280) cannot be addressed with a `uint8_t bitPos`. Every 7Dh field is byte-aligned. The class decodes and encodes all four entries by direct byte assembly from `_raw[]` with a 9-byte stride, following `TPS25751IOConfig::readGpioBitmap()` (`src/TPS25751IOConfig.cpp:3`) for the bounds-checked little-endian read. IO_CONFIG is read-only, so 7Dh also needs the library's first write past bit 255: class-private `readLE16()`, `writeLE16()`, and byte-write helpers guarded by `isValid()` and a bounds check. Widening the base class's `bitPos` to `uint16_t` would remove the need for those helpers, but it is a base-class API change, which v01's "When Not to Delegate" reserves for the orchestrator and which would deserve an ADR. This plan does not make that change.
+
+27h is 116 bits. Its `RegisterInfo` size is 15 bytes, the width rounded up, which is the rule LIQUID_DETECTION_CONFIG already follows (83 bits, 11 bytes). Bits 119:116 (the high nibble of byte 14) lie outside the register: the class does not decode them, validation does not check them, and no setter touches them. Writes are read-modify-write, so `writeGlobalSystemConfig()` sends the nibble back exactly as it was read; a default-constructed object sends 0. One hardware risk remains. `TPS25751::readRegister()` rejects any response whose length byte differs from the expected size (`src/TPS25751.cpp:50`). If the controller reports a count other than 15 for 27h, every read fails. Batch H confirms the length byte on hardware before merge. If it differs, set `RegisterInfo` to the observed count and record it in CONSTRAINTS.md, as was done for ACTIVE_RDO_CONTRACT (16 B).
+
+### Access and write paths
+
+| Register | TRM access | Library | Setters, `kAddress`, `TPS25751` write method |
+|---|---|---|---|
+| Fh Version | R | Read-only | None |
+| 42h PD3 Configuration | R/W | R/W | Yes: `writePD3Config()` |
+| 27h Global System Configuration | R/W | R/W | Yes: `writeGlobalSystemConfig()` (decision 2). Doxygen on the class and the write method quotes the TRM: "Any modifications to this register will cause a port disconnect and reconnect". 28h PORT_CONFIGURATION stays decode-only; this plan does not change it. |
+| 48h Received SOP Identity | R | Read-only | None |
+| 78h TX Source Info | R/W | R/W | Yes: `writeTransmitSourceInfo()`. Doxygen states that the firmware may overwrite host writes. |
+| 7Ah Transmitted PPS Status | R/W | R/W | Yes: `writeTransmitPPSStatus()` |
+| 77h Tx Source Caps Extended | R/W | R/W | Yes: `writeTransmitSourceCapsExtended()` |
+| 7Eh Transmit Sink Caps Extended | R/W | R/W | Yes: `writeTransmitSinkCapsExtended()` |
+| 7Bh BSDO | R/W | R/W | Yes: `writeTransmitBatteryStatus()` |
+| 7Dh Tx Battery Capabilities | R/W | R/W | Yes: `writeTransmitBatteryCapabilities()` |
+
+Every register also gets `read<Name>Register(bool validate = true)`, and every R/W register gets the `read<Name>()` / `write<Name>()` pair, mirroring `readLiquidDetectionConfig` / `writeLiquidDetectionConfig` / `readLiquidDetectionConfigRegister`. Write methods forward to `TPS25751::writeRegister<T>()`.
+
+### Cross-register dependencies
+
+- 42h gates the Tx blocks. Bit 8 enables replies from 77h, bit 10 from 7Dh, bit 11 from 7Bh, bit 17 from 7Eh, bit 18 from 78h, and bit 20 from 7Ah. With the bit clear, the controller answers the corresponding Get_* message with Not_Supported. Each Tx class's Doxygen names its gate bit and the 42h accessor.
+- 48h is filled when the controller sends Discover Identity. PORT_CONTROL Automatic ID Request (29h bit 16, reset 1h) makes that automatic. INT_EVENT1 bit 51 means "The Discover Modes process has completed" (p.19). That is a later step in discovery, not a signal that 48h changed, and INT_EVENT1 has no Discover Identity event (the server lists 38 named bits, none for identity). The 48h Response Type field is therefore the authoritative status; bit 51 is a hint whose timing Batch H records on hardware.
+- 77h's two battery-count fields should agree with the populated entries in 7Bh and 7Dh (TRM p.57 and p.58: "The host should also program the Tx Source Capabilities Extended register (0x77) ... consistent with the contents of this register"). Single-register validation cannot check this, so the rule goes in Doxygen on all three classes.
+- 77h and 7Eh hold only the tail of the PD data block. The controller prepends VID, PID, and XID from firmware configuration, the firmware version, and the hardware version from BOOT_FLAGS (2Dh) REV_ID.
+- 42h bit 7 (Auto Get MIDB) stores its result in TX_MIBDB_SOP (0x73), which neither the library nor the server covers. Its companion event is INT_EVENT1 bit 29, MIDB Received.
+
+### Validation tiers
+
+The library's real tiers are basic (`isValid()`, `isValidSize()`), data (`hasValidData()`, which rejects the all-0xFF bus-error signature), and semantic (`isSemanticallyValid()`). Basic and data come from the base class for all ten registers. Each register's semantic rules are listed in its batch. Two rules apply throughout:
+
+- Reserved ranges must read 0. Every reserved range in the ten registers has reset 0h. If hardware shows firmware setting a reserved bit, drop that check and record why in CONSTRAINTS.md.
+- A documented reset value must pass validation unless it actually violates a stated rule. Each suite includes a reset-fixture test.
+
+### Hardware validation
+
+The test board is a Teensy 4.0 host and a TPS25751 in Application mode with an EEPROM configuration (audit step 1). Connection states are: none; attached source (a PD charger, board sinking); attached sink (board sourcing, if 27h shows a source path). The controller's replies to Get_Source_Info, Get_PPS_Status, Get_*_Cap_Extended, Get_Battery_*, and Get_Revision are visible only to a PD partner or a PD analyzer. Without one, that behavior is unit-tested only, and hardware checks for those registers are limited to reads and write/read-back.
+
+| Register | Connection state | Hardware check | Unit-test only |
+|---|---|---|---|
+| Fh | Any | Read; compare with the firmware version from TI's tooling if available | Byte-order decode beyond the observed value |
+| 42h | Any | Read; write one responder bit, read back, restore | Effect on PD replies |
+| 27h | Read: any. Write: no partner attached, board powered independently of the USB-C port | Read; confirm the length byte is 15 and decode the board's PP1, PP3, and RCP settings. Write: change RCP Threshold, read back, observe the disconnect and reconnect, restore the original value | PP1 and PP3 writes (a wrong PP3 role can back-drive the power path), undefined PP1/PP3 codes |
+| 48h | None, then attached source, then attached sink if available | None: Response Type 0, count 0. Attached: Response Type and VDO count after discovery; time of INT_EVENT1 bit 51 relative to the 48h update | NAK and BUSY decode unless a partner produces them |
+| 78h | None, then attached sink | Read; check whether the lower word changes when the board sources; write the upper word and read back | Get_Source_Info reply |
+| 7Ah | Any | Write and read back | Get_PPS_Status reply |
+| 77h, 7Eh | Any | Write and read back; on 77h, note whether Source Inputs bit 0 tracks Barrel_Jack_Event | Get_*_Cap_Extended replies |
+| 7Bh | Any | Read the reset (expected FFFF0200h in the low word); write and read back | Get_Battery_Status reply |
+| 7Dh | Any | Write all four entries, including battery 3 past bit 255, and read back | Get_Battery_Capabilities reply |
+
+### Release level
+
+`scripts/release_level.py` takes the highest level among non-merge commits since the last `chore(release)` commit: a breaking marker gives major, any `feat` gives minor, anything else gives patch. Each batch adds public API in `feat(...)` commits and breaks nothing: the new enumerators were not previously representable, so no existing call changes behavior. Each batch therefore carries a minor level.
+
+The whole plan ships as one release, from one push. Publishing runs only in CI on a push to `main` (`.github/workflows/publish.yml`), CI derives one release level per push, and the `pre-push` hook refuses pushes from agent shells. Five releases would therefore take five pushes; one release takes one. Each batch is integrated locally with `scripts/integrate.py` as it finishes, and nothing is pushed until Batch K (and Batch L, if it runs) is integrated. Then the human pushes `main` and every archive tag in one command, from this library root:
+
+```bash
+git push origin main refs/tags/archive/feat/registers-batch-g refs/tags/archive/feat/registers-batch-h refs/tags/archive/feat/registers-batch-i refs/tags/archive/feat/registers-batch-j refs/tags/archive/feat/registers-batch-k
+```
+
+CI then runs the verify job once on the final tip and publishes one minor release. `fix/rev-b-trm` already carries nine `feat` commits (`release_level.py main..fix/rev-b-trm` prints `minor`). If it is pushed separately first, it ships as 2.1.0 and this plan ships as 2.2.0. If it is still unpushed when Batch K lands, add `refs/tags/archive/fix/rev-b-trm` to the same push, and everything ships together as 2.1.0 from the current 2.0.2.
+
+### Decisions
+
+Decided on 2026-11-18:
+
+1. Batch K is implemented, not deferred.
+2. 27h gets setters, `kAddress`, and `writeGlobalSystemConfig()` despite the disconnect-on-write behavior. Examples never call the write method.
+3. Typed decode from the USB PD specification comes from the MCP server, which is being extended to serve it. A batch whose work order can paste the spec tables from the server includes typed decode; a batch that starts before then ships raw accessors, and Batch L adds the typed decode later.
+4. One release from one push at the end, as described under "Release level".
+5. The TRM defects are recorded in the server repo's `known_document_issues.json` (see "Register facts from tps25751-docs").
+
+### Per-batch documentation
+
+v01's "Documentation Update Checklist (per batch)" applies with these changes:
+
+- Edit `docs/plans/plan-impl-v02.md`, not v01. v01 stays as the historical record.
+- `AGENTS.md`: the "Last Updated" and "Current Phase" lines, the "Implemented Registers" count in Implementation Status (27/37 before Batch G, then 29, 31, 33, 35, 37), the "Status" line under it, the Register Classes list (one entry per new class), and the documentation tree's plan line, which still says "12 registers remaining". In Batch G only: point "Current Roadmap" at v02, and change the MCP table's "27 registers" to 37. That column describes the server, which serves 37 registers whatever the library supports.
+- `docs/engineering/STANDARDS.md` "Factory Integration" step 1, in Batch G only: it says the 27 addresses already exist. Rewrite it to say a new register adds its `Address`, `RegisterInfo`, and both lookup cases.
+- Factory: forward declaration in `include/TPS25751RegisterFactory.h`, two private creators in `TPS25751RegisterFactoryImpl`, and one case in each of the three `createRegister()` switches in `src/TPS25751RegisterFactory.cpp` (81 cases today, 111 after Batch K).
+- `examples/read-registers/src/main.cpp`: a read-only demo of every new register. No example writes a register. Update `examples/README.md` and `examples/AGENTS.md` when the demonstrated list changes.
+- `docs/engineering/CONSTRAINTS.md`: entries named in each batch.
+- `docs/engineering/CODE_REVIEW_GUIDELINES.md`: any new bug pattern the gate catches.
+- `README.md`: a Highlights bullet only when a batch adds a user-visible capability (Batch J or K: "PD 3.x extended and battery data replies").
+
+## Changes
+
+### Batch G: Version (Fh) and PD3 Configuration (42h)
+
+Branch `feat/registers-batch-g`. Both registers are 4 bytes with fields well inside `extractBits`/`setBits` range.
+
+Fh Version, class `TPS25751Version`, read-only, 4 bytes, p.18.
+
+- Accessors: `rawVersion()` (bits 31:0), `versionMajor()` (VVVV, bits 31:16), `versionMinor()` (MM, bits 15:8), `versionRevision()` (RR, bits 7:0). The TRM numbers bytes from 1 and gives only "byte 1 = RR, byte 2 = MM, etc.", so the VVVV-in-bytes-3-and-4 reading is an inference to confirm on hardware. `debugPrint()` prints the value as hex `VVVV.MM.RR` because the TRM does not say whether the digits are BCD.
+- Validation: no semantic field rules. 00000000h is the reset and is accepted.
+- `TPS25751`: `readVersionRegister(bool validate = true)`.
+- Tests (`test_TPS25751Version`): construction and Rule of Five, an all-0xFF data-tier rejection, decode of a hand-packed `{0x03, 0x02, 0x01, 0x00}` as 0001.02.03, and a reset fixture.
+- Hardware: read in any state and record the value in the batch summary. Optional follow-up outside this batch: print the version after step 17 in `examples/load-patch-bundle`.
+
+42h PD3 Configuration, class `TPS25751PD3Config`, R/W, 4 bytes, reset 00080010h, p.46.
+
+- Accessors and `setBits()` setters for Support PPS Status (bit 20), Support Get Revision (19), Support Get Source Info (18), Support Sink Cap Extended (17), Support Battery Status Message (11), Support Battery Capabilities Message (10), Support Source Extended Message (8), Auto Get MIDB (7), and Unchunked Supported (4). Doxygen on each bit names the register it gates.
+- Validation, semantic: reserved bits 31:21, 16:12, 9, 6:5, and 3:0 read 0.
+- `TPS25751`: `readPD3Config()`, `writePD3Config()`, `readPD3ConfigRegister()`; `kAddress = Address::PD3_CONFIGURATION`.
+- Tests (`test_TPS25751PD3Config`): the 00080010h reset decodes as Get Revision 1 and Unchunked 1 with all other bits 0, and is valid. Each setter round-trips and leaves the other bits unchanged, including preset reserved bits. A reserved bit set makes the register semantically invalid.
+- Hardware: read in any state (expect 00080010h unless the EEPROM configuration differs); write Support Get Revision, read it back, and restore the original value.
+
+Also in this batch: the Batch G items under "Per-batch documentation" (STANDARDS.md step 1, AGENTS.md roadmap link, MCP table count).
+
+### Batch H: Global System Configuration (27h) and Received SOP Identity (48h)
+
+Branch `feat/registers-batch-h`. Both have non-standard sizes; 27h is R/W and 48h is read-only.
+
+27h Global System Configuration, class `TPS25751GlobalSystemConfig`, R/W, 15 bytes (116 bits), reset 28101h, p.28.
+
+- Accessors: `rcpThreshold()` (bits 23:22, enum 6, 8, 10, 12 mV nominal), `pp3Config()` (18:16, enum for values 0h to 5h), `ilimOvershoot()` (15:14, enum: none, 100, 200, 500 mA; Doxygen notes this is the PP_5V limit, not 28h's APDO ILIM Over Shoot), `pp1Config()` (10:8, enum for 0h and 1h), `ppCable1SwitchEnabled()` (bit 0). Each enum has `toString()` text from the TRM value tables.
+- Setters: one `setBits()` setter per accessor (`setRcpThreshold()`, `setPp3Config()`, `setIlimOvershoot()`, `setPp1Config()`, `setPpCable1SwitchEnabled()`), taking the typed enums so an undefined PP1 or PP3 code cannot be written through the typed API.
+- Size and padding: see "Decode technique" under Approach. Byte 14's high nibble is ignored on decode and preserved on write.
+- Validation, semantic: PP3 Config ≤ 5, PP1 Config ≤ 1, and reserved bits 115:24, 21:19, 13:11, and 7:1 read 0. Bits 119:116 are not checked.
+- `TPS25751`: `readGlobalSystemConfig()`, `writeGlobalSystemConfig()`, `readGlobalSystemConfigRegister()`; `kAddress = Address::GLOBAL_SYSTEM_CONFIGURATION`. Doxygen on the class and on `writeGlobalSystemConfig()` states that every write disconnects and reconnects the port, and that PP1 and PP3 describe the board's power-switch wiring.
+- Tests (`test_TPS25751GlobalSystemConfig`): the reset fixture decodes to PP3 Sink, ILIM 200 mA, PP1 Source, and Cable1 enabled, and is valid. PP3 6h and PP1 2h are each invalid. A set reserved bit in each reserved range is invalid. 0xF0 in byte 14 is ignored (still valid). Each setter round-trips and leaves reserved bits and the byte 14 nibble unchanged.
+- Hardware: see the 27h row in "Hardware validation". Confirm the length byte is 15 before merge; on a mismatch, follow "Decode technique". Record the board's PP1 and PP3 settings in the batch summary for Batch I.
+- CONSTRAINTS.md: the 116-bit size rule and padding nibble; the disconnect-on-write behavior and the observed reconnect on hardware.
+
+48h Received SOP Identity, class `TPS25751ReceivedSOPIdentity`, read-only, 25 bytes, p.47.
+
+- Accessors: `numberValidVdos()` (bits 2:0), `responseType()` (7:6, enum `NotSentOrPending`, `Ack`, `NakOrTimeout`, `Busy`), `vdo(index)` for index 0 to 5 via `extractBits32(8 + 32 * index, 32)` (returns 0 for index ≥ 6), and named aliases `idHeaderVdo()`, `certStatVdo()`, `productVdo()` for VDOs 1 to 3, as the TRM labels them. Typed decode inside the VDOs follows decision 3: in this batch if the server serves the USB PD specification when the batch starts, otherwise in Batch L.
+- Validation, semantic: Number Valid VDOs ≤ 6 (TRM "Max of 6") and reserved bits 5:3 read 0. Not checked: whether VDOs past the count are zero, and whether the count is consistent with Response Type. The TRM states neither rule.
+- `debugPrint()` prints only the first `numberValidVdos()` VDOs.
+- `TPS25751`: `readReceivedSOPIdentityRegister()`.
+- Tests (`test_TPS25751ReceivedSOPIdentity`): an ACK fixture with three VDOs at bytes 1 to 12 asserting every accessor, a fixture for each Response Type, count 7 invalid, a reserved bit invalid, and `vdo(6)` returning 0.
+- Example: print 48h in the connected-state block alongside `automaticIdRequest()` and `discoverModeCompleted()`.
+- Hardware: see the 48h row in "Hardware validation". If Response Type stays 0 with Automatic ID Request = 1 and a source attached, record it and retry with a sink attached. Discover Identity initiation depends on firmware policy and data role, which the TRM does not specify.
+- CONSTRAINTS.md: bit 51 is a hint, not a 48h-updated signal; the observed timing.
+
+### Batch I: TX Source Info (78h) and Transmitted PPS Status (7Ah)
+
+Branch `feat/registers-batch-i`. Both are R/W source-side info words with unit conversion. Setters invert the class's own LSB constants, per STANDARDS.md "Write-encoder pattern".
+
+78h TX Source Info, class `TPS25751TransmitSourceInfo`, R/W, 8 bytes, reset 8000000080000000h, p.55.
+
+- Fields: PortType (bit 63), DPSPort (62), PortMaximumPDP_0p5W (49:41, 500 mW/LSB), PortGuaranteedPDP_0p5W (40:32, 500 mW/LSB), Port Type (31), Port Maximum PDP (23:16, 1 W/LSB), Port Present PDP (15:8, 1 W/LSB), Port Reported PDP (7:0, 1 W/LSB). Raw and milliwatt accessors and setters for each. The two Port Type bits get distinct names, and each Doxygen comment cites its bit number and notes the TRM does not explain the duplication.
+- Validation, semantic: reserved bits 61:50 and 30:24 read 0. DPSPort = 1 requires PortType (bit 63) = 0, stated by the TRM. PortGuaranteedPDP_0p5W ≤ PortMaximumPDP_0p5W, skipped when the maximum is 0; this rule is inferred from the TRM descriptions ("minimum power the port is guaranteed" against "maximum power the port will provide").
+- `TPS25751`: read trio and `writeTransmitSourceInfo()`; `kAddress`. Doxygen quotes the TRM: "automatically updated by the PD firmware".
+- Tests (`test_TPS25751TransmitSourceInfo`): reset fixture valid with both Port Type bits set; round-trip of each setter; 9-bit field masking (an over-range value does not reach bit 50 or 41); DPSPort with PortType = 1 invalid; guaranteed > maximum invalid; guaranteed > 0 with maximum 0 valid.
+- Hardware: see the 78h row in "Hardware validation". The attached-sink step depends on Batch H's PP1 reading.
+- CONSTRAINTS.md: firmware-updated R/W register; the observed relation between the upper and lower words.
+
+7Ah Transmitted PPS Status, class `TPS25751TransmitPPSStatus`, R/W, 4 bytes, p.56.
+
+- Fields: Output Voltage (15:0, 20 mV/LSB, 0xFFFF = not supported), Output Current (23:16, 50 mA/LSB, 0xFF = not supported), PTF (26:25, enum: 1h normal, 2h warning, 3h over-temperature, 0h "not defined in TRM"), OMF (27, 0 = constant voltage, 1 = current limit). Accessors: raw values, `outputVoltage_mV()`, `outputCurrent_mA()`, `outputVoltageSupported()`, `outputCurrentSupported()`. Setters: raw, unit-based, and `setOutputVoltageNotSupported()` / `setOutputCurrentNotSupported()`. Unit setters clamp to one below the sentinel, so an over-range input cannot accidentally report "not supported".
+- Validation, semantic: reserved bits 31:28 and 24 read 0. PTF 0h is accepted because it is the reset.
+- `TPS25751`: read trio and `writeTransmitPPSStatus()`; `kAddress`.
+- Tests (`test_TPS25751TransmitPPSStatus`): decode of 5000 mV and 3000 mA from exact-multiple raw values, both sentinels, each PTF value, unit-setter clamping, setter isolation from neighbours, reserved bit invalid.
+- Hardware: write and read back in any state.
+
+### Batch J: Tx Source Caps Extended (77h) and Transmit Sink Caps Extended (7Eh)
+
+Branch `feat/registers-batch-j`. Both are byte-aligned blocks of raw fields whose encodings the TRM defers to the USB PD specification. Typed decode follows decision 3: here if the server already serves the specification, otherwise in Batch L. Accessors and setters are raw, using `setBits()` for sub-byte fields and `extractBits16`/`setBits(pos, 16, v)` for 16-bit fields (little-endian, as everywhere on the host side). Doxygen on each class states that the controller prepends VID, PID, XID, and the firmware and hardware versions.
+
+77h Tx Source Caps Extended, class `TPS25751TransmitSourceCapsExtended`, R/W, 15 bytes, p.54.
+
+- Fields by byte: Voltage Regulation (byte 0), Hold Up Time (1), Compliance (2), Touch Current (3), Peak Current 1, 2, 3 (bytes 4-5, 6-7, 8-9, 16-bit), Touch Temperature (10), Source Inputs (11), Number Fixed Batteries (byte 12 bits 3:0), Number Hot Swappable Batteries (byte 12 bits 7:4), Source PDP (byte 13 bits 6:0), reserved (byte 13 bit 7 and byte 14). Peak currents use an indexed `peakCurrent(1..3)` accessor.
+- Validation, semantic: reserved bits 119:111 read 0; each battery count ≤ 4 (TRM "Max of 4").
+- Doxygen: Source Inputs bit 0 can be changed by the Barrel_Jack_Event GPIO event, so a read-back can differ from the value written.
+- `TPS25751`: read trio and `writeTransmitSourceCapsExtended()`; `kAddress`.
+- Tests (`test_TPS25751TransmitSourceCapsExtended`): a hand-packed fixture asserting every accessor, 16-bit little-endian peak currents, nibble isolation in byte 12, Source PDP masking to 7 bits (bit 111 untouched), battery count 5 invalid, reserved bit invalid, setter round-trips.
+
+7Eh Transmit Sink Caps Extended, class `TPS25751TransmitSinkCapsExtended`, R/W, 14 bytes, p.59.
+
+- Fields by byte: SKEDB Version (0), Load Step (1), Sink Load Char (bytes 2-3, 16-bit), Compliance (4), Touch Temperature (5; TI "Touch Temprature"), Battery Info (6), Sink Modes (7), Sink Minimum PDP (8), Sink Operational PDP (9), Sink Maximum PDP (10), reserved (bytes 11 to 13).
+- Validation, semantic: reserved bits 111:88 read 0. There is no PDP ordering check: the TRM gives no encoding for the PDP bytes, so a numeric comparison of raw bytes could reject a valid value.
+- `TPS25751`: read trio and `writeTransmitSinkCapsExtended()`; `kAddress`.
+- Tests (`test_TPS25751TransmitSinkCapsExtended`): a hand-packed fixture asserting every accessor, 16-bit Sink Load Char, reserved bit invalid, setter round-trips with neighbours preserved.
+
+Hardware for both: write and read back in any state. Replies to Get_Source_Cap_Extended and Get_Sink_Cap_Extended are unit-test only.
+
+### Batch K: BSDO (7Bh) and Tx Battery Capabilities (7Dh)
+
+Branch `feat/registers-batch-k`. Apply v01's "Batch-D Tightening" by analogy: the orchestrator writes the full byte map for both registers into the work order, and the review gate re-derives battery 3's 7Dh offsets by hand. The implementer runs at high effort and the gate at `/code-review xhigh` (see "Models and effort").
+
+7Bh BSDO, class `TPS25751TransmitBatteryStatus`, R/W, 16 bytes, reset FFFF0200h in the low word, p.57.
+
+- Layout: four 4-byte entries at byte 4i: reserved byte, Battery Info (byte 4i+1), Present Capacity (bytes 4i+2 and 4i+3, 16-bit). Indexed accessors and setters `batteryInfo(i)`, `rawPresentCapacity(i)` for i 0 to 3, returning 0 or doing nothing for i ≥ 4. Battery 3's capacity uses the same name as the others; its Doxygen quotes TI's "Battery 3 Present Info".
+- Validation, semantic: reserved bytes 0, 4, 8, and 12 read 0. The reset fixture (Present Capacity FFFFh, Battery Info 2h on battery 0) must be valid; the test confirms the whole-buffer all-0xFF check does not trip on it.
+- `TPS25751`: read trio and `writeTransmitBatteryStatus()`; `kAddress`.
+- Tests (`test_TPS25751TransmitBatteryStatus`): reset fixture, per-entry round-trip with the other entries unchanged, out-of-range index, reserved bit invalid.
+
+7Dh Tx Battery Capabilities, class `TPS25751TransmitBatteryCapabilities`, R/W, 36 bytes, p.58.
+
+- Layout: four 9-byte entries at byte 9i: VID (+0, 16-bit), PID (+2, 16-bit), Battery Design Capacity (+4, 16-bit), Battery Last Full Charge Capacity (+6, 16-bit), Battery Type (+8). Battery 3 is bytes 27 to 35 (bits 287:216). The library treats it as battery index 3 despite the TRM's "battery index 0" text, because that is the only reading consistent with the field names (VID 3, PID 3) and the 72-bit stride.
+- Decode and encode: byte assembly for all entries, per "Decode technique".
+- Validation: the register has no reserved bits and the TRM states no rule, so the semantic tier is the base checks only.
+- `TPS25751`: read trio and `writeTransmitBatteryCapabilities()`; `kAddress`.
+- Tests (`test_TPS25751TransmitBatteryCapabilities`): a fixture with distinct values in every field of every entry, asserting all 20 accessors; battery 3 decode at bytes 27 to 35; setters on battery 3 leave battery 2's last byte (byte 26) unchanged; out-of-range index; bounds guard on a short buffer.
+- CONSTRAINTS.md: extend the IO_CONFIG note ("Any future register whose highest bit offset exceeds 255 ...") with the first R/W case and the class-local write helpers. Record the TRM's battery-index labeling error.
+- Doxygen on 77h, 7Bh, and 7Dh: keep 77h's battery counts consistent with the populated entries.
+
+Hardware for both: see the 7Bh and 7Dh rows in "Hardware validation".
+
+### Batch L (conditional): Typed decode from the USB PD specification
+
+Branch `feat/registers-batch-l`. Runs only if one or more of Batches H, J, and K shipped raw accessors because the MCP server did not yet serve the USB PD specification. It adds typed decode to those classes only. Each addition is new accessors beside the raw ones, so no existing call changes and the batch stays a minor release.
+
+- Scope, per register: 48h ID Header, Cert Stat, and Product VDO fields; 77h and 7Eh field encodings and units; 7Bh Battery Info flags and Present Capacity units; 7Dh Battery Type and capacity units. If the server's specification data resolves the undefined 7Ah PTF 00b, add that meaning to `TPS25751TransmitPPSStatus` too.
+- Work order: paste the specification tables from the server, with the specification revision and table numbers, as v01 did for the TRM. Do not take any field from memory.
+- Tests: extend each existing suite with one fixture per decoded structure, packing the bytes from the pasted tables and commenting the arithmetic.
+- Hardware: re-run the 48h attached-source check and compare the typed decode with the partner's known identity (for example the charger's vendor). The rest is unit-test only.
+- Add `refs/tags/archive/feat/registers-batch-l` to the final push if this batch runs.
+
+## Files touched
+
+| File | Batches |
+|---|---|
+| `include/TPS25751RegisterAddress.h` | G, H, I, J, K |
+| `include/TPS25751RegisterFactory.h`, `src/TPS25751RegisterFactory.cpp` | G, H, I, J, K |
+| `include/TPS25751.h`, `src/TPS25751.cpp` | G, H, I, J, K |
+| `platformio.ini` (`[env:native]` `build_src_filter`) | G, H, I, J, K |
+| `include/TPS25751Version.h`, `src/TPS25751Version.cpp` (new) | G |
+| `include/TPS25751PD3Config.h`, `src/TPS25751PD3Config.cpp` (new) | G |
+| `include/TPS25751GlobalSystemConfig.h`, `src/TPS25751GlobalSystemConfig.cpp` (new) | H |
+| `include/TPS25751ReceivedSOPIdentity.h`, `src/TPS25751ReceivedSOPIdentity.cpp` (new) | H |
+| `include/TPS25751TransmitSourceInfo.h`, `src/TPS25751TransmitSourceInfo.cpp` (new) | I |
+| `include/TPS25751TransmitPPSStatus.h`, `src/TPS25751TransmitPPSStatus.cpp` (new) | I |
+| `include/TPS25751TransmitSourceCapsExtended.h`, `src/TPS25751TransmitSourceCapsExtended.cpp` (new) | J |
+| `include/TPS25751TransmitSinkCapsExtended.h`, `src/TPS25751TransmitSinkCapsExtended.cpp` (new) | J |
+| `include/TPS25751TransmitBatteryStatus.h`, `src/TPS25751TransmitBatteryStatus.cpp` (new) | K |
+| `include/TPS25751TransmitBatteryCapabilities.h`, `src/TPS25751TransmitBatteryCapabilities.cpp` (new) | K |
+| `test/test_native/test_TPS25751<Class>/` (one new suite per class) | G, H, I, J, K; L extends the H, J, and K suites |
+| 48h, 77h, 7Eh, 7Bh, and 7Dh class files above | L, if it runs |
+| `examples/read-registers/src/main.cpp`, `examples/README.md`, `examples/AGENTS.md` | G, H, I, J, K |
+| `AGENTS.md` | G, H, I, J, K |
+| `docs/plans/plan-impl-v02.md` | G, H, I, J, K |
+| `docs/engineering/STANDARDS.md` | G |
+| `docs/engineering/CONSTRAINTS.md` | H, I, K |
+| `docs/engineering/CODE_REVIEW_GUIDELINES.md` | Any batch whose gate finds a new pattern |
+| `README.md` | J or K |
+
+## Verification
+
+Per batch, from the library root on the batch branch:
+
+1. Native tests are green, including the new suite:
+   ```bash
+   pio test -e native
+   ```
+2. The example builds without warnings:
+   ```bash
+   pio run -e example-read-registers
+   ```
+3. The workflow gate passes on a rebased, clean tree (it reruns both of the above plus commit linting):
+   ```bash
+   scripts/verify.py
+   ```
+4. Every new field's bit offset and width matches `get_register` for that register, checked by hand in the review gate, and the class's `RegisterInfo` size matches `list_registers` (after Batch K, 37 of 37).
+5. The release level for the batch range is `minor`:
+   ```bash
+   python3 scripts/release_level.py main..feat/registers-batch-<x>
+   ```
+6. The hardware check in the batch's "Changes" entry is done or explicitly recorded as not possible, with the observed values in the batch summary. Batch H does not merge until the 27h length byte has been read on hardware.
+
+After Batch K, `readRegisterByAddress()` returns a non-null object for all 37 addresses on hardware, and the AGENTS.md counts read 37/37.

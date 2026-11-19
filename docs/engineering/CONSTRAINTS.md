@@ -535,6 +535,19 @@ Two consequences for writers:
 `debugPrint()` prints all 14 raw bytes so a before-and-after comparison shows
 whether the undocumented bits survived.
 
+**Trap: LIQUID_DETECTION_CONFIG (0x98) is 12 bytes on the wire, not the TRM's
+83 bits.** SLVUCR8B Rev. B (p.60) gives 83 bits, which rounds up to 11 bytes, and
+the library shipped an 11-byte `RegisterInfo` from Batch F. On 2026-11-18 the
+same board answered a raw read of 0x98 with a length byte of 12 (`0C`) followed
+by 12 zero bytes. Because `TPS25751::readRegister()` rejects a length byte that
+differs from `RegisterInfo`, every 0x98 read had failed, and
+`example-read-registers` printed "Failed to read register data for address 0x98"
+on every loop. `Registers::LIQUID_DETECTION_CONFIG` is now 12 bytes. Only bits
+82:0 are defined; bits 95:83 are not decoded and the setters do not touch them.
+With 0x27 (14 bytes against 116 bits) this is the second register whose TRM width
+disagrees with the length byte, so confirm the length byte on hardware for any
+register whose TRM width is not a whole number of bytes.
+
 **RECEIVED_SOP_IDENTITY (0x48) and INT_EVENT1 bit 51.** 0x48 holds the latest
 Discover Identity response. INT_EVENT1 bit 51 means "The Discover Modes process
 has completed" (p.19), a later discovery step, and INT_EVENT1 has no Discover
@@ -622,6 +635,22 @@ bits** at 6:0 — verified against the hardware-tested decode in
 listed "Bits 26-17" / "Bits 16-8"; the decode `.cpp` is the source of truth —
 corrected in Batch D when the encode inverse was added.)
 
+**Trap: not every Augmented PDO is a PPS PDO.** Bits 31:30 = 11b mark an
+Augmented PDO (APDO); bits 29:28 then select the APDO subtype, and only 00b is
+the SPR PPS layout above. On 2026-11-18 the test board's TRANSMIT_SOURCE_CAPS
+(0x32, EEPROM configuration) carried PDO 5 = `0xE004B1F4`, subtype 10b. Read with
+the PPS layout it gave a 17700 mV minimum and a 200 mV maximum, and the whole
+register failed `isSemanticallyValid()`. USB PD 3.1 and later define further APDO
+subtypes; their layouts are not yet checked against the specification (that
+waits for the MCP server to serve it). Every PDO class (`TPS25751ActivePDOContract`,
+`TPS25751Received{Source,Sink}Caps`, `TPS25751Transmit{Source,Sink}Caps`)
+therefore exposes the subtype (`apdoSubtype()` / `getAPDOSubtype()`) and
+`isSprPps()` / `isSprPpsPDO()`. The PPS accessors return 0 (or false) for any
+other subtype, semantic validation skips the PPS rules for it, and
+`debugPrint()` names the subtype instead of printing a PPS decode. The shared
+helpers `apdoSubtype(pdo)` and `isSprPpsApdo(pdo)` live in
+`TPS25751ActivePDOContract.h` next to `PDOType`.
+
 ### PDO Parsing Strategy
 
 **Type detection:**
@@ -690,6 +719,13 @@ for (uint8_t i = 0; i < pdoCount; i++) {
 > page 36; Rev. A used bits 21:10 for Power Path for PDO 2-7), so **PDO 1
 > starts at byte 3** and PDO *n* at `3 + (n-1)*4`.
 > Always check the specific register's field table before assuming the offset.
+>
+> The firmware on the test board still fills bits 23:10 with the rev A layout.
+> On 2026-11-18 bytes 1 and 2 of 0x32 read `AA 2A`: Power Path for PDO 1 (bits
+> 9:8) = 2h, PP_EXT, and bits 21:10 = `0xAAA`, which in rev A means PP_EXT for
+> PDOs 2 to 7. The library follows rev B and treats bits 23:10 as reserved, so it
+> neither decodes nor writes them, and a read-modify-write keeps the firmware's
+> values.
 
 ### Transmit Capabilities encode quirks (Batch D)
 
@@ -1010,6 +1046,7 @@ void foo() {
 | 1.3 | 2026-07-07 | Claude Code | Batch C: documented the ADC_RESULTS (0x6A) update-frequency caveat — not refreshed in Unconnected Sleep, so a stale/all-zero read is expected, not an error (Read-Only Registers section) |
 | 1.4 | 2026-11-18 | Claude Code | Batch G of the rev B plan: firmware sets PD3_CONFIGURATION (0x42) reserved bits 3:0 on hardware, so validation no longer checks them (Read/Write Registers section) |
 | 1.5 | 2026-11-18 | Claude Code | Batch H of the rev B plan: GLOBAL_SYSTEM_CONFIGURATION (0x27) reports 14 bytes on hardware and the firmware sets bits in all its reserved ranges; RECEIVED_SOP_IDENTITY (0x48) status comes from Response Type, not INT_EVENT1 bit 51 (Read/Write Registers section) |
+| 1.6 | 2026-11-18 | Claude Code | LIQUID_DETECTION_CONFIG (0x98) reports 12 bytes on hardware, not 11 (Read/Write Registers section); PDO classes decode only the SPR PPS APDO subtype after a subtype 10b APDO in 0x32 failed validation (USB Power Delivery Complexity section); the firmware still uses the rev A Power Path layout in 0x32 bits 21:10 |
 
 ---
 

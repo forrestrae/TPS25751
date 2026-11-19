@@ -195,6 +195,11 @@ bool TPS25751::readPD3Config(TPS25751PD3Config &pd3Config) const
     return readRegister(TPS25751Registers::Registers::PD3_CONFIGURATION, pd3Config);
 }
 
+bool TPS25751::readGlobalSystemConfig(TPS25751GlobalSystemConfig &globalSystemConfig) const
+{
+    return readRegister(TPS25751Registers::Registers::GLOBAL_SYSTEM_CONFIGURATION, globalSystemConfig);
+}
+
 bool TPS25751::writeSleepControl(const TPS25751SleepControl &sleepControl) const
 {
     // Delegates to the typed writeRegister<T>() (keyed on kAddress) so there is
@@ -248,6 +253,11 @@ bool TPS25751::writePD3Config(const TPS25751PD3Config &pd3Config) const
     // Delegates to the typed writeRegister<T>() (keyed on kAddress) so there is
     // a single host write path; the size/validity guard lives there.
     return writeRegister(pd3Config);
+}
+
+bool TPS25751::writeGlobalSystemConfig(const TPS25751GlobalSystemConfig &globalSystemConfig) const
+{
+    return writeRegister(globalSystemConfig);
 }
 
 // Type-safe register reading methods
@@ -533,6 +543,14 @@ std::unique_ptr<TPS25751PD3Config> TPS25751::readPD3ConfigRegister(bool validate
 
     TPS25751PD3Config* pd3ConfigReg = static_cast<TPS25751PD3Config*>(reg.release());
     return std::unique_ptr<TPS25751PD3Config>(pd3ConfigReg);
+}
+
+std::unique_ptr<TPS25751GlobalSystemConfig> TPS25751::readGlobalSystemConfigRegister(bool validate) const {
+    auto reg = readAndValidateRegisterByAddress(TPS25751Registers::Address::GLOBAL_SYSTEM_CONFIGURATION, validate);
+    if (!reg) return nullptr;
+
+    TPS25751GlobalSystemConfig* typedReg = static_cast<TPS25751GlobalSystemConfig*>(reg.release());
+    return std::unique_ptr<TPS25751GlobalSystemConfig>(typedReg);
 }
 
 std::unique_ptr<TPS25751PortControl> TPS25751::readPortControlRegister(bool validate) const {

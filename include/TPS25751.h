@@ -32,6 +32,7 @@
 #include "TPS25751LiquidDetectionConfig.h"
 #include "TPS25751Version.h"
 #include "TPS25751PD3Config.h"
+#include "TPS25751GlobalSystemConfig.h"
 #include "TPS25751RegisterAddress.h"
 #include "TPS25751RegisterFactory.h"
 #include "TPS25751Task.h"
@@ -155,6 +156,13 @@ public:
     bool readPD3Config(TPS25751PD3Config &pd3Config) const;
 
     /**
+     * @brief Read the Global System Configuration register (0x27)
+     * @param globalSystemConfig Register object to populate (14 bytes)
+     * @return true if the read succeeded
+     */
+    bool readGlobalSystemConfig(TPS25751GlobalSystemConfig &globalSystemConfig) const;
+
+    /**
      * @brief Write the Sleep Control register (0x70)
      * @param sleepControl Register object holding the bytes to write
      * @return false if @p sleepControl is not valid or not the expected size;
@@ -230,6 +238,23 @@ public:
      *         otherwise the result of the underlying I2C write
      */
     bool writePD3Config(const TPS25751PD3Config &pd3Config) const;
+
+    /**
+     * @brief Write the Global System Configuration register (0x27)
+     *
+     * TRM: "Any modifications to this register will cause a port disconnect and
+     * reconnect with the new settings." PP1 and PP3 describe the board's
+     * power-switch wiring, and a wrong PP3 role can back-drive the power path.
+     * The firmware stores undocumented values in bits the TRM lists as
+     * reserved, so start from a fresh readGlobalSystemConfig() and change only
+     * the fields you mean to. Writing a default-constructed object would clear
+     * those bits as well as rewrite every field.
+     *
+     * @param globalSystemConfig Register object holding the bytes to write
+     * @return false if @p globalSystemConfig is not valid or not the expected size;
+     *         otherwise the result of the underlying I2C write
+     */
+    bool writeGlobalSystemConfig(const TPS25751GlobalSystemConfig &globalSystemConfig) const;
 
     // Type-safe register reading methods
     bool readRegister(TPS25751Registers::RegisterInfo regInfo, uint8_t *buffer) const;
@@ -482,6 +507,13 @@ public:
      * @return Unique pointer to PD3 Configuration register (nullptr if failed)
      */
     std::unique_ptr<TPS25751PD3Config> readPD3ConfigRegister(bool validate = true) const;
+
+    /**
+     * @brief Read Global System Configuration (0x27) register using factory pattern
+     * @param validate Whether to validate the register after reading
+     * @return Unique pointer to the register (nullptr if failed)
+     */
+    std::unique_ptr<TPS25751GlobalSystemConfig> readGlobalSystemConfigRegister(bool validate = true) const;
 
     /**
      * @brief Read Port Control register using factory pattern

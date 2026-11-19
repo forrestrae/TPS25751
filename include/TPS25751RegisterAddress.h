@@ -27,6 +27,8 @@ enum class Address : uint8_t {
     INT_CLEAR1 = 0x18,
     STATUS = 0x1A,
     POWER_PATH_STATUS = 0x26,
+    /// Global System Configuration (SLVUCR8B Rev. B, p.28). TI short name GLOBAL_SYSTEM_CONFIGURATION.
+    GLOBAL_SYSTEM_CONFIGURATION = 0x27,
     PORT_CONFIGURATION = 0x28,
     PORT_CONTROL = 0x29,
     BOOT_STATUS = 0x2D,
@@ -76,6 +78,9 @@ namespace Registers {
     constexpr RegisterInfo INT_CLEAR1{Address::INT_CLEAR1, 11};
     constexpr RegisterInfo STATUS{Address::STATUS, 5};
     constexpr RegisterInfo POWER_PATH_STATUS{Address::POWER_PATH_STATUS, 5};
+    // The TRM gives 116 bits (15 bytes), but the controller reports a 14-byte length
+    // on hardware (2026-11-18), so bits 115:112 are not transmitted.
+    constexpr RegisterInfo GLOBAL_SYSTEM_CONFIGURATION{Address::GLOBAL_SYSTEM_CONFIGURATION, 14};
     constexpr RegisterInfo PORT_CONFIGURATION{Address::PORT_CONFIGURATION, 17};
     constexpr RegisterInfo PORT_CONTROL{Address::PORT_CONTROL, 4};
     constexpr RegisterInfo BOOT_STATUS{Address::BOOT_STATUS, 5};
@@ -114,6 +119,7 @@ constexpr uint8_t getRegisterSize(Address addr) {
         case Address::INT_CLEAR1: return Registers::INT_CLEAR1.size;
         case Address::STATUS: return Registers::STATUS.size;
         case Address::POWER_PATH_STATUS: return Registers::POWER_PATH_STATUS.size;
+        case Address::GLOBAL_SYSTEM_CONFIGURATION: return Registers::GLOBAL_SYSTEM_CONFIGURATION.size;
         case Address::PORT_CONFIGURATION: return Registers::PORT_CONFIGURATION.size;
         case Address::PORT_CONTROL: return Registers::PORT_CONTROL.size;
         case Address::BOOT_STATUS: return Registers::BOOT_STATUS.size;
@@ -148,6 +154,7 @@ inline const RegisterInfo* getRegisterInfo(Address addr) {
         case Address::MODE: return &Registers::MODE;
         case Address::BOOT_STATUS: return &Registers::BOOT_STATUS;
         case Address::POWER_PATH_STATUS: return &Registers::POWER_PATH_STATUS;
+        case Address::GLOBAL_SYSTEM_CONFIGURATION: return &Registers::GLOBAL_SYSTEM_CONFIGURATION;
         case Address::PORT_CONFIGURATION: return &Registers::PORT_CONFIGURATION;
         case Address::COMMAND: return &Registers::COMMAND;
         case Address::DATA: return &Registers::DATA;

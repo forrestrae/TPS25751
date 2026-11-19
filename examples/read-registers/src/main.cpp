@@ -386,8 +386,9 @@ void print_caps_extended()
     // TX_SOURCE_CAPABILITIES_EXTENDED (0x77) and TRANSMIT_SINK_CAPABILITIES_EXTENDED
     // (0x7E) are R/W, but this sketch never writes them: whatever the host stores
     // is sent to the port partner in reply to Get_Source_Cap_Extended or
-    // Get_Sink_Cap_Extended. The fields are raw; the USB PD specification defines
-    // their encodings.
+    // Get_Sink_Cap_Extended. The classes decode the fields per the USB PD
+    // specification (R3.3), and debugPrint() prints the decoded values below the
+    // raw ones.
     if (const auto sourceCaps = pd.readTransmitSourceCapsExtendedRegister(true))
         sourceCaps->debugPrint();
     else
@@ -421,7 +422,8 @@ void print_battery_data()
     // TRANSMITTED_BATTERY_STATUS (0x7B) and TX_BATTERY_CAPABILITIES (0x7D) are R/W,
     // but this sketch never writes them: whatever the host stores is sent to the
     // port partner in reply to Get_Battery_Status or Get_Battery_Capabilities. The
-    // fields are raw; the USB PD specification defines their encodings.
+    // classes decode the fields per the USB PD specification (R3.3), and
+    // debugPrint() prints the decoded values below the raw ones.
     if (const auto batteryStatus = pd.readTransmitBatteryStatusRegister(true))
         batteryStatus->debugPrint();
     else
@@ -446,8 +448,9 @@ void print_battery_data()
         Serial.println(F("Failed to create/read PD3 Configuration register via factory"));
 
     // The TRM wants the battery counts in TX_SOURCE_CAPABILITIES_EXTENDED (0x77) to
-    // agree with the entries populated in 0x7B and 0x7D. Print them so the three
-    // registers can be read against each other.
+    // agree with the entries populated in 0x7B and 0x7D, and the USB PD
+    // specification requires 0x77 and 0x7E to agree. Print the counts from both so
+    // the registers can be read against each other.
     if (const auto sourceCaps = pd.readTransmitSourceCapsExtendedRegister(true))
     {
         Serial.print(F("Number Fixed Batteries (0x77): "));
@@ -457,6 +460,16 @@ void print_battery_data()
     }
     else
         Serial.println(F("Failed to create/read TX Source Capabilities Extended register via factory"));
+
+    if (const auto sinkCaps = pd.readTransmitSinkCapsExtendedRegister(true))
+    {
+        Serial.print(F("Fixed Batteries (0x7E): "));
+        Serial.println(sinkCaps->fixedBatteryCount());
+        Serial.print(F("Hot Swappable Battery Slots (0x7E): "));
+        Serial.println(sinkCaps->hotSwappableBatterySlotCount());
+    }
+    else
+        Serial.println(F("Failed to create/read Transmit Sink Capabilities Extended register via factory"));
 }
 
 void print_app_mode_status(const std::unique_ptr<TPS25751Mode> &modeReg)

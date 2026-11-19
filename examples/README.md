@@ -21,7 +21,7 @@ Replace `example-read-registers` with any environment from the table below.
 
 | Example | Environment | Demonstrates |
 |---|---|---|
-| [`read-registers`](read-registers/) | `example-read-registers` | Reading core TPS25751 **host** registers (STATUS, MODE, POWER_PATH_STATUS, BOOT_FLAGS, PORT_CONFIG, internal-ADC telemetry via ADC_RESULTS, …) and decoding interrupt events via an IRQ pin. The starting point for the host controller. |
+| [`read-registers`](read-registers/) | `example-read-registers` | Reading core TPS25751 **host** registers (STATUS, MODE, VERSION, PD3_CONFIGURATION, POWER_PATH_STATUS, BOOT_FLAGS, PORT_CONFIG, internal-ADC telemetry via ADC_RESULTS, …) and decoding interrupt events via an IRQ pin. The starting point for the host controller. |
 | [`load-patch-bundle`](load-patch-bundle/) | `example-load-patch-bundle` | **Host-side Patch Burst Mode (PBM)** bring-up: loads a TI patch bundle directly into the TPS25751 over I2Ct when no external EEPROM is present (EEPROM-less PTCH → APP path). Demonstrates `TPS25751PatchLoader` — the 17-step PBM sequencing from TI app note SLVAFV8A §4.1 — and prints the `PatchLoadStatus` outcome. Requires replacing `patch_bundle.h` with the real low-region binary from TI's USBCPD Application Customization Tool; ships with a placeholder array so the example compiles as-is. |
 
 > **BQ25798 downstream-device examples** (status, charge-config, telemetry,

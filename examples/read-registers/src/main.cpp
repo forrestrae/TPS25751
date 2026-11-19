@@ -14,6 +14,8 @@
 #include "TPS25751AutoNegotiateSink.h"
 #include "TPS25751IOConfig.h"
 #include "TPS25751LiquidDetectionConfig.h"
+#include "TPS25751Version.h"
+#include "TPS25751PD3Config.h"
 
 #define I2CT_IRQ_PIN 17
 
@@ -282,10 +284,31 @@ void print_liquid_detection_config()
         Serial.println(F("Failed to create/read Liquid Detection Config register via factory"));
 }
 
+void print_version_and_pd3_config()
+{
+    Serial.println();
+    Serial.println(F("-------------------- print_version_and_pd3_config --------------------"));
+    Serial.println();
+
+    // VERSION (0x0F) is read-only. PD3_CONFIGURATION (0x42) is R/W, but changing
+    // which PD 3.0 messages a live board answers is outside this read-only
+    // sketch, so only the read paths are demonstrated here.
+    if (const auto version = pd.readVersionRegister(true))
+        version->debugPrint();
+    else
+        Serial.println(F("Failed to create/read Version register via factory"));
+
+    if (const auto pd3Config = pd.readPD3ConfigRegister(true))
+        pd3Config->debugPrint();
+    else
+        Serial.println(F("Failed to create/read PD3 Configuration register via factory"));
+}
+
 void print_app_mode_status(const std::unique_ptr<TPS25751Mode> &modeReg)
 {
     modeReg->debugPrint();
 
+    print_version_and_pd3_config();
     print_boot_flags();
     print_status_register();
     print_pd_status();

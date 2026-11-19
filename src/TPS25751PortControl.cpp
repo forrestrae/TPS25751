@@ -12,6 +12,14 @@ bool TPS25751PortControl::resistor15kPresent() const {
     return extractBits(24, 1);
 }
 
+bool TPS25751PortControl::dcdEnable() const {
+    return extractBits(25, 1);
+}
+
+bool TPS25751PortControl::automaticIdRequest() const {
+    return extractBits(16, 1);
+}
+
 bool TPS25751PortControl::enableCurrentMonitor() const {
     return extractBits(20, 1);
 }
@@ -63,6 +71,8 @@ void TPS25751PortControl::debugPrint(Stream &s) const {
     s.print(F("    Detect Enable: ")); s.println(toString(chargerDetectEnable()));
     s.print(F("    Advertise Enable: ")); s.println(toString(chargerAdvertiseEnable()));
     s.print(F("    15k Resistor Present: ")); s.println(resistor15kPresent() ? F("Yes") : F("No"));
+    s.print(F("    DCD Enable: ")); s.println(dcdEnable() ? F("Enabled") : F("Disabled"));
+    s.print(F("    Automatic ID Request: ")); s.println(automaticIdRequest() ? F("Enabled") : F("Disabled"));
 
     s.println(F("  Power Configuration:"));
     s.print(F("    Current Monitor: ")); s.println(enableCurrentMonitor() ? F("Enabled") : F("Disabled"));

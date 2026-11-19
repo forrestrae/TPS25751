@@ -77,6 +77,23 @@ public:
     ChargerAdvertiseEnable chargerAdvertiseEnable() const;
     bool resistor15kPresent() const;
 
+    /**
+     * @brief DCD Enable (bit 25)
+     *
+     * Set to enable Data Contact Detect as defined by BC 1.2 for sinks.
+     * SLVUCR8B (Rev. B, 2026-08), page 31; reset 0h. New in Rev. B.
+     */
+    bool dcdEnable() const;
+
+    /**
+     * @brief Automatic ID Request (bit 16)
+     *
+     * When set, the controller automatically issues a Discover Identity VDM
+     * for all SOP types when appropriate. SLVUCR8B (Rev. B, 2026-08), page 31;
+     * reset 1h, so a freshly reset register reads true. New in Rev. B.
+     */
+    bool automaticIdRequest() const;
+
     // Current monitoring
     bool enableCurrentMonitor() const;
 

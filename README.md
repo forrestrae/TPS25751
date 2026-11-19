@@ -25,8 +25,9 @@ Designed for **Teensy 4.x** (ARM Cortex-M7) and the Arduino framework.
 - **PD 3.x extended and battery data replies** — set the data blocks the controller
   sends in reply to PD 3.x Get_* messages (Source Info, PPS Status, Source and Sink
   Capabilities Extended, Battery Status, and Battery Capabilities), each enabled by
-  its PD3_CONFIGURATION bit. Extended-capability and battery fields are raw values
-  whose encodings the USB PD specification defines.
+  its PD3_CONFIGURATION bit. Extended-capability, battery, and received identity
+  fields decode per USB PD R3.3 into typed flags, enums, and units beside the raw
+  values.
 - **Downstream device support** — talk to chips on the TPS25751's I2Cc bus via
   `TPS25751DownstreamDevice`; typed per-device drivers (e.g. the BQ25798 charger
   driver in the sibling `lib/BQ25798` repo) build on it.

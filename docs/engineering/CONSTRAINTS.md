@@ -591,6 +591,15 @@ configuration enables only Ready for Patch and Patch Loaded (INT_MASK1
 through attach, discovery, and detach. To observe bit 51 or the plug event,
 set the matching INT_MASK1 bits first.
 
+Typed decode on hardware (Batch L, 2026-11-19): with the same iPhone attached and the
+board DFP, 0x48 read Response Type ACK with three valid VDOs (the earlier walkthrough
+saw six): ID Header `0xD50005AC`, Cert Stat `0x00000000`, Product `0x710C2166`. Per
+USB PD R3.3 Table 6.34 the ID Header decodes to USB Host and USB Device capable, UFP
+PDUSB Peripheral, Alternate Modes supported, DFP PDUSB Host, Connector Type 00b
+(deprecated "unknown", the value a PD 3.0 product sends), and VID 0x05AC (Apple).
+The Product VDO gives PID 0x710C and bcdDevice 0x2166, and XID is 0. The number of
+valid VDOs varies between attaches of the same partner, so read it on every attach.
+
 **TX_SOURCE_INFO (0x78) is R/W, but the firmware owns it.** SLVUCR8B Rev. B
 (p.55) lists every field as R/W and also says the register "is automatically
 updated by the PD firmware and does not require any EC implementation". A host
@@ -640,8 +649,8 @@ exactly. Both registers match their TRM widths, unlike 0x27 and 0x98. The board'
 PD3_CONFIGURATION has bits 8 and 17 clear, so the controller answers
 Get_Source_Cap_Extended and Get_Sink_Cap_Extended with Not_Supported, and neither
 register's contents go out on the wire. The field encodings come from the USB PD
-specification, which the register-docs server does not serve, so both classes
-expose raw values only.
+specification; see "USB PD Specification Structures (Batch L)" below for the typed
+decode.
 
 **TX_BATTERY_CAPABILITIES (0x7D): the TRM labels battery 3 as battery 0.**
 SLVUCR8B Rev. B (p.58, Table 3-37) describes the five fields at bits 287:216 as
@@ -665,9 +674,11 @@ Raw writes of distinct bytes read back exactly on both registers over four reads
 exactly. Through the classes, setting every battery 3 field of 0x7D and calling
 `writeTransmitBatteryCapabilities()` left bytes 0 to 26, including a nonzero byte
 26 (battery 2's Battery Type), unchanged on the controller. 0x77 reads zero fixed
-and zero hot-swappable batteries while 0x7B battery 0 holds the reset value; whether
-that entry counts as populated depends on the Battery Info encoding, which is a USB
-PD specification structure (Batch L). The board's PD3_CONFIGURATION has bits 11 and
+and zero hot-swappable batteries while 0x7B battery 0 holds the reset value. Decoded
+per USB PD R3.3 Table 6.24 (Batch L), that reset entry's Battery Info 0x02 sets
+Battery Present, so the controller's own defaults disagree: 0x7B reports battery 0
+present (capacity unknown) while 0x77 and 0x7E report no batteries. A host that
+enables the battery replies should write all three registers consistently. The board's PD3_CONFIGURATION has bits 11 and
 10 clear, so the controller answers Get_Battery_Status and Get_Battery_Capabilities
 with Not_Supported.
 
@@ -765,8 +776,8 @@ the SPR PPS layout above. On 2026-11-18 the test board's TRANSMIT_SOURCE_CAPS
 (0x32, EEPROM configuration) carried PDO 5 = `0xE004B1F4`, subtype 10b. Read with
 the PPS layout it gave a 17700 mV minimum and a 200 mV maximum, and the whole
 register failed `isSemanticallyValid()`. USB PD 3.1 and later define further APDO
-subtypes; their layouts are not yet checked against the specification (that
-waits for the MCP server to serve it). Every PDO class (`TPS25751ActivePDOContract`,
+subtypes; their layouts are not yet checked against the specification. The
+`usb-pd-docs` MCP server serves USB PD R3.3 but not yet its APDO tables. Every PDO class (`TPS25751ActivePDOContract`,
 `TPS25751Received{Source,Sink}Caps`, `TPS25751Transmit{Source,Sink}Caps`)
 therefore exposes the subtype (`apdoSubtype()` / `getAPDOSubtype()`) and
 `isSprPps()` / `isSprPpsPDO()`. The PPS accessors return 0 (or false) for any
@@ -875,9 +886,45 @@ first registers with a PDO *encode* path (`TPS25751TransmitSourceCaps` /
   the Batch-D gate surfaced. Left unchanged in Batch D to keep the batch scoped
   to the TRANSMIT registers; worth a dedicated follow-up fix.)*
 
+### USB PD Specification Structures (Batch L)
+
+The TRM defers the field encodings of 0x48, 0x77, 0x7A, 0x7B, 0x7D, and 0x7E to the
+USB PD specification. Batch L decodes them from USB PD R3.3 V1.0 (Rev. 3.3), served by
+the `usb-pd-docs` MCP server (`specifications/USB_PD/specification.json` in the
+sibling `device-register-mcp-server` repo). Take every encoding from that server, not
+from memory. Points that are easy to get wrong:
+
+- Offsets. TRM byte n of 0x77 is Source_Capabilities_Extended Data Block (Table 6.59)
+  byte n + 10, and TRM byte n of 0x7E is Sink_Capabilities_Extended Data Block
+  (Table 6.70) byte n + 10, because the controller prepends VID, PID, XID, and the
+  firmware and hardware versions. The EPR PDP bytes have no TRM field (0x77) or fall
+  in TRM reserved bits 111:88 (0x7E). 0x7B entries are whole BSDOs (Table 6.24), so
+  BSDO bit 8 is bit 0 of the Battery Info byte. 0x7D entries are whole Battery
+  Capability Data Blocks (Table 6.64).
+- Source PDP width. The TRM gives 0x77 Source PDP as 7 bits (110:104); the
+  specification field is a byte with valid values 0 to 100 W. Every code with bit 7
+  set is invalid anyway, so the 7-bit TRM field and the bit 111 reserved check stand.
+  The test board reads 0x7F (127), which `sourcePdpValid()` reports as invalid.
+- Duty Cycle. Peak Current (Table 6.59) and Sink Load Characteristics (Table 6.70)
+  give the duty-cycle sub-field as 4 bits with values "0..31"; only 0 to 15 fit, so
+  the library decodes 0 to 75 percent.
+- Touch Temp. The two extended blocks encode it differently: in 0x77, 0 is IEC
+  60950-1; in 0x7E, 0 is "No applicable standard" and 1 is IEC 60950-1.
+- Conditional fields. BSDO Charging Status is reserved when the battery is absent or
+  the capacity is FFFFh, and Source Inputs bit 1 is ignored when bit 0 is 0. The
+  accessors decode the bits regardless; `debugPrint()` prints them only when they
+  mean something.
+- 0x7A Present Temperature Flag 00b is "Not Supported" in Table 6.67; the TRM leaves it
+  undefined. `PresentTemperatureFlag::NotSupported` names it, and `NotDefined` stays
+  as a deprecated alias of the same value.
+
 ### USB PD Specification Reference
 
 For complete details, refer to:
+- **USB Power Delivery Specification R3.3 V1.0**, via the `usb-pd-docs` MCP server:
+  Table 6.24 (BSDO), 6.34 (ID Header VDO), 6.38 (Cert Stat VDO), 6.39 (Product VDO),
+  6.59 (Source_Capabilities_Extended), 6.64 (Battery Capabilities), 6.67 (PPS Status),
+  and 6.70 (Sink_Capabilities_Extended)
 - **USB Power Delivery Specification 3.1**
 - Section 6.4.1: Power Data Objects
 - Table 6-7: Fixed Supply PDO
@@ -1175,6 +1222,7 @@ void foo() {
 | 1.8 | 2026-11-19 | Claude Code | Batch K of the rev B plan: TX_BATTERY_CAPABILITIES (0x7D) is the first R/W register past bit 255 and uses class-local byte helpers (Read-Only Registers section, IO_CONFIG note); the TRM labels 0x7D battery 3 as battery 0; 0x7B and 0x7D report 16 and 36 bytes and round-trip on hardware; CUSTOMER_USE (0x06) ignores runtime writes (Read/Write Registers section) |
 | 1.9 | 2026-11-19 | Claude Code | CUSTOMER_USE (0x06) is read-only in the library: `writeCustomerUse()`, the class setters, and `kAddress` are removed (Read/Write Registers section) |
 | 1.10 | 2026-11-19 | Claude Code | Batches G to I bench checks: a GLOBAL_SYSTEM_CONFIGURATION (0x27) RCP write preserves the undocumented bits; RECEIVED_SOP_IDENTITY (0x48) fills about 106 ms before INT_EVENT1 bit 51 and keeps the last identity after detach; INT_EVENT1 latches only INT_MASK1-enabled sources; the firmware fills the TX_SOURCE_INFO (0x78) lower word when the board sources (Read/Write Registers section) |
+| 1.11 | 2026-11-19 | Claude Code | Batch L of the rev B plan: typed USB PD R3.3 decode for 0x48, 0x77, 0x7E, 0x7B, and 0x7D and the 0x7A PTF 00b meaning (new USB PD Specification Structures section); 0x48 decode of an iPhone on hardware; the 0x7B reset value reports a battery that 0x77 and 0x7E do not (Read/Write Registers section) |
 
 ---
 

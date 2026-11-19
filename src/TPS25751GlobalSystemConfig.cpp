@@ -124,6 +124,17 @@ void TPS25751GlobalSystemConfig::debugPrint(Stream &s) const
     s.println(F(" bytes"));
     s.println(F("========================================"));
 
+    // The raw bytes show the undocumented values the firmware keeps in the
+    // TRM-reserved bits, which a read-modify-write must send back unchanged.
+    s.print(F("Raw (byte 0 first):"));
+    for (size_t i = 0; i < size(); i++)
+    {
+        s.print(F(" "));
+        if (raw()[i] < 0x10) s.print(F("0"));
+        s.print(raw()[i], HEX);
+    }
+    s.println();
+
     s.print(F("RCP Threshold: "));
     s.print(toString(rcpThreshold()));
     s.print(F(" (raw "));

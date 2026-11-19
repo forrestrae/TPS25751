@@ -374,6 +374,48 @@ void test_move_assignment_transfers_ownership()
     TEST_ASSERT_EQUAL_UINT8_ARRAY(BENCH_BUFFER, target.raw(), GSC_SIZE);
 }
 
+// --- debugPrint ------------------------------------------------------------------
+
+namespace {
+
+std::string captureDebugPrint(const TPS25751GlobalSystemConfig &reg)
+{
+    fflush(stdout);
+    FILE *tmp = tmpfile();
+    const int saved = dup(fileno(stdout));
+    dup2(fileno(tmp), fileno(stdout));
+
+    reg.debugPrint();
+
+    fflush(stdout);
+    dup2(saved, fileno(stdout));
+    close(saved);
+
+    std::string out;
+    rewind(tmp);
+    char buf[256];
+    size_t n;
+    while ((n = fread(buf, 1, sizeof(buf), tmp)) > 0) out.append(buf, n);
+    fclose(tmp);
+    return out;
+}
+
+}  // namespace
+
+void test_debug_print_shows_raw_bytes_and_fields()
+{
+    TPS25751GlobalSystemConfig reg(BENCH_BUFFER);
+    const std::string out = captureDebugPrint(reg);
+
+    // Every byte zero-padded, so the firmware's undocumented bits are visible.
+    TEST_ASSERT_TRUE(out.find("Raw (byte 0 first): 05 09 14 00 1C 03 00 00 00 00 00 00 00 00") != std::string::npos);
+    TEST_ASSERT_TRUE(out.find("PP3 Config: PP3 is bi-directional (raw 4)") != std::string::npos);
+    TEST_ASSERT_TRUE(out.find("PP1 Config: PP1 configured as source (raw 1)") != std::string::npos);
+    TEST_ASSERT_TRUE(out.find("ILIM Over Shoot (PP_5V): No additional overshoot margin (raw 0)") != std::string::npos);
+    TEST_ASSERT_TRUE(out.find("RCP Threshold: 6 mV (nominal) (raw 0)") != std::string::npos);
+    TEST_ASSERT_TRUE(out.find("PP Cable1 Switch: Enabled") != std::string::npos);
+}
+
 // --- Runner ----------------------------------------------------------------------
 
 int main(int, char **)
@@ -406,6 +448,7 @@ int main(int, char **)
 
     RUN_TEST(test_to_string_values);
     RUN_TEST(test_to_string_undefined_codes);
+    RUN_TEST(test_debug_print_shows_raw_bytes_and_fields);
 
     RUN_TEST(test_copy_constructor_deep_copies);
     RUN_TEST(test_move_constructor_transfers_ownership);

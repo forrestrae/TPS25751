@@ -178,20 +178,20 @@ constexpr uint8_t getRegisterSize(Address addr) {
  */
 inline const RegisterInfo* getRegisterInfo(Address addr) {
     switch (addr) {
-        case Address::STATUS: return &Registers::STATUS;
         case Address::MODE: return &Registers::MODE;
-        case Address::BOOT_STATUS: return &Registers::BOOT_STATUS;
-        case Address::POWER_PATH_STATUS: return &Registers::POWER_PATH_STATUS;
-        case Address::GLOBAL_SYSTEM_CONFIGURATION: return &Registers::GLOBAL_SYSTEM_CONFIGURATION;
-        case Address::PORT_CONFIGURATION: return &Registers::PORT_CONFIGURATION;
+        case Address::CUSTOMER_USE: return &Registers::CUSTOMER_USE;
         case Address::COMMAND: return &Registers::COMMAND;
         case Address::DATA: return &Registers::DATA;
-        case Address::CUSTOMER_USE: return &Registers::CUSTOMER_USE;
         case Address::VERSION: return &Registers::VERSION;
         case Address::INT_EVENT1: return &Registers::INT_EVENT1;
         case Address::INT_MASK1: return &Registers::INT_MASK1;
         case Address::INT_CLEAR1: return &Registers::INT_CLEAR1;
+        case Address::STATUS: return &Registers::STATUS;
+        case Address::POWER_PATH_STATUS: return &Registers::POWER_PATH_STATUS;
+        case Address::GLOBAL_SYSTEM_CONFIGURATION: return &Registers::GLOBAL_SYSTEM_CONFIGURATION;
+        case Address::PORT_CONFIGURATION: return &Registers::PORT_CONFIGURATION;
         case Address::PORT_CONTROL: return &Registers::PORT_CONTROL;
+        case Address::BOOT_STATUS: return &Registers::BOOT_STATUS;
         case Address::RECEIVED_SOURCE_CAPABILITIES: return &Registers::RECEIVED_SOURCE_CAPABILITIES;
         case Address::RECEIVED_SINK_CAPABILITIES: return &Registers::RECEIVED_SINK_CAPABILITIES;
         case Address::TRANSMIT_SOURCE_CAPABILITIES: return &Registers::TRANSMIT_SOURCE_CAPABILITIES;

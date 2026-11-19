@@ -1,6 +1,6 @@
 # TPS25751 Library - System Architecture
 
-**Last Updated:** 2025-10-20
+**Last Updated:** 2026-11-19
 **Status:** Active
 
 ---
@@ -1236,6 +1236,14 @@ caps are artifacts of the proxy path, not of the part.
   payload + STOP. This is the part's own protocol, *not* the TPS25751's length-byte
   register protocol and *not* the 4CC task path.
 
+**Consequences:**
+- Direct mode has **no** TRM 5 s spacing and **no** 63/11-byte caps — the only bound is
+  the `TwoWire` buffer. It requires the part to actually be on the passed bus.
+- Any future downstream-device driver built on `TPS25751DownstreamDevice` inherits direct
+  mode for free.
+- The big-endian decode/encode conventions (ADR-008/009) are unchanged: burst reads/writes
+  carry multi-byte registers identically over either transport.
+
 ### ADR-011: Patch Loader — Non-Register PBM Sequencer on `executeCommand()`
 **Status:** Accepted
 **Date:** 2026-06
@@ -1279,13 +1287,46 @@ to start the session, `PBMc` to commit it) plus a raw burst write to I2C address
 - BQ25798 `bundleSize` in the `PBMs` config is **little-endian** (4 bytes, LSB first),
   consistent with host-register byte order but opposite to BQ25798 downstream registers
   (which are big-endian). See CONSTRAINTS.md "Patch Burst Mode (PBM)".
+
+
+### ADR-012: 16-Bit Bit Positions in the Register Base Class
+**Status:** Accepted
+**Date:** 2026-11-19
+**Context:** `extractBits()`, `extractBits16/32/64()`, `setBits()`, and the `extractEnum*()`
+templates took the field's bit position as `uint8_t`, so no field could start past bit 255
+(byte 31). Seven registers are longer than 32 bytes. DATA (0x09) and the four capability
+registers (0x30 to 0x33) reach their late bytes through byte accessors or hand-assembled PDO
+words, and two registers with individually defined fields past bit 255 worked around the
+limit on their own: IO_CONFIG (0x5C, 49 bytes, fields to bit 391) and
+TX_BATTERY_CAPABILITIES (0x7D, 36 bytes, battery 3 at bits 287:216).
+`TPS25751IOConfig` assembled every field from `_raw[]` by hand, and
+`TPS25751TransmitBatteryCapabilities` carried four class-private, bounds-checked byte
+helpers for reads and writes. Both copies repeated bounds logic the base class already
+has, and every new long register would have added another.
+**Decision:**
+- Widen `bitPos` to `uint16_t` in every instance and static extract and set method and in
+  the `extractEnum*()` templates. `bitLen` stays `uint8_t`, because no field is wider than
+  64 bits.
+- Do all internal byte arithmetic (start byte, bytes needed, loop indexes) in `size_t`, and
+  compare the field's end against the buffer length in `size_t`, so no sum can wrap.
+  `extractBits64()` computes the upper half's bit position in 32 bits and returns 0 when it
+  does not fit, instead of letting it truncate.
+- Convert 0x7D and 0x5C to the base-class calls and delete their private helpers.
+- `uint16_t` rather than `size_t`: 65,535 bits is 8 KB, far past the 64-byte DATA register,
+  and it matches the existing `uint16_t startBitPos` of `extractArray32()`.
 **Consequences:**
-- Direct mode has **no** TRM 5 s spacing and **no** 63/11-byte caps — the only bound is
-  the `TwoWire` buffer. It requires the part to actually be on the passed bus.
-- Any future downstream-device driver built on `TPS25751DownstreamDevice` inherits direct
-  mode for free.
-- The big-endian decode/encode conventions (ADR-008/009) are unchanged: burst reads/writes
-  carry multi-byte registers identically over either transport.
+- Any field inside the buffer is reachable; the only limit is the register's length.
+- The change is source-compatible. Callers pass integer literals or `uint8_t` values, which
+  convert implicitly, including the sibling BQ25798 driver, which calls the protected
+  helpers. A derived class that declares its own `extractBits(uint8_t, uint8_t)` overload
+  would now overload rather than hide the base method; no class in this repository or in
+  BQ25798 does.
+- Decode results do not change. Native tests cover fields at bit 255, past it, and
+  straddling it, and a byte-for-byte comparison of `debugPrint()` for all 37 registers
+  matched before and after.
+- The PDO accessors of the capability registers (0x30 to 0x33) still assemble their 32-bit
+  words from `_raw[]` by hand. They are correct and were left as they are; they could move
+  to `extractBits32()` and `setBits()` in a later cleanup.
 
 ---
 
@@ -1299,6 +1340,7 @@ to start the session, `PBMc` to commit it) plus a raw burst write to I2C address
 | 1.3 | 2026-06-24 | Claude Code | Added downstream-device write encoders (ADR-009), typed write flow; updated ADR-008/driver-layer to note R/W setters + kAddress |
 | 1.4 | 2026-06-26 | Claude Code | Added dual-transport downstream devices (ADR-010): optional direct-I2C constructor on TPS25751DownstreamDevice / BQ25798::Device |
 | 1.5 | 2026-07-02 | Claude Code | BQ25798 driver split out to the sibling lib/BQ25798 repo; ADR-008/009/010 retained as the downstream-driver extension-point contract, BQ25798-specific walkthrough moved with the driver |
+| 1.6 | 2026-11-19 | Claude Code | Added ADR-012: 16-bit bit positions in the register base class; moved ADR-010's Consequences back under ADR-010 |
 
 ---
 

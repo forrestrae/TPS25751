@@ -6,7 +6,7 @@ The library decodes 27 of the 37 registers in TRM SLVUCR8B (Rev. B, 2026-08). Th
 
 All ten are implemented. Eight are useful to any PD host: Version for diagnostics and patch checks, PD3 Configuration because it gates every Tx data block below, Global System Configuration and Received SOP Identity for diagnostics and board configuration, and the four Tx blocks the controller sends in reply to PD 3.x Get_* messages. The two battery registers (7Bh, 7Dh) matter only when the product answers Get_Battery_Status and Get_Battery_Capabilities. The test board carries a BQ25798 charger, so it is a battery-backed design, and the decision on 2026-11-18 was to implement them. They go last because they have the most new machinery (see "Decisions" under Approach).
 
-No batch starts until `fix/rev-b-trm` is integrated into `main`. Only Batch H needs code from that branch: its example and hardware check use `TPS25751PortControl::automaticIdRequest()` (29h bit 16, audit step 12) and `TPS25751InterruptEvent::discoverModeCompleted()` (bit 51, audit step 5), and neither exists on `main` at ca8a640. Every batch, though, edits files that `fix/rev-b-trm` also edits: `include/TPS25751RegisterAddress.h`, `AGENTS.md`, `examples/read-registers/src/main.cpp`, and the native `build_src_filter` in `platformio.ini`. `scripts/verify.py` requires each batch branch to be rebased onto `main`, so starting before that integration buys a guaranteed rebase conflict and nothing else.
+All batches are committed on `fix/rev-b-trm`, the branch that carries the rev B audit fixes, and they ship when that branch is integrated (decision 6 under Approach). Nothing waits on an integration: Batch H's example and hardware check use `TPS25751PortControl::automaticIdRequest()` (29h bit 16, audit step 12) and `TPS25751InterruptEvent::discoverModeCompleted()` (bit 51, audit step 5), and both are already on that branch. Batches run one at a time, because every batch edits the same shared files: `include/TPS25751RegisterAddress.h`, the factory, `include/TPS25751.h`, `AGENTS.md`, `examples/read-registers/src/main.cpp`, and the native `build_src_filter` in `platformio.ini`.
 
 ### Register facts from tps25751-docs
 
@@ -35,7 +35,7 @@ The TRM defects in the table are recorded in the server repo as seven new `open`
 
 Each batch runs the v01 process unchanged except where listed below:
 
-- Batch structure: one batch is one branch, one review, one merge, run as its own Claude Code session ("Implementation Order & Rationale" and "Launching the Plan" in v01).
+- Batch structure: one batch is one review gate and one set of commits, run as its own Claude Code session ("Implementation Order & Rationale" and "Launching the Plan" in v01). Unlike v01, batches do not get their own branches (workflow change 2).
 - Delegated Implementation Workflow: orchestrator writes the work order, a Sonnet `general-purpose` subagent implements in an isolated worktree, the orchestrator gates with `/code-review` at high effort plus a manual bit-offset cross-check against the MCP data ("Delegated Implementation Workflow", "Roles", "Per-Batch Loop", and "When Not to Delegate" in v01).
 - Pilot Retrospective amendments 1 to 5 stay in force: paste MCP facts into the work order; phrase base-class behavior as "verify against `<file>`"; be ready to run the correctness pass inline; name the base branch; use `setBits()`, `kAddress`, and `writeRegister<T>()` for every R/W register.
 - Documentation Update Checklist (per batch) from v01, with the changes in "Per-batch documentation" below.
@@ -43,11 +43,11 @@ Each batch runs the v01 process unchanged except where listed below:
 ### Changes to the v01 workflow
 
 1. Each batch adds its addresses. In v01 all 27 addresses already lived in `TPS25751Registers::Address`. None of the ten do. Each batch adds an `Address` enumerator, a `Registers::` `RegisterInfo` constant, and a case in both `getRegisterSize()` and `getRegisterInfo()` in `include/TPS25751RegisterAddress.h`. Enumerator names follow the library's style rather than the MCP names: `VERSION`, `PD3_CONFIGURATION`, `GLOBAL_SYSTEM_CONFIGURATION`, `RECEIVED_SOP_IDENTITY`, `TRANSMIT_SOURCE_INFO`, `TRANSMIT_PPS_STATUS`, `TRANSMIT_SOURCE_CAPABILITIES_EXTENDED`, `TRANSMIT_SINK_CAPABILITIES_EXTENDED`, `TRANSMIT_BATTERY_STATUS`, `TRANSMIT_BATTERY_CAPABILITIES`. Each carries a `///` comment with the TRM title and rev B page, as the INT_* entries do.
-2. Batch letters continue at G. Tags `archive/feat/registers-batch-a` to `-e` already exist and `scripts/integrate.py` creates `archive/<branch>`, so reusing a letter would collide. Branches are `feat/registers-batch-g` to `feat/registers-batch-k`.
-3. Merge and release follow AGENTS.md "Git Workflow": Conventional Commits, `scripts/verify.py` on a rebased, clean branch, `scripts/integrate.py <branch>`, and a human push. The `#minor` token in v01's "Merge & release" no longer has any effect.
+2. Every batch commits to `fix/rev-b-trm`; there are no per-batch branches or archive tags. The subagent's worktree is based on the current tip of `fix/rev-b-trm`, and the orchestrator brings its commits onto `fix/rev-b-trm` by fast-forward (`git merge --ff-only <worktree-branch>`) or cherry-pick, never by a merge commit, because `scripts/verify.py` refuses merge commits on the branch. Batch letters continue at G so they do not clash with v01's Batches A to F. Batches run one at a time, since two sessions writing in the same checkout would overwrite each other.
+3. Integration and release follow AGENTS.md "Git Workflow", once for the whole branch: Conventional Commits for every batch commit, `scripts/verify.py` on a clean tree after each batch as a check, and after the last batch `scripts/integrate.py fix/rev-b-trm` and one human push (see "Release level"). The `#minor` token in v01's "Merge & release" no longer has any effect.
 4. Work orders cite rev B table numbers and pages, apply the audit's "Appendix B: Spelling of TI's misspelled names" policy (correct spelling in identifiers, TI's spelling quoted once in the doc comment), and identify fields by bit range wherever the TRM reuses a name (78h, 7Dh).
 5. Each new `.cpp` is added to `[env:native]` `build_src_filter` in `platformio.ini`.
-6. Kickoff prompts are v01's template with `plan-impl-v02.md` and the new branch name substituted, plus the implementer's model and effort from "Models and effort" below. Batch K gets the Batch-D Tightening reminder (see Batch K).
+6. Kickoff prompts are v01's template with `trm-revB-audit-remaining-registers.md` substituted and `fix/rev-b-trm` as the working branch, plus the implementer's model and effort from "Models and effort" below. Batch K gets the Batch-D Tightening reminder (see Batch K).
 7. Models and effort are fixed per batch rather than left to the session. v01 named only model classes ("Fable/Opus class" orchestrator, Sonnet implementer, Haiku for Batch A only) and set no effort levels.
 
 ### Models and effort
@@ -60,7 +60,7 @@ The split stays as v01 proved it: a stronger model orchestrates and gates, Sonne
 | H | Opus 5.5, high | `sonnet`, `medium` | `/code-review high` |
 | I | Opus 5.5, high | `sonnet`, `high` | `/code-review high` |
 | J | Opus 5.5, high | `sonnet`, `medium` | `/code-review high` |
-| K | Opus 5.5, high | `sonnet`, `high` | `/code-review xhigh`; the human may also run `/code-review ultra` before integrating |
+| K | Opus 5.5, high | `sonnet`, `high` | `/code-review xhigh`; the human may also run `/code-review ultra` before `fix/rev-b-trm` is integrated |
 | L | Opus 5.5, high | `sonnet`, `high` | `/code-review high`, plus a hand re-derivation of one decoded value per spec table, as v01's Batch-D Tightening required for PDOs |
 
 - Set the orchestrator's model and effort when starting the batch session (the app's model selector, or `claude --model claude-opus-5-5` with effort high). The orchestrator writes the work order, runs the gate, does the manual bit-offset cross-check, and owns every task v01's "When Not to Delegate" reserves for it, including the 7Dh write helpers if a gate finding pushes them toward the base class.
@@ -86,7 +86,7 @@ The split stays as v01 proved it: a stronger model orchestrates and gates, Sonne
 
 7Dh (288 bits) holds four 72-bit battery entries. Battery 3 occupies bits 287:216, so its Design Capacity (bit 248, ending at 264), Last Full Charge Capacity (bit 264), and Battery Type (bit 280) cannot be addressed with a `uint8_t bitPos`. Every 7Dh field is byte-aligned. The class decodes and encodes all four entries by direct byte assembly from `_raw[]` with a 9-byte stride, following `TPS25751IOConfig::readGpioBitmap()` (`src/TPS25751IOConfig.cpp:3`) for the bounds-checked little-endian read. IO_CONFIG is read-only, so 7Dh also needs the library's first write past bit 255: class-private `readLE16()`, `writeLE16()`, and byte-write helpers guarded by `isValid()` and a bounds check. Widening the base class's `bitPos` to `uint16_t` would remove the need for those helpers, but it is a base-class API change, which v01's "When Not to Delegate" reserves for the orchestrator and which would deserve an ADR. This plan does not make that change.
 
-27h is 116 bits. Its `RegisterInfo` size is 15 bytes, the width rounded up, which is the rule LIQUID_DETECTION_CONFIG already follows (83 bits, 11 bytes). Bits 119:116 (the high nibble of byte 14) lie outside the register: the class does not decode them, validation does not check them, and no setter touches them. Writes are read-modify-write, so `writeGlobalSystemConfig()` sends the nibble back exactly as it was read; a default-constructed object sends 0. One hardware risk remains. `TPS25751::readRegister()` rejects any response whose length byte differs from the expected size (`src/TPS25751.cpp:50`). If the controller reports a count other than 15 for 27h, every read fails. Batch H confirms the length byte on hardware before merge. If it differs, set `RegisterInfo` to the observed count and record it in CONSTRAINTS.md, as was done for ACTIVE_RDO_CONTRACT (16 B).
+27h is 116 bits. Its `RegisterInfo` size is 15 bytes, the width rounded up, which is the rule LIQUID_DETECTION_CONFIG already follows (83 bits, 11 bytes). Bits 119:116 (the high nibble of byte 14) lie outside the register: the class does not decode them, validation does not check them, and no setter touches them. Writes are read-modify-write, so `writeGlobalSystemConfig()` sends the nibble back exactly as it was read; a default-constructed object sends 0. One hardware risk remains. `TPS25751::readRegister()` rejects any response whose length byte differs from the expected size (`src/TPS25751.cpp:50`). If the controller reports a count other than 15 for 27h, every read fails. Batch H confirms the length byte on hardware before the batch is marked done. If it differs, set `RegisterInfo` to the observed count and record it in CONSTRAINTS.md, as was done for ACTIVE_RDO_CONTRACT (16 B).
 
 ### Access and write paths
 
@@ -140,13 +140,13 @@ The test board is a Teensy 4.0 host and a TPS25751 in Application mode with an E
 
 `scripts/release_level.py` takes the highest level among non-merge commits since the last `chore(release)` commit: a breaking marker gives major, any `feat` gives minor, anything else gives patch. Each batch adds public API in `feat(...)` commits and breaks nothing: the new enumerators were not previously representable, so no existing call changes behavior. Each batch therefore carries a minor level.
 
-The whole plan ships as one release, from one push. Publishing runs only in CI on a push to `main` (`.github/workflows/publish.yml`), CI derives one release level per push, and the `pre-push` hook refuses pushes from agent shells. Five releases would therefore take five pushes; one release takes one. Each batch is integrated locally with `scripts/integrate.py` as it finishes, and nothing is pushed until Batch K (and Batch L, if it runs) is integrated. Then the human pushes `main` and every archive tag in one command, from this library root:
+The whole branch ships as one release, from one push (decision 4). Publishing runs only in CI on a push to `main` (`.github/workflows/publish.yml`), CI derives one release level per push, and the `pre-push` hook refuses pushes from agent shells, so every release takes a human push. After the last batch, `scripts/integrate.py fix/rev-b-trm` merges the branch into `main` and tags `archive/fix/rev-b-trm`. Then the human pushes both in one command, from this library root:
 
 ```bash
-git push origin main refs/tags/archive/feat/registers-batch-g refs/tags/archive/feat/registers-batch-h refs/tags/archive/feat/registers-batch-i refs/tags/archive/feat/registers-batch-j refs/tags/archive/feat/registers-batch-k
+git push origin main refs/tags/archive/fix/rev-b-trm
 ```
 
-CI then runs the verify job once on the final tip and publishes one minor release. `fix/rev-b-trm` already carries nine `feat` commits (`release_level.py main..fix/rev-b-trm` prints `minor`). If it is pushed separately first, it ships as 2.1.0 and this plan ships as 2.2.0. If it is still unpushed when Batch K lands, add `refs/tags/archive/fix/rev-b-trm` to the same push, and everything ships together as 2.1.0 from the current 2.0.2.
+CI runs the verify job once on the final tip and publishes one minor release: 2.1.0 from the current 2.0.2. The level is minor because the branch already carries nine `feat` commits from the audit fixes, and each batch adds more.
 
 ### Decisions
 
@@ -157,13 +157,15 @@ Decided on 2026-11-18:
 3. Typed decode from the USB PD specification comes from the MCP server, which is being extended to serve it. A batch whose work order can paste the spec tables from the server includes typed decode; a batch that starts before then ships raw accessors, and Batch L adds the typed decode later.
 4. One release from one push at the end, as described under "Release level".
 5. The TRM defects are recorded in the server repo's `known_document_issues.json` (see "Register facts from tps25751-docs").
+6. The batches are committed on `fix/rev-b-trm` and ship together with the rev B audit fixes. This plan lives at `docs/plans/trm-revB-audit-remaining-registers.md`.
 
 ### Per-batch documentation
 
 v01's "Documentation Update Checklist (per batch)" applies with these changes:
 
-- Edit `docs/plans/plan-impl-v02.md`, not v01. v01 stays as the historical record.
-- `AGENTS.md`: the "Last Updated" and "Current Phase" lines, the "Implemented Registers" count in Implementation Status (27/37 before Batch G, then 29, 31, 33, 35, 37), the "Status" line under it, the Register Classes list (one entry per new class), and the documentation tree's plan line, which still says "12 registers remaining". In Batch G only: point "Current Roadmap" at v02, and change the MCP table's "27 registers" to 37. That column describes the server, which serves 37 registers whatever the library supports.
+- Edit `docs/plans/trm-revB-audit-remaining-registers.md`, not v01. v01 stays as the historical record. Record each batch's outcome the way `trm-revB-audit.md` records its steps: a status tag on the batch heading (`[done]`, `[partial]`, or `[not started]`) and a Verified line naming the checks run and the commits.
+- `AGENTS.md`: the "Last Updated" and "Current Phase" lines, the "Implemented Registers" count in Implementation Status (27/37 before Batch G, then 29, 31, 33, 35, 37), the "Status" line under it, the Register Classes list (one entry per new class), and the documentation tree's plan line, which still says "12 registers remaining". In Batch G only: point "Current Roadmap" at this plan, and change the MCP table's "27 registers" to 37. That column describes the server, which serves 37 registers whatever the library supports.
+- `docs/plans/trm-revB-audit.md` "Out of scope", in Batch G only: link the register table to this plan.
 - `docs/engineering/STANDARDS.md` "Factory Integration" step 1, in Batch G only: it says the 27 addresses already exist. Rewrite it to say a new register adds its `Address`, `RegisterInfo`, and both lookup cases.
 - Factory: forward declaration in `include/TPS25751RegisterFactory.h`, two private creators in `TPS25751RegisterFactoryImpl`, and one case in each of the three `createRegister()` switches in `src/TPS25751RegisterFactory.cpp` (81 cases today, 111 after Batch K).
 - `examples/read-registers/src/main.cpp`: a read-only demo of every new register. No example writes a register. Update `examples/README.md` and `examples/AGENTS.md` when the demonstrated list changes.
@@ -175,7 +177,7 @@ v01's "Documentation Update Checklist (per batch)" applies with these changes:
 
 ### Batch G: Version (Fh) and PD3 Configuration (42h)
 
-Branch `feat/registers-batch-g`. Both registers are 4 bytes with fields well inside `extractBits`/`setBits` range.
+Both registers are 4 bytes with fields well inside `extractBits`/`setBits` range.
 
 Fh Version, class `TPS25751Version`, read-only, 4 bytes, p.18.
 
@@ -197,7 +199,7 @@ Also in this batch: the Batch G items under "Per-batch documentation" (STANDARDS
 
 ### Batch H: Global System Configuration (27h) and Received SOP Identity (48h)
 
-Branch `feat/registers-batch-h`. Both have non-standard sizes; 27h is R/W and 48h is read-only.
+Both have non-standard sizes; 27h is R/W and 48h is read-only.
 
 27h Global System Configuration, class `TPS25751GlobalSystemConfig`, R/W, 15 bytes (116 bits), reset 28101h, p.28.
 
@@ -207,7 +209,7 @@ Branch `feat/registers-batch-h`. Both have non-standard sizes; 27h is R/W and 48
 - Validation, semantic: PP3 Config ≤ 5, PP1 Config ≤ 1, and reserved bits 115:24, 21:19, 13:11, and 7:1 read 0. Bits 119:116 are not checked.
 - `TPS25751`: `readGlobalSystemConfig()`, `writeGlobalSystemConfig()`, `readGlobalSystemConfigRegister()`; `kAddress = Address::GLOBAL_SYSTEM_CONFIGURATION`. Doxygen on the class and on `writeGlobalSystemConfig()` states that every write disconnects and reconnects the port, and that PP1 and PP3 describe the board's power-switch wiring.
 - Tests (`test_TPS25751GlobalSystemConfig`): the reset fixture decodes to PP3 Sink, ILIM 200 mA, PP1 Source, and Cable1 enabled, and is valid. PP3 6h and PP1 2h are each invalid. A set reserved bit in each reserved range is invalid. 0xF0 in byte 14 is ignored (still valid). Each setter round-trips and leaves reserved bits and the byte 14 nibble unchanged.
-- Hardware: see the 27h row in "Hardware validation". Confirm the length byte is 15 before merge; on a mismatch, follow "Decode technique". Record the board's PP1 and PP3 settings in the batch summary for Batch I.
+- Hardware: see the 27h row in "Hardware validation". Confirm the length byte is 15 before marking the batch done; on a mismatch, follow "Decode technique". Record the board's PP1 and PP3 settings in the batch summary for Batch I.
 - CONSTRAINTS.md: the 116-bit size rule and padding nibble; the disconnect-on-write behavior and the observed reconnect on hardware.
 
 48h Received SOP Identity, class `TPS25751ReceivedSOPIdentity`, read-only, 25 bytes, p.47.
@@ -223,7 +225,7 @@ Branch `feat/registers-batch-h`. Both have non-standard sizes; 27h is R/W and 48
 
 ### Batch I: TX Source Info (78h) and Transmitted PPS Status (7Ah)
 
-Branch `feat/registers-batch-i`. Both are R/W source-side info words with unit conversion. Setters invert the class's own LSB constants, per STANDARDS.md "Write-encoder pattern".
+Both are R/W source-side info words with unit conversion. Setters invert the class's own LSB constants, per STANDARDS.md "Write-encoder pattern".
 
 78h TX Source Info, class `TPS25751TransmitSourceInfo`, R/W, 8 bytes, reset 8000000080000000h, p.55.
 
@@ -244,7 +246,7 @@ Branch `feat/registers-batch-i`. Both are R/W source-side info words with unit c
 
 ### Batch J: Tx Source Caps Extended (77h) and Transmit Sink Caps Extended (7Eh)
 
-Branch `feat/registers-batch-j`. Both are byte-aligned blocks of raw fields whose encodings the TRM defers to the USB PD specification. Typed decode follows decision 3: here if the server already serves the specification, otherwise in Batch L. Accessors and setters are raw, using `setBits()` for sub-byte fields and `extractBits16`/`setBits(pos, 16, v)` for 16-bit fields (little-endian, as everywhere on the host side). Doxygen on each class states that the controller prepends VID, PID, XID, and the firmware and hardware versions.
+Both are byte-aligned blocks of raw fields whose encodings the TRM defers to the USB PD specification. Typed decode follows decision 3: here if the server already serves the specification, otherwise in Batch L. Accessors and setters are raw, using `setBits()` for sub-byte fields and `extractBits16`/`setBits(pos, 16, v)` for 16-bit fields (little-endian, as everywhere on the host side). Doxygen on each class states that the controller prepends VID, PID, XID, and the firmware and hardware versions.
 
 77h Tx Source Caps Extended, class `TPS25751TransmitSourceCapsExtended`, R/W, 15 bytes, p.54.
 
@@ -265,7 +267,7 @@ Hardware for both: write and read back in any state. Replies to Get_Source_Cap_E
 
 ### Batch K: BSDO (7Bh) and Tx Battery Capabilities (7Dh)
 
-Branch `feat/registers-batch-k`. Apply v01's "Batch-D Tightening" by analogy: the orchestrator writes the full byte map for both registers into the work order, and the review gate re-derives battery 3's 7Dh offsets by hand. The implementer runs at high effort and the gate at `/code-review xhigh` (see "Models and effort").
+Apply v01's "Batch-D Tightening" by analogy: the orchestrator writes the full byte map for both registers into the work order, and the review gate re-derives battery 3's 7Dh offsets by hand. The implementer runs at high effort and the gate at `/code-review xhigh` (see "Models and effort").
 
 7Bh BSDO, class `TPS25751TransmitBatteryStatus`, R/W, 16 bytes, reset FFFF0200h in the low word, p.57.
 
@@ -288,13 +290,12 @@ Hardware for both: see the 7Bh and 7Dh rows in "Hardware validation".
 
 ### Batch L (conditional): Typed decode from the USB PD specification
 
-Branch `feat/registers-batch-l`. Runs only if one or more of Batches H, J, and K shipped raw accessors because the MCP server did not yet serve the USB PD specification. It adds typed decode to those classes only. Each addition is new accessors beside the raw ones, so no existing call changes and the batch stays a minor release.
+Runs only if one or more of Batches H, J, and K shipped raw accessors because the MCP server did not yet serve the USB PD specification. It adds typed decode to those classes only. Each addition is new accessors beside the raw ones, so no existing call changes and the batch stays a minor release.
 
 - Scope, per register: 48h ID Header, Cert Stat, and Product VDO fields; 77h and 7Eh field encodings and units; 7Bh Battery Info flags and Present Capacity units; 7Dh Battery Type and capacity units. If the server's specification data resolves the undefined 7Ah PTF 00b, add that meaning to `TPS25751TransmitPPSStatus` too.
 - Work order: paste the specification tables from the server, with the specification revision and table numbers, as v01 did for the TRM. Do not take any field from memory.
 - Tests: extend each existing suite with one fixture per decoded structure, packing the bytes from the pasted tables and commenting the arithmetic.
 - Hardware: re-run the 48h attached-source check and compare the typed decode with the partner's known identity (for example the charger's vendor). The rest is unit-test only.
-- Add `refs/tags/archive/feat/registers-batch-l` to the final push if this batch runs.
 
 ## Files touched
 
@@ -318,7 +319,8 @@ Branch `feat/registers-batch-l`. Runs only if one or more of Batches H, J, and K
 | 48h, 77h, 7Eh, 7Bh, and 7Dh class files above | L, if it runs |
 | `examples/read-registers/src/main.cpp`, `examples/README.md`, `examples/AGENTS.md` | G, H, I, J, K |
 | `AGENTS.md` | G, H, I, J, K |
-| `docs/plans/plan-impl-v02.md` | G, H, I, J, K |
+| `docs/plans/trm-revB-audit-remaining-registers.md` | G, H, I, J, K, L |
+| `docs/plans/trm-revB-audit.md` | G |
 | `docs/engineering/STANDARDS.md` | G |
 | `docs/engineering/CONSTRAINTS.md` | H, I, K |
 | `docs/engineering/CODE_REVIEW_GUIDELINES.md` | Any batch whose gate finds a new pattern |
@@ -326,7 +328,7 @@ Branch `feat/registers-batch-l`. Runs only if one or more of Batches H, J, and K
 
 ## Verification
 
-Per batch, from the library root on the batch branch:
+Per batch, from the library root on `fix/rev-b-trm`:
 
 1. Native tests are green, including the new suite:
    ```bash
@@ -341,10 +343,10 @@ Per batch, from the library root on the batch branch:
    scripts/verify.py
    ```
 4. Every new field's bit offset and width matches `get_register` for that register, checked by hand in the review gate, and the class's `RegisterInfo` size matches `list_registers` (after Batch K, 37 of 37).
-5. The release level for the batch range is `minor`:
+5. The release level for the branch is `minor`:
    ```bash
-   python3 scripts/release_level.py main..feat/registers-batch-<x>
+   python3 scripts/release_level.py main..fix/rev-b-trm
    ```
-6. The hardware check in the batch's "Changes" entry is done or explicitly recorded as not possible, with the observed values in the batch summary. Batch H does not merge until the 27h length byte has been read on hardware.
+6. The hardware check in the batch's "Changes" entry is done or explicitly recorded as not possible, with the observed values in the batch summary. Batch H is not marked done until the 27h length byte has been read on hardware.
 
 After Batch K, `readRegisterByAddress()` returns a non-null object for all 37 addresses on hardware, and the AGENTS.md counts read 37/37.

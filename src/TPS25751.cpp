@@ -220,6 +220,11 @@ bool TPS25751::readTransmitBatteryStatus(TPS25751TransmitBatteryStatus &status) 
     return readRegister(TPS25751Registers::Registers::TRANSMIT_BATTERY_STATUS, status);
 }
 
+bool TPS25751::readTransmitBatteryCapabilities(TPS25751TransmitBatteryCapabilities &caps) const
+{
+    return readRegister(TPS25751Registers::Registers::TRANSMIT_BATTERY_CAPABILITIES, caps);
+}
+
 bool TPS25751::readTransmitSinkCapsExtended(TPS25751TransmitSinkCapsExtended &caps) const
 {
     return readRegister(TPS25751Registers::Registers::TRANSMIT_SINK_CAPABILITIES_EXTENDED, caps);
@@ -303,6 +308,11 @@ bool TPS25751::writeTransmitSourceCapsExtended(const TPS25751TransmitSourceCapsE
 bool TPS25751::writeTransmitBatteryStatus(const TPS25751TransmitBatteryStatus &status) const
 {
     return writeRegister(status);
+}
+
+bool TPS25751::writeTransmitBatteryCapabilities(const TPS25751TransmitBatteryCapabilities &caps) const
+{
+    return writeRegister(caps);
 }
 
 bool TPS25751::writeTransmitSinkCapsExtended(const TPS25751TransmitSinkCapsExtended &caps) const
@@ -633,6 +643,14 @@ std::unique_ptr<TPS25751TransmitBatteryStatus> TPS25751::readTransmitBatteryStat
 
     TPS25751TransmitBatteryStatus* typedReg = static_cast<TPS25751TransmitBatteryStatus*>(reg.release());
     return std::unique_ptr<TPS25751TransmitBatteryStatus>(typedReg);
+}
+
+std::unique_ptr<TPS25751TransmitBatteryCapabilities> TPS25751::readTransmitBatteryCapabilitiesRegister(bool validate) const {
+    auto reg = readAndValidateRegisterByAddress(TPS25751Registers::Address::TRANSMIT_BATTERY_CAPABILITIES, validate);
+    if (!reg) return nullptr;
+
+    TPS25751TransmitBatteryCapabilities* typedReg = static_cast<TPS25751TransmitBatteryCapabilities*>(reg.release());
+    return std::unique_ptr<TPS25751TransmitBatteryCapabilities>(typedReg);
 }
 
 std::unique_ptr<TPS25751TransmitSinkCapsExtended> TPS25751::readTransmitSinkCapsExtendedRegister(bool validate) const {

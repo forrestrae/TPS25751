@@ -58,6 +58,8 @@ enum class Address : uint8_t {
     TRANSMIT_PPS_STATUS = 0x7A,
     /// Transmitted Battery Status Data Objects (BSDO) (SLVUCR8B Rev. B, p.57). TI short name TRANSMITTED_BATTERY_STATUS_DATA_OBJECTS_(BSDO).
     TRANSMIT_BATTERY_STATUS = 0x7B,
+    /// Tx Battery Capabilities Data Block (SLVUCR8B Rev. B, p.58). TI short name TX_BATTERY_CAPABILITIES.
+    TRANSMIT_BATTERY_CAPABILITIES = 0x7D,
     /// Transmit Sink Capabilities Extended Data Block (SLVUCR8B Rev. B, p.59). TI short name TRANSMIT_SINK_CAPABILITIES_EXTENDED_DATA_BLOCK.
     TRANSMIT_SINK_CAPABILITIES_EXTENDED = 0x7E,
     LIQUID_DETECTION_CONFIG = 0x98
@@ -116,6 +118,7 @@ namespace Registers {
     constexpr RegisterInfo TRANSMIT_SOURCE_INFO{Address::TRANSMIT_SOURCE_INFO, 8};  // hardware length byte 8 (2026-11-18)
     constexpr RegisterInfo TRANSMIT_PPS_STATUS{Address::TRANSMIT_PPS_STATUS, 4};  // hardware length byte 4 (2026-11-18)
     constexpr RegisterInfo TRANSMIT_BATTERY_STATUS{Address::TRANSMIT_BATTERY_STATUS, 16};  // hardware length byte 16 (2026-11-19)
+    constexpr RegisterInfo TRANSMIT_BATTERY_CAPABILITIES{Address::TRANSMIT_BATTERY_CAPABILITIES, 36};  // hardware length byte 36 (2026-11-19)
     constexpr RegisterInfo TRANSMIT_SINK_CAPABILITIES_EXTENDED{Address::TRANSMIT_SINK_CAPABILITIES_EXTENDED, 14};  // hardware length byte 14 (2026-11-18)
     constexpr RegisterInfo LIQUID_DETECTION_CONFIG{Address::LIQUID_DETECTION_CONFIG, 12};  // TRM: 83 bits; the controller's length byte is 12 (hardware, 2026-11-18)
 }
@@ -161,6 +164,7 @@ constexpr uint8_t getRegisterSize(Address addr) {
         case Address::TRANSMIT_SOURCE_INFO: return Registers::TRANSMIT_SOURCE_INFO.size;
         case Address::TRANSMIT_PPS_STATUS: return Registers::TRANSMIT_PPS_STATUS.size;
         case Address::TRANSMIT_BATTERY_STATUS: return Registers::TRANSMIT_BATTERY_STATUS.size;
+        case Address::TRANSMIT_BATTERY_CAPABILITIES: return Registers::TRANSMIT_BATTERY_CAPABILITIES.size;
         case Address::TRANSMIT_SINK_CAPABILITIES_EXTENDED: return Registers::TRANSMIT_SINK_CAPABILITIES_EXTENDED.size;
         case Address::LIQUID_DETECTION_CONFIG: return Registers::LIQUID_DETECTION_CONFIG.size;
         default: return 0;
@@ -207,6 +211,7 @@ inline const RegisterInfo* getRegisterInfo(Address addr) {
         case Address::TRANSMIT_SOURCE_INFO: return &Registers::TRANSMIT_SOURCE_INFO;
         case Address::TRANSMIT_PPS_STATUS: return &Registers::TRANSMIT_PPS_STATUS;
         case Address::TRANSMIT_BATTERY_STATUS: return &Registers::TRANSMIT_BATTERY_STATUS;
+        case Address::TRANSMIT_BATTERY_CAPABILITIES: return &Registers::TRANSMIT_BATTERY_CAPABILITIES;
         case Address::TRANSMIT_SINK_CAPABILITIES_EXTENDED: return &Registers::TRANSMIT_SINK_CAPABILITIES_EXTENDED;
         case Address::LIQUID_DETECTION_CONFIG: return &Registers::LIQUID_DETECTION_CONFIG;
         default: return nullptr;

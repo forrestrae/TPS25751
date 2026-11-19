@@ -101,7 +101,11 @@ no `Wire`, no Arduino framework. The `[env:native]` environment in
   `test/support/native/` (`Arduino.h`, `Stream.h`). The stubs print to stdout;
   they are just enough surface to compile the decode/encode logic, not an
   Arduino emulation. Extend them (minimally) if a new source file needs more;
-- only runs suites under `test/test_native/` (`test_filter = test_native/*`).
+- only runs suites under `test/test_native/` (`test_filter = test_native/*`);
+- compiles as `-std=gnu++17`, the standard the Teensy build uses, so language
+  features behave the same on the host and on the target. Without the flag the
+  host default applies (Apple clang defaults to gnu++14), where attributes on
+  enumerators such as the rev B aliases compile only as an extension.
 
 PlatformIO defines **`PIO_UNIT_TESTING`** during test builds;
 `TPS25751Register.h` uses it to make the protected `extractBits*` /

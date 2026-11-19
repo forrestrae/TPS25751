@@ -146,7 +146,7 @@ The whole branch ships as one release, from one push (decision 4). Publishing ru
 git push origin main refs/tags/archive/fix/rev-b-trm
 ```
 
-CI runs the verify job once on the final tip and publishes one minor release: 2.1.0 from the current 2.0.2. The level is minor because the branch already carries nine `feat` commits from the audit fixes, and each batch adds more.
+CI runs the verify job once on the final tip and publishes one major release: 3.0.0 from the current 2.0.2. The batches alone would make it minor, since the branch carries `feat` commits from the audit fixes and from every batch. The removal of `writeCustomerUse()` after Batch K (CUSTOMER_USE is read-only at runtime in rev B) is a breaking change marked `!`, which makes it major.
 
 ### Decisions
 
@@ -324,7 +324,7 @@ Apply v01's "Batch-D Tightening" by analogy: the orchestrator writes the full by
   5. 77h agreement [done, inconclusive by design]: 0x77 reads zero fixed and zero hot-swappable batteries while 7Bh battery 0 holds the reset value and 7Dh is all zero. Whether the 7Bh reset entry counts as populated depends on the Battery Info encoding, a USB PD specification structure (Batch L).
   6. 37 addresses [done]: after 80f6928, `readRegisterByAddress()` returns an object for all 37 addresses and every one passes `hasValidData()` and `isSemanticallyValid()`.
   7. Replies [unit-test only, as planned]: PD3_CONFIGURATION reads `0x0008001A`, so Support Battery Status Message (bit 11) and Support Battery Capabilities Message (bit 10) are clear and the controller answers Get_Battery_Status and Get_Battery_Capabilities with Not_Supported on this board.
-- Found on the bench, outside this batch: CUSTOMER_USE (0x06) is `[R]` in rev B ("can only be changed during application customization, not at runtime", p.15). After 80f6928, `writeCustomerUse()` reaches the bus and the controller ACKs it, but the read-back keeps the old value. Recorded in CONSTRAINTS.md; removing `writeCustomerUse()` is an open API decision because it breaks callers.
+- Found on the bench, outside this batch: CUSTOMER_USE (0x06) is `[R]` in rev B ("can only be changed during application customization, not at runtime", p.15). After 80f6928, `writeCustomerUse()` reaches the bus and the controller ACKs it, but the read-back keeps the old value. Recorded in CONSTRAINTS.md. The user decided on 2026-11-19 to remove it: a follow-up `fix(registers)!` commit removes `writeCustomerUse()`, the class setters, and `kAddress`, which makes the release major (see "Release level").
 
 7Bh BSDO, class `TPS25751TransmitBatteryStatus`, R/W, 16 bytes, reset FFFF0200h in the low word, p.57.
 

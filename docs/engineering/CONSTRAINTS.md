@@ -645,12 +645,15 @@ with Not_Supported.
 
 **CUSTOMER_USE (0x06) is read-only at runtime in rev B.** SLVUCR8B Rev. B (p.15)
 marks the field `[R]`: it "can only be changed during application customization,
-not at runtime." The library has exposed `writeCustomerUse()` since Batch A. Until
+not at runtime." The library exposed `writeCustomerUse()` from Batch A. Until
 2026-11-19 that call returned false without writing, because `getRegisterInfo()`
 had no CUSTOMER_USE case. With the case added, the write reaches the bus and the
 controller ACKs it, but a read-back 100 ms later still shows the old value (bench,
-2026-11-19). Treat CUSTOMER_USE as read-only; whether to remove `writeCustomerUse()`
-is an open API decision, since removal is a breaking change.
+2026-11-19). The library now treats CUSTOMER_USE as read-only: `writeCustomerUse()`,
+`TPS25751CustomerUse::setValue()`, `setBytes()`, and `kAddress` are removed, so
+`writeRegister<TPS25751CustomerUse>()` does not compile. This is a breaking change
+for any caller of those methods. Set the bytes in the application configuration
+(the EEPROM image or the patch bundle) instead.
 
 ---
 
@@ -1142,6 +1145,7 @@ void foo() {
 | 1.6 | 2026-11-18 | Claude Code | LIQUID_DETECTION_CONFIG (0x98) reports 12 bytes on hardware, not 11 (Read/Write Registers section); PDO classes decode only the SPR PPS APDO subtype after a subtype 10b APDO in 0x32 failed validation (USB Power Delivery Complexity section); the firmware still uses the rev A Power Path layout in 0x32 bits 21:10 |
 | 1.7 | 2026-11-18 | Claude Code | Batch J of the rev B plan: TX_SOURCE_CAPABILITIES_EXTENDED (0x77) reads Source PDP 0x7F from firmware configuration, not the documented reset; 0x77 and TRANSMIT_SINK_CAPABILITIES_EXTENDED (0x7E) report 15 and 14 bytes as the TRM implies, and the firmware sets none of their reserved bits (Read/Write Registers section) |
 | 1.8 | 2026-11-19 | Claude Code | Batch K of the rev B plan: TX_BATTERY_CAPABILITIES (0x7D) is the first R/W register past bit 255 and uses class-local byte helpers (Read-Only Registers section, IO_CONFIG note); the TRM labels 0x7D battery 3 as battery 0; 0x7B and 0x7D report 16 and 36 bytes and round-trip on hardware; CUSTOMER_USE (0x06) ignores runtime writes (Read/Write Registers section) |
+| 1.9 | 2026-11-19 | Claude Code | CUSTOMER_USE (0x06) is read-only in the library: `writeCustomerUse()`, the class setters, and `kAddress` are removed (Read/Write Registers section) |
 
 ---
 

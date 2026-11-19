@@ -111,7 +111,7 @@ protected:
      * This is the host-side write primitive symmetric to extractBits(); host
      * R/W register setters build on it instead of hand-poking @c _raw. Fields
      * wider than 32 bits have no sub-structure to preserve in this library
-     * (e.g. CUSTOMER_USE) and are written byte-wise by the owning class.
+     * and are written byte-wise by the owning class.
      *
      * @param bitPos Bit offset of the field within the buffer
      * @param bitLen Number of bits in the field (field width, 1..32)

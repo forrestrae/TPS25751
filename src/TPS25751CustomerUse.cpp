@@ -1,7 +1,6 @@
 #include "TPS25751CustomerUse.h"
 
 #include <cstdio>
-#include <cstring>
 
 uint64_t TPS25751CustomerUse::value() const {
     return extractBits64(0, 64);
@@ -10,20 +9,6 @@ uint64_t TPS25751CustomerUse::value() const {
 uint8_t TPS25751CustomerUse::byteAt(size_t index) const {
     if (!isValid() || index >= _len) return 0;
     return _raw[index];
-}
-
-void TPS25751CustomerUse::setValue(uint64_t v) {
-    if (!isValid()) return;
-    for (size_t i = 0; i < _len && i < 8; ++i) {
-        _raw[i] = static_cast<uint8_t>((v >> (8 * i)) & 0xFF);
-    }
-}
-
-void TPS25751CustomerUse::setBytes(const uint8_t* src, size_t len) {
-    if (!isValid() || !src) return;
-    size_t n = len < 8 ? len : 8;
-    n = n < _len ? n : _len;
-    memcpy(_raw, src, n);
 }
 
 void TPS25751CustomerUse::debugPrint(Stream &s) const {

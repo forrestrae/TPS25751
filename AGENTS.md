@@ -186,8 +186,10 @@ Serial.println(F("String in flash"));                // Use F() macro
 - GPIO_STATUS, RECEIVED_SINK_CAPS, RECEIVED_SOURCE_CAPS
 - COMMAND, DATA — the 4CC command-task control/payload registers (TRM Sec 4.4.2);
   see `TPS25751::executeCommand()` and `TPS25751DownstreamDevice`
-- SLEEP_CONTROL, CUSTOMER_USE (Batch A, 2026-07-06) — the first R/W host registers
-  with field setters and `writeSleepControl()`/`writeCustomerUse()` write paths
+- SLEEP_CONTROL, CUSTOMER_USE (Batch A, 2026-07-06) — the first host registers
+  with field setters and write paths. CUSTOMER_USE is read-only at runtime in rev B,
+  so its setters and `writeCustomerUse()` were removed on 2026-11-19 (breaking
+  change); `writeSleepControl()` remains
 - INT_MASK1, INT_CLEAR1 (Batch B, 2026-07-07) — interrupt enable-mask and
   event-clear registers mirroring INT_EVENT1's 38-source bit map (36 in rev A; rev B adds bits 29 and 51); built on the new
   base-class `setBits()` write primitive and typed `TPS25751::writeRegister<T>()`
@@ -318,7 +320,7 @@ Each register has its own class inheriting from `TPS25751Register`:
 - `TPS25751Command`: COMMAND register (0x08) — 4CC task code, clear/rejected state
 - `TPS25751Data`: DATA register (0x09) — generic 64-byte 4CC task payload (no fixed layout)
 - `TPS25751SleepControl`: SLEEP_CONTROL register (0x70) — sleep-mode enable + sleep-time; R/W with field setters
-- `TPS25751CustomerUse`: CUSTOMER_USE register (0x06) — opaque 8-byte application blob; R/W raw/64-bit accessors. Rev B (SLVUCR8B p.15) marks the field read-only, changeable only during application customization, and on hardware the controller ACKs a write and keeps the old value; `writeCustomerUse()` remains for now (see CONSTRAINTS.md, Read/Write Registers)
+- `TPS25751CustomerUse`: CUSTOMER_USE register (0x06) — opaque 8-byte application blob; **read-only** raw/64-bit accessors (`value()`, `byteAt()`). Rev B (SLVUCR8B p.15) marks the field read-only, changeable only during application customization, and on hardware the controller ACKs a write and keeps the old value, so the class has no setters and no `kAddress`, and `writeCustomerUse()` was removed (2026-11-19; see CONSTRAINTS.md, Read/Write Registers)
 - `TPS25751InterruptMask`: INT_MASK1 register (0x16) — per-source interrupt enable mask mirroring INT_EVENT1's 38-source bit map (rev B adds MIDB Received bit 29 and Discover Mode Completed bit 51); R/W with `set<Source>(bool)` setters (a 1 unmasks/enables that source)
 - `TPS25751InterruptClear`: INT_CLEAR1 register (0x18) — event-clear staging buffer (R/W per the TRM, p.23; the library only writes it); `clear<Source>()` / `clear(bitPos)` / `clearAll()` helpers (write a 1 to acknowledge that INT_EVENT1 source)
 - `TPS25751ADCResults`: ADC_RESULTS register (0x6A) — read-only 13-byte internal-ADC telemetry block; per-pin voltage and power-path current (IVBUS_Mean byte 5, IVBUS_Peak byte 11 per rev B) with `raw*()` + unit-converted (`*Millivolts()`/`*Milliamps()`) accessors. Byte layout is not alphabetical (transcribed from the TRM); not updated in Unconnected-Sleep mode

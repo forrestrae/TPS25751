@@ -273,7 +273,7 @@ inversion), `BQ25798MinimalSystemVoltage` (offset inversion with underflow guard
 
 The write-encoder pattern above was written for **downstream** device registers,
 whose `setField8`/`setField16BE` helpers live in the `lib/BQ25798` repo. Host R/W
-registers (`TPS25751SleepControl`, `TPS25751CustomerUse`, and the Batch B+
+registers (`TPS25751SleepControl` and the Batch B+
 interrupt registers) use the host side's own equivalents, landed before Batch B:
 
 - **`TPS25751Register::setBits(bitPos, bitLen, value)`** — the base-class write
@@ -283,8 +283,8 @@ interrupt registers) use the host side's own equivalents, landed before Batch B:
   bleed into a neighbour. **Every host bitfield setter builds on it** instead of
   hand-poking `_raw[...]`; there are no per-class field masks to keep in sync, so
   the "hand-restated field-position mask drifts" defect class is designed out.
-  Fields with no sub-structure to preserve (e.g. CUSTOMER_USE's opaque 8 bytes)
-  are written byte-wise by the owning class instead.
+  Fields wider than 32 bits with no sub-structure to preserve are written
+  byte-wise by the owning class instead.
 - **`static constexpr TPS25751Registers::Address kAddress`** on every host R/W
   register class — the single source of register identity.
 - **`TPS25751::writeRegister<T>(const T&)`** (keyed on `T::kAddress`) is the write

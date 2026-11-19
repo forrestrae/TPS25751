@@ -236,14 +236,6 @@ public:
     bool writeTransmitSinkCaps(const TPS25751TransmitSinkCaps &sinkCaps) const;
 
     /**
-     * @brief Write the Customer Use register (0x06)
-     * @param customerUse Register object holding the bytes to write
-     * @return false if @p customerUse is not valid or not the expected size;
-     *         otherwise the result of the underlying I2C write
-     */
-    bool writeCustomerUse(const TPS25751CustomerUse &customerUse) const;
-
-    /**
      * @brief Write the Interrupt Mask register (0x16)
      * @param interruptMask Register object holding the bytes to write
      * @return false if @p interruptMask is not valid or not the expected

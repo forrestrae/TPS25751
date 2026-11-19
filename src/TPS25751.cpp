@@ -247,11 +247,6 @@ bool TPS25751::writeTransmitSinkCaps(const TPS25751TransmitSinkCaps &sinkCaps) c
     return writeRegister(sinkCaps);
 }
 
-bool TPS25751::writeCustomerUse(const TPS25751CustomerUse &customerUse) const
-{
-    return writeRegister(customerUse);
-}
-
 bool TPS25751::writeInterruptMask(const TPS25751InterruptMask &interruptMask) const
 {
     // Delegates to the typed writeRegister<T>() (keyed on kAddress) so there is

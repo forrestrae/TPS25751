@@ -64,8 +64,8 @@ any code that directly implements the SLVAFV8A PBM sequence:
 
 ### Host-Register Write-Path Traps (Batch A onward)
 
-Review these when a **host** R/W register class (SLEEP_CONTROL, CUSTOMER_USE, and
-the Batch B+ registers) adds field setters or a `TPS25751::writeX()` method:
+Review these when a **host** R/W register class (SLEEP_CONTROL and the Batch B+
+registers) adds field setters or a `TPS25751::writeX()` method:
 
 - **Setters must read-modify-write, never whole-byte assign**: a host setter must
   mask out only its field and OR in the shifted value, preserving reserved and
@@ -82,7 +82,7 @@ the Batch B+ registers) adds field setters or a `TPS25751::writeX()` method:
   write-only. Flag any hand-restated field-position mask.
 - **`writeX()` convenience methods and register-class↔address pairing**: until the
   planned typed `writeRegister<T>()` (keyed on a class-level `kAddress`) lands, the
-  hand-written `writeSleepControl`/`writeCustomerUse`-style methods pair a class
+  hand-written `writeSleepControl`-style methods pair a class
   with a `RegisterInfo` by hand. The `isValidSize()` guard cannot catch a wrong
   **same-size** pairing (INT_MASK1 0x16 and INT_CLEAR1 0x18 are both
   11 bytes; RECEIVED_SINK_CAPS and TRANSMIT_SINK_CAPS are both 53). Verify each
@@ -109,7 +109,8 @@ the Batch B+ registers) adds field setters or a `TPS25751::writeX()` method:
   register read-only at runtime even when it looks like host storage. CUSTOMER_USE
   is `[R]` in rev B ("can only be changed during application customization"), and
   the controller ACKs a write and keeps the old value, so a successful I2C write is
-  not evidence the register changed. Confirm R/W on hardware with a read-back.
+  not evidence the register changed. Confirm R/W on hardware with a read-back. The
+  library shipped `writeCustomerUse()` from Batch A until its removal on 2026-11-19.
 
 ### Downstream-Device Write-Path Traps (ADR-009)
 

@@ -29,6 +29,7 @@
 #include "TPS25751Version.h"
 #include "TPS25751PD3Config.h"
 #include "TPS25751GlobalSystemConfig.h"
+#include "TPS25751TransmitSourceInfo.h"
 #include "TPS25751ReceivedSOPIdentity.h"
 #include "TPS25751Debug.h"
 
@@ -100,6 +101,8 @@ std::unique_ptr<TPS25751Register> TPS25751RegisterFactoryImpl::createRegister(TP
             return createPD3ConfigRegister();
         case TPS25751Registers::Address::GLOBAL_SYSTEM_CONFIGURATION:
             return createGlobalSystemConfigRegister();
+        case TPS25751Registers::Address::TRANSMIT_SOURCE_INFO:
+            return createTransmitSourceInfoRegister();
         case TPS25751Registers::Address::RECEIVED_SOP_IDENTITY:
             return createReceivedSOPIdentityRegister();
         default:
@@ -178,6 +181,8 @@ std::unique_ptr<TPS25751Register> TPS25751RegisterFactoryImpl::createRegister(TP
             return createPD3ConfigRegister(data, length);
         case TPS25751Registers::Address::GLOBAL_SYSTEM_CONFIGURATION:
             return createGlobalSystemConfigRegister(data, length);
+        case TPS25751Registers::Address::TRANSMIT_SOURCE_INFO:
+            return createTransmitSourceInfoRegister(data, length);
         case TPS25751Registers::Address::RECEIVED_SOP_IDENTITY:
             return createReceivedSOPIdentityRegister(data, length);
         default:
@@ -251,6 +256,8 @@ std::unique_ptr<TPS25751Register> TPS25751RegisterFactoryImpl::createRegister(co
             return std::make_unique<TPS25751PD3Config>(regInfo);
         case TPS25751Registers::Address::GLOBAL_SYSTEM_CONFIGURATION:
             return std::make_unique<TPS25751GlobalSystemConfig>(regInfo);
+        case TPS25751Registers::Address::TRANSMIT_SOURCE_INFO:
+            return std::make_unique<TPS25751TransmitSourceInfo>(regInfo);
         case TPS25751Registers::Address::RECEIVED_SOP_IDENTITY:
             return std::make_unique<TPS25751ReceivedSOPIdentity>(regInfo);
         default:
@@ -503,6 +510,14 @@ std::unique_ptr<TPS25751Register> TPS25751RegisterFactoryImpl::createPD3ConfigRe
 
 std::unique_ptr<TPS25751Register> TPS25751RegisterFactoryImpl::createGlobalSystemConfigRegister(const uint8_t* data, size_t length) const {
     return std::make_unique<TPS25751GlobalSystemConfig>(data, length);
+}
+
+std::unique_ptr<TPS25751Register> TPS25751RegisterFactoryImpl::createTransmitSourceInfoRegister() const {
+    return std::make_unique<TPS25751TransmitSourceInfo>();
+}
+
+std::unique_ptr<TPS25751Register> TPS25751RegisterFactoryImpl::createTransmitSourceInfoRegister(const uint8_t* data, size_t length) const {
+    return std::make_unique<TPS25751TransmitSourceInfo>(data, length);
 }
 
 std::unique_ptr<TPS25751Register> TPS25751RegisterFactoryImpl::createReceivedSOPIdentityRegister(const uint8_t* data, size_t length) const {

@@ -302,6 +302,133 @@ void test_print_hex_digit_count_limits()
     TEST_ASSERT_EQUAL_STRING("00001234", capturePrintHex(0x1234, 255).c_str());
 }
 
+
+// --- Invalid registers and argument guards -----------------------------------
+
+namespace {
+
+// A default-constructed register has no buffer (_raw null, _len 0).
+class EmptyRegister : public TPS25751Register
+{
+public:
+    EmptyRegister() : TPS25751Register() {}
+    void debugPrint(Stream &) const override {}
+};
+
+std::string captureDump(const TPS25751Register &reg, const char *prefix)
+{
+    fflush(stdout);
+    FILE *tmp = tmpfile();
+    const int saved = dup(fileno(stdout));
+    dup2(fileno(tmp), fileno(stdout));
+
+    reg.debugDumpRaw(Serial, prefix);
+
+    fflush(stdout);
+    dup2(saved, fileno(stdout));
+    close(saved);
+
+    std::string out;
+    rewind(tmp);
+    char buf[256];
+    size_t n;
+    while ((n = fread(buf, 1, sizeof(buf), tmp)) > 0) out.append(buf, n);
+    fclose(tmp);
+    return out;
+}
+
+}  // namespace
+
+void test_default_constructed_register_is_invalid()
+{
+    EmptyRegister reg;
+    TEST_ASSERT_FALSE(reg.isValid());
+    TEST_ASSERT_FALSE(reg.hasValidData());
+    TEST_ASSERT_EQUAL_size_t(0, reg.size());
+}
+
+void test_invalid_register_decodes_to_zero()
+{
+    EmptyRegister reg;
+    TEST_ASSERT_EQUAL_UINT8(0, reg.extractBits(0, 8));
+    TEST_ASSERT_EQUAL_UINT16(0, reg.extractBits16(0, 16));
+    TEST_ASSERT_EQUAL_UINT32(0, reg.extractBits32(0, 32));
+    TEST_ASSERT_TRUE(reg.extractBits64(0, 64) == 0);
+    uint32_t out[2] = {0xAAAA, 0xBBBB};
+    TEST_ASSERT_EQUAL_size_t(0, reg.extractArray32(0, 8, 2, out));
+    TEST_ASSERT_EQUAL_UINT32(0xAAAA, out[0]);
+}
+
+void test_static_extract_rejects_bad_arguments()
+{
+    uint8_t buf[kSize];
+    fill(buf);
+    // Null data, zero or oversized width, and zero size each read as 0.
+    TEST_ASSERT_EQUAL_UINT16(0, TPS25751Register::extractBits16(nullptr, kSize, 0, 8));
+    TEST_ASSERT_EQUAL_UINT16(0, TPS25751Register::extractBits16(buf, kSize, 0, 0));
+    TEST_ASSERT_EQUAL_UINT16(0, TPS25751Register::extractBits16(buf, kSize, 0, 17));
+    TEST_ASSERT_EQUAL_UINT16(0, TPS25751Register::extractBits16(buf, 0, 0, 8));
+    TEST_ASSERT_EQUAL_UINT32(0, TPS25751Register::extractBits32(nullptr, kSize, 0, 8));
+    TEST_ASSERT_EQUAL_UINT32(0, TPS25751Register::extractBits32(buf, kSize, 0, 0));
+    TEST_ASSERT_EQUAL_UINT32(0, TPS25751Register::extractBits32(buf, kSize, 0, 33));
+    TEST_ASSERT_EQUAL_UINT32(0, TPS25751Register::extractBits32(buf, 0, 0, 8));
+    TEST_ASSERT_TRUE(TPS25751Register::extractBits64(nullptr, kSize, 0, 8) == 0);
+    TEST_ASSERT_TRUE(TPS25751Register::extractBits64(buf, kSize, 0, 0) == 0);
+    TEST_ASSERT_TRUE(TPS25751Register::extractBits64(buf, kSize, 0, 65) == 0);
+    TEST_ASSERT_TRUE(TPS25751Register::extractBits64(buf, 0, 0, 8) == 0);
+}
+
+void test_extract_bits64_narrow_field_matches_32_bit_read()
+{
+    uint8_t buf[kSize];
+    fill(buf);
+    // A field of 32 bits or fewer takes the 32-bit path: bytes 0..3 = 10 11 12 13.
+    TEST_ASSERT_TRUE(TPS25751Register::extractBits64(buf, kSize, 0, 32) == 0x13121110ULL);
+    TEST_ASSERT_TRUE(TPS25751Register::extractBits64(buf, kSize, 8, 12) == 0x211ULL);
+}
+
+void test_extract_bits64_high_half_past_16_bit_position_reads_zero()
+{
+    uint8_t buf[kSize];
+    fill(buf);
+    // bitPos 0xFFF0 + 32 does not fit in 16 bits, and 0xFFF0 is past the buffer anyway.
+    TEST_ASSERT_TRUE(TPS25751Register::extractBits64(buf, kSize, 0xFFF0, 48) == 0);
+}
+
+void test_static_set_bits_rejects_bad_arguments()
+{
+    uint8_t buf[kSize];
+    fill(buf);
+    uint8_t copy[kSize];
+    memcpy(copy, buf, kSize);
+
+    TPS25751Register::setBits(nullptr, kSize, 0, 8, 0xFF);  // must not crash
+    TPS25751Register::setBits(buf, kSize, 0, 0, 0xFF);
+    TPS25751Register::setBits(buf, kSize, 0, 33, 0xFF);
+    TPS25751Register::setBits(buf, 0, 0, 8, 0xFF);
+    TEST_ASSERT_EQUAL_UINT8_ARRAY(copy, buf, kSize);
+}
+
+void test_debug_dump_raw_invalid_register()
+{
+    EmptyRegister reg;
+    const std::string out = captureDump(reg, "Raw");
+    TEST_ASSERT_EQUAL_STRING("Register invalid - cannot dump\n", out.c_str());
+}
+
+void test_debug_dump_raw_header_with_and_without_prefix()
+{
+    uint8_t buf[kSize];
+    fill(buf);
+    TestRegister reg(buf);
+
+    const std::string withPrefix = captureDump(reg, "Raw");
+    TEST_ASSERT_EQUAL_size_t(0, withPrefix.find("Raw (40 bytes):\n"));
+
+    const std::string noPrefix = captureDump(reg, nullptr);
+    TEST_ASSERT_EQUAL_size_t(0, noPrefix.find("Register dump (40 bytes):\n"));
+}
+
 int main(int, char **)
 {
     UNITY_BEGIN();
@@ -320,5 +447,14 @@ int main(int, char **)
     RUN_TEST(test_print_hex_zero_pads_to_the_digit_count);
     RUN_TEST(test_print_hex_prints_only_the_low_digits);
     RUN_TEST(test_print_hex_digit_count_limits);
+    RUN_TEST(test_default_constructed_register_is_invalid);
+    RUN_TEST(test_invalid_register_decodes_to_zero);
+    RUN_TEST(test_static_extract_rejects_bad_arguments);
+    RUN_TEST(test_extract_bits64_narrow_field_matches_32_bit_read);
+    RUN_TEST(test_extract_bits64_high_half_past_16_bit_position_reads_zero);
+    RUN_TEST(test_static_set_bits_rejects_bad_arguments);
+    RUN_TEST(test_debug_dump_raw_invalid_register);
+    RUN_TEST(test_debug_dump_raw_header_with_and_without_prefix);
+
     return UNITY_END();
 }

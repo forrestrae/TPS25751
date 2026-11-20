@@ -20,6 +20,9 @@
  */
 
 #include <unity.h>
+#include <cstdio>
+#include <string>
+#include <unistd.h>
 
 #include "TPS25751InterruptMask.h"
 #include "TPS25751Register.h"
@@ -322,6 +325,209 @@ void test_move_constructor_transfers_ownership()
     TEST_ASSERT_TRUE(moved.pdHardreset());
 }
 
+
+// --- Every source: getter, setter, bit position, debug name -----------------
+
+namespace {
+
+struct SourceCase {
+    uint8_t bit;
+    bool (TPS25751InterruptMask::*get)() const;
+    void (TPS25751InterruptMask::*set)(bool);
+    const char *name;
+};
+
+// Bit numbers follow INT_EVENT1 / INT_MASK1 in TRM SLVUCR8B (rev B).
+constexpr SourceCase kSources[] = {
+    {82, &TPS25751InterruptMask::i2cControllerNacked, &TPS25751InterruptMask::setI2cControllerNacked, "I2C Controller NACKed"},
+    {81, &TPS25751InterruptMask::readyForPatch, &TPS25751InterruptMask::setReadyForPatch, "Ready for Patch"},
+    {80, &TPS25751InterruptMask::patchLoaded, &TPS25751InterruptMask::setPatchLoaded, "Patch Loaded"},
+    {66, &TPS25751InterruptMask::mbrdBufferReady, &TPS25751InterruptMask::setMbrdBufferReady, "MBRD Buffer Ready"},
+    {65, &TPS25751InterruptMask::txMemoryBufferEmpty, &TPS25751InterruptMask::setTxMemoryBufferEmpty, "TX Memory Buffer Empty"},
+    {60, &TPS25751InterruptMask::liquidDetection, &TPS25751InterruptMask::setLiquidDetection, "Liquid Detection"},
+    {57, &TPS25751InterruptMask::extDcdcSourceSafeState, &TPS25751InterruptMask::setExtDcdcSourceSafeState, "Ext DCDC Source Safe State"},
+    {56, &TPS25751InterruptMask::extDcdcSinkSafeState, &TPS25751InterruptMask::setExtDcdcSinkSafeState, "Ext DCDC Sink Safe State"},
+    {51, &TPS25751InterruptMask::discoverModeCompleted, &TPS25751InterruptMask::setDiscoverModeCompleted, "Discover Mode Completed"},
+    {46, &TPS25751InterruptMask::unableToSourceError, &TPS25751InterruptMask::setUnableToSourceError, "Unable to Source Error"},
+    {43, &TPS25751InterruptMask::plugEarlyNotification, &TPS25751InterruptMask::setPlugEarlyNotification, "Plug Early Notification"},
+    {42, &TPS25751InterruptMask::sinkTransitionCompleted, &TPS25751InterruptMask::setSinkTransitionCompleted, "Sink Transition Completed"},
+    {39, &TPS25751InterruptMask::messageDataError, &TPS25751InterruptMask::setMessageDataError, "Message Data Error"},
+    {38, &TPS25751InterruptMask::protocolError, &TPS25751InterruptMask::setProtocolError, "Protocol Error"},
+    {36, &TPS25751InterruptMask::missingGetCapabilitiesError, &TPS25751InterruptMask::setMissingGetCapabilitiesError, "Missing Get Capabilities Error"},
+    {35, &TPS25751InterruptMask::powerEventOccurredError, &TPS25751InterruptMask::setPowerEventOccurredError, "Power Event Occurred Error"},
+    {34, &TPS25751InterruptMask::canProvideVoltageLaterError, &TPS25751InterruptMask::setCanProvideVoltageLaterError, "Can Provide Voltage/Current Later"},
+    {33, &TPS25751InterruptMask::cannotProvideVoltageError, &TPS25751InterruptMask::setCannotProvideVoltageError, "Cannot Provide Voltage/Current"},
+    {32, &TPS25751InterruptMask::deviceIncompatibleError, &TPS25751InterruptMask::setDeviceIncompatibleError, "Device Incompatible Error"},
+    {30, &TPS25751InterruptMask::cmd1Complete, &TPS25751InterruptMask::setCmd1Complete, "CMD1 Complete"},
+    {29, &TPS25751InterruptMask::midbReceived, &TPS25751InterruptMask::setMidbReceived, "MIDB Received"},
+    {27, &TPS25751InterruptMask::pdStatusUpdated, &TPS25751InterruptMask::setPdStatusUpdated, "PD Status Updated"},
+    {26, &TPS25751InterruptMask::statusUpdated, &TPS25751InterruptMask::setStatusUpdated, "Status Updated"},
+    {24, &TPS25751InterruptMask::powerStatusUpdated, &TPS25751InterruptMask::setPowerStatusUpdated, "Power Status Updated"},
+    {23, &TPS25751InterruptMask::powerPathSwitchChanged, &TPS25751InterruptMask::setPowerPathSwitchChanged, "Power Path Switch Changed"},
+    {21, &TPS25751InterruptMask::usbHostNoLongerPresent, &TPS25751InterruptMask::setUsbHostNoLongerPresent, "USB Host No Longer Present"},
+    {20, &TPS25751InterruptMask::usbHostPresent, &TPS25751InterruptMask::setUsbHostPresent, "USB Host Present"},
+    {18, &TPS25751InterruptMask::dataSwapRequested, &TPS25751InterruptMask::setDataSwapRequested, "Data Swap Requested"},
+    {17, &TPS25751InterruptMask::powerSwapRequested, &TPS25751InterruptMask::setPowerSwapRequested, "Power Swap Requested"},
+    {15, &TPS25751InterruptMask::sinkCapMessageReceived, &TPS25751InterruptMask::setSinkCapMessageReceived, "Sink Cap Message Received"},
+    {14, &TPS25751InterruptMask::sourceCapMessageReceived, &TPS25751InterruptMask::setSourceCapMessageReceived, "Source Cap Message Received"},
+    {13, &TPS25751InterruptMask::newContractAsProvider, &TPS25751InterruptMask::setNewContractAsProvider, "New Contract as Provider"},
+    {12, &TPS25751InterruptMask::newContractAsConsumer, &TPS25751InterruptMask::setNewContractAsConsumer, "New Contract as Consumer"},
+    {9, &TPS25751InterruptMask::overcurrent, &TPS25751InterruptMask::setOvercurrent, "Overcurrent"},
+    {5, &TPS25751InterruptMask::dataSwapComplete, &TPS25751InterruptMask::setDataSwapComplete, "Data Swap Complete"},
+    {4, &TPS25751InterruptMask::powerSwapComplete, &TPS25751InterruptMask::setPowerSwapComplete, "Power Swap Complete"},
+    {3, &TPS25751InterruptMask::plugInsertOrRemoval, &TPS25751InterruptMask::setPlugInsertOrRemoval, "Plug Insert or Removal"},
+    {1, &TPS25751InterruptMask::pdHardreset, &TPS25751InterruptMask::setPdHardreset, "PD Hard Reset"},
+};
+
+constexpr size_t kNumSources = sizeof(kSources) / sizeof(kSources[0]);
+
+// Runs reg.debugPrint() against the stdout-backed native Stream stub and
+// returns what it printed.
+std::string captureDebugPrint(const TPS25751InterruptMask &reg)
+{
+    fflush(stdout);
+    FILE *tmp = tmpfile();
+    const int saved = dup(fileno(stdout));
+    dup2(fileno(tmp), fileno(stdout));
+
+    reg.debugPrint();
+
+    fflush(stdout);
+    dup2(saved, fileno(stdout));
+    close(saved);
+
+    std::string out;
+    rewind(tmp);
+    char buf[256];
+    size_t n;
+    while ((n = fread(buf, 1, sizeof(buf), tmp)) > 0) out.append(buf, n);
+    fclose(tmp);
+    return out;
+}
+
+bool contains(const std::string &haystack, const char *needle)
+{
+    return haystack.find(needle) != std::string::npos;
+}
+
+}  // namespace
+
+void test_each_source_setter_sets_only_its_bit_and_getter_reads_it()
+{
+    TEST_ASSERT_EQUAL_size_t(38, kNumSources);
+    for (size_t i = 0; i < kNumSources; ++i) {
+        const SourceCase &c = kSources[i];
+        TPS25751InterruptMask reg;
+        (reg.*c.set)(true);
+
+        char msg[48];
+        snprintf(msg, sizeof(msg), "bit %u", (unsigned)c.bit);
+        TEST_ASSERT_TRUE_MESSAGE((reg.*c.get)(), msg);
+        TEST_ASSERT_EQUAL_UINT8_MESSAGE(1, reg.getEnabledCount(), msg);
+        for (size_t b = 0; b < INT_MASK1_SIZE; ++b) {
+            const uint8_t expected = (b == c.bit / 8u) ? static_cast<uint8_t>(1u << (c.bit % 8u)) : 0x00;
+            TEST_ASSERT_EQUAL_UINT8_MESSAGE(expected, reg.raw()[b], msg);
+        }
+
+        (reg.*c.set)(false);
+        TEST_ASSERT_FALSE_MESSAGE((reg.*c.get)(), msg);
+        TEST_ASSERT_FALSE_MESSAGE(reg.hasAnyEnabled(), msg);
+    }
+}
+
+void test_each_source_getter_ignores_every_other_bit()
+{
+    for (size_t i = 0; i < kNumSources; ++i) {
+        TPS25751InterruptMask reg(ALL_ONES_DATA);
+        (reg.*kSources[i].set)(false);
+        char msg[48];
+        snprintf(msg, sizeof(msg), "bit %u", (unsigned)kSources[i].bit);
+        TEST_ASSERT_FALSE_MESSAGE((reg.*kSources[i].get)(), msg);
+        TEST_ASSERT_EQUAL_UINT8_MESSAGE(kNumSources - 1, reg.getEnabledCount(), msg);
+    }
+}
+
+void test_enabled_count_with_every_source_set()
+{
+    TPS25751InterruptMask reg;
+    for (size_t i = 0; i < kNumSources; ++i) (reg.*kSources[i].set)(true);
+    TEST_ASSERT_EQUAL_UINT8(kNumSources, reg.getEnabledCount());
+    TEST_ASSERT_TRUE(reg.hasAnyEnabled());
+}
+
+// --- debugPrint ---------------------------------------------------------------
+
+void test_debug_print_all_masked()
+{
+    TPS25751InterruptMask reg;
+    const std::string out = captureDebugPrint(reg);
+
+    TEST_ASSERT_TRUE(contains(out, "=== Interrupt Mask Register (0x16) ==="));
+    TEST_ASSERT_TRUE(contains(out, "No interrupt sources enabled (all masked)"));
+    TEST_ASSERT_FALSE(contains(out, "Enabled Sources:"));
+    TEST_ASSERT_FALSE(contains(out, "[+]"));
+}
+
+void test_debug_print_lists_each_source_alone()
+{
+    for (size_t i = 0; i < kNumSources; ++i) {
+        TPS25751InterruptMask reg;
+        (reg.*kSources[i].set)(true);
+        const std::string out = captureDebugPrint(reg);
+
+        std::string line = std::string("  [+] ") + kSources[i].name + "\n";
+        TEST_ASSERT_TRUE_MESSAGE(contains(out, "Enabled Sources: 1\n"), kSources[i].name);
+        TEST_ASSERT_TRUE_MESSAGE(contains(out, line.c_str()), kSources[i].name);
+        size_t count = 0;
+        for (size_t pos = out.find("[+]"); pos != std::string::npos; pos = out.find("[+]", pos + 1)) ++count;
+        TEST_ASSERT_EQUAL_size_t_MESSAGE(1, count, kSources[i].name);
+        TEST_ASSERT_FALSE_MESSAGE(contains(out, "No interrupt sources"), kSources[i].name);
+    }
+}
+
+void test_debug_print_every_source_enabled()
+{
+    TPS25751InterruptMask reg;
+    for (size_t i = 0; i < kNumSources; ++i) (reg.*kSources[i].set)(true);
+    const std::string out = captureDebugPrint(reg);
+
+    char expected[40];
+    snprintf(expected, sizeof(expected), "Enabled Sources: %u\n", (unsigned)kNumSources);
+    TEST_ASSERT_TRUE(contains(out, expected));
+    for (size_t i = 0; i < kNumSources; ++i) {
+        std::string line = std::string("  [+] ") + kSources[i].name + "\n";
+        TEST_ASSERT_TRUE_MESSAGE(contains(out, line.c_str()), kSources[i].name);
+    }
+}
+
+void test_set_midb_and_discover_mode_bits()
+{
+    // Rev B additions: MIDB Received is bit 29 (byte 3, 0x20), Discover Mode
+    // Completed is bit 51 (byte 6, 0x08). SLVUCR8B p.21.
+    TPS25751InterruptMask reg;
+    reg.setMidbReceived(true);
+    reg.setDiscoverModeCompleted(true);
+    TEST_ASSERT_EQUAL_UINT8(0x20, reg.raw()[3]);
+    TEST_ASSERT_EQUAL_UINT8(0x08, reg.raw()[6]);
+    TEST_ASSERT_TRUE(reg.midbReceived());
+    TEST_ASSERT_TRUE(reg.discoverModeCompleted());
+}
+
+void test_invalid_register_reads_disabled_and_semantically_invalid()
+{
+    TPS25751InterruptMask reg(MULTI_BIT_DATA);
+    TPS25751InterruptMask moved(static_cast<TPS25751InterruptMask &&>(reg));
+    TEST_ASSERT_FALSE(reg.isSemanticallyValid());
+    TEST_ASSERT_FALSE(reg.pdHardreset());
+}
+
+void test_semantic_invalid_for_wrong_size()
+{
+    const uint8_t shortBuf[3] = {0x02, 0x00, 0x00};
+    TPS25751InterruptMask reg(shortBuf, sizeof(shortBuf));
+    TEST_ASSERT_FALSE(reg.isSemanticallyValid());
+}
+
 // --- Runner -------------------------------------------------------------------
 
 int main(int, char **)
@@ -355,6 +561,16 @@ int main(int, char **)
 
     RUN_TEST(test_copy_constructor_deep_copies);
     RUN_TEST(test_move_constructor_transfers_ownership);
+
+    RUN_TEST(test_each_source_setter_sets_only_its_bit_and_getter_reads_it);
+    RUN_TEST(test_each_source_getter_ignores_every_other_bit);
+    RUN_TEST(test_enabled_count_with_every_source_set);
+    RUN_TEST(test_debug_print_all_masked);
+    RUN_TEST(test_debug_print_lists_each_source_alone);
+    RUN_TEST(test_debug_print_every_source_enabled);
+    RUN_TEST(test_set_midb_and_discover_mode_bits);
+    RUN_TEST(test_invalid_register_reads_disabled_and_semantically_invalid);
+    RUN_TEST(test_semantic_invalid_for_wrong_size);
 
     return UNITY_END();
 }

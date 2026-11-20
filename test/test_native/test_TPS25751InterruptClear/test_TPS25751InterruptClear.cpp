@@ -32,6 +32,9 @@
  */
 
 #include <unity.h>
+#include <cstdio>
+#include <string>
+#include <unistd.h>
 
 #include "TPS25751InterruptClear.h"
 #include "TPS25751Register.h"
@@ -289,6 +292,184 @@ void test_move_constructor_transfers_ownership()
     TEST_ASSERT_EQUAL_UINT8(0x02, moved.raw()[0]);
 }
 
+
+// --- Every named clear setter sets exactly its documented bit ---------------
+
+namespace {
+
+struct ClearCase {
+    void (TPS25751InterruptClear::*fn)();
+    uint8_t bit;
+};
+
+constexpr ClearCase kClearCases[] = {
+    {&TPS25751InterruptClear::clearI2cControllerNacked, 82},
+    {&TPS25751InterruptClear::clearReadyForPatch, 81},
+    {&TPS25751InterruptClear::clearPatchLoaded, 80},
+    {&TPS25751InterruptClear::clearMbrdBufferReady, 66},
+    {&TPS25751InterruptClear::clearTxMemoryBufferEmpty, 65},
+    {&TPS25751InterruptClear::clearLiquidDetection, 60},
+    {&TPS25751InterruptClear::clearExtDcdcSourceSafeState, 57},
+    {&TPS25751InterruptClear::clearExtDcdcSinkSafeState, 56},
+    {&TPS25751InterruptClear::clearUnableToSourceError, 46},
+    {&TPS25751InterruptClear::clearMessageDataError, 39},
+    {&TPS25751InterruptClear::clearProtocolError, 38},
+    {&TPS25751InterruptClear::clearMissingGetCapabilitiesError, 36},
+    {&TPS25751InterruptClear::clearPowerEventOccurredError, 35},
+    {&TPS25751InterruptClear::clearCanProvideVoltageLaterError, 34},
+    {&TPS25751InterruptClear::clearCannotProvideVoltageError, 33},
+    {&TPS25751InterruptClear::clearDeviceIncompatibleError, 32},
+    {&TPS25751InterruptClear::clearPlugEarlyNotification, 43},
+    {&TPS25751InterruptClear::clearSinkTransitionCompleted, 42},
+    {&TPS25751InterruptClear::clearPlugInsertOrRemoval, 3},
+    {&TPS25751InterruptClear::clearCmd1Complete, 30},
+    {&TPS25751InterruptClear::clearMidbReceived, 29},
+    {&TPS25751InterruptClear::clearDiscoverModeCompleted, 51},
+    {&TPS25751InterruptClear::clearPdStatusUpdated, 27},
+    {&TPS25751InterruptClear::clearStatusUpdated, 26},
+    {&TPS25751InterruptClear::clearPowerStatusUpdated, 24},
+    {&TPS25751InterruptClear::clearPowerPathSwitchChanged, 23},
+    {&TPS25751InterruptClear::clearUsbHostNoLongerPresent, 21},
+    {&TPS25751InterruptClear::clearUsbHostPresent, 20},
+    {&TPS25751InterruptClear::clearDataSwapRequested, 18},
+    {&TPS25751InterruptClear::clearPowerSwapRequested, 17},
+    {&TPS25751InterruptClear::clearSinkCapMessageReceived, 15},
+    {&TPS25751InterruptClear::clearSourceCapMessageReceived, 14},
+    {&TPS25751InterruptClear::clearNewContractAsProvider, 13},
+    {&TPS25751InterruptClear::clearNewContractAsConsumer, 12},
+    {&TPS25751InterruptClear::clearOvercurrent, 9},
+    {&TPS25751InterruptClear::clearDataSwapComplete, 5},
+    {&TPS25751InterruptClear::clearPowerSwapComplete, 4},
+    {&TPS25751InterruptClear::clearPdHardreset, 1},
+};
+
+constexpr size_t kNumClearCases = sizeof(kClearCases) / sizeof(kClearCases[0]);
+
+// Runs reg.debugPrint() against the stdout-backed native Stream stub and
+// returns what it printed.
+std::string captureDebugPrint(const TPS25751InterruptClear &reg)
+{
+    fflush(stdout);
+    FILE *tmp = tmpfile();
+    const int saved = dup(fileno(stdout));
+    dup2(fileno(tmp), fileno(stdout));
+
+    reg.debugPrint();
+
+    fflush(stdout);
+    dup2(saved, fileno(stdout));
+    close(saved);
+
+    std::string out;
+    rewind(tmp);
+    char buf[256];
+    size_t n;
+    while ((n = fread(buf, 1, sizeof(buf), tmp)) > 0) out.append(buf, n);
+    fclose(tmp);
+    return out;
+}
+
+bool contains(const std::string &haystack, const char *needle)
+{
+    return haystack.find(needle) != std::string::npos;
+}
+
+}  // namespace
+
+void test_every_named_clear_sets_exactly_its_bit()
+{
+    TEST_ASSERT_EQUAL_size_t(38, kNumClearCases);
+    for (size_t i = 0; i < kNumClearCases; ++i) {
+        TPS25751InterruptClear reg;
+        (reg.*kClearCases[i].fn)();
+        for (size_t b = 0; b < INT_CLEAR1_SIZE; ++b) {
+            const uint8_t expected = (b == kClearCases[i].bit / 8u)
+                                         ? static_cast<uint8_t>(1u << (kClearCases[i].bit % 8u))
+                                         : 0x00;
+            char msg[48];
+            snprintf(msg, sizeof(msg), "case %u bit %u byte %u", (unsigned)i,
+                     (unsigned)kClearCases[i].bit, (unsigned)b);
+            TEST_ASSERT_EQUAL_UINT8_MESSAGE(expected, reg.raw()[b], msg);
+        }
+    }
+}
+
+void test_named_clears_together_match_clear_all()
+{
+    TPS25751InterruptClear viaEach;
+    for (size_t i = 0; i < kNumClearCases; ++i) (viaEach.*kClearCases[i].fn)();
+    TEST_ASSERT_EQUAL_UINT8_ARRAY(CLEAR_ALL_EXPECTED, viaEach.raw(), INT_CLEAR1_SIZE);
+}
+
+void test_generic_clear_preserves_staged_bits()
+{
+    TPS25751InterruptClear reg;
+    reg.clear(1);
+    reg.clear(82);
+    TEST_ASSERT_EQUAL_UINT8(0x02, reg.raw()[0]);
+    TEST_ASSERT_EQUAL_UINT8(0x04, reg.raw()[10]);
+}
+
+// --- debugPrint ---------------------------------------------------------------
+
+void test_debug_print_empty_buffer()
+{
+    TPS25751InterruptClear reg;
+    const std::string out = captureDebugPrint(reg);
+
+    TEST_ASSERT_TRUE(contains(out, "=== Interrupt Clear Register (0x18) [R/W, write 1 to clear] ==="));
+    TEST_ASSERT_TRUE(contains(out, "No clears staged (buffer is all-zero)"));
+    TEST_ASSERT_FALSE(contains(out, "Staged clears:"));
+    TEST_ASSERT_FALSE(contains(out, "[x]"));
+}
+
+void test_debug_print_names_each_staged_bit()
+{
+    TPS25751InterruptClear reg;
+    reg.clearPdHardreset();
+    reg.clearLiquidDetection();
+    const std::string out = captureDebugPrint(reg);
+
+    TEST_ASSERT_TRUE(contains(out, "Staged clears:"));
+    TEST_ASSERT_TRUE(contains(out, "  [x] Liquid Detection\n"));
+    TEST_ASSERT_TRUE(contains(out, "  [x] PD Hard Reset\n"));
+    TEST_ASSERT_FALSE(contains(out, "Overcurrent"));
+    TEST_ASSERT_FALSE(contains(out, "No clears staged"));
+}
+
+void test_debug_print_clear_all_lists_every_named_source()
+{
+    TPS25751InterruptClear reg;
+    reg.clearAll();
+    const std::string out = captureDebugPrint(reg);
+
+    size_t count = 0;
+    for (size_t pos = out.find("  [x] "); pos != std::string::npos; pos = out.find("  [x] ", pos + 1)) ++count;
+    TEST_ASSERT_EQUAL_size_t(38, count);
+    TEST_ASSERT_TRUE(contains(out, "[x] I2C Controller NACKed"));
+    TEST_ASSERT_TRUE(contains(out, "[x] Discover Mode Completed"));
+    TEST_ASSERT_TRUE(contains(out, "[x] MIDB Received"));
+    TEST_ASSERT_TRUE(contains(out, "[x] Plug Insert or Removal"));
+}
+
+void test_debug_print_invalid_register()
+{
+    TPS25751InterruptClear reg;
+    TPS25751InterruptClear moved(static_cast<TPS25751InterruptClear &&>(reg));
+    const std::string out = captureDebugPrint(reg);
+
+    TEST_ASSERT_TRUE(contains(out, "[R/W, write 1 to clear] ==="));
+    TEST_ASSERT_TRUE(contains(out, "  <invalid>"));
+    TEST_ASSERT_FALSE(contains(out, "No clears staged"));
+}
+
+void test_semantic_validity_false_when_invalid()
+{
+    TPS25751InterruptClear reg;
+    TPS25751InterruptClear moved(static_cast<TPS25751InterruptClear &&>(reg));
+    TEST_ASSERT_FALSE(reg.isSemanticallyValid());
+}
+
 // --- Runner -------------------------------------------------------------------
 
 int main(int, char **)
@@ -319,6 +500,15 @@ int main(int, char **)
 
     RUN_TEST(test_copy_constructor_deep_copies);
     RUN_TEST(test_move_constructor_transfers_ownership);
+
+    RUN_TEST(test_every_named_clear_sets_exactly_its_bit);
+    RUN_TEST(test_named_clears_together_match_clear_all);
+    RUN_TEST(test_generic_clear_preserves_staged_bits);
+    RUN_TEST(test_debug_print_empty_buffer);
+    RUN_TEST(test_debug_print_names_each_staged_bit);
+    RUN_TEST(test_debug_print_clear_all_lists_every_named_source);
+    RUN_TEST(test_debug_print_invalid_register);
+    RUN_TEST(test_semantic_validity_false_when_invalid);
 
     return UNITY_END();
 }

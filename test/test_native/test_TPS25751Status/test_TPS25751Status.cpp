@@ -361,10 +361,7 @@ void test_to_string_acting_as_legacy_all_values()
     TEST_ASSERT_EQUAL_STRING("PD Controller is acting like a legacy source", toString(LEGACY_SOURCE).c_str());
     TEST_ASSERT_EQUAL_STRING("Acting as legacy sink due to dead-battery",
                              toString(LEGACY_SINK_DEAD_BATTERY).c_str());
-    // The out-of-range text is spelled "Uknown" in src; assert only its first letter.
-    const std::string unknown = toString(static_cast<ActingAsLegacy>(4));
-    TEST_ASSERT_EQUAL_size_t(6, unknown.size());
-    TEST_ASSERT_EQUAL_CHAR('U', unknown[0]);
+    TEST_ASSERT_EQUAL_STRING("Unknown", toString(static_cast<ActingAsLegacy>(4)).c_str());
 }
 
 void test_to_string_role_and_orientation()

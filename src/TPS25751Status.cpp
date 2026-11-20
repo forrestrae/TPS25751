@@ -155,7 +155,7 @@ std::string toString(const ActingAsLegacy s)
         case LEGACY_SINK_DEAD_BATTERY:
             return "Acting as legacy sink due to dead-battery";
         default:
-            return "Uknown";
+            return "Unknown";
     }
 }
 

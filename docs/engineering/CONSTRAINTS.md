@@ -615,8 +615,10 @@ rewrote the lower word within about 110 ms of the attach, to `64 64 00 80`: Port
 Reported PDP and Port Present PDP 100 W, Port Maximum PDP 0 W, Port Type
 Guaranteed. It left the upper word at its reset, and the value stayed after
 the iPhone was unplugged. A Present PDP above the Maximum PDP is not consistent
-with the field descriptions, but the library checks no rule on the lower word,
-so the firmware value validates. `TPS25751TransmitSourceInfo` checks a
+with the field descriptions, but neither the TRM nor USB PD R3.3 states a rule
+between them, so the library checks none. The firmware value also meets the two
+Source_Info rules that the class checks (see USB PD Specification Structures): DPS
+Port is clear, and both Port Maximum PDP fields read 0. `TPS25751TransmitSourceInfo` checks a
 Guaranteed PDP at most Maximum PDP rule on the upper word that the TRM does not
 state. The firmware leaves both of those fields at 0, so hardware has not
 exercised the rule; if firmware-written data breaks it, drop the rule under
@@ -921,9 +923,12 @@ from memory. Points that are easy to get wrong:
 - 0x78 TX Source Info is the two Source_Info Data Objects: bits 31:0 are SIDO1
   (Table 6.29, 1 W steps) and bits 63:32 are SIDO2 (Table 6.30, 0.5 W steps). The two
   Port Type bits the TRM leaves unexplained are bit 31 of each object. Table 6.30 says
-  DPS Port requires Port Type 0 in both, where the class checks only bit 63, and
-  Table 6.29 says SIDO1 Port Maximum PDP equals SIDO2 Port Maximum PDP rounded down to
-  1 W, which the class does not check.
+  DPS Port requires Port Type 0 in both, and Table 6.29 says SIDO1 Port Maximum PDP
+  equals SIDO2 Port Maximum PDP rounded down to 1 W. Semantic validation checks both
+  rules. The TRM states only the first, and only for bit 63. A host that sets one
+  Port Maximum PDP field must set the other to match, or the register fails
+  validation. The values the firmware wrote on hardware, at reset and with a sink
+  attached, meet both rules.
 - Finding the mapping. Since `device-register-mcp-server` 8673c30, `tps25751-docs`
   prints a Specification block for 48h, 77h, 78h, 7Ah, 7Bh, 7Dh, and 7Eh that names
   the object and bits each register carries, and `explain_bitfield` names the object
@@ -1237,6 +1242,7 @@ void foo() {
 | 1.11 | 2026-11-19 | Claude Code | Batch L of the rev B plan: typed USB PD R3.3 decode for 0x48, 0x77, 0x7E, 0x7B, and 0x7D and the 0x7A PTF 00b meaning (new USB PD Specification Structures section); 0x48 decode of an iPhone on hardware; the 0x7B reset value reports a battery that 0x77 and 0x7E do not (Read/Write Registers section) |
 | 1.12 | 2026-11-19 | Claude Code | ADR-012: the base-class bit helpers take a 16-bit bit position, so IO_CONFIG (0x5C) and TX_BATTERY_CAPABILITIES (0x7D) read and write through them (Read-Only Registers section, IO_CONFIG note) |
 | 1.13 | 2026-11-19 | Claude Code | USB PD cross-check against the linked `tps25751-docs` output: 0x77 byte 14 is the EPR Source PDP Rating, 0x78 is SIDO1 and SIDO2, and the Specification block (USB PD Specification Structures section) |
+| 1.14 | 2026-11-19 | Claude Code | TX_SOURCE_INFO (0x78) semantic validation checks the USB PD R3.3 Table 6.29 and 6.30 rules: DPS Port requires both Port Type bits Managed, and the 1 W Port Maximum PDP equals the 0.5 W value rounded down (USB PD Specification Structures and Read/Write Registers sections) |
 
 ---
 

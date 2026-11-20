@@ -32,10 +32,11 @@
  * ambiguities:
  * - The two Port Type bits are bit 31 of SIDO1 and bit 31 of SIDO2; each object
  *   carries its own copy. Table 6.30 says that with DPS Port set, Port Type shall
- *   be 0 in both SIDO1 and SIDO2. Semantic validation checks only bit 63 (the TRM
- *   rule).
+ *   be 0 in both SIDO1 and SIDO2. Semantic validation checks both bits.
  * - Table 6.29 says SIDO1 Port Maximum PDP shall equal SIDO2 Port Maximum PDP
- *   rounded down to 1 W. Semantic validation does not check this.
+ *   rounded down to 1 W. Semantic validation checks this. The firmware data seen
+ *   on hardware meets it: both fields read 0 at reset and after the firmware
+ *   rewrote the lower word for an attached sink.
  * Table 6.30 defines Port Guaranteed PDP as the minimum the port can always
  * provide and Port Maximum PDP as the most it will provide, which supports the
  * Guaranteed at most Maximum check below; neither table states that rule.
@@ -108,7 +109,7 @@ public:
      * TRM name "PortType", bit 63: Port Type of SIDO2 (USB PD R3.3 Table 6.30).
      * Reset 1 (Guaranteed). Bit 31 (portTypeLower()) is the Port Type of SIDO1.
      * DPSPort's TRM rule ("If set, then PortType shall be 0") refers to this bit;
-     * Table 6.30 extends it to both.
+     * Table 6.30 extends it to both, and isSemanticallyValid() checks both.
      */
     PortType portTypeUpper() const;
 
@@ -124,7 +125,8 @@ public:
      * @brief DPS Port
      *
      * TRM name "DPSPort", bit 62. If set, PortType (bit 63) shall be 0 (Managed
-     * Capability Port); isSemanticallyValid() enforces that.
+     * Capability Port), and USB PD R3.3 Table 6.30 requires the same of Port Type
+     * bit 31; isSemanticallyValid() enforces both.
      */
     bool dpsPort() const;
 
@@ -201,8 +203,12 @@ public:
      * Base checks (valid buffer, not the all-0xFF bus-error signature, expected
      * size) plus:
      * - reserved bits 61:50 and 30:24 read 0 (TRM)
-     * - DPSPort set requires Port Type (bit 63) to be Managed (TRM: "If set, then
-     *   PortType shall be 0"); bit 31 is not checked
+     * - DPSPort set requires Port Type bits 63 and 31 to be Managed (TRM: "If
+     *   set, then PortType shall be 0"; USB PD R3.3 Table 6.30 names both SIDO1
+     *   and SIDO2)
+     * - Port Maximum PDP in 1 W steps (bits 23:16) equals Port Maximum PDP in
+     *   0.5 W steps (bits 49:41) rounded down to 1 W (USB PD R3.3 Table 6.29).
+     *   The reset, with both 0, passes; setting only one of the two fails.
      * - Port Guaranteed PDP (0.5 W) is at most Port Maximum PDP (0.5 W), skipped
      *   when the maximum is 0. This rule is inferred from the TRM field
      *   descriptions ("Minimum power the port is guaranteed to always be able to

@@ -249,19 +249,32 @@ bool TPS25751TransmitSourceInfo::isSemanticallyValid() const
     }
 
     // TRM: DPSPort "If set, then PortType shall be 0 (Managed Capability Port)".
-    if (dpsPort() && portTypeUpper() != PortType::Managed)
+    // USB PD R3.3 Table 6.30 extends the rule to the Port Type of both SIDO1
+    // (bit 31) and SIDO2 (bit 63).
+    if (dpsPort() && (portTypeUpper() != PortType::Managed || portTypeLower() != PortType::Managed))
     {
-        TPS_DEBUG_WARN(DEBUG_CAT_VALIDATION, "TX_SOURCE_INFO: DPS Port set but Port Type (bit 63) is not Managed");
+        TPS_DEBUG_WARN(DEBUG_CAT_VALIDATION, "TX_SOURCE_INFO: DPS Port set but Port Type (bit 63 %u, bit 31 %u) is not Managed",
+                       static_cast<unsigned>(portTypeUpper()), static_cast<unsigned>(portTypeLower()));
+        return false;
+    }
+
+    // USB PD R3.3 Table 6.29: SIDO1 Port Maximum PDP (1 W steps) "Shall equal
+    // RoundDown(Port Maximum PDP in SIDO2) to 1W" (SIDO2 is in 0.5 W steps).
+    const uint16_t maximumSido2 = rawPortMaximumPdp0p5W();
+    const uint8_t maximumSido1 = rawPortMaximumPdp();
+    if (maximumSido1 != maximumSido2 / 2)
+    {
+        TPS_DEBUG_WARN(DEBUG_CAT_VALIDATION, "TX_SOURCE_INFO: Port Maximum PDP %u W (bits 23:16) is not %u x 0.5 W rounded down",
+                       static_cast<unsigned>(maximumSido1), static_cast<unsigned>(maximumSido2));
         return false;
     }
 
     // Inferred from the TRM field descriptions; the TRM does not state this rule.
-    const uint16_t maximum = rawPortMaximumPdp0p5W();
     const uint16_t guaranteed = rawPortGuaranteedPdp0p5W();
-    if (maximum != 0 && guaranteed > maximum)
+    if (maximumSido2 != 0 && guaranteed > maximumSido2)
     {
         TPS_DEBUG_WARN(DEBUG_CAT_VALIDATION, "TX_SOURCE_INFO: Port Guaranteed PDP (%u) exceeds Port Maximum PDP (%u)",
-                       static_cast<unsigned>(guaranteed), static_cast<unsigned>(maximum));
+                       static_cast<unsigned>(guaranteed), static_cast<unsigned>(maximumSido2));
         return false;
     }
 

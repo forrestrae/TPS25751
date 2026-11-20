@@ -46,8 +46,11 @@ constexpr size_t INFO_SIZE = TPS25751Registers::Registers::TRANSMIT_SOURCE_INFO.
 constexpr uint8_t RESET_BUFFER[INFO_SIZE] = {0x00, 0x00, 0x00, 0x80, 0x00, 0x00, 0x00, 0x80};
 constexpr uint8_t ALL_ONES_DATA[INFO_SIZE] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
 
+// Every field nonzero and consistent with USB PD R3.3 Tables 6.29 and 6.30:
+// DPS Port set with both Port Type bits Managed, and the 1 W Port Maximum PDP
+// (170) equal to the 0.5 W one (341) rounded down.
 constexpr uint32_t FIXTURE_UPPER = 0x4002AAAAu;
-constexpr uint32_t FIXTURE_LOWER = 0x80642D3Cu;
+constexpr uint32_t FIXTURE_LOWER = 0x00AA2D3Cu;
 
 // Every field nonzero, used as a base for the setter isolation tests (not
 // semantically valid: DPSPort and Port Type bit 63 are both 1).
@@ -268,15 +271,15 @@ void test_hand_packed_fixture_decodes_every_field()
 
     TEST_ASSERT_TRUE(reg.portTypeUpper() == PortType::Managed);
     TEST_ASSERT_TRUE(reg.dpsPort());
-    TEST_ASSERT_TRUE(reg.portTypeLower() == PortType::Guaranteed);
+    TEST_ASSERT_TRUE(reg.portTypeLower() == PortType::Managed);
 
     TEST_ASSERT_EQUAL_UINT16(0x155, reg.rawPortMaximumPdp0p5W());
     TEST_ASSERT_EQUAL_UINT32(170500, reg.portMaximumPdp0p5W_mW());
     TEST_ASSERT_EQUAL_UINT16(0x0AA, reg.rawPortGuaranteedPdp0p5W());
     TEST_ASSERT_EQUAL_UINT32(85000, reg.portGuaranteedPdp0p5W_mW());
 
-    TEST_ASSERT_EQUAL_UINT8(100, reg.rawPortMaximumPdp());
-    TEST_ASSERT_EQUAL_UINT32(100000, reg.portMaximumPdp_mW());
+    TEST_ASSERT_EQUAL_UINT8(170, reg.rawPortMaximumPdp());
+    TEST_ASSERT_EQUAL_UINT32(170000, reg.portMaximumPdp_mW());
     TEST_ASSERT_EQUAL_UINT8(45, reg.rawPortPresentPdp());
     TEST_ASSERT_EQUAL_UINT32(45000, reg.portPresentPdp_mW());
     TEST_ASSERT_EQUAL_UINT8(60, reg.rawPortReportedPdp());
@@ -501,14 +504,87 @@ void test_dps_with_upper_port_type_guaranteed_is_invalid()
     TEST_ASSERT_FALSE(reg.isSemanticallyValid());
 }
 
-void test_dps_with_upper_port_type_managed_is_valid_even_if_lower_is_guaranteed()
+void test_dps_with_lower_port_type_guaranteed_is_invalid()
 {
-    // DPSPort = 1, bit 63 = 0, bit 31 still 1: the rule refers to bit 63 only.
+    // DPSPort = 1, bit 63 = 0, bit 31 = 1. The TRM names bit 63 only, but USB PD
+    // R3.3 Table 6.30 requires Port Type 0 in both SIDO1 (bit 31) and SIDO2.
     Info reg = makeInfo(0x40000000u, 0x80000000u);
 
     TEST_ASSERT_TRUE(reg.dpsPort());
     TEST_ASSERT_TRUE(reg.portTypeUpper() == PortType::Managed);
     TEST_ASSERT_TRUE(reg.portTypeLower() == PortType::Guaranteed);
+    TEST_ASSERT_FALSE(reg.isSemanticallyValid());
+}
+
+void test_dps_with_both_port_types_managed_is_valid()
+{
+    Info reg = makeInfo(0x40000000u, 0x00000000u);
+
+    TEST_ASSERT_TRUE(reg.dpsPort());
+    TEST_ASSERT_TRUE(reg.isSemanticallyValid());
+}
+
+void test_port_types_may_differ_without_dps()
+{
+    // The Table 6.30 rule applies only with DPS Port set.
+    TEST_ASSERT_TRUE(makeInfo(0x80000000u, 0x00000000u).isSemanticallyValid());
+    TEST_ASSERT_TRUE(makeInfo(0x00000000u, 0x80000000u).isSemanticallyValid());
+}
+
+// --- Port Maximum PDP agreement (USB PD R3.3 Table 6.29) --------------------------
+
+void test_maximum_pdp_equal_to_rounded_down_half_watt_value_is_valid()
+{
+    Info even = makeInfo(0x80000000u, 0x80000000u);
+    even.setRawPortMaximumPdp0p5W(200);  // 100 W
+    even.setRawPortMaximumPdp(100);
+    TEST_ASSERT_TRUE(even.isSemanticallyValid());
+
+    Info odd = makeInfo(0x80000000u, 0x80000000u);
+    odd.setRawPortMaximumPdp0p5W(31);    // 15.5 W rounds down to 15 W
+    odd.setRawPortMaximumPdp(15);
+    TEST_ASSERT_TRUE(odd.isSemanticallyValid());
+
+    Info top = makeInfo(0x80000000u, 0x80000000u);
+    top.setRawPortMaximumPdp0p5W(511);   // 255.5 W rounds down to 255 W
+    top.setRawPortMaximumPdp(255);
+    TEST_ASSERT_TRUE(top.isSemanticallyValid());
+}
+
+void test_maximum_pdp_rounded_up_is_invalid()
+{
+    Info reg = makeInfo(0x80000000u, 0x80000000u);
+    reg.setRawPortMaximumPdp0p5W(31);  // 15.5 W
+    reg.setRawPortMaximumPdp(16);
+
+    TEST_ASSERT_FALSE(reg.isSemanticallyValid());
+}
+
+void test_maximum_pdp_set_in_one_word_only_is_invalid()
+{
+    Info lowerOnly = makeInfo(0x80000000u, 0x80000000u);
+    lowerOnly.setRawPortMaximumPdp(100);
+    TEST_ASSERT_FALSE(lowerOnly.isSemanticallyValid());
+
+    Info upperOnly = makeInfo(0x80000000u, 0x80000000u);
+    upperOnly.setRawPortMaximumPdp0p5W(200);
+    TEST_ASSERT_FALSE(upperOnly.isSemanticallyValid());
+
+    // One 0.5 W step rounds down to 0 W, so a lower word of 0 still agrees.
+    Info halfWatt = makeInfo(0x80000000u, 0x80000000u);
+    halfWatt.setRawPortMaximumPdp0p5W(1);
+    TEST_ASSERT_TRUE(halfWatt.isSemanticallyValid());
+}
+
+void test_hardware_value_after_sink_attach_is_valid()
+{
+    // Bench read on 2026-11-19, board sourcing an iPhone: the firmware rewrote
+    // the lower word to 64 64 00 80 (Reported and Present PDP 100 W, Maximum
+    // PDP 0) and left the upper word at the reset.
+    const uint8_t hw[INFO_SIZE] = {0x64, 0x64, 0x00, 0x80, 0x00, 0x00, 0x00, 0x80};
+    Info reg(hw);
+
+    TEST_ASSERT_EQUAL_UINT8(100, reg.rawPortPresentPdp());
     TEST_ASSERT_TRUE(reg.isSemanticallyValid());
 }
 
@@ -516,6 +592,7 @@ void test_guaranteed_above_maximum_is_invalid()
 {
     Info reg = makeInfo(0x80000000u, 0x80000000u);
     reg.setRawPortMaximumPdp0p5W(100);
+    reg.setRawPortMaximumPdp(50);
     reg.setRawPortGuaranteedPdp0p5W(101);
 
     TEST_ASSERT_FALSE(reg.isSemanticallyValid());
@@ -534,6 +611,7 @@ void test_guaranteed_equal_to_maximum_is_valid()
 {
     Info reg = makeInfo(0x80000000u, 0x80000000u);
     reg.setRawPortMaximumPdp0p5W(100);
+    reg.setRawPortMaximumPdp(50);
     reg.setRawPortGuaranteedPdp0p5W(100);
 
     TEST_ASSERT_TRUE(reg.isSemanticallyValid());
@@ -561,9 +639,11 @@ void test_every_reserved_bit_individually_invalid()
 
 void test_bits_next_to_reserved_ranges_are_valid()
 {
-    // Bits 23 and 49 are the top bits of defined fields, not reserved.
-    TEST_ASSERT_TRUE(resetWithBit(23).isSemanticallyValid());
-    TEST_ASSERT_TRUE(resetWithBit(49).isSemanticallyValid());
+    // Bits 23 and 49 are the top bits of defined fields, not reserved. Set
+    // together they read 128 W and 256 x 0.5 W, which agree (Table 6.29).
+    uint8_t buf[INFO_SIZE];
+    packLE(pack64(0x80000000u, 0x80000000u) | (1ULL << 23) | (1ULL << 49), buf);
+    TEST_ASSERT_TRUE(Info(buf).isSemanticallyValid());
 }
 
 // --- Debug print -----------------------------------------------------------------
@@ -585,11 +665,11 @@ void test_debug_print_fixture_fields()
     Info reg = makeInfo(FIXTURE_UPPER, FIXTURE_LOWER);
     const std::string out = captureDebugPrint(reg);
 
-    TEST_ASSERT_NOT_EQUAL(std::string::npos, out.find("Raw: 0x4002AAAA80642D3C"));
+    TEST_ASSERT_NOT_EQUAL(std::string::npos, out.find("Raw: 0x4002AAAA00AA2D3C"));
     TEST_ASSERT_NOT_EQUAL(std::string::npos, out.find("DPS Port (bit 62): Yes"));
     TEST_ASSERT_NOT_EQUAL(std::string::npos, out.find("Port Maximum PDP (0.5 W units): 341 (170500 mW)"));
     TEST_ASSERT_NOT_EQUAL(std::string::npos, out.find("Port Guaranteed PDP (0.5 W units): 170 (85000 mW)"));
-    TEST_ASSERT_NOT_EQUAL(std::string::npos, out.find("Port Maximum PDP (1 W units): 100 (100000 mW)"));
+    TEST_ASSERT_NOT_EQUAL(std::string::npos, out.find("Port Maximum PDP (1 W units): 170 (170000 mW)"));
     TEST_ASSERT_NOT_EQUAL(std::string::npos, out.find("Port Present PDP (1 W units): 45 (45000 mW)"));
     TEST_ASSERT_NOT_EQUAL(std::string::npos, out.find("Port Reported PDP (1 W units): 60 (60000 mW)"));
 }
@@ -683,7 +763,13 @@ int main(int, char **)
     RUN_TEST(test_all_ones_is_invalid);
     RUN_TEST(test_all_zeros_is_valid);
     RUN_TEST(test_dps_with_upper_port_type_guaranteed_is_invalid);
-    RUN_TEST(test_dps_with_upper_port_type_managed_is_valid_even_if_lower_is_guaranteed);
+    RUN_TEST(test_dps_with_lower_port_type_guaranteed_is_invalid);
+    RUN_TEST(test_dps_with_both_port_types_managed_is_valid);
+    RUN_TEST(test_port_types_may_differ_without_dps);
+    RUN_TEST(test_maximum_pdp_equal_to_rounded_down_half_watt_value_is_valid);
+    RUN_TEST(test_maximum_pdp_rounded_up_is_invalid);
+    RUN_TEST(test_maximum_pdp_set_in_one_word_only_is_invalid);
+    RUN_TEST(test_hardware_value_after_sink_attach_is_valid);
     RUN_TEST(test_guaranteed_above_maximum_is_invalid);
     RUN_TEST(test_guaranteed_with_zero_maximum_is_valid);
     RUN_TEST(test_guaranteed_equal_to_maximum_is_valid);

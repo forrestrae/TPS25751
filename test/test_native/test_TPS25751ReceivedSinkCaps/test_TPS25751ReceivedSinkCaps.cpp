@@ -243,7 +243,7 @@ void test_fixed_supply_fields_decode()
     TEST_ASSERT_TRUE(reg.getFixedUnconstrainedPower(1));
     TEST_ASSERT_TRUE(reg.getFixedUSBCommCapable(1));
     TEST_ASSERT_TRUE(reg.getFixedDualRoleData(1));
-    TEST_ASSERT_TRUE(reg.getFixedFastRoleSwapCurrent(1));
+    TEST_ASSERT_EQUAL_UINT8(2, reg.getFixedFastRoleSwapCurrent(1));
 
     // PDO 1 has none of the flags set.
     TEST_ASSERT_EQUAL_UINT16(5000, reg.getFixedVoltage_mV(0));
@@ -253,7 +253,18 @@ void test_fixed_supply_fields_decode()
     TEST_ASSERT_FALSE(reg.getFixedUnconstrainedPower(0));
     TEST_ASSERT_FALSE(reg.getFixedUSBCommCapable(0));
     TEST_ASSERT_FALSE(reg.getFixedDualRoleData(0));
-    TEST_ASSERT_FALSE(reg.getFixedFastRoleSwapCurrent(0));
+    TEST_ASSERT_EQUAL_UINT8(0, reg.getFixedFastRoleSwapCurrent(0));
+}
+
+void test_fast_role_swap_current_keeps_every_code()
+{
+    // Bits 24:23 are a 2-bit code; 2 (1.5 A) and 3 (3.0 A) must not read as 1.
+    for (uint32_t code = 0; code < 4; code++) {
+        const uint32_t pdo = (code << 23) | (100u << 10) | 300u;
+        Caps c(1, {pdo});
+        TPS25751ReceivedSinkCaps reg(c.buf, CAPS_SIZE);
+        TEST_ASSERT_EQUAL_UINT8(code, reg.getFixedFastRoleSwapCurrent(0));
+    }
 }
 
 // --- Battery / Variable -------------------------------------------------------
@@ -314,7 +325,7 @@ void test_debug_print_all_pdo_types()
     TEST_ASSERT_TRUE(contains(out, "Unconstrained Power: Yes"));
     TEST_ASSERT_TRUE(contains(out, "USB Comm Capable: Yes"));
     TEST_ASSERT_TRUE(contains(out, "Dual Role Data: Yes"));
-    TEST_ASSERT_TRUE(contains(out, "Fast Role Swap Current:"));
+    TEST_ASSERT_TRUE(contains(out, "Fast Role Swap Current: 2"));
     TEST_ASSERT_TRUE(contains(out, "Type: Battery"));
     TEST_ASSERT_TRUE(contains(out, "Max Power: 60000 mW"));
     TEST_ASSERT_TRUE(contains(out, "Type: Variable Supply"));
@@ -411,6 +422,7 @@ int main(int, char **)
     RUN_TEST(test_pdo_type_decodes_bits_31_30);
     RUN_TEST(test_stale_count_with_zero_pdo1_means_no_caps);
     RUN_TEST(test_fixed_supply_fields_decode);
+    RUN_TEST(test_fast_role_swap_current_keeps_every_code);
     RUN_TEST(test_battery_fields_decode);
     RUN_TEST(test_variable_fields_decode);
     RUN_TEST(test_debug_print_no_caps);

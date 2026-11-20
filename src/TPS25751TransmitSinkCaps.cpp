@@ -69,11 +69,8 @@ bool TPS25751TransmitSinkCaps::getFixedDualRoleData(uint8_t index) const {
 }
 
 uint8_t TPS25751TransmitSinkCaps::getFixedFastRoleSwapCurrent(uint8_t index) const {
-    // 2-bit field (0-3), NOT a boolean -- unlike TPS25751ReceivedSinkCaps'
-    // getFixedFastRoleSwapCurrent(), which returns bool and silently
-    // truncates values 2/3 to true. Kept as uint8_t here since this is a R/W
-    // register and a truncating getter cannot round-trip what setFixedSupplyPDO()
-    // writes.
+    // 2-bit field (0-3), NOT a boolean. A truncating getter could not
+    // round-trip what setFixedSupplyPDO() writes.
     return static_cast<uint8_t>(extractPDOBits(index, 23, 2));  // Bits 24:23 (different from source!)
 }
 

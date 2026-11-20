@@ -57,7 +57,13 @@ public:
     bool getFixedUnconstrainedPower(uint8_t index) const;
     bool getFixedUSBCommCapable(uint8_t index) const;
     bool getFixedDualRoleData(uint8_t index) const;
-    bool getFixedFastRoleSwapCurrent(uint8_t index) const;
+    /**
+     * @brief Fast Role Swap required USB Type-C Current, Sink Fixed PDO bits 24:23
+     *
+     * A 2-bit code (0 to 3), not a flag: 0 Fast Swap not supported, 1 Default
+     * USB Power, 2 1.5 A at 5 V, 3 3.0 A at 5 V (USB PD Sink Fixed Supply PDO).
+     */
+    uint8_t getFixedFastRoleSwapCurrent(uint8_t index) const;
 
     // Helper methods to parse Battery PDO (type 01)
     uint16_t getBatteryMaxVoltage_mV(uint8_t index) const;

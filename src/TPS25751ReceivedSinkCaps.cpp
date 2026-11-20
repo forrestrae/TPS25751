@@ -73,8 +73,9 @@ bool TPS25751ReceivedSinkCaps::getFixedDualRoleData(uint8_t index) const {
     return extractPDOBits(index, 25, 1);  // Bit 25
 }
 
-bool TPS25751ReceivedSinkCaps::getFixedFastRoleSwapCurrent(uint8_t index) const {
-    return extractPDOBits(index, 23, 2);  // Bits 24:23 (different from source!)
+uint8_t TPS25751ReceivedSinkCaps::getFixedFastRoleSwapCurrent(uint8_t index) const {
+    // 2-bit field (0-3), not a boolean; returning bool truncated codes 2 and 3 to 1.
+    return static_cast<uint8_t>(extractPDOBits(index, 23, 2));  // Bits 24:23 (different from source!)
 }
 
 // Battery PDO parsing (type 01)

@@ -768,7 +768,9 @@ test/coverage.sh
 ```
 
 The first run, on 2026-11-19, measured 84% of lines, with 18 files under the
->90% target. The verify gate and CI do not run it.
+>90% target. After nine new suites and additions to eleven more, the same day's
+run measured 98% (1063 tests), with every file at 93% or more. The verify gate
+and CI do not run it.
 
 ### Publishing the Library
 

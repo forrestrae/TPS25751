@@ -619,6 +619,17 @@ of the ten lowest have no suite of their own and are reached only through the
 factory suite; the rest miss mostly `debugPrint()` branches and semantic-check
 failure paths.
 
+Second measurement, 2026-11-19 (1063 tests): 98% of lines overall, every file at
+93% or more. New suites cover PowerStatus, PDStatus, PowerPathStatus, BootFlags,
+TypeCState, Mode, Command, Data, and Debug, and eleven existing suites gained
+tests. Most of the lines still missed cannot be reached by any input: `default:`
+returns in `toString()` switches over enums that `extractEnum()` clamps, and
+`> max` checks in `isSemanticallyValid()` on fields too narrow to exceed the
+maximum (for example `TPS25751Status.cpp` 220 and 227, `TPS25751TypeCState.cpp`
+71 and 75, `TPS25751PDStatus.cpp` 241 and 247). Files at or above 90% that the
+second pass did not target, such as `TPS25751InterruptEvent.cpp` (93%) and
+`TPS25751ActivePDOContract.cpp` (95%), were left as they were.
+
 ### Regression Testing
 
 Maintain a regression test suite:
@@ -659,6 +670,7 @@ Tests are successful when:
 | 1.0 | 2025-10-20 | Claude Code | Initial testing strategy document extracted from implementation plan |
 | 1.1 | 2026-07-06 | Claude Code | Batch 0: replaced aspirational unit-test sections with the real, working `pio test -e native` harness (Unity, native env, Arduino stubs in `test/support/native/`, seed suite for TPS25751Status); corrected fictional API in examples; marked coverage tooling as pending |
 | 1.2 | 2026-11-19 | Claude Code | The native build compiles every register class and the factory; factory and base-class suites; line coverage with `test/coverage.sh` and `[env:native-coverage]`, with the first per-file numbers |
+| 1.3 | 2026-11-19 | Claude Code | Second coverage measurement: 98% of lines, every file at 93% or more, and the kinds of line that remain unreachable |
 
 ---
 

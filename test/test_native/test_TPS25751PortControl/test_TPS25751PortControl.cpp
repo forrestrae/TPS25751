@@ -21,6 +21,9 @@
  */
 
 #include <unity.h>
+#include <unistd.h>
+#include <string>
+#include <cstdio>
 
 #include "TPS25751PortControl.h"
 #include "TPS25751Register.h"
@@ -237,6 +240,246 @@ void test_wrong_size_fails_semantic_validation()
     TEST_ASSERT_FALSE(TPS25751PortControl(oversized, sizeof(oversized)).isSemanticallyValid());
 }
 
+
+// --- Every flag decodes from its own bit (TRM SLVUCR8B p.31) ----------------
+
+namespace {
+
+struct FlagCase {
+    uint8_t bit;
+    bool (TPS25751PortControl::*get)() const;
+    const char *name;
+};
+
+constexpr FlagCase kFlags[] = {
+    {24, &TPS25751PortControl::resistor15kPresent, "resistor15kPresent"},
+    {25, &TPS25751PortControl::dcdEnable, "dcdEnable"},
+    {16, &TPS25751PortControl::automaticIdRequest, "automaticIdRequest"},
+    {20, &TPS25751PortControl::enableCurrentMonitor, "enableCurrentMonitor"},
+    {19, &TPS25751PortControl::unconstrainedPower, "unconstrainedPower"},
+    {15, &TPS25751PortControl::initiateSwapToDFP, "initiateSwapToDFP"},
+    {14, &TPS25751PortControl::processSwapToDFP, "processSwapToDFP"},
+    {13, &TPS25751PortControl::initiateSwapToUFP, "initiateSwapToUFP"},
+    {12, &TPS25751PortControl::processSwapToUFP, "processSwapToUFP"},
+    {7, &TPS25751PortControl::initiateSwapToSource, "initiateSwapToSource"},
+    {6, &TPS25751PortControl::processSwapToSource, "processSwapToSource"},
+    {5, &TPS25751PortControl::initiateSwapToSink, "initiateSwapToSink"},
+    {4, &TPS25751PortControl::processSwapToSink, "processSwapToSink"},
+};
+
+constexpr size_t kNumFlags = sizeof(kFlags) / sizeof(kFlags[0]);
+
+void packBit(uint8_t (&buf)[PORT_CONTROL_SIZE], uint8_t bit)
+{
+    buf[bit / 8] = static_cast<uint8_t>(buf[bit / 8] | (1u << (bit % 8)));
+}
+
+// Runs reg.debugPrint() against the stdout-backed native Stream stub and
+// returns what it printed.
+std::string captureDebugPrint(const TPS25751PortControl &reg)
+{
+    fflush(stdout);
+    FILE *tmp = tmpfile();
+    const int saved = dup(fileno(stdout));
+    dup2(fileno(tmp), fileno(stdout));
+
+    reg.debugPrint();
+
+    fflush(stdout);
+    dup2(saved, fileno(stdout));
+    close(saved);
+
+    std::string out;
+    rewind(tmp);
+    char buf[256];
+    size_t n;
+    while ((n = fread(buf, 1, sizeof(buf), tmp)) > 0) out.append(buf, n);
+    fclose(tmp);
+    return out;
+}
+
+bool contains(const std::string &haystack, const char *needle)
+{
+    return haystack.find(needle) != std::string::npos;
+}
+
+}  // namespace
+
+void test_each_flag_decodes_from_exactly_its_bit()
+{
+    for (size_t i = 0; i < kNumFlags; ++i) {
+        uint8_t buf[PORT_CONTROL_SIZE] = {0, 0, 0, 0};
+        packBit(buf, kFlags[i].bit);
+        TPS25751PortControl reg(buf);
+        TEST_ASSERT_TRUE_MESSAGE((reg.*kFlags[i].get)(), kFlags[i].name);
+        for (size_t j = 0; j < kNumFlags; ++j) {
+            if (j != i) TEST_ASSERT_FALSE_MESSAGE((reg.*kFlags[j].get)(), kFlags[j].name);
+        }
+    }
+}
+
+void test_charger_detect_enable_all_codes()
+{
+    // Bits 31:30 -> byte 3 bits 7:6.
+    const ChargerDetectEnable expected[4] = {ChargerDetectEnable::None, ChargerDetectEnable::BC12Only,
+                                             ChargerDetectEnable::ProprietaryOnly,
+                                             ChargerDetectEnable::BC12AndProprietary};
+    for (uint8_t code = 0; code < 4; ++code) {
+        const uint8_t buf[PORT_CONTROL_SIZE] = {0, 0, 0, static_cast<uint8_t>(code << 6)};
+        TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(expected[code]),
+                                static_cast<uint8_t>(TPS25751PortControl(buf).chargerDetectEnable()));
+    }
+}
+
+void test_charger_advertise_enable_all_codes()
+{
+    // Bits 28:26 -> byte 3 bits 4:2.
+    for (uint8_t code = 0; code < 8; ++code) {
+        const uint8_t buf[PORT_CONTROL_SIZE] = {0, 0, 0, static_cast<uint8_t>(code << 2)};
+        TEST_ASSERT_EQUAL_UINT8(code, static_cast<uint8_t>(TPS25751PortControl(buf).chargerAdvertiseEnable()));
+    }
+}
+
+void test_type_c_current_all_codes()
+{
+    // Bits 1:0 -> byte 0.
+    const TypeCCurrent expected[4] = {TypeCCurrent::USBDefault, TypeCCurrent::Current_1_5A,
+                                      TypeCCurrent::Current_3_0A, TypeCCurrent::Reserved};
+    for (uint8_t code = 0; code < 4; ++code) {
+        const uint8_t buf[PORT_CONTROL_SIZE] = {code, 0, 0, 0};
+        TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(expected[code]),
+                                static_cast<uint8_t>(TPS25751PortControl(buf).typeCCurrent()));
+    }
+}
+
+// --- toString -----------------------------------------------------------------
+
+void test_to_string_charger_detect_enable()
+{
+    TEST_ASSERT_EQUAL_STRING("None", toString(ChargerDetectEnable::None));
+    TEST_ASSERT_EQUAL_STRING("BC 1.2 only", toString(ChargerDetectEnable::BC12Only));
+    TEST_ASSERT_EQUAL_STRING("Proprietary only", toString(ChargerDetectEnable::ProprietaryOnly));
+    TEST_ASSERT_EQUAL_STRING("BC 1.2 + Proprietary", toString(ChargerDetectEnable::BC12AndProprietary));
+    TEST_ASSERT_EQUAL_STRING("Unknown", toString(static_cast<ChargerDetectEnable>(4)));
+}
+
+void test_to_string_charger_advertise_enable()
+{
+    TEST_ASSERT_EQUAL_STRING("BC 1.2 SDP only", toString(ChargerAdvertiseEnable::SDP));
+    TEST_ASSERT_EQUAL_STRING("CDP", toString(ChargerAdvertiseEnable::CDP));
+    TEST_ASSERT_EQUAL_STRING("DCP", toString(ChargerAdvertiseEnable::DCP));
+    TEST_ASSERT_EQUAL_STRING("Reserved (3)", toString(ChargerAdvertiseEnable::Reserved3));
+    TEST_ASSERT_EQUAL_STRING("Reserved (4)", toString(ChargerAdvertiseEnable::Reserved4));
+    TEST_ASSERT_EQUAL_STRING("DCP Auto 1", toString(ChargerAdvertiseEnable::DCP_Auto1));
+    TEST_ASSERT_EQUAL_STRING("DCP Auto 2", toString(ChargerAdvertiseEnable::DCP_Auto2));
+    TEST_ASSERT_EQUAL_STRING("Reserved (7)", toString(ChargerAdvertiseEnable::Reserved7));
+    TEST_ASSERT_EQUAL_STRING("Unknown", toString(static_cast<ChargerAdvertiseEnable>(8)));
+}
+
+void test_to_string_type_c_current()
+{
+    TEST_ASSERT_EQUAL_STRING("USB Default", toString(TypeCCurrent::USBDefault));
+    TEST_ASSERT_EQUAL_STRING("1.5A", toString(TypeCCurrent::Current_1_5A));
+    TEST_ASSERT_EQUAL_STRING("3.0A", toString(TypeCCurrent::Current_3_0A));
+    TEST_ASSERT_EQUAL_STRING("Reserved", toString(TypeCCurrent::Reserved));
+    TEST_ASSERT_EQUAL_STRING("Unknown", toString(static_cast<TypeCCurrent>(4)));
+}
+
+// --- Semantic validation: remaining branches ---------------------------------
+
+void test_15k_resistor_with_dcp_auto_modes_is_semantically_invalid()
+{
+    // Advertise 5h (DCP Auto 1) and 6h (DCP Auto 2) with the 15k resistor present.
+    for (uint8_t code = 5; code <= 6; ++code) {
+        const uint8_t buf[PORT_CONTROL_SIZE] = {0, 0, 0, static_cast<uint8_t>(0x01 | (code << 2))};
+        TEST_ASSERT_FALSE(TPS25751PortControl(buf).isSemanticallyValid());
+    }
+}
+
+void test_15k_resistor_with_non_dcp_modes_is_semantically_valid()
+{
+    // SDP (0h), CDP (1h), and the reserved codes carry no DCP rule.
+    const uint8_t codes[] = {0, 1, 3, 4, 7};
+    for (uint8_t code : codes) {
+        const uint8_t buf[PORT_CONTROL_SIZE] = {0, 0, 0, static_cast<uint8_t>(0x01 | (code << 2))};
+        TEST_ASSERT_TRUE(TPS25751PortControl(buf).isSemanticallyValid());
+    }
+}
+
+void test_dcp_without_15k_resistor_is_semantically_valid()
+{
+    const uint8_t buf[PORT_CONTROL_SIZE] = {0, 0, 0, static_cast<uint8_t>(2 << 2)};
+    TEST_ASSERT_TRUE(TPS25751PortControl(buf).isSemanticallyValid());
+}
+
+void test_all_ones_data_is_semantically_invalid()
+{
+    const uint8_t buf[PORT_CONTROL_SIZE] = {0xFF, 0xFF, 0xFF, 0xFF};
+    TEST_ASSERT_FALSE(TPS25751PortControl(buf).isSemanticallyValid());
+}
+
+// --- debugPrint ---------------------------------------------------------------
+
+void test_debug_print_reset_value()
+{
+    // Reset 00015052h: Auto ID Request set, Process-swap bits 14, 12, 6, 4 set, TypeC Current 2h.
+    const std::string out = captureDebugPrint(TPS25751PortControl(RESET_VALUE));
+
+    TEST_ASSERT_TRUE(contains(out, "=== Port Control Register (0x29) ==="));
+    TEST_ASSERT_TRUE(contains(out, "    Detect Enable: None\n"));
+    TEST_ASSERT_TRUE(contains(out, "    Advertise Enable: BC 1.2 SDP only\n"));
+    TEST_ASSERT_TRUE(contains(out, "    15k Resistor Present: No\n"));
+    TEST_ASSERT_TRUE(contains(out, "    DCD Enable: Disabled\n"));
+    TEST_ASSERT_TRUE(contains(out, "    Automatic ID Request: Enabled\n"));
+    TEST_ASSERT_TRUE(contains(out, "    Current Monitor: Disabled\n"));
+    TEST_ASSERT_TRUE(contains(out, "    Unconstrained Power: No\n"));
+    TEST_ASSERT_TRUE(contains(out, "    Initiate to DFP: No\n"));
+    TEST_ASSERT_TRUE(contains(out, "    Process to DFP: Accept\n"));
+    TEST_ASSERT_TRUE(contains(out, "    Initiate to UFP: No\n"));
+    TEST_ASSERT_TRUE(contains(out, "    Process to UFP: Accept\n"));
+    TEST_ASSERT_TRUE(contains(out, "    Initiate to Source: No\n"));
+    TEST_ASSERT_TRUE(contains(out, "    Process to Source: Accept\n"));
+    TEST_ASSERT_TRUE(contains(out, "    Initiate to Sink: No\n"));
+    TEST_ASSERT_TRUE(contains(out, "    Process to Sink: Accept\n"));
+    TEST_ASSERT_TRUE(contains(out, "Type-C Current: 3.0A\n"));
+}
+
+void test_debug_print_all_zero_rejects_swaps()
+{
+    const uint8_t buf[PORT_CONTROL_SIZE] = {0, 0, 0, 0};
+    const std::string out = captureDebugPrint(TPS25751PortControl(buf));
+
+    TEST_ASSERT_TRUE(contains(out, "    Automatic ID Request: Disabled\n"));
+    TEST_ASSERT_TRUE(contains(out, "    Process to DFP: Reject\n"));
+    TEST_ASSERT_TRUE(contains(out, "    Process to UFP: Reject\n"));
+    TEST_ASSERT_TRUE(contains(out, "    Process to Source: Reject\n"));
+    TEST_ASSERT_TRUE(contains(out, "    Process to Sink: Reject\n"));
+    TEST_ASSERT_TRUE(contains(out, "Type-C Current: USB Default\n"));
+}
+
+void test_debug_print_every_flag_set()
+{
+    uint8_t buf[PORT_CONTROL_SIZE] = {0, 0, 0, 0};
+    for (size_t i = 0; i < kNumFlags; ++i) packBit(buf, kFlags[i].bit);
+    buf[3] = static_cast<uint8_t>(buf[3] | (3u << 6) | (6u << 2));  // detect 3h, advertise 6h
+    buf[0] = static_cast<uint8_t>(buf[0] | 0x01);                   // Type-C current 1.5 A
+    const std::string out = captureDebugPrint(TPS25751PortControl(buf));
+
+    TEST_ASSERT_TRUE(contains(out, "    Detect Enable: BC 1.2 + Proprietary\n"));
+    TEST_ASSERT_TRUE(contains(out, "    Advertise Enable: DCP Auto 2\n"));
+    TEST_ASSERT_TRUE(contains(out, "    15k Resistor Present: Yes\n"));
+    TEST_ASSERT_TRUE(contains(out, "    DCD Enable: Enabled\n"));
+    TEST_ASSERT_TRUE(contains(out, "    Automatic ID Request: Enabled\n"));
+    TEST_ASSERT_TRUE(contains(out, "    Current Monitor: Enabled\n"));
+    TEST_ASSERT_TRUE(contains(out, "    Unconstrained Power: Yes\n"));
+    TEST_ASSERT_TRUE(contains(out, "    Initiate to DFP: Yes\n"));
+    TEST_ASSERT_TRUE(contains(out, "    Process to DFP: Accept\n"));
+    TEST_ASSERT_TRUE(contains(out, "    Initiate to UFP: Yes\n"));
+    TEST_ASSERT_TRUE(contains(out, "    Initiate to Source: Yes\n"));
+    TEST_ASSERT_TRUE(contains(out, "    Initiate to Sink: Yes\n"));
+    TEST_ASSERT_TRUE(contains(out, "Type-C Current: 1.5A\n"));
+}
+
 // --- Runner -----------------------------------------------------------------
 
 int main(int, char **)
@@ -258,6 +501,21 @@ int main(int, char **)
     RUN_TEST(test_deprecated_aliases_match_rev_b_names);
     RUN_TEST(test_15k_resistor_with_dcp_is_semantically_invalid);
     RUN_TEST(test_wrong_size_fails_semantic_validation);
+
+    RUN_TEST(test_each_flag_decodes_from_exactly_its_bit);
+    RUN_TEST(test_charger_detect_enable_all_codes);
+    RUN_TEST(test_charger_advertise_enable_all_codes);
+    RUN_TEST(test_type_c_current_all_codes);
+    RUN_TEST(test_to_string_charger_detect_enable);
+    RUN_TEST(test_to_string_charger_advertise_enable);
+    RUN_TEST(test_to_string_type_c_current);
+    RUN_TEST(test_15k_resistor_with_dcp_auto_modes_is_semantically_invalid);
+    RUN_TEST(test_15k_resistor_with_non_dcp_modes_is_semantically_valid);
+    RUN_TEST(test_dcp_without_15k_resistor_is_semantically_valid);
+    RUN_TEST(test_all_ones_data_is_semantically_invalid);
+    RUN_TEST(test_debug_print_reset_value);
+    RUN_TEST(test_debug_print_all_zero_rejects_swaps);
+    RUN_TEST(test_debug_print_every_flag_set);
 
     return UNITY_END();
 }

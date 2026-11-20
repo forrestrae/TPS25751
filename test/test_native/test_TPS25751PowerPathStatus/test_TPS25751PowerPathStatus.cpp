@@ -158,7 +158,8 @@ void test_switch_fields_do_not_bleed()
 
 void test_three_bit_switch_codes_above_3_fall_back_to_disabled()
 {
-    // PP1 and PP3 are 3-bit fields; codes 4 to 7 are undefined in the TRM.
+    // PP1 and PP3 are 3-bit fields; codes 4 to 7 are undefined in the TRM. The
+    // enum decoders map them to Disabled; rawPp1Switch()/rawPp3Switch() keep them.
     for (uint32_t v = 4; v < 8; v++) {
         Fields f;
         f.pp1 = v;
@@ -256,9 +257,66 @@ void test_debug_print()
     TEST_ASSERT_TRUE(has(out, "Power Source: VBUS"));
     TEST_ASSERT_TRUE(has(out, "PP_CABLE1 Overcurrent: Yes"));
     TEST_ASSERT_TRUE(has(out, "PP1 Overcurrent: No"));
-    TEST_ASSERT_TRUE(has(out, "PP_CABLE1 Switch: Disabled (Fault)"));
-    TEST_ASSERT_TRUE(has(out, "PP1 Switch: Enabled (CC1/Output)"));
-    TEST_ASSERT_TRUE(has(out, "PP3 Switch: Enabled (CC2/System Output)"));
+    TEST_ASSERT_TRUE(has(out, "PP_CABLE1 Switch: Currently disabled (1)"));
+    TEST_ASSERT_TRUE(has(out, "PP1 Switch: Enabled (system output) (2)"));
+    // PP3 code 3 is a system input (SLVUCR8B p.27), not the PP_CABLE1 CC2 wording.
+    TEST_ASSERT_TRUE(has(out, "PP3 Switch: Enabled (system input) (3)"));
+    TEST_ASSERT_FALSE(has(out, "CC2"));
+}
+
+void test_debug_print_undefined_codes()
+{
+    Fields f;
+    f.pp1 = 3;
+    f.pp3 = 7;
+    const std::string out = captureDebugPrint(make(f));
+    TEST_ASSERT_TRUE(has(out, "PP1 Switch: Undefined (3)"));
+    TEST_ASSERT_TRUE(has(out, "PP3 Switch: Undefined (7)"));
+}
+
+void test_switch_text_follows_the_trm_per_switch()
+{
+    TEST_ASSERT_EQUAL_STRING("Disabled", E::ppCable1SwitchText(0));
+    TEST_ASSERT_EQUAL_STRING("Currently disabled", E::ppCable1SwitchText(1));
+    TEST_ASSERT_EQUAL_STRING("CC1 enabled (system output)", E::ppCable1SwitchText(2));
+    TEST_ASSERT_EQUAL_STRING("CC2 enabled (system output)", E::ppCable1SwitchText(3));
+    TEST_ASSERT_EQUAL_STRING("Undefined", E::ppCable1SwitchText(4));
+
+    TEST_ASSERT_EQUAL_STRING("Disabled", E::pp1SwitchText(0));
+    TEST_ASSERT_EQUAL_STRING("Disabled due to fault", E::pp1SwitchText(1));
+    TEST_ASSERT_EQUAL_STRING("Enabled (system output)", E::pp1SwitchText(2));
+    TEST_ASSERT_EQUAL_STRING("Undefined", E::pp1SwitchText(3));
+
+    TEST_ASSERT_EQUAL_STRING("Disabled", E::pp3SwitchText(0));
+    TEST_ASSERT_EQUAL_STRING("Disabled due to fault", E::pp3SwitchText(1));
+    TEST_ASSERT_EQUAL_STRING("Enabled (system output)", E::pp3SwitchText(2));
+    TEST_ASSERT_EQUAL_STRING("Enabled (system input)", E::pp3SwitchText(3));
+    TEST_ASSERT_EQUAL_STRING("Undefined", E::pp3SwitchText(4));
+}
+
+void test_raw_switch_codes()
+{
+    Fields f;
+    f.cable = 3;
+    f.pp1 = 5;
+    f.pp3 = 6;
+    E r = make(f);
+    TEST_ASSERT_EQUAL_UINT8(3, r.rawPpCable1Switch());
+    TEST_ASSERT_EQUAL_UINT8(5, r.rawPp1Switch());
+    TEST_ASSERT_EQUAL_UINT8(6, r.rawPp3Switch());
+}
+
+void test_undefined_switch_codes_are_semantically_invalid()
+{
+    // PP1 defines codes 0 to 2 and PP3 codes 0 to 3 (SLVUCR8B p.27).
+    for (uint32_t v = 0; v < 8; v++) {
+        Fields a;
+        a.pp1 = v;
+        TEST_ASSERT_EQUAL_MESSAGE(v <= 2, make(a).isSemanticallyValid(), "PP1");
+        Fields b;
+        b.pp3 = v;
+        TEST_ASSERT_EQUAL_MESSAGE(v <= 3, make(b).isSemanticallyValid(), "PP3");
+    }
 }
 
 void test_debug_print_pp1_overcurrent_yes()
@@ -311,6 +369,10 @@ int main(int, char **)
     RUN_TEST(test_validation_tiers);
     RUN_TEST(test_semantic_overcurrent_requires_switch_off);
     RUN_TEST(test_debug_print);
+    RUN_TEST(test_debug_print_undefined_codes);
+    RUN_TEST(test_switch_text_follows_the_trm_per_switch);
+    RUN_TEST(test_raw_switch_codes);
+    RUN_TEST(test_undefined_switch_codes_are_semantically_invalid);
     RUN_TEST(test_debug_print_pp1_overcurrent_yes);
     RUN_TEST(test_rule_of_five);
     return UNITY_END();

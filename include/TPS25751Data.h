@@ -40,10 +40,12 @@ public:
 
     /**
      * @brief Safely extract an 8-bit bitfield (exposes the protected base helper)
-     * @param bitPos Bit offset within the buffer
+     * @param bitPos Bit offset within the buffer, 0 to 511 for the 64-byte DATA
+     *        register (16 bits wide, like the base helper since ADR-012)
      * @param bitLen Number of bits in the field (max 8)
+     * @return The field, or 0 if it lies outside the buffer
      */
-    uint8_t extractByteField(uint8_t bitPos, uint8_t bitLen) const { return extractBits(bitPos, bitLen); }
+    uint8_t extractByteField(uint16_t bitPos, uint8_t bitLen) const { return extractBits(bitPos, bitLen); }
 
     void debugPrint(Stream &s = Serial) const override;
 

@@ -160,13 +160,27 @@ void test_extract_byte_field_reads_bits_little_endian()
 
 void test_extract_byte_field_reaches_last_addressable_byte()
 {
-    // The helper takes a uint8_t bit position, so bit 248 (byte 31) is the
-    // highest field it can address.
+    // The bit position is 16 bits wide, so the whole 64-byte register is
+    // reachable: bit 248 is byte 31, bit 256 byte 32, and bit 504 byte 63.
     uint8_t src[DATA_SIZE];
     fillRamp(src);
     TPS25751Data reg(src);
 
     TEST_ASSERT_EQUAL_UINT8(32, reg.extractByteField(248, 8));
+    TEST_ASSERT_EQUAL_UINT8(33, reg.extractByteField(256, 8));
+    TEST_ASSERT_EQUAL_UINT8(64, reg.extractByteField(504, 8));
+}
+
+void test_extract_byte_field_past_end_returns_zero_without_wrapping()
+{
+    // Bit 512 is past the 64-byte register. With an 8-bit position it wrapped
+    // to bit 0 and read byte 0.
+    uint8_t src[DATA_SIZE];
+    fillRamp(src);
+    TPS25751Data reg(src);
+
+    TEST_ASSERT_EQUAL_UINT8(0, reg.extractByteField(512, 8));
+    TEST_ASSERT_EQUAL_UINT8(0, reg.extractByteField(508, 8));  // straddles the end
 }
 
 void test_extract_byte_field_past_short_buffer_returns_zero()
@@ -337,6 +351,7 @@ int main(int, char **)
     RUN_TEST(test_byte_at_zero_when_invalid);
     RUN_TEST(test_extract_byte_field_reads_bits_little_endian);
     RUN_TEST(test_extract_byte_field_reaches_last_addressable_byte);
+    RUN_TEST(test_extract_byte_field_past_end_returns_zero_without_wrapping);
     RUN_TEST(test_extract_byte_field_past_short_buffer_returns_zero);
     RUN_TEST(test_extract_byte_field_zero_when_invalid);
 

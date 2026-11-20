@@ -1153,7 +1153,7 @@ Two things remain true on the host side regardless of the device driver:
   section above apply unchanged to *typed* downstream writes — payload `len ≤ 11`,
   `Length = payload + 1` (counts the register-offset byte) — because they ride the
   same I2Cw task as raw writes.
-- `TPS25751BitUtils::extractBits16` is **little-endian** by design (matches the
+- `TPS25751Register::extractBits16` is **little-endian** by design (matches the
   TPS25751's own registers); big-endian downstream devices must assemble
   multi-byte fields manually.
 

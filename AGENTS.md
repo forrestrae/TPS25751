@@ -302,7 +302,6 @@ stay raw.
 
 - **`TPS25751`**: Main controller class that handles I2C communication
 - **`TPS25751Register`**: Abstract base class providing common functionality for all registers
-- **`TPS25751BitUtils`**: Utility class for bitfield extraction from packed register data
 - **`TPS25751RegisterFactory`**: Abstract factory interface for creating register objects
 - **`TPS25751RegisterFactoryImpl`**: Concrete factory implementation
 - **`TPS25751Factory`**: Singleton pattern for global factory access
@@ -436,7 +435,7 @@ repo's `AGENTS.md` for its API, decode/encode conventions, and examples.
 ### Key Design Patterns
 
 - **Base Register Class**: `TPS25751Register` provides common functionality for bitfield extraction and debug printing
-- **Bitfield Utilities**: `TPS25751BitUtils` provides helper functions for extracting multi-bit fields from packed register data
+- **Bitfield Helpers**: `TPS25751Register`'s `extractBits*()`, `extractEnum*()`, and `setBits()` read and write multi-bit fields of the packed register data, with a 16-bit bit position (ADR-012)
 - **I2C Protocol Handling**: The TPS25751 uses a custom I2C protocol where responses are prefixed with byte count
 - **Factory Method Pattern**: Modern object creation using `TPS25751RegisterFactory`
 - **Validation Layer**: Multi-level validation (basic, data, semantic) across all register classes

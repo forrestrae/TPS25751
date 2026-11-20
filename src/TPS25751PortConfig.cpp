@@ -1,5 +1,4 @@
 #include "TPS25751PortConfig.h"
-#include "util/TPS25751BitUtils.h"
 
 
 const char* toString(TypeCStateMachine state) {

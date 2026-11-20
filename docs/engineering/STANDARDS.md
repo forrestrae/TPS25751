@@ -75,7 +75,7 @@ public:
 
 private:
     // Helper methods for bitfield extraction
-    // Use TPS25751BitUtils for multi-bit fields
+    // Use the base-class extractBits*() helpers for multi-bit fields
 };
 ```
 
@@ -217,7 +217,7 @@ The per-device factory mirrors the host factory exactly: `<Device>::RegisterFact
 
 #### Big-Endian 16-Bit Assembly Rule
 
-`TPS25751BitUtils::extractBits16` is **little-endian** (assembles `raw[0]` as LSB).
+`TPS25751Register::extractBits16` is **little-endian** (assembles `raw[0]` as LSB).
 Downstream devices such as the BQ25798 store 16-bit registers big-endian. Always
 assemble multi-byte downstream fields manually:
 
@@ -226,7 +226,7 @@ assemble multi-byte downstream fields manually:
 uint16_t raw16 = (static_cast<uint16_t>(data_[0]) << 8) | data_[1];
 
 // WRONG — extractBits16 is little-endian; silently byte-swaps the value
-uint16_t raw16 = TPS25751BitUtils::extractBits16(data_.data(), 0, 16, 0);
+uint16_t raw16 = extractBits16(0, 16);
 ```
 
 For signed ADC channels (e.g. BQ25798 IBUS/IBAT/TDIE), reinterpret the assembled

@@ -331,9 +331,9 @@ static void printHex(Stream& s, uint32_t value, uint8_t digits);  // zero-padded
 ```
 
 The bit position is 16 bits (ADR-012), and a field outside the buffer reads 0 or is not
-written. `include/util/TPS25751BitUtils.h` still declares a legacy free function
-`extractBits(const uint8_t*, uint8_t, uint8_t)` with an 8-bit position and no bounds
-check; no library code calls it. Use the base-class helpers instead.
+written. These helpers are the library's only bit-extraction API: the legacy
+`include/util/TPS25751BitUtils.h` free function `extractBits(const uint8_t*, uint8_t,
+uint8_t)`, with an 8-bit position and no bounds check, was removed on 2026-11-19.
 
 **TPS25751Debug:**
 ```cpp
@@ -581,8 +581,6 @@ TPS25751DownstreamDevice (I2Cc proxy; composes a TPS25751 host, not a subclass)
 └── <Device>::Device (typed per-device drivers inherit this — reference
                       implementation: BQ25798::Device, sibling lib/BQ25798 repo)
 
-TPS25751BitUtils (utility, all static)
-
 TPS25751Debug (utility, all static)
 ```
 
@@ -657,7 +655,7 @@ factory is unaffected by downstream additions.
         │
         ▼
 7. Bitfield extraction (internal):
-   - TPS25751BitUtils::extractBits(data, byte, count, offset)
+   - TPS25751Register::extractBits*(bitPos, bitLen)
         │
         ▼
 8. Return value to application
@@ -832,7 +830,7 @@ needs no changes to any TPS25751 host file.
    for R/W registers add a `static constexpr Registers::Address kAddress` and field
    setters following the write-encoder pattern (ADR-009, STANDARDS.md).
    - **Multi-byte (16-bit) registers on big-endian downstream devices**: assemble
-     `(raw[0] << 8) | raw[1]`, NOT `TPS25751BitUtils::extractBits16` (little-endian;
+     `(raw[0] << 8) | raw[1]`, NOT `TPS25751Register::extractBits16` (little-endian;
      will silently byte-swap the value).
    - **Signed ADC channels**: reinterpret the assembled uint16_t via `int16_t` (2's
      complement); do not treat as unsigned.
@@ -918,7 +916,7 @@ TPS25751Factory
     ↓ creates
 TPS25751Register subclasses
     ↓ uses
-TPS25751BitUtils (bit extraction)
+TPS25751Register bit helpers (bit extraction)
 ```
 
 ### Compile-Time Dependencies

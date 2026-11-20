@@ -23,14 +23,51 @@
 
 #include <unity.h>
 
+#include <cstdio>
+#include <string>
+#include <unistd.h>
+
 #include "TPS25751PortConfig.h"
 #include "TPS25751Register.h"
 #include "TPS25751RegisterAddress.h"
 
 // Defined in TPS25751PortConfig.cpp but not declared in its header.
 const char* toString(TypeCSupportOptions opt);
+const char* toString(TypeCStateMachine state);
+const char* toString(VbusOVPUsage val);
+const char* toString(OVP_PP5V val);
+const char* toString(VbusUVPTripHV val);
 
 namespace {
+
+// Runs reg.debugPrint() against the stdout-backed native Stream stub and
+// returns what it printed.
+std::string captureDebugPrint(const TPS25751PortConfig &reg)
+{
+    fflush(stdout);
+    FILE *tmp = tmpfile();
+    const int saved = dup(fileno(stdout));
+    dup2(fileno(tmp), fileno(stdout));
+
+    reg.debugPrint();
+
+    fflush(stdout);
+    dup2(saved, fileno(stdout));
+    close(saved);
+
+    std::string out;
+    rewind(tmp);
+    char buf[256];
+    size_t n;
+    while ((n = fread(buf, 1, sizeof(buf), tmp)) > 0) out.append(buf, n);
+    fclose(tmp);
+    return out;
+}
+
+bool contains(const std::string &hay, const char *needle)
+{
+    return hay.find(needle) != std::string::npos;
+}
 
 constexpr size_t PORT_CONFIG_SIZE = TPS25751Registers::Registers::PORT_CONFIGURATION.size;  // 17
 
@@ -307,6 +344,126 @@ void test_deprecated_drp_src_alias_matches_try_src()
 }
 #pragma GCC diagnostic pop
 
+// --- toString for the remaining enums and out-of-range values ------------------
+
+void test_state_machine_to_string()
+{
+    TEST_ASSERT_EQUAL_STRING("Sink Only", toString(TypeCStateMachine::SinkOnly));
+    TEST_ASSERT_EQUAL_STRING("Source Only", toString(TypeCStateMachine::SourceOnly));
+    TEST_ASSERT_EQUAL_STRING("Dual Role Power (DRP)", toString(TypeCStateMachine::DRP));
+    TEST_ASSERT_EQUAL_STRING("Disabled", toString(TypeCStateMachine::Disabled));
+}
+
+void test_vbus_ovp_usage_to_string()
+{
+    TEST_ASSERT_EQUAL_STRING("100%", toString(VbusOVPUsage::OVP100));
+    TEST_ASSERT_EQUAL_STRING("105%", toString(VbusOVPUsage::OVP105));
+    TEST_ASSERT_EQUAL_STRING("111%", toString(VbusOVPUsage::OVP111));
+    TEST_ASSERT_EQUAL_STRING("114%", toString(VbusOVPUsage::OVP114));
+}
+
+void test_ovp_pp5v_to_string()
+{
+    TEST_ASSERT_EQUAL_STRING("5.25V", toString(OVP_PP5V::V5_25));
+    TEST_ASSERT_EQUAL_STRING("5.5V", toString(OVP_PP5V::V5_5));
+    TEST_ASSERT_EQUAL_STRING("5.8V", toString(OVP_PP5V::V5_8));
+    TEST_ASSERT_EQUAL_STRING("6.1V", toString(OVP_PP5V::V6_1));
+}
+
+void test_vbus_uvp_trip_hv_to_string()
+{
+    TEST_ASSERT_EQUAL_STRING("5%", toString(VbusUVPTripHV::Margin5));
+    TEST_ASSERT_EQUAL_STRING("10%", toString(VbusUVPTripHV::Margin10));
+    TEST_ASSERT_EQUAL_STRING("15%", toString(VbusUVPTripHV::Margin15));
+    TEST_ASSERT_EQUAL_STRING("20%", toString(VbusUVPTripHV::Margin20));
+    TEST_ASSERT_EQUAL_STRING("25%", toString(VbusUVPTripHV::Margin25));
+    TEST_ASSERT_EQUAL_STRING("30%", toString(VbusUVPTripHV::Margin30));
+    TEST_ASSERT_EQUAL_STRING("40%", toString(VbusUVPTripHV::Margin40));
+    TEST_ASSERT_EQUAL_STRING("50%", toString(VbusUVPTripHV::Margin50));
+}
+
+void test_to_string_out_of_range_is_unknown()
+{
+    TEST_ASSERT_EQUAL_STRING("Unknown", toString(static_cast<TypeCStateMachine>(9)));
+    TEST_ASSERT_EQUAL_STRING("Unknown", toString(static_cast<TypeCSupportOptions>(9)));
+    TEST_ASSERT_EQUAL_STRING("Unknown", toString(static_cast<VbusOVPUsage>(9)));
+    TEST_ASSERT_EQUAL_STRING("Unknown", toString(static_cast<OVP_PP5V>(9)));
+    TEST_ASSERT_EQUAL_STRING("Unknown", toString(static_cast<VbusUVPTripHV>(9)));
+    TEST_ASSERT_EQUAL_STRING("Unknown", toString(static_cast<USB3Rate>(9)));
+    TEST_ASSERT_EQUAL_STRING("Unknown", toString(static_cast<ApdoIlimOvershoot>(9)));
+    TEST_ASSERT_EQUAL_STRING("Unknown", toString(static_cast<ApdoVbusUvpThreshold>(9)));
+}
+
+// --- Field decode of a non-default register and debugPrint ---------------------
+
+namespace {
+// byte 0: state machine 3 (Disabled)
+// byte 1: Try.SNK (bits 9:8 = 2), Disable PD (10), USB comm (11), debug accessory (12), USB3 Gen2 (14:13 = 2)
+// byte 2: VBUS OVP usage 1 (105%), OVP PP5V 3 (6.1V)
+// byte 3: Sink UVP trip HV 5 (30%), APDO UVP 1 (88%), APDO ILIM overshoot 2 (75 mA)
+constexpr uint8_t NON_DEFAULT[PORT_CONFIG_SIZE] = {0x03, 0x5E, 0x31, 0x4D};
+}  // namespace
+
+void test_non_default_fields_decode()
+{
+    TPS25751PortConfig reg(NON_DEFAULT, PORT_CONFIG_SIZE);
+
+    TEST_ASSERT_EQUAL(TypeCStateMachine::Disabled, reg.typeCStateMachine());
+    TEST_ASSERT_EQUAL(TypeCSupportOptions::TrySNK, reg.typeCSupportOptions());
+    TEST_ASSERT_TRUE(reg.disablePD());
+    TEST_ASSERT_TRUE(reg.usbCommunicationCapable());
+    TEST_ASSERT_TRUE(reg.debugAccessorySupport());
+    TEST_ASSERT_EQUAL(USB3Rate::Gen2, reg.usb3Rate());
+    TEST_ASSERT_EQUAL(VbusOVPUsage::OVP105, reg.vbusOVPUsage());
+    TEST_ASSERT_EQUAL(OVP_PP5V::V6_1, reg.ovpPP5V());
+    TEST_ASSERT_EQUAL(VbusUVPTripHV::Margin30, reg.vbusUVPTripHV());
+    TEST_ASSERT_EQUAL(ApdoVbusUvpThreshold::Percent88, reg.apdoVbusUvpThreshold());
+    TEST_ASSERT_EQUAL(ApdoIlimOvershoot::Above75mA, reg.apdoIlimOvershoot());
+}
+
+void test_debug_print_non_default_register()
+{
+    TPS25751PortConfig reg(NON_DEFAULT, PORT_CONFIG_SIZE);
+    const std::string out = captureDebugPrint(reg);
+
+    TEST_ASSERT_TRUE(contains(out, "Port Configuration Register (0x28)"));
+    TEST_ASSERT_TRUE(contains(out, "Type-C State Machine: Disabled"));
+    TEST_ASSERT_TRUE(contains(out, "Type-C Support Options: Try.SNK"));
+    TEST_ASSERT_TRUE(contains(out, "Disable PD: 1"));
+    TEST_ASSERT_TRUE(contains(out, "VBUS OVP Usage: 105%"));
+    TEST_ASSERT_TRUE(contains(out, "OVP for PP5V: 6.1V"));
+    TEST_ASSERT_TRUE(contains(out, "VBUS Sink UVP Trip HV: 30%"));
+    TEST_ASSERT_TRUE(contains(out, "USB3 Rate: USB3 Gen2"));
+    TEST_ASSERT_TRUE(contains(out, "DebugAccessory Support: 1"));
+    TEST_ASSERT_TRUE(contains(out, "USB Communication Capable: 1"));
+    TEST_ASSERT_TRUE(contains(out, "APDO ILIM Over Shoot: 75 mA above PDO current"));
+    TEST_ASSERT_TRUE(contains(out, "APDO VBUS UVP Threshold: 88%"));
+}
+
+void test_debug_print_reset_value()
+{
+    TPS25751PortConfig reg(RESET_VALUE, PORT_CONFIG_SIZE);
+    const std::string out = captureDebugPrint(reg);
+
+    TEST_ASSERT_TRUE(contains(out, "Type-C State Machine: Dual Role Power (DRP)"));
+    TEST_ASSERT_TRUE(contains(out, "Type-C Support Options: None"));
+    TEST_ASSERT_TRUE(contains(out, "Disable PD: 0"));
+    TEST_ASSERT_TRUE(contains(out, "VBUS OVP Usage: 111%"));
+    TEST_ASSERT_TRUE(contains(out, "OVP for PP5V: 5.8V"));
+    TEST_ASSERT_TRUE(contains(out, "VBUS Sink UVP Trip HV: 10%"));
+    TEST_ASSERT_TRUE(contains(out, "USB3 Rate: USB3 not supported"));
+    TEST_ASSERT_TRUE(contains(out, "APDO ILIM Over Shoot: 25 mA overshoot"));
+    TEST_ASSERT_TRUE(contains(out, "APDO VBUS UVP Threshold: 90%"));
+}
+
+void test_state_machine_decodes_sink_only_and_source_only()
+{
+    const uint8_t srcOnly[PORT_CONFIG_SIZE] = {0x01};
+    TEST_ASSERT_EQUAL(TypeCStateMachine::SourceOnly, TPS25751PortConfig(srcOnly, PORT_CONFIG_SIZE).typeCStateMachine());
+    const uint8_t snkOnly[PORT_CONFIG_SIZE] = {0x00};
+    TEST_ASSERT_EQUAL(TypeCStateMachine::SinkOnly, TPS25751PortConfig(snkOnly, PORT_CONFIG_SIZE).typeCStateMachine());
+}
+
 int main(int, char **)
 {
     UNITY_BEGIN();
@@ -336,5 +493,14 @@ int main(int, char **)
     RUN_TEST(test_support_options_to_string);
     RUN_TEST(test_deprecated_drp_src_alias_matches_try_src);
 
+    RUN_TEST(test_state_machine_to_string);
+    RUN_TEST(test_vbus_ovp_usage_to_string);
+    RUN_TEST(test_ovp_pp5v_to_string);
+    RUN_TEST(test_vbus_uvp_trip_hv_to_string);
+    RUN_TEST(test_to_string_out_of_range_is_unknown);
+    RUN_TEST(test_non_default_fields_decode);
+    RUN_TEST(test_debug_print_non_default_register);
+    RUN_TEST(test_debug_print_reset_value);
+    RUN_TEST(test_state_machine_decodes_sink_only_and_source_only);
     return UNITY_END();
 }

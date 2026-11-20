@@ -16,6 +16,9 @@
  */
 
 #include <unity.h>
+#include <unistd.h>
+#include <string>
+#include <cstdio>
 
 #include <type_traits>
 
@@ -191,6 +194,70 @@ void test_move_constructor_transfers_ownership()
     TEST_ASSERT_EQUAL_UINT64(SEQUENTIAL_VALUE, moved.value());
 }
 
+
+// --- debugPrint ---------------------------------------------------------------
+
+namespace {
+
+std::string captureDebugPrint(const TPS25751CustomerUse &reg)
+{
+    fflush(stdout);
+    FILE *tmp = tmpfile();
+    const int saved = dup(fileno(stdout));
+    dup2(fileno(tmp), fileno(stdout));
+
+    reg.debugPrint();
+
+    fflush(stdout);
+    dup2(saved, fileno(stdout));
+    close(saved);
+
+    std::string out;
+    rewind(tmp);
+    char buf[256];
+    size_t n;
+    while ((n = fread(buf, 1, sizeof(buf), tmp)) > 0) out.append(buf, n);
+    fclose(tmp);
+    return out;
+}
+
+bool contains(const std::string &haystack, const char *needle)
+{
+    return haystack.find(needle) != std::string::npos;
+}
+
+}  // namespace
+
+void test_debug_print_valid_register()
+{
+    const std::string out = captureDebugPrint(TPS25751CustomerUse(SEQUENTIAL_DATA));
+
+    TEST_ASSERT_TRUE(contains(out, "CUSTOMER_USE (0x6) - 8 bytes\n"));
+    TEST_ASSERT_TRUE(contains(out, "Raw (8 bytes):"));
+    TEST_ASSERT_TRUE(contains(out, "Value: 0x0807060504030201\n"));
+    TEST_ASSERT_FALSE(contains(out, "<invalid>"));
+}
+
+void test_debug_print_invalid_register()
+{
+    TPS25751CustomerUse reg(SEQUENTIAL_DATA);
+    TPS25751CustomerUse moved(static_cast<TPS25751CustomerUse &&>(reg));
+    const std::string out = captureDebugPrint(reg);
+
+    TEST_ASSERT_TRUE(contains(out, "CUSTOMER_USE (0x6)"));
+    TEST_ASSERT_TRUE(contains(out, "  <invalid>\n"));
+    TEST_ASSERT_FALSE(contains(out, "Value: 0x"));
+}
+
+void test_semantically_invalid_when_moved_from()
+{
+    TPS25751CustomerUse reg(SEQUENTIAL_DATA);
+    TPS25751CustomerUse moved(static_cast<TPS25751CustomerUse &&>(reg));
+    TEST_ASSERT_FALSE(reg.isSemanticallyValid());
+    TEST_ASSERT_EQUAL_UINT8(0, reg.byteAt(0));
+    TEST_ASSERT_EQUAL_UINT64(0, reg.value());
+}
+
 // --- Runner -----------------------------------------------------------------
 
 int main(int, char **)
@@ -215,6 +282,10 @@ int main(int, char **)
 
     RUN_TEST(test_copy_constructor_deep_copies);
     RUN_TEST(test_move_constructor_transfers_ownership);
+
+    RUN_TEST(test_debug_print_valid_register);
+    RUN_TEST(test_debug_print_invalid_register);
+    RUN_TEST(test_semantically_invalid_when_moved_from);
 
     return UNITY_END();
 }

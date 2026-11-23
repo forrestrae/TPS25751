@@ -2129,12 +2129,16 @@ void test_update_region_limit_step_2_trusts_the_write_address()
     // the TRM; no TI document describes an FLad that reports success without
     // taking effect).
     //
-    // The update does fail, at FLvy or at the compare, and it leaves the target
-    // pointer at 0. But the 14336 bytes have already landed on the other
+    // The update fails at FLvy or at the compare, with the target pointer left
+    // at 0, unless the target region already held the same image: then both
+    // pass on the old contents and the call returns Success (the last case
+    // below). Either way the 14336 bytes have already landed on the other
     // region, so the "other region boots" column of the status table does not
     // hold. The plan fixes the sequence of SLVAFL1 Figure 2-3, so the updater
     // does not add a read-back of the first chunk; the orchestrator has raised
     // the limit with the user. updateRegion()'s Doxygen states it.
+
+    // The target holds something else (the old bundle): the call fails.
     for (EepromRegion target : {EepromRegion::Low, EepromRegion::High}) {
         Board b(BUNDLE_LEN);
         b.fake.failCall(IDX_BUNDLE_FLAD, Fault::returnCodeOnly(0x00));
@@ -2166,6 +2170,38 @@ void test_update_region_limit_step_2_trusts_the_write_address()
             TEST_ASSERT_FALSE(regionHolds(b.fake, EepromRegion::Low, b.newBundle));
             TEST_ASSERT_FALSE(pointerValid(b.fake, EepromRegion::High));
         }
+    }
+
+    // Both regions already hold the image and the target is High. Nothing in
+    // the sequence can tell that the chunks went elsewhere: FLvy and the
+    // compare read the High region, which still holds the image from before,
+    // so the pointer is restored, step 4 runs, and the call returns Success.
+    {
+        Board b(BUNDLE_LEN);
+        b.fake.writeBytes(LOW_START, b.newBundle.data(), b.newBundle.size());
+        b.fake.writeBytes(HIGH_START, b.newBundle.data(), b.newBundle.size());
+        b.snapshot();
+        b.fake.failCall(IDX_BUNDLE_FLAD, Fault::returnCodeOnly(0x00));
+        TPS25751EepromUpdater u(b.fake);
+
+        ASSERT_STATUS(EepromUpdateStatus::Success,
+                      u.updateRegion(EepromRegion::High, b.newBundle.data(), b.newBundle.size()));
+        ASSERT_STEP(EepromUpdateStep::Done, u.lastStep());
+        TEST_ASSERT_EQUAL_size_t(448 + 3, b.fake.countOf("FLwd"));
+
+        // The High region is as it was, with its pointer valid again.
+        TEST_ASSERT_TRUE(regionHolds(b.fake, EepromRegion::High, b.newBundle));
+        TEST_ASSERT_EQUAL_HEX32(HIGH_START, pointerOf(b.fake, EepromRegion::High));
+
+        // The image sits at the stale address, 0x0404 to 0x3C03, across the
+        // Low bundle, which no longer equals the image. Step 4 erased the Low
+        // pointer, so in this case the misplaced bytes lie behind a pointer of
+        // 0 and the High region boots.
+        TEST_ASSERT_EQUAL_HEX8_ARRAY(b.newBundle.data(), &b.fake.eeprom[HIGH_PTR + 4], BUNDLE_LEN);
+        TEST_ASSERT_FALSE(regionHolds(b.fake, EepromRegion::Low, b.newBundle));
+        TEST_ASSERT_EQUAL_HEX32(0, pointerOf(b.fake, EepromRegion::Low));
+        // Outside the two pointer words and the stale range nothing changed.
+        assertUnchangedOutside(b, {{LOW_PTR, 4}, {HIGH_PTR + 4, BUNDLE_LEN}});
     }
 }
 

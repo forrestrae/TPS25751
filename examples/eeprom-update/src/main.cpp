@@ -2,36 +2,76 @@
 #include <Wire.h>
 #include <TPS25751.h>  // also brings in TPS25751HostExecutor and TPS25751EepromUpdater
 
+#include "patch_bundle.h"  // tps25751_eeprom_bundle / tps25751_eeprom_bundle_size (placeholder)
+
 // ---------------------------------------------------------------------------
-// EEPROM inspection example (read-only)
+// EEPROM update example
 //
-// Reads the TPS25751 configuration EEPROM through the flash 4CC tasks while the
-// controller runs in APP mode, and prints what an update would start from:
+// Inspects and rewrites the TPS25751 configuration EEPROM through the flash
+// 4CC tasks while the controller runs in APP mode (TI SLVAFL1; TRM SLVUCR8B
+// pages 81 and 82). It is driven over serial, one command per line.
 //
-//   - MODE, VERSION, and BOOT_FLAGS (0x2D; Patch Config Source and the region flags);
-//   - both region pointers and whether each equals its bundle start;
-//   - the region an update would target (TPS25751EepromUpdater::selectTargetRegion);
-//   - the FLvy result for each region's bundle start;
-//   - a hex dump of 0x0000 to 0x7C00 between two marker lines.
+// COMMANDS THAT ONLY READ
+//   r    Read-only report: MODE, VERSION, BOOT_FLAGS (0x2D), both region
+//        pointers, the region an update would target, FLvy for each region,
+//        and a hex dump of 0x0000 to 0x7C00. Issues FLrd and FLvy only.
+//        The same report without the dump is printed once at start-up.
 //
-// It issues only FLrd and FLvy. It makes no EEPROM write and does not reset
-// the controller.
+// COMMAND THAT RESTARTS THE CONTROLLER (no EEPROM write)
+//   x    coldReset(): issues GAID, waits for APP, then prints the time to APP,
+//        MODE, VERSION, and BOOT_FLAGS. The port disconnects during the
+//        restart. Runs at once, with no confirmation.
 //
-// The report runs once in setup() and again each time "r" arrives over serial,
-// so a monitor attached late can still capture a complete run.
+// COMMANDS THAT WRITE THE EEPROM
+//   p    Pointer test: writes the High pointer to 0 and back to 0x4400, and
+//        prints the 64 bytes at 0x0400 before, between, and after.
+//   u    updateInactiveRegion() with the embedded image.
+//   b    updateBothRegions() with the embedded image.
+//   c1   Update the inactive region and halt after step 1 of SLVAFL1
+//        Figure 2-3 (target pointer erased).
+//   c2   The same, halting after step 2 (bundle written, pointer still 0).
+//   c3   The same, stopping after step 3 (target pointer restored, old
+//        pointer kept).
+//   c4   The complete update, steps 1 to 4.
+//   v    FLvy experiment: erases the inactive region's pointer, writes the
+//        image, corrupts one byte of it, and reports what FLvy and
+//        compareRegion() say. Leaves that pointer at 0; u or b repairs it.
 //
-// The dump lines have the form "xxxxxxxx: xx xx ... xx", which xxd -r turns
-// back into binary. The BEGIN and END marker lines are for reading the log;
-// they are not neutral to xxd -r, which would parse parts of them as an
-// address and a byte. Never feed the whole log to xxd. Extract the dump lines
-// first, from a log that holds exactly one report:
+// Every command that writes first prints its plan (target region, image
+// version, current VERSION, both pointers) and then waits for the line
 //
-//   grep -aE '^[0-9a-f]{8}:( [0-9a-f]{2}){1,16}\r?$' serial.log > dump.txt
-//   wc -l dump.txt                  # must print 1984
-//   xxd -r dump.txt > eeprom.bin
-//   cmp eeprom.bin <image>_fullFlash.bin
+//   yes
 //
-// A log with several reports gives a multiple of 1984 lines; keep one run.
+// Any other line cancels the command with nothing written. Every one of them
+// is also refused while src/patch_bundle.h is the placeholder, because
+// TPS25751EepromUpdater::checkImage() rejects it. Generate the real header
+// with scripts/bin_to_header.py (see patch_bundle.h).
+//
+// c1 and c2 halt inside the progress callback and never return to the command
+// loop; power-cycle or reset the Teensy afterwards. Keep the board powered
+// during every other write: an interrupted write is the failure the two-region
+// layout exists for, and c1 to c4 are the commands that test it.
+//
+// OUTPUT
+//   Every line starts with a tag in brackets. A command ends with "[done] <cmd>"
+//   followed by "[ready] ...". After p, u, b, v, x, and the c commands a
+//   "[timing]" table gives, per 4CC task, the calls, total time, average, and
+//   maximum, measured around each executor call.
+//
+//   The dump lines of r have the form "xxxxxxxx: xx xx ... xx", which xxd -r
+//   turns back into binary. The BEGIN and END marker lines are not neutral to
+//   xxd -r. Extract the dump lines first, from a log with exactly one report:
+//
+//     grep -aE '^[0-9a-f]{8}:( [0-9a-f]{2}){16}\r?$' serial.log > dump.txt
+//     wc -l dump.txt                  # must print 1984
+//     xxd -r dump.txt > eeprom.bin
+//     cmp eeprom.bin <image>_fullFlash.bin
+//
+//   The pattern takes full 16-byte lines only. p and v print lines of the
+//   same form, so keep them out of the log used for the extraction.
+//
+//   The library's debug level is errors only. During x the executor reports
+//   I2C errors while the controller restarts; those lines are expected.
 //
 // HARDWARE:
 //   - Teensy 4.x MCU
@@ -42,10 +82,145 @@
 /// End of the dumped range: the size of the full-flash image (31744 bytes).
 constexpr uint32_t DUMP_END = 0x7C00;
 
+/// Bytes shown at the High pointer by the pointer test: the largest FLwd payload.
+constexpr size_t POINTER_WINDOW = 64;
+
+/// EEPROM address of the High region pointer.
+constexpr uint32_t HIGH_POINTER = TPS25751EepromUpdater::regionPointerAddress(EepromRegion::High);
+
+/// The image the write commands use.
+static const uint8_t* const IMAGE = tps25751_eeprom_bundle;
+static const size_t IMAGE_SIZE = tps25751_eeprom_bundle_size;
+
+// ---------------------------------------------------------------------------
+// Per-task timing
+// ---------------------------------------------------------------------------
+
+static const __FlashStringHelper* taskStatusName(TPS25751TaskStatus s)
+{
+    switch (s) {
+        case TPS25751TaskStatus::Success:  return F("Success");
+        case TPS25751TaskStatus::Rejected: return F("Rejected");
+        case TPS25751TaskStatus::Timeout:  return F("Timeout");
+        default:                           return F("I2CError");
+    }
+}
+
+/**
+ * @brief Executor decorator that times every 4CC task it forwards
+ *
+ * Wraps another TPS25751CommandExecutor and records, per task code, the number
+ * of calls, the total and the longest duration, the calls that did not return
+ * Success, and the status of the latest call. The duration covers the whole
+ * executeCommand() call: the DATA write, the COMMAND write, the COMMAND poll,
+ * and the 64-byte DATA read.
+ */
+class TimingExecutor final : public TPS25751CommandExecutor {
+public:
+    explicit TimingExecutor(TPS25751CommandExecutor& inner) : _inner(inner) {}
+
+    TPS25751TaskResult executeCommand(TPS25751FourCC cmd,
+        const uint8_t* inData, size_t inLen,
+        uint8_t* outData, size_t outLen, uint32_t timeoutMs) override
+    {
+        const uint32_t started = micros();
+        const TPS25751TaskResult result =
+            _inner.executeCommand(cmd, inData, inLen, outData, outLen, timeoutMs);
+        record(cmd, micros() - started, result.status);
+        return result;
+    }
+
+    bool readMode(TPS25751Mode& mode) override { return _inner.readMode(mode); }
+    bool readBootFlags(TPS25751BootFlags& flags) override { return _inner.readBootFlags(flags); }
+    void delayMs(uint32_t ms) override { _inner.delayMs(ms); }
+    uint32_t nowMs() override { return _inner.nowMs(); }
+
+    /// Forget everything recorded so far.
+    void reset() { _count = 0; }
+
+    /// Print one line per task code seen since the last reset().
+    void print(Stream& out) const
+    {
+        out.println(F("[timing] task calls total_ms avg_us max_us not_success last_status"));
+        for (size_t i = 0; i < _count; ++i) {
+            const Row& r = _rows[i];
+            out.print(F("[timing] "));
+            out.write(reinterpret_cast<const uint8_t*>(r.code), sizeof(r.code));
+            out.print(' ');
+            out.print(r.calls);
+            out.print(' ');
+            out.print(static_cast<uint32_t>(r.totalUs / 1000));
+            out.print(' ');
+            out.print(static_cast<uint32_t>(r.totalUs / r.calls));
+            out.print(' ');
+            out.print(r.maxUs);
+            out.print(' ');
+            out.print(r.notSuccess);
+            out.print(' ');
+            out.println(taskStatusName(r.lastStatus));
+        }
+        if (_count == 0) {
+            out.println(F("[timing] (no task issued)"));
+        }
+    }
+
+private:
+    struct Row {
+        char code[4];
+        uint32_t calls;
+        uint64_t totalUs;
+        uint32_t maxUs;
+        uint32_t notSuccess;
+        TPS25751TaskStatus lastStatus;
+    };
+
+    static constexpr size_t kMaxRows = 8;
+
+    TPS25751CommandExecutor& _inner;
+    Row _rows[kMaxRows];
+    size_t _count = 0;
+
+    void record(TPS25751FourCC cmd, uint32_t durationUs, TPS25751TaskStatus status)
+    {
+        Row* row = nullptr;
+        for (size_t i = 0; i < _count; ++i) {
+            if (memcmp(_rows[i].code, cmd.code, sizeof(cmd.code)) == 0) {
+                row = &_rows[i];
+                break;
+            }
+        }
+        if (row == nullptr) {
+            if (_count == kMaxRows) {
+                return;  // more task codes than rows; this example uses five
+            }
+            row = &_rows[_count++];
+            memcpy(row->code, cmd.code, sizeof(cmd.code));
+            row->calls = 0;
+            row->totalUs = 0;
+            row->maxUs = 0;
+            row->notSuccess = 0;
+        }
+        row->calls++;
+        row->totalUs += durationUs;
+        if (durationUs > row->maxUs) {
+            row->maxUs = durationUs;
+        }
+        if (status != TPS25751TaskStatus::Success) {
+            row->notSuccess++;
+        }
+        row->lastStatus = status;
+    }
+};
+
+// ---------------------------------------------------------------------------
+
 TPS25751 pd(Wire, TPS25751_I2CT_ADDRESS_IDX[0]);
-TPS25751HostExecutor exec(pd);
+TPS25751HostExecutor hostExec(pd);
+TimingExecutor exec(hostExec);
 TPS25751EepromUpdater updater(exec);
 
+// ---------------------------------------------------------------------------
+// Printing helpers
 // ---------------------------------------------------------------------------
 
 static void printHex32(uint32_t v)
@@ -53,6 +228,27 @@ static void printHex32(uint32_t v)
     char buf[11];
     snprintf(buf, sizeof(buf), "0x%08lX", static_cast<unsigned long>(v));
     Serial.print(buf);
+}
+
+static void printHex8(uint8_t v)
+{
+    char buf[5];
+    snprintf(buf, sizeof(buf), "0x%02X", v);
+    Serial.print(buf);
+}
+
+/// One dump line in the format of TPS25751EepromUpdater::dump().
+static void printRow(uint32_t addr, const uint8_t* bytes)
+{
+    char head[10];
+    snprintf(head, sizeof(head), "%08lx:", static_cast<unsigned long>(addr));
+    Serial.print(head);
+    for (size_t i = 0; i < TPS25751EepromUpdater::kFlashReadBytes; ++i) {
+        char byte[4];
+        snprintf(byte, sizeof(byte), " %02x", bytes[i]);
+        Serial.print(byte);
+    }
+    Serial.println();
 }
 
 static bool printMode()
@@ -68,15 +264,25 @@ static bool printMode()
     return mode.isApplicationMode();
 }
 
-static void printVersion()
+static bool readVersion(uint32_t& value)
 {
     auto version = pd.readVersionRegister(/*validate=*/false);
     if (!version) {
+        return false;
+    }
+    value = version->rawVersion();
+    return true;
+}
+
+static void printVersion()
+{
+    uint32_t value = 0;
+    if (!readVersion(value)) {
         Serial.println(F("[version] Failed to read VERSION"));
         return;
     }
     Serial.print(F("[version] VERSION = "));
-    printHex32(version->rawVersion());
+    printHex32(value);
     Serial.println();
 }
 
@@ -115,7 +321,8 @@ static void printBootFlags()
     printFlag(F("Patch Header Error"), flags.patchHeaderError());
 }
 
-static void printPointer(EepromRegion r)
+/// Prints one pointer line and returns true when the pointer read as valid.
+static bool printPointer(EepromRegion r)
 {
     Serial.print(F("[pointer] "));
     Serial.print(TPS25751EepromUpdater::toString(r));
@@ -128,10 +335,18 @@ static void printPointer(EepromRegion r)
     if (s != EepromUpdateStatus::Success) {
         Serial.print(F("read failed: "));
         Serial.println(TPS25751EepromUpdater::toString(s));
-        return;
+        return false;
     }
+    const bool valid = (value == TPS25751EepromUpdater::bundleStart(r));
     printHex32(value);
-    Serial.println(value == TPS25751EepromUpdater::bundleStart(r) ? F(" (valid)") : F(" (not valid)"));
+    Serial.println(valid ? F(" (valid)") : F(" (not valid)"));
+    return valid;
+}
+
+static void printPointers()
+{
+    printPointer(EepromRegion::Low);
+    printPointer(EepromRegion::High);
 }
 
 static void printTarget()
@@ -160,6 +375,36 @@ static void printVerify(EepromRegion r)
     Serial.println(TPS25751EepromUpdater::toString(s));
 }
 
+/// checkImage() for the embedded image against the smaller region.
+static EepromUpdateStatus imageStatus()
+{
+    const uint32_t low = updater.regionCapacity(EepromRegion::Low);
+    const uint32_t high = updater.regionCapacity(EepromRegion::High);
+    return TPS25751EepromUpdater::checkImage(IMAGE, IMAGE_SIZE, (low < high) ? low : high);
+}
+
+static void printImage()
+{
+    Serial.print(F("[image] Embedded image: "));
+    Serial.print(IMAGE_SIZE);
+    Serial.print(F(" bytes, version "));
+    printHex32(TPS25751EepromUpdater::imageVersion(IMAGE, IMAGE_SIZE));
+    Serial.print(F(", checkImage() = "));
+    Serial.println(TPS25751EepromUpdater::toString(imageStatus()));
+    if (imageStatus() != EepromUpdateStatus::Success) {
+        Serial.println(F("[image] Placeholder or unusable image: every command that writes the EEPROM is refused."));
+    }
+}
+
+static void printTiming()
+{
+    exec.print(Serial);
+}
+
+// ---------------------------------------------------------------------------
+// Read-only report
+// ---------------------------------------------------------------------------
+
 static void dumpEeprom()
 {
     Serial.println(F("-----BEGIN EEPROM DUMP 0x00000000-0x00007C00-----"));
@@ -181,31 +426,702 @@ static void dumpEeprom()
     Serial.println(F(" ms"));
 }
 
-// Runs every read-only step once. Issues only FLrd and FLvy.
-static void runReport()
+/// Everything the report prints except the dump. Issues only FLrd and FLvy.
+/// Returns true when MODE reads APP.
+static bool printStatus()
 {
-    Serial.println(F("[report] TPS25751 EEPROM inspection (read-only)"));
-
     const bool app = printMode();
     printVersion();
     printBootFlags();
 
     if (!app) {
         Serial.println(F("[report] Not in APP mode; SLVAFL1 describes EEPROM access in APP mode. Skipping the flash tasks."));
-    } else {
-        printPointer(EepromRegion::Low);
-        printPointer(EepromRegion::High);
-        printTarget();
-        printVerify(EepromRegion::Low);
-        printVerify(EepromRegion::High);
+        return false;
+    }
+    printPointers();
+    printTarget();
+    printVerify(EepromRegion::Low);
+    printVerify(EepromRegion::High);
+    return true;
+}
+
+static void runReport()
+{
+    Serial.println(F("[report] TPS25751 EEPROM inspection (read-only)"));
+    if (printStatus()) {
         dumpEeprom();
         Serial.println(F("[report] Done. No EEPROM write was made."));
     }
-
-    Serial.println(F("[hint] Send 'r' to run the read-only report again."));
 }
 
 // ---------------------------------------------------------------------------
+// Serial input
+// ---------------------------------------------------------------------------
+
+/// Reads one line, blocking. CR, LF, and CRLF each end a line. A line longer
+/// than the buffer comes back empty with tooLong set.
+static void readLine(char* buf, size_t size, bool& tooLong)
+{
+    static bool lastWasCr = false;
+    size_t n = 0;
+    tooLong = false;
+    for (;;) {
+        if (Serial.available() <= 0) {
+            delay(1);
+            continue;
+        }
+        const char c = static_cast<char>(Serial.read());
+        if (c == '\n' && lastWasCr) {
+            lastWasCr = false;  // second half of a CRLF
+            continue;
+        }
+        lastWasCr = (c == '\r');
+        if (c == '\r' || c == '\n') {
+            buf[tooLong ? 0 : n] = '\0';
+            return;
+        }
+        if (n + 1 < size) {
+            buf[n++] = c;
+        } else {
+            tooLong = true;
+        }
+    }
+}
+
+/// Waits for one line. Only the exact line "yes" confirms.
+static bool confirm()
+{
+    Serial.println(F("[confirm] Type yes to proceed; anything else cancels."));
+    char line[16];
+    bool tooLong = false;
+    readLine(line, sizeof(line), tooLong);
+    if (!tooLong && strcmp(line, "yes") == 0) {
+        Serial.println(F("[confirm] Confirmed."));
+        return true;
+    }
+    Serial.println(F("[confirm] Cancelled; nothing was written."));
+    return false;
+}
+
+// ---------------------------------------------------------------------------
+// Checks and plan shared by the commands that write
+// ---------------------------------------------------------------------------
+
+/// The embedded image is a bundle, MODE reads APP, and BOOT_FLAGS reports the
+/// EEPROM. Prints the reason and returns false otherwise.
+static bool writeAllowed()
+{
+    const EepromUpdateStatus image = imageStatus();
+    if (image != EepromUpdateStatus::Success) {
+        Serial.print(F("[refused] The embedded image is not a usable patch bundle: checkImage() = "));
+        Serial.println(TPS25751EepromUpdater::toString(image));
+        Serial.println(F("[refused] Replace src/patch_bundle.h (scripts/bin_to_header.py). Nothing was written."));
+        return false;
+    }
+    TPS25751Mode mode;
+    if (!pd.readMode(mode) || !mode.isApplicationMode()) {
+        Serial.println(F("[refused] MODE does not read APP. Nothing was written."));
+        return false;
+    }
+    TPS25751BootFlags flags;
+    if (!pd.readBootFlags(flags) || !flags.i2cEepromPresent()) {
+        Serial.println(F("[refused] BOOT_FLAGS does not report an I2C EEPROM. Nothing was written."));
+        return false;
+    }
+    return true;
+}
+
+static bool selectTarget(EepromRegion& target)
+{
+    const EepromUpdateStatus s = updater.selectTargetRegion(target);
+    if (s == EepromUpdateStatus::Success) {
+        return true;
+    }
+    Serial.print(F("[refused] No target region: selectTargetRegion() = "));
+    Serial.print(TPS25751EepromUpdater::toString(s));
+    Serial.println(F(". Nothing was written."));
+    return false;
+}
+
+/// The plan every write command prints before it asks for confirmation.
+static void printPlan(const __FlashStringHelper* action, EepromRegion target, bool thenOther)
+{
+    Serial.print(F("[plan] Action: "));
+    Serial.println(action);
+    Serial.print(F("[plan] Target region: "));
+    Serial.print(TPS25751EepromUpdater::toString(target));
+    if (thenOther) {
+        Serial.print(F(", then "));
+        Serial.print(TPS25751EepromUpdater::toString(TPS25751EepromUpdater::otherRegion(target)));
+    }
+    Serial.println();
+    Serial.print(F("[plan] Image: "));
+    Serial.print(IMAGE_SIZE);
+    Serial.print(F(" bytes, version "));
+    printHex32(TPS25751EepromUpdater::imageVersion(IMAGE, IMAGE_SIZE));
+    Serial.println();
+    Serial.print(F("[plan] Current VERSION: "));
+    uint32_t version = 0;
+    if (readVersion(version)) {
+        printHex32(version);
+        Serial.println();
+    } else {
+        Serial.println(F("read failed"));
+    }
+    printPointers();
+    Serial.println(F("[plan] This command writes the EEPROM."));
+}
+
+// ---------------------------------------------------------------------------
+// Progress and the cut points of c1 and c2
+// ---------------------------------------------------------------------------
+
+static uint8_t cutAfterStep = 0;  // 1 or 2: halt in the progress callback after that step
+static EepromUpdateStep progressStep = EepromUpdateStep::None;
+static EepromRegion progressTarget = EepromRegion::Low;
+static uint8_t progressDecile = 0xFF;
+
+static void resetProgress(uint8_t cut)
+{
+    cutAfterStep = cut;
+    progressStep = EepromUpdateStep::None;
+    progressDecile = 0xFF;
+}
+
+static void printProgressLine(EepromRegion target, const __FlashStringHelper* phase,
+                              uint32_t done, uint32_t total)
+{
+    Serial.print(F("[progress] "));
+    Serial.print(TPS25751EepromUpdater::toString(target));
+    Serial.print(' ');
+    Serial.print(phase);
+    Serial.print(' ');
+    Serial.print((total == 0) ? 100u : static_cast<unsigned>((static_cast<uint64_t>(done) * 100) / total));
+    Serial.print(F("% ("));
+    Serial.print(done);
+    Serial.print('/');
+    Serial.print(total);
+    Serial.println(')');
+}
+
+static void printCutLine(uint8_t step)
+{
+    Serial.print(F("[cut] Step "));
+    Serial.print(static_cast<unsigned>(step));
+    Serial.println(F(" of SLVAFL1 Figure 2-3 is complete. Power-cycle the board now."));
+}
+
+/// Stops the update where it stands. Reading the pointers here issues FLrd from
+/// inside the progress callback, which the updater forbids for a callback that
+/// returns; this one never does, so the abandoned update cannot be disturbed.
+[[noreturn]] static void haltAfterStep(uint8_t step)
+{
+    Serial.println(F("[cut] Update stopped inside the progress callback; updateRegion() does not return."));
+    printPointers();
+    printTiming();
+    printCutLine(step);
+    Serial.println(F("[halt] Halted. This command never returns; power-cycle or reset the Teensy to continue."));
+    Serial.flush();
+    for (;;) {
+        delay(1000);
+    }
+}
+
+/// Progress callback: one line per 10% of each phase, and the cut points.
+static void onProgress(uint32_t done, uint32_t total, void*)
+{
+    const EepromUpdateStep step = updater.lastStep();
+    const EepromRegion target = updater.lastTarget();
+    if (step != progressStep || target != progressTarget) {
+        progressStep = step;
+        progressTarget = target;
+        progressDecile = 0xFF;
+    }
+
+    const uint8_t decile =
+        (total == 0) ? 10 : static_cast<uint8_t>((static_cast<uint64_t>(done) * 10) / total);
+    if (decile != progressDecile) {
+        progressDecile = decile;
+        printProgressLine(target, step == EepromUpdateStep::WriteBundle ? F("write") : F("compare"),
+                          done, total);
+    }
+
+    // The write phase reports done == 0 once step 1 is complete and no task of
+    // step 2 has been issued, and done == total once step 2 is complete.
+    if (step == EepromUpdateStep::WriteBundle) {
+        if (cutAfterStep == 1 && done == 0) {
+            haltAfterStep(1);
+        }
+        if (cutAfterStep == 2 && done == total) {
+            haltAfterStep(2);
+        }
+    }
+}
+
+static void printUpdateResult(EepromUpdateStatus s, uint32_t elapsedMs)
+{
+    Serial.print(F("[update] Result: "));
+    Serial.println(TPS25751EepromUpdater::toString(s));
+    Serial.print(F("[update] Last step: "));
+    Serial.println(TPS25751EepromUpdater::toString(updater.lastStep()));
+    Serial.print(F("[update] Last target: "));
+    Serial.println(TPS25751EepromUpdater::toString(updater.lastTarget()));
+    Serial.print(F("[update] Elapsed: "));
+    Serial.print(elapsedMs);
+    Serial.println(F(" ms"));
+}
+
+// ---------------------------------------------------------------------------
+// p: pointer test (hardware stage 2)
+// ---------------------------------------------------------------------------
+
+static bool readWindow(uint8_t* buf)
+{
+    for (size_t off = 0; off < POINTER_WINDOW; off += TPS25751EepromUpdater::kFlashReadBytes) {
+        if (updater.readFlash(HIGH_POINTER + off, buf + off) != EepromUpdateStatus::Success) {
+            return false;
+        }
+    }
+    return true;
+}
+
+static void printWindow(const __FlashStringHelper* label, const uint8_t* buf, bool ok)
+{
+    Serial.print(F("[p] "));
+    Serial.print(label);
+    if (!ok) {
+        Serial.println(F(": read failed"));
+        return;
+    }
+    Serial.println(':');
+    for (size_t off = 0; off < POINTER_WINDOW; off += TPS25751EepromUpdater::kFlashReadBytes) {
+        printRow(HIGH_POINTER + off, buf + off);
+    }
+}
+
+/// Compares bytes 4 to 63 of two windows: everything after the pointer word.
+static void printNeighbors(const __FlashStringHelper* what, const uint8_t* before, bool beforeOk,
+                           const uint8_t* after, bool afterOk)
+{
+    Serial.print(F("[p] Bytes 0x0404 to 0x043F unchanged by the "));
+    Serial.print(what);
+    if (!beforeOk || !afterOk) {
+        Serial.println(F(": unknown (read failed)"));
+        return;
+    }
+    Serial.println(memcmp(before + 4, after + 4, POINTER_WINDOW - 4) == 0 ? F(": yes") : F(": NO"));
+}
+
+static void printPointerWrite(uint32_t value, EepromUpdateStatus s)
+{
+    Serial.print(F("[p] writeRegionPointer(High, "));
+    printHex32(value);
+    Serial.print(F("): "));
+    Serial.println(TPS25751EepromUpdater::toString(s));
+}
+
+static void cmdPointerTest()
+{
+    if (!writeAllowed()) {
+        return;
+    }
+    uint32_t low = 0;
+    uint32_t high = 0;
+    if (updater.readRegionPointer(EepromRegion::Low, low) != EepromUpdateStatus::Success ||
+        updater.readRegionPointer(EepromRegion::High, high) != EepromUpdateStatus::Success ||
+        low != TPS25751EepromUpdater::bundleStart(EepromRegion::Low) ||
+        high != TPS25751EepromUpdater::bundleStart(EepromRegion::High)) {
+        Serial.println(F("[refused] The pointer test needs both region pointers valid. Nothing was written."));
+        printPointers();
+        return;
+    }
+
+    printPlan(F("p: pointer test. Writes the High pointer to 0, then back to 0x00004400"),
+              EepromRegion::High, false);
+    if (!confirm()) {
+        return;
+    }
+
+    exec.reset();
+    const uint32_t highStart = TPS25751EepromUpdater::bundleStart(EepromRegion::High);
+    uint8_t before[POINTER_WINDOW];
+    uint8_t afterErase[POINTER_WINDOW];
+    uint8_t afterRestore[POINTER_WINDOW];
+
+    const bool beforeOk = readWindow(before);
+    printWindow(F("Before"), before, beforeOk);
+    if (!beforeOk) {
+        Serial.println(F("[p] Stopped before any write."));
+        printTiming();
+        return;
+    }
+
+    const EepromUpdateStatus erase = updater.writeRegionPointer(EepromRegion::High, 0);
+    printPointerWrite(0, erase);
+    const bool eraseOk = readWindow(afterErase);
+    printWindow(F("After the erase"), afterErase, eraseOk);
+    printNeighbors(F("erase"), before, beforeOk, afterErase, eraseOk);
+    if (erase != EepromUpdateStatus::Success) {
+        Serial.println(F("[p] The erase did not report Success; attempting the restore anyway."));
+    }
+
+    const EepromUpdateStatus restore = updater.writeRegionPointer(EepromRegion::High, highStart);
+    printPointerWrite(highStart, restore);
+    const bool restoreOk = readWindow(afterRestore);
+    printWindow(F("After the restore"), afterRestore, restoreOk);
+    printNeighbors(F("restore"), before, beforeOk, afterRestore, restoreOk);
+    Serial.print(F("[p] All 64 bytes equal the bytes before the test"));
+    if (!restoreOk) {
+        Serial.println(F(": unknown (read failed)"));
+    } else {
+        Serial.println(memcmp(before, afterRestore, POINTER_WINDOW) == 0 ? F(": yes") : F(": NO"));
+    }
+
+    printPointers();
+    printTiming();
+}
+
+// ---------------------------------------------------------------------------
+// u, b: updates
+// ---------------------------------------------------------------------------
+
+static void cmdUpdate(bool both)
+{
+    if (!writeAllowed()) {
+        return;
+    }
+    EepromRegion target = EepromRegion::Low;
+    if (!selectTarget(target)) {
+        return;
+    }
+    printPlan(both ? F("b: updateBothRegions() with the embedded image")
+                   : F("u: updateInactiveRegion() with the embedded image"),
+              target, both);
+    if (!confirm()) {
+        return;
+    }
+
+    exec.reset();
+    resetProgress(0);
+    const uint32_t started = millis();
+    const EepromUpdateStatus s = both ? updater.updateBothRegions(IMAGE, IMAGE_SIZE)
+                                      : updater.updateInactiveRegion(IMAGE, IMAGE_SIZE);
+    printUpdateResult(s, millis() - started);
+    printPointers();
+    printTiming();
+    if (s == EepromUpdateStatus::Success) {
+        Serial.println(F("[update] The controller still runs the bundle it booted. Send x to restart it."));
+    }
+}
+
+// ---------------------------------------------------------------------------
+// c1 to c4: interrupted updates (hardware stage 4)
+// ---------------------------------------------------------------------------
+
+static void cmdCut(uint8_t step)
+{
+    if (!writeAllowed()) {
+        return;
+    }
+    EepromRegion target = EepromRegion::Low;
+    if (!selectTarget(target)) {
+        return;
+    }
+
+    const __FlashStringHelper* action =
+        (step == 1) ? F("c1: update the inactive region and halt after step 1 (target pointer erased)")
+      : (step == 2) ? F("c2: update the inactive region and halt after step 2 (bundle written, pointer still 0)")
+      : (step == 3) ? F("c3: update the inactive region and stop after step 3 (target pointer restored, old pointer kept)")
+                    : F("c4: update the inactive region completely, steps 1 to 4");
+    printPlan(action, target, false);
+    if (!confirm()) {
+        return;
+    }
+
+    exec.reset();
+    resetProgress(step <= 2 ? step : 0);
+    EepromUpdateOptions opt;
+    opt.invalidateOldRegion = (step != 3);  // c3 leaves out step 4
+
+    const uint32_t started = millis();
+    const EepromUpdateStatus s = updater.updateRegion(target, IMAGE, IMAGE_SIZE, opt);
+    resetProgress(0);
+
+    // c1 and c2 reach this line only when the update failed before its cut point.
+    printUpdateResult(s, millis() - started);
+    printPointers();
+    printTiming();
+    if (s == EepromUpdateStatus::Success && step >= 3) {
+        printCutLine(step);
+    } else {
+        Serial.print(F("[cut] The update ended before the cut point; step "));
+        Serial.print(static_cast<unsigned>(step));
+        Serial.println(F(" was not completed. See the result above."));
+    }
+}
+
+// ---------------------------------------------------------------------------
+// v: FLvy experiment (hardware stage 3), built from the public primitives
+// ---------------------------------------------------------------------------
+
+/// One chunk at the current write address, with the updater's busy rule.
+static EepromUpdateStatus writeChunkWithRetry(uint32_t addr, const uint8_t* data, size_t len)
+{
+    EepromUpdateStatus s = updater.writeData(data, len);
+    for (uint8_t retry = 0; s == EepromUpdateStatus::FlashBusy && retry < FLWD_BUSY_RETRIES; ++retry) {
+        delay(FLWD_BUSY_RETRY_DELAY_MS);
+        s = updater.setWriteAddress(addr);
+        if (s != EepromUpdateStatus::Success) {
+            return s;
+        }
+        s = updater.writeData(data, len);
+    }
+    return s;
+}
+
+static EepromUpdateStatus writeImageWithPrimitives(EepromRegion target)
+{
+    const uint32_t start = TPS25751EepromUpdater::bundleStart(target);
+    EepromUpdateStatus s = updater.setWriteAddress(start);
+    uint8_t decile = 0;
+    size_t offset = 0;
+    printProgressLine(target, F("write"), 0, IMAGE_SIZE);
+    while (s == EepromUpdateStatus::Success && offset < IMAGE_SIZE) {
+        const size_t remaining = IMAGE_SIZE - offset;
+        const size_t n = (remaining < TPS25751EepromUpdater::kFlashWriteChunk)
+                             ? remaining : TPS25751EepromUpdater::kFlashWriteChunk;
+        s = writeChunkWithRetry(start + offset, IMAGE + offset, n);
+        if (s != EepromUpdateStatus::Success) {
+            break;
+        }
+        offset += n;
+        const uint8_t now = static_cast<uint8_t>((static_cast<uint64_t>(offset) * 10) / IMAGE_SIZE);
+        if (now != decile) {
+            decile = now;
+            printProgressLine(target, F("write"), offset, IMAGE_SIZE);
+        }
+    }
+    return s;
+}
+
+static void printStep(const __FlashStringHelper* what, EepromUpdateStatus s)
+{
+    Serial.print(F("[v] "));
+    Serial.print(what);
+    Serial.print(F(": "));
+    Serial.println(TPS25751EepromUpdater::toString(s));
+}
+
+static void finishExperiment(EepromRegion target, const __FlashStringHelper* note)
+{
+    Serial.print(F("[v] "));
+    Serial.println(note);
+    Serial.print(F("[v] The "));
+    Serial.print(TPS25751EepromUpdater::toString(target));
+    Serial.println(F(" pointer is left at 0, so that region cannot boot. Run u or b to repair it."));
+    printPointers();
+    printTiming();
+}
+
+static void cmdVerifyExperiment()
+{
+    if (!writeAllowed()) {
+        return;
+    }
+    // The byte to corrupt sits in the middle of the image, well past the header.
+    if (IMAGE_SIZE < 0x400) {
+        Serial.println(F("[refused] The image is too small for this experiment. Nothing was written."));
+        return;
+    }
+    EepromRegion target = EepromRegion::Low;
+    if (!selectTarget(target)) {
+        return;
+    }
+    const EepromRegion other = TPS25751EepromUpdater::otherRegion(target);
+    uint32_t otherPointer = 0;
+    if (updater.readRegionPointer(other, otherPointer) != EepromUpdateStatus::Success ||
+        otherPointer != TPS25751EepromUpdater::bundleStart(other)) {
+        Serial.println(F("[refused] The other region's pointer is not valid, and this experiment erases the target pointer. Nothing was written."));
+        printPointers();
+        return;
+    }
+
+    printPlan(F("v: FLvy experiment. Erases the target pointer, writes the image, corrupts one byte, leaves the pointer at 0"),
+              target, false);
+    if (!confirm()) {
+        return;
+    }
+
+    exec.reset();
+    const uint32_t start = TPS25751EepromUpdater::bundleStart(target);
+
+    // 1. Erase the target pointer, as step 1 of an update does.
+    EepromUpdateStatus s = updater.writeRegionPointer(target, 0);
+    Serial.print(F("[v] writeRegionPointer("));
+    Serial.print(TPS25751EepromUpdater::toString(target));
+    Serial.print(F(", 0x00000000): "));
+    Serial.println(TPS25751EepromUpdater::toString(s));
+    if (s != EepromUpdateStatus::Success) {
+        Serial.println(F("[v] The pointer erase failed; the experiment stops before the region is written."));
+        printPointers();
+        printTiming();
+        return;
+    }
+
+    // 2. Write the image.
+    const uint32_t started = millis();
+    s = writeImageWithPrimitives(target);
+    printStep(F("Image write"), s);
+    Serial.print(F("[v] Image write took "));
+    Serial.print(millis() - started);
+    Serial.println(F(" ms"));
+    if (s != EepromUpdateStatus::Success) {
+        finishExperiment(target, F("The image write failed; the experiment stops here."));
+        return;
+    }
+
+    // 3. The clean region must verify and compare before it is corrupted.
+    uint32_t mismatch = 0;
+    const EepromUpdateStatus cleanVerify = updater.verifyBundle(start);
+    printStep(F("FLvy after the clean write"), cleanVerify);
+    const EepromUpdateStatus cleanCompare = updater.compareRegion(target, IMAGE, IMAGE_SIZE, &mismatch);
+    printStep(F("compareRegion() after the clean write"), cleanCompare);
+    if (cleanVerify != EepromUpdateStatus::Success || cleanCompare != EepromUpdateStatus::Success) {
+        finishExperiment(target, F("The clean write did not verify; the experiment stops here."));
+        return;
+    }
+
+    // 4. Overwrite one byte: a full chunk that differs from the image in that byte.
+    const size_t offset = (IMAGE_SIZE / 2 / TPS25751EepromUpdater::kFlashWriteChunk) *
+                              TPS25751EepromUpdater::kFlashWriteChunk + 5;
+    const size_t chunkStart = offset - 5;
+    const size_t remaining = IMAGE_SIZE - chunkStart;
+    const size_t n = (remaining < TPS25751EepromUpdater::kFlashWriteChunk)
+                         ? remaining : TPS25751EepromUpdater::kFlashWriteChunk;
+    uint8_t chunk[TPS25751EepromUpdater::kFlashWriteChunk];
+    memcpy(chunk, IMAGE + chunkStart, n);
+    chunk[5] = static_cast<uint8_t>(chunk[5] ^ 0xFF);
+
+    Serial.print(F("[v] Corrupting image offset "));
+    printHex32(static_cast<uint32_t>(offset));
+    Serial.print(F(" (EEPROM address "));
+    printHex32(start + static_cast<uint32_t>(offset));
+    Serial.print(F("): "));
+    printHex8(IMAGE[offset]);
+    Serial.print(F(" -> "));
+    printHex8(chunk[5]);
+    Serial.println();
+
+    s = updater.setWriteAddress(start + static_cast<uint32_t>(chunkStart));
+    if (s == EepromUpdateStatus::Success) {
+        s = writeChunkWithRetry(start + static_cast<uint32_t>(chunkStart), chunk, n);
+    }
+    printStep(F("Corrupting write"), s);
+    if (s != EepromUpdateStatus::Success) {
+        finishExperiment(target, F("The corrupting write failed; the region may or may not be changed."));
+        return;
+    }
+    uint8_t row[TPS25751EepromUpdater::kFlashReadBytes];
+    if (updater.readFlash(start + static_cast<uint32_t>(chunkStart), row) == EepromUpdateStatus::Success) {
+        Serial.println(F("[v] The 16 bytes that hold the corrupted byte now read:"));
+        printRow(start + static_cast<uint32_t>(chunkStart), row);
+    }
+
+    // 5. What FLvy and the compare say about the corrupted region.
+    const EepromUpdateStatus corruptVerify = updater.verifyBundle(start);
+    printStep(F("FLvy after corrupting one byte"), corruptVerify);
+    if (corruptVerify == EepromUpdateStatus::Success) {
+        Serial.println(F("[v] FLvy did NOT report the corrupted byte."));
+    } else if (corruptVerify == EepromUpdateStatus::VerifyFailed) {
+        Serial.println(F("[v] FLvy reported the corrupted byte."));
+    } else {
+        Serial.println(F("[v] FLvy did not complete."));
+    }
+
+    const EepromUpdateStatus corruptCompare = updater.compareRegion(target, IMAGE, IMAGE_SIZE, &mismatch);
+    printStep(F("compareRegion() after corrupting one byte"), corruptCompare);
+    if (corruptCompare == EepromUpdateStatus::CompareMismatch) {
+        Serial.print(F("[v] compareRegion() first mismatch at image offset "));
+        printHex32(mismatch);
+        Serial.println();
+    }
+
+    finishExperiment(target, F("Experiment complete."));
+}
+
+// ---------------------------------------------------------------------------
+// x: cold reset
+// ---------------------------------------------------------------------------
+
+static void cmdColdReset()
+{
+    Serial.println(F("[x] coldReset(): issuing GAID. The port disconnects while the controller restarts."));
+    exec.reset();
+    const uint32_t started = millis();
+    const EepromUpdateStatus s = updater.coldReset();
+    const uint32_t elapsed = millis() - started;
+
+    Serial.print(F("[x] Result: "));
+    Serial.println(TPS25751EepromUpdater::toString(s));
+    if (s == EepromUpdateStatus::Success) {
+        Serial.print(F("[x] Time to APP: "));
+        Serial.print(elapsed);
+        Serial.println(F(" ms from issuing GAID"));
+        if (elapsed < 1000) {
+            Serial.println(F("[x] Note: under 1000 ms. TRM Table 4-3 gives a typical 1-second delay before the restart, so MODE may have been read before it. Send r in a few seconds and compare."));
+        }
+    } else {
+        Serial.print(F("[x] APP was not confirmed; coldReset() returned after "));
+        Serial.print(elapsed);
+        Serial.println(F(" ms"));
+    }
+    printMode();
+    printVersion();
+    printBootFlags();
+    printTiming();
+}
+
+// ---------------------------------------------------------------------------
+// Command loop
+// ---------------------------------------------------------------------------
+
+static void printReady()
+{
+    Serial.println(F("[ready] Commands: r p u b x c1 c2 c3 c4 v"));
+}
+
+static void runCommand(const char* line)
+{
+    if (strcmp(line, "r") == 0) {
+        runReport();
+    } else if (strcmp(line, "p") == 0) {
+        cmdPointerTest();
+    } else if (strcmp(line, "u") == 0) {
+        cmdUpdate(/*both=*/false);
+    } else if (strcmp(line, "b") == 0) {
+        cmdUpdate(/*both=*/true);
+    } else if (strcmp(line, "x") == 0) {
+        cmdColdReset();
+    } else if (strcmp(line, "c1") == 0) {
+        cmdCut(1);
+    } else if (strcmp(line, "c2") == 0) {
+        cmdCut(2);
+    } else if (strcmp(line, "c3") == 0) {
+        cmdCut(3);
+    } else if (strcmp(line, "c4") == 0) {
+        cmdCut(4);
+    } else if (strcmp(line, "v") == 0) {
+        cmdVerifyExperiment();
+    } else {
+        Serial.print(F("[error] Unknown command: "));
+        Serial.println(line);
+        printReady();
+        return;
+    }
+    Serial.print(F("[done] "));
+    Serial.println(line);
+    printReady();
+}
 
 void setup()
 {
@@ -219,16 +1135,27 @@ void setup()
     TPS25751::setDebugCategories(DEBUG_CAT_TASK | DEBUG_CAT_I2C);
 
     pd.begin();
+    updater.setProgressCallback(onProgress, nullptr);
 
-    runReport();
+    Serial.println(F("[setup] TPS25751 EEPROM update example"));
+    Serial.println(F("[setup] r reads. x restarts the controller. p u b c1 c2 c3 c4 v write the EEPROM, each after a typed yes."));
+    printImage();
+    printStatus();
+    printReady();
 }
 
 void loop()
 {
-    while (Serial.available() > 0) {
-        if (Serial.read() == 'r') {
-            runReport();
-        }
+    char line[16];
+    bool tooLong = false;
+    readLine(line, sizeof(line), tooLong);
+    if (tooLong) {
+        Serial.println(F("[error] Line too long"));
+        printReady();
+        return;
     }
-    delay(10);
+    if (line[0] == '\0') {
+        return;  // an empty line at the prompt is ignored
+    }
+    runCommand(line);
 }

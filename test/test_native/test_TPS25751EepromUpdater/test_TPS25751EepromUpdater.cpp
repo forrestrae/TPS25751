@@ -318,7 +318,7 @@ void test_select_region1_flags_do_not_affect_row_1()
 
 void test_select_low_valid_high_not_valid_targets_high()
 {
-    // Row 2. BOOT_STATUS says region 0 is bad, but it is not consulted.
+    // Row 2. BOOT_FLAGS says region 0 is bad, but it is not consulted.
     FakeCommandExecutor fake;
     loadFullFlash(fake, makeBundle());
     fake.writeLe32(HIGH_PTR, 0);
@@ -345,9 +345,9 @@ void test_select_low_not_valid_high_valid_targets_low()
     TEST_ASSERT_EQUAL_size_t(0, fake.bootFlagsReads);
 }
 
-void test_select_stale_boot_status_follows_pointers()
+void test_select_stale_boot_flags_follows_pointers()
 {
-    // After a high-region update without a reset, BOOT_STATUS still describes
+    // After a high-region update without a reset, BOOT_FLAGS still describes
     // the boot from low (healthy), but the low pointer is now 0 and only the
     // high pointer is valid. Figure 2-2 alone would choose High and erase the
     // only valid pointer; the pointer-first rule chooses Low.
@@ -381,7 +381,7 @@ void test_select_neither_valid_is_no_bootable_region()
     }
 }
 
-void test_select_boot_status_read_failure()
+void test_select_boot_flags_read_failure()
 {
     FakeCommandExecutor fake;
     loadFullFlash(fake, makeBundle());
@@ -780,7 +780,7 @@ void test_fake_gaid_reboot_and_clock()
     TEST_ASSERT_FALSE(fake.readMode(mode));
 }
 
-void test_fake_unknown_code_is_rejected_and_boot_status_reads()
+void test_fake_unknown_code_is_rejected_and_boot_flags_reads()
 {
     FakeCommandExecutor fake;
     TEST_ASSERT_EQUAL(TPS25751TaskStatus::Rejected,
@@ -824,9 +824,9 @@ int main(int, char **)
     RUN_TEST(test_select_region1_flags_do_not_affect_row_1);
     RUN_TEST(test_select_low_valid_high_not_valid_targets_high);
     RUN_TEST(test_select_low_not_valid_high_valid_targets_low);
-    RUN_TEST(test_select_stale_boot_status_follows_pointers);
+    RUN_TEST(test_select_stale_boot_flags_follows_pointers);
     RUN_TEST(test_select_neither_valid_is_no_bootable_region);
-    RUN_TEST(test_select_boot_status_read_failure);
+    RUN_TEST(test_select_boot_flags_read_failure);
     RUN_TEST(test_select_pointer_read_failures);
 
     RUN_TEST(test_compare_region_match_low_and_high);
@@ -854,7 +854,7 @@ int main(int, char **)
     RUN_TEST(test_fake_busy_fault_writes_nothing_and_hook_runs);
     RUN_TEST(test_fake_failure_with_run_task_still_writes);
     RUN_TEST(test_fake_gaid_reboot_and_clock);
-    RUN_TEST(test_fake_unknown_code_is_rejected_and_boot_status_reads);
+    RUN_TEST(test_fake_unknown_code_is_rejected_and_boot_flags_reads);
 
     return UNITY_END();
 }

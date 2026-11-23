@@ -19,10 +19,10 @@
 //   - FLvy (Table 4-22): 0x00 when the 4 bytes at the address are the
 //     little-endian Header_ID 0xACE00001, else 0x01;
 //   - GAID (Table 4-3): clears DATA and the write address, counts the reset, and
-//     makes MODE and BOOT_STATUS reads fail for rebootDurationMs of fake time,
+//     makes MODE and BOOT_FLAGS reads fail for rebootDurationMs of fake time,
 //     after which MODE reads modeAfterReset;
 //   - any other code: COMMAND reads "!CMD" (Rejected);
-//   - MODE and BOOT_STATUS register contents, with read failures on demand;
+//   - MODE and BOOT_FLAGS register contents, with read failures on demand;
 //   - a fake clock: delayMs() advances it, and every executeCommand() advances
 //     it by msPerCommand;
 //   - a log of every executeCommand() call (4CC, input payload, outLen,
@@ -53,7 +53,7 @@ class FakeCommandExecutor : public TPS25751CommandExecutor
 public:
     static constexpr size_t kDataSize = TPS25751Registers::Registers::DATA.size;  // 64
     static constexpr size_t kModeSize = TPS25751Registers::Registers::MODE.size;  // 4
-    static constexpr size_t kBootSize = TPS25751Registers::Registers::BOOT_STATUS.size;  // 5
+    static constexpr size_t kBootSize = TPS25751Registers::Registers::BOOT_FLAGS.size;  // 5
 
     static constexpr uint8_t kRcSuccess = 0x00;   // TRM Table 4-1
     static constexpr uint8_t kRcRejected = 0x03;  // TRM Table 4-1
@@ -61,7 +61,7 @@ public:
     static constexpr uint8_t kRcNotValid = 0x01;  // FLvy "not valid", Table 4-22
     static constexpr uint32_t kHeaderId = 0xACE00001UL;
 
-    // BOOT_STATUS bit positions (TRM, register 0x2D "Boot Flags").
+    // BOOT_FLAGS (0x2D) bit positions, TRM SLVUCR8B p.33.
     static constexpr uint8_t kBitI2cEepromPresent = 3;
     static constexpr uint8_t kBitRegion0Invalid = 6;
     static constexpr uint8_t kBitRegion1Invalid = 7;
@@ -107,7 +107,7 @@ public:
         setMode("APP ");
         setModeAfterReset("APP ");
         memset(data, 0, sizeof(data));
-        memset(bootStatus, 0, sizeof(bootStatus));
+        memset(bootFlags, 0, sizeof(bootFlags));
     }
 
     // --- State (public so tests can inspect and edit it directly) -----------
@@ -116,7 +116,7 @@ public:
     uint8_t data[kDataSize];
     uint8_t mode[kModeSize];
     uint8_t modeAfterReset[kModeSize];
-    uint8_t bootStatus[kBootSize];
+    uint8_t bootFlags[kBootSize];
 
     uint32_t writeAddress = 0;
     bool writeAddressSet = false;
@@ -145,14 +145,14 @@ public:
     void setBootBit(uint8_t bit, bool value)
     {
         const uint8_t mask = static_cast<uint8_t>(1u << (bit % 8));
-        if (value) bootStatus[bit / 8] |= mask;
-        else bootStatus[bit / 8] &= static_cast<uint8_t>(~mask);
+        if (value) bootFlags[bit / 8] |= mask;
+        else bootFlags[bit / 8] &= static_cast<uint8_t>(~mask);
     }
 
-    // Patch Config Source, BOOT_STATUS bits 31:29.
+    // Patch Config Source, BOOT_FLAGS bits 31:29.
     void setPatchConfigSource(uint8_t source)
     {
-        bootStatus[3] = static_cast<uint8_t>((bootStatus[3] & 0x1F) | ((source & 0x07) << 5));
+        bootFlags[3] = static_cast<uint8_t>((bootFlags[3] & 0x1F) | ((source & 0x07) << 5));
     }
 
     void writeBytes(uint32_t addr, const uint8_t *src, size_t len)
@@ -261,7 +261,7 @@ public:
     {
         ++bootFlagsReads;
         if (bootFlagsReadFails || stillRebooting()) return false;
-        out = TPS25751BootFlags(bootStatus);
+        out = TPS25751BootFlags(bootFlags);
         return true;
     }
 

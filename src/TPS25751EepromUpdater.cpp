@@ -159,10 +159,10 @@ EepromUpdateStatus TPS25751EepromUpdater::selectTargetRegion(EepromRegion& targe
         return EepromUpdateStatus::NoBootableRegion;
     }
 
-    // Both valid: SLVAFL1 Figure 2-2 decides from BOOT_STATUS.
+    // Both valid: SLVAFL1 Figure 2-2 decides from BOOT_FLAGS (0x2D).
     TPS25751BootFlags flags;
     if (!_exec.readBootFlags(flags)) {
-        TPS_DEBUG_ERROR(DEBUG_CAT_TASK, "EEPROM: failed to read BOOT_STATUS");
+        TPS_DEBUG_ERROR(DEBUG_CAT_TASK, "EEPROM: failed to read BOOT_FLAGS");
         return EepromUpdateStatus::I2cError;
     }
     target = (flags.region0Invalid() || flags.region0EepromError())

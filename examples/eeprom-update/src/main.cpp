@@ -8,7 +8,7 @@
 // Reads the TPS25751 configuration EEPROM through the flash 4CC tasks while the
 // controller runs in APP mode, and prints what an update would start from:
 //
-//   - MODE, VERSION, and BOOT_STATUS (Patch Config Source and the region flags);
+//   - MODE, VERSION, and BOOT_FLAGS (0x2D; Patch Config Source and the region flags);
 //   - both region pointers and whether each equals its bundle start;
 //   - the region an update would target (TPS25751EepromUpdater::selectTargetRegion);
 //   - the FLvy result for each region's bundle start;
@@ -81,10 +81,10 @@ static void printBootStatus()
 {
     TPS25751BootFlags flags;
     if (!pd.readBootFlags(flags)) {
-        Serial.println(F("[boot] Failed to read BOOT_STATUS"));
+        Serial.println(F("[boot] Failed to read BOOT_FLAGS"));
         return;
     }
-    Serial.print(F("[boot] BOOT_STATUS raw ="));
+    Serial.print(F("[boot] BOOT_FLAGS raw ="));
     for (size_t i = 0; i < flags.size(); ++i) {
         char buf[4];
         snprintf(buf, sizeof(buf), " %02X", flags.raw()[i]);

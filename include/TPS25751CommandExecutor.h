@@ -5,7 +5,7 @@
  * @brief Abstract host interface that sequencers such as TPS25751EepromUpdater drive
  *
  * TPS25751EepromUpdater needs four things from the host: the 4CC task executor,
- * the MODE and BOOT_STATUS reads, and a clock. TPS25751 provides all of them, but
+ * the MODE and BOOT_FLAGS reads, and a clock. TPS25751 provides all of them, but
  * src/TPS25751.cpp needs Wire and is not part of the native test build. This
  * interface is the seam between the two: TPS25751HostExecutor adapts a TPS25751 to
  * it on the target, and the native tests supply a scripted fake.
@@ -64,7 +64,7 @@ public:
     virtual bool readMode(TPS25751Mode& mode) = 0;
 
     /**
-     * @brief Read the BOOT_STATUS register (0x2D, "Boot Flags")
+     * @brief Read the BOOT_FLAGS register (0x2D)
      * @param flags Register object to populate
      * @return true if the read succeeded
      */

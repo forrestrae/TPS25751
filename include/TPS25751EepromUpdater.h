@@ -89,7 +89,7 @@ enum class EepromRegion : uint8_t {
 enum class EepromUpdateStatus : uint8_t {
     Success,                  ///< The call completed as requested
     NotInAppMode,             ///< Pre-flight: MODE did not read APP
-    NoEepromPresent,          ///< Pre-flight: BOOT_STATUS did not report I2C EEPROM Present
+    NoEepromPresent,          ///< Pre-flight: BOOT_FLAGS (0x2D) did not report I2C EEPROM Present
     BadImageHeader,           ///< checkImage(): the image does not start with 0xACE00001
     BadImageLength,           ///< checkImage(): the image is shorter than 0x38 bytes or longer than the region
     NoBootableRegion,         ///< Neither region pointer equals its bundle start
@@ -253,10 +253,11 @@ public:
     /**
      * @brief Choose the region an update should write
      *
-     * The region pointers decide first, BOOT_STATUS second. BOOT_STATUS is
-     * latched at boot, so after an update without a reset it describes the old
-     * layout; following SLVAFL1 Figure 2-2 alone in that state could select the
-     * region whose pointer is the only valid one.
+     * The region pointers decide first, BOOT_FLAGS (0x2D) second; SLVAFL1
+     * Figure 2-2 decides from BOOT_FLAGS alone and calls the register
+     * BOOT_STATUS. BOOT_FLAGS is latched at boot, so after an update without a
+     * reset it describes the old layout; following Figure 2-2 alone in that
+     * state could select the region whose pointer is the only valid one.
      *
      * | Low pointer | High pointer | Target |
      * |---|---|---|
@@ -265,10 +266,10 @@ public:
      * | Not valid | Valid | Low |
      * | Not valid | Not valid | None: NoBootableRegion |
      *
-     * BOOT_STATUS is read only in the first row.
+     * BOOT_FLAGS is read only in the first row.
      *
      * @param target Receives the region; written only on Success
-     * @return Success, NoBootableRegion, I2cError if BOOT_STATUS cannot be read,
+     * @return Success, NoBootableRegion, I2cError if BOOT_FLAGS cannot be read,
      *         or a readFlash() failure
      */
     EepromUpdateStatus selectTargetRegion(EepromRegion& target);

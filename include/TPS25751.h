@@ -846,4 +846,8 @@ private:
 // TPS25751PatchLoader.h forward-declares TPS25751 to avoid a circular include.
 #include "TPS25751PatchLoader.h"
 
+// The executor seam and its TPS25751 adapter, included here for the same reason.
+// TPS25751HostExecutor.h forward-declares TPS25751.
+#include "TPS25751HostExecutor.h"
+
 #endif // TPS25751_H

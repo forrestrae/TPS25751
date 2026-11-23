@@ -3,29 +3,47 @@
 // Scripted TPS25751CommandExecutor for the native suites.
 //
 // Models what the flash 4CC tasks touch, closely enough to test a sequencer
-// without hardware:
+// without hardware. The model mixes behaviour the TI documents state with
+// choices the fake has to make where they are silent. Each item below says
+// which it is; "assumption" means the TRM (SLVUCR8B pages 61, 62, 81, 82) does
+// not describe it, and a test that relies on it pins the fake, not the device.
 //
-//   - a byte-array EEPROM (erased to 0xFF) of a configurable size;
-//   - the 64-byte DATA register: the input payload is written to DATA bytes
+//   - A byte-array EEPROM, erased to 0xFF, of a configurable size. There is no
+//     page-size model: a write is never wrapped within an EEPROM page
+//     (assumption; the 24LC256 itself wraps at 64-byte pages).
+//   - The 64-byte DATA register: the input payload is written to DATA bytes
 //     0..inLen-1, the task writes its output, and outData is copied from DATA
-//     byte 0, as TPS25751::executeCommand() does. returnCode is always DATA[0];
-//   - FLrd (TRM Table 4-19): 16 bytes from the 4-byte little-endian address,
-//     0xFF past the end of the EEPROM, no return-code byte;
-//   - FLad (Table 4-20): loads the write-address register; 0x00, or 0x03
-//     (rejected) for an address past the end;
-//   - FLwd (Table 4-21): writes inLen bytes (up to 64) at the write address and
-//     auto-increments it; 0x00, or 0x03 when no FLad was issued since the last
-//     reset or the write would run past the end;
-//   - FLvy (Table 4-22): 0x00 when the 4 bytes at the address are the
-//     little-endian Header_ID 0xACE00001, else 0x01;
-//   - GAID (Table 4-3): clears DATA and the write address, counts the reset, and
-//     makes MODE and BOOT_FLAGS reads fail for rebootDurationMs of fake time,
-//     after which MODE reads modeAfterReset;
-//   - any other code: COMMAND reads "!CMD" (Rejected);
-//   - MODE and BOOT_FLAGS register contents, with read failures on demand;
-//   - a fake clock: delayMs() advances it, and every executeCommand() advances
-//     it by msPerCommand;
-//   - a log of every executeCommand() call (4CC, input payload, outLen,
+//     byte 0, as TPS25751::executeCommand() does. returnCode is always DATA[0].
+//   - Addresses are decoded from the 4 input bytes least significant byte
+//     first. Table 4-20 states this for FLad only; for FLrd and FLvy it is
+//     inferred from Table 4-20 and the struct cast in the SLVAFL1 source code.
+//   - FLrd: 16 bytes starting at the address, DATA byte 0 holding the byte at
+//     the address (Table 4-19 gives 16 bytes and no return-code byte; the byte
+//     order is inferred). Bytes past the end of the EEPROM read 0xFF
+//     (assumption, not in the TRM).
+//   - FLad: loads the write-address register and returns 0x00 (Table 4-20 and
+//     the standard return codes of Table 4-1). An address at or past the end of
+//     the EEPROM returns 0x03 (assumption, not in the TRM).
+//   - FLwd: writes the inLen input bytes at the write address, auto-increments
+//     the address, and returns 0x00 (Table 4-21). Writing exactly inLen bytes is
+//     an assumption until hardware stage 2 confirms it. Returning 0x03 when no
+//     FLad was issued since the last reset, or when the write would pass the
+//     end, is an assumption, not in the TRM: Table 4-21 documents only 0x00
+//     (written) and 0xFF (busy). 0xFF is produced only by an injected fault.
+//   - FLvy: 0x00 valid, 0x01 not valid (Table 4-22). Deciding validity from the
+//     four Header_ID bytes alone (little-endian 0xACE00001) is an assumption,
+//     not in the TRM, which says only that the task completes after the header
+//     is checked.
+//   - GAID: counts the reset and makes MODE and BOOT_FLAGS reads fail for
+//     rebootDurationMs of fake time, after which MODE reads modeAfterReset (the
+//     controller can NAK while rebooting, Table 4-3). It clears DATA, as the TRM
+//     says all CMDx and DATAx registers return to 0. Clearing the FLad write
+//     address is an assumption, not in the TRM.
+//   - Any other code: COMMAND reads "!CMD" (Rejected).
+//   - MODE and BOOT_FLAGS register contents, with read failures on demand.
+//   - A fake clock: delayMs() advances it, and every executeCommand() advances
+//     it by msPerCommand.
+//   - A log of every executeCommand() call (4CC, input payload, outLen,
 //     timeout, result).
 //
 // Faults are injected per call, either by the global call index or by the n-th
@@ -55,8 +73,9 @@ public:
     static constexpr size_t kModeSize = TPS25751Registers::Registers::MODE.size;  // 4
     static constexpr size_t kBootSize = TPS25751Registers::Registers::BOOT_FLAGS.size;  // 5
 
-    static constexpr uint8_t kRcSuccess = 0x00;   // TRM Table 4-1
-    static constexpr uint8_t kRcRejected = 0x03;  // TRM Table 4-1
+    static constexpr uint8_t kRcSuccess = 0x00;   // standard "completed", TRM Table 4-1
+    static constexpr uint8_t kRcRejected = 0x03;  // standard "rejected", Table 4-1; see the
+                                                  // assumptions above for where the fake uses it
     static constexpr uint8_t kRcBusy = 0xFF;      // FLwd "flash is busy", Table 4-21
     static constexpr uint8_t kRcNotValid = 0x01;  // FLvy "not valid", Table 4-22
     static constexpr uint32_t kHeaderId = 0xACE00001UL;
@@ -318,13 +337,14 @@ private:
     TPS25751TaskStatus runTask(const std::string &code, const uint8_t *in, size_t inLen)
     {
         if (code == "FLrd") {
+            // Byte order inferred; 0xFF past the end is an assumption, not in the TRM.
             const uint32_t addr = le32(in, inLen);
             for (uint32_t i = 0; i < 16; ++i) data[i] = byteAt(addr + i);
             return TPS25751TaskStatus::Success;
         }
         if (code == "FLad") {
             const uint32_t addr = le32(in, inLen);
-            if (addr >= eeprom.size()) {
+            if (addr >= eeprom.size()) {  // assumption, not in the TRM
                 data[0] = kRcRejected;
                 return TPS25751TaskStatus::Success;
             }
@@ -334,6 +354,9 @@ private:
             return TPS25751TaskStatus::Success;
         }
         if (code == "FLwd") {
+            // Rejecting these with 0x03 is an assumption, not in the TRM: Table
+            // 4-21 documents only 0x00 and 0xFF. Writing exactly inLen bytes is
+            // also an assumption until hardware stage 2.
             if (!writeAddressSet || inLen > kDataSize || writeAddress + inLen > eeprom.size()) {
                 data[0] = kRcRejected;
                 return TPS25751TaskStatus::Success;
@@ -344,12 +367,13 @@ private:
             return TPS25751TaskStatus::Success;
         }
         if (code == "FLvy") {
+            // Header_ID-only check: an assumption, not in the TRM.
             data[0] = (readLe32(le32(in, inLen)) == kHeaderId) ? kRcSuccess : kRcNotValid;
             return TPS25751TaskStatus::Success;
         }
         if (code == "GAID") {
             memset(data, 0, sizeof(data));
-            writeAddressSet = false;
+            writeAddressSet = false;  // assumption, not in the TRM
             ++resetCount;
             rebooting = true;
             rebootEndsAt = now + rebootDurationMs;

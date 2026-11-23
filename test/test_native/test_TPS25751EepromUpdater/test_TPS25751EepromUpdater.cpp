@@ -8,11 +8,15 @@
  * Task facts under test (TRM SLVUCR8B pages 81 and 82):
  *   FLrd  in: 4-byte address   out: 16 bytes from DATA byte 0, no return code
  *   FLvy  in: 4-byte address   out: DATA byte 0, 0x00 valid, 0x01 not valid
- * Addresses go out least significant byte first. Layout (SLVAFL1 Figure 2-6):
+ * Addresses go out least significant byte first: Table 4-20 states it for
+ * FLad; for FLrd and FLvy it is inferred and hardware stage 1 confirms it.
+ * Layout (SLVAFL1 Figure 2-6):
  * pointers at 0x0000 and 0x0400, bundles at 0x0800 and 0x4400.
  *
  * The last group exercises the fake's write-side model (FLad, FLwd, GAID),
  * which the updater does not use yet, so later write flows can rely on it.
+ * Where the fake models behaviour the TRM does not describe, the test says
+ * that it pins the fake (see FakeCommandExecutor.h).
  */
 
 #include <unity.h>
@@ -137,7 +141,9 @@ void test_read_flash_encodes_all_four_address_bytes()
     uint8_t out[16];
     TEST_ASSERT_EQUAL(EepromUpdateStatus::Success, u.readFlash(0xA1B2C3D4UL, out));
     assertPayload(fake.calls[0], "FLrd", {0xD4, 0xC3, 0xB2, 0xA1}, 200);
-    // Past the end of the fake EEPROM: erased bytes.
+    // Pins the fake's model, not documented device behaviour: the fake returns
+    // 0xFF past the end of the EEPROM. What the controller returns there is
+    // not in the TRM.
     for (int i = 0; i < 16; ++i) TEST_ASSERT_EQUAL_HEX8(0xFF, out[i]);
 }
 
@@ -711,6 +717,9 @@ void test_fake_flad_flwd_write_and_auto_increment()
 
 void test_fake_flwd_without_flad_and_out_of_range_are_rejected()
 {
+    // Pins the fake's model, not documented device behaviour. TRM Table 4-21
+    // gives FLwd only 0x00 and 0xFF, and Table 4-20 says nothing about an FLad
+    // past the end; the fake's 0x03 in these cases is its own assumption.
     FakeCommandExecutor fake;
     const uint8_t d[2] = {0, 0};
     TEST_ASSERT_EQUAL_HEX8(0x03, fake.executeCommand(TPS25751FourCC::of("FLwd"), d, 2, nullptr, 0, 200).returnCode);

@@ -24,7 +24,9 @@
 //
 // COMMANDS THAT WRITE THE EEPROM
 //   p    Pointer test: writes the High pointer to 0 and back to 0x4400, and
-//        prints the 64 bytes at 0x0400 before, between, and after.
+//        prints the 64 bytes at 0x0400 before, between, and after. Starts
+//        with both pointers valid, or with the Low pointer valid and the High
+//        pointer 0, which is what a test whose restore failed leaves behind.
 //   u    updateInactiveRegion() with the embedded image.
 //   b    updateBothRegions() with the embedded image.
 //   c1   Update the inactive region and halt after step 1 of SLVAFL1
@@ -767,25 +769,52 @@ static void cmdPointerTest()
     if (!writeAllowed()) {
         return;
     }
+    // Start states: both pointers valid, or the Low pointer valid and the High
+    // pointer 0. The second is what a test leaves when its restore fails, so
+    // the test can be run again to finish the restore. The Low pointer must be
+    // valid either way: the controller boots Low while the High pointer is 0.
+    const uint32_t highStart = TPS25751EepromUpdater::bundleStart(EepromRegion::High);
     uint32_t low = 0;
     uint32_t high = 0;
     if (updater.readRegionPointer(EepromRegion::Low, low) != EepromUpdateStatus::Success ||
         updater.readRegionPointer(EepromRegion::High, high) != EepromUpdateStatus::Success ||
         low != TPS25751EepromUpdater::bundleStart(EepromRegion::Low) ||
-        high != TPS25751EepromUpdater::bundleStart(EepromRegion::High)) {
-        Serial.println(F("[refused] The pointer test needs both region pointers valid. Nothing was written."));
+        (high != highStart && high != 0)) {
+        Serial.println(F("[refused] The pointer test needs the Low pointer valid and the High pointer valid or 0. Nothing was written."));
         printPointers();
         return;
+    }
+    const bool startedErased = (high == 0);
+
+    // From a High pointer of 0 the test ends by making that pointer valid, so
+    // the region behind it has to hold a bundle. FLvy is the only check there
+    // is without knowing which image the region holds.
+    EepromUpdateStatus highVerify = EepromUpdateStatus::Success;
+    if (startedErased) {
+        highVerify = updater.verifyBundle(highStart);
+        if (highVerify != EepromUpdateStatus::Success) {
+            Serial.print(F("[refused] The High pointer is 0 and FLvy at 0x00004400 returned "));
+            Serial.print(TPS25751EepromUpdater::toString(highVerify));
+            Serial.println(F(". Run u or b instead. Nothing was written."));
+            printPointers();
+            return;
+        }
     }
 
     printPlan(F("p: pointer test. Writes the High pointer to 0, then back to 0x00004400"),
               EepromRegion::High, false);
+    if (startedErased) {
+        Serial.println(F("[plan] Start state: Low pointer valid, High pointer 0. The test ends with the High pointer valid."));
+        Serial.println(F("[plan] FLvy High bundle at 0x00004400: Success"));
+        Serial.println(F("[plan] Warning: the High region is not compared with any image. Use p from this state only after a p whose restore failed. After c1, c2, v, or a failed update, run u or b instead."));
+    } else {
+        Serial.println(F("[plan] Start state: both pointers valid."));
+    }
     if (!confirm()) {
         return;
     }
 
     exec.reset();
-    const uint32_t highStart = TPS25751EepromUpdater::bundleStart(EepromRegion::High);
     uint8_t before[POINTER_WINDOW];
     uint8_t afterErase[POINTER_WINDOW];
     uint8_t afterRestore[POINTER_WINDOW];
@@ -813,7 +842,9 @@ static void cmdPointerTest()
     printWindow(F("After the restore"), afterRestore, restoreOk);
     printNeighbors(F("restore"), before, beforeOk, afterRestore, restoreOk);
     Serial.print(F("[p] All 64 bytes equal the bytes before the test"));
-    if (!restoreOk) {
+    if (startedErased) {
+        Serial.println(F(": not applicable (the High pointer started at 0)"));
+    } else if (!restoreOk) {
         Serial.println(F(": unknown (read failed)"));
     } else {
         Serial.println(memcmp(before, afterRestore, POINTER_WINDOW) == 0 ? F(": yes") : F(": NO"));

@@ -176,6 +176,49 @@ Other points recorded during Batch 1:
   `test/support/native/FakeCommandExecutor.h`. Batch 2 tests must not depend on `FLwd`
   returning 0x03.
 
+### Notes from the Batch 2 review (2026-11-23)
+
+The Batch 2 reviewer read TRM pages 60 to 62 and 81 to 82 and the whole app note
+against the write path and found no contradiction with this plan. Two statements in
+the documents were not carried here before:
+
+- Redundancy is one-directional. The app note (page 2, Boot Process) says that after a
+  correct Header_ID in the Low region, a CRC error while reading the Low bundle ends
+  the load, and the controller does not try High. A High CRC error does fall back to
+  Low. A valid Low pointer over a damaged Low body therefore does not boot, even with
+  High intact. The flows restore a pointer only after the `FLrd` compare, so reaching
+  that state needs `compareAfterWrite = false` or later corruption.
+- DATA after a task is task-defined. TRM page 61 says the controller does not modify
+  DATAx after CMDx reads 0, and that the bytes after the return code are used at each
+  task's discretion. `executeCommand()` writes exactly the given number of bytes to
+  DATA, as the app note's own source does for the 4-byte pointer `FLwd`.
+
+Decisions taken on 2026-11-23:
+
+1. Return codes compare the whole byte, as written above ("require return code 0").
+   This can fail falsely and cannot succeed falsely. `FLwd` treats 0x00 as written,
+   0xFF as busy, and any other value as `WriteFailed`.
+2. No status is added for an address outside the EEPROM. `setWriteAddress()`
+   documents that the caller owns the range.
+3. Step 2 of `updateRegion()` reads back the first two chunks before it sends the
+   rest. The updateRegion section has the sequence and the reason.
+4. Stage 2 gains a second pointer test, `p2`, because the neighbor check cannot show
+   what it was meant to show. The writeRegionPointer section explains the limit.
+5. `coldReset()` stays as written until stage 3 measures what COMMAND and MODE read
+   during the restart. The coldReset section states the limit.
+6. Reading the AppConfigOffset word in pre-flight is deferred to Batch 3. A valid
+   pointer means the pointer equals the bundle start, while the controller looks for
+   Header_ID at the region start plus AppConfigOffset. Both words are 0 on this board
+   (stage 1 dump), so the gap affects only other boards.
+
+The example's serial commands, which the hardware stages use: `r` read-only report,
+`p` and `p2` pointer tests, `u` update the inactive region, `b` update both regions,
+`x` cold reset, `c1` to `c4` cut an update after step 1 to 4 of Figure 2-3, and `v`
+the `FLvy` corruption experiment. Each command that writes prints its plan and waits
+for the line `yes`, sent after the prompt; input queued before the prompt is
+discarded. A timing table per 4CC task follows each command, with counts of nonzero
+return codes and of `FLwd` busy results.
+
 ## Reused as-is
 
 - `TPS25751::executeCommand()` and `TPS25751FourCC`, `TPS25751TaskStatus`,
@@ -290,6 +333,18 @@ Follows Figure 2-5 of the app note with one added check:
 Step 4's neighbor check detects a controller that writes more than the four bytes
 given, which the documents do not rule out.
 
+Correction, 2026-11-23: the neighbor check is weaker than the sentence above claims.
+Step 1's `FLrd` leaves the neighbors' own values in DATA bytes 4 to 15, so a
+controller that wrote up to 16 bytes out of DATA would write them back unchanged and
+pass the check. A write past byte 15 is outside the 16 bytes read. The check still
+detects a write of different bytes into bytes 4 to 15. Two measures cover the gap in
+stage 2: the example's `p` prints 64 bytes at the pointer before and after each write,
+and `p2` loads DATA with the 16 bytes at 0x4400 first, sets the write address to
+0x0400, prints the DATA register, and writes the four bytes the High pointer already
+holds, so that a longer write changes bytes after the pointer and shows in the 64-byte
+print. The pointer's value never changes in `p2`. A pointer write does not retry a
+busy `FLwd`; busy there fails the step, and the other region still boots.
+
 ### `updateRegion()`
 
 Pre-flight, before any write:
@@ -308,6 +363,35 @@ Then the four steps of Figure 2-3:
 3. `FLvy` at the target bundle start; then, when `compareAfterWrite` is set,
    `compareRegion()`; then `writeRegionPointer(target, bundleStart)`.
 4. When `invalidateOldRegion` is set, `writeRegionPointer(other, 0)`.
+
+Change to step 2, approved on 2026-11-23. Step 2 as first written trusts the
+controller's write address for all 448 `FLwd` calls. If `FLad` reported success
+without taking effect, the bundle would land just past the pointer word that step 1
+wrote, and at the real 14336-byte length it would overwrite the other region's bundle
+or pointer. No document suggests the controller does this; the Batch 2 review
+reproduced the outcome against the fake. Step 2 is now:
+
+1. `FLad` to the target bundle start, then the first two chunks.
+2. `FLrd` those bytes back and compare them with the image. A difference returns
+   `CompareMismatch`.
+3. `FLrd` the 16 bytes at the target's pointer address. The pointer word must still be
+   0 and bytes 4 to 15 must equal what step 1's read-back saw. A difference returns
+   `PointerNeighborsChanged`. This check exists because check 2 is blind when the
+   target already holds the same image.
+4. A fresh `FLad` to the next unwritten byte, then the remaining chunks. The documents
+   do not say whether `FLrd` disturbs the controller's write address, and the busy
+   retry already uses the same pattern.
+
+This bounds a write address that is wrong from the start to the first two chunks, 64
+bytes in the unused area after the pointer word. Residual limits: a write address that
+goes wrong after the read-back is not seen before step 3, and step 3 checks only the
+target region; when the target already held the same image, two chunks misplaced
+anywhere other than just past its pointer word go unseen. A 14336-byte update with no
+retries issues 5 `FLad`, 451 `FLwd`, 908 `FLrd`, and 1 `FLvy`.
+
+The progress callback is called with `done == 0` after step 1 and before any step 2
+task, then after each successful chunk up to `done == total`, and in the same way
+during the compare of step 3. `lastStep()` tells the phases apart.
 
 ### Region selection
 
@@ -355,6 +439,16 @@ the timeout, tolerating read failures while the controller reboots. The caller t
 reads VERSION and BOOT_STATUS to confirm the new bundle; the example does this and
 prints the Patch Config Source and region flags.
 
+Limit, recorded 2026-11-23: `coldReset()` can return `Success` without a restart. TRM
+Table 4-3 says an APP-mode controller restarts after a typical 1-second Error Recovery
+delay, and the sequence above accepts a MODE read of APP 100 ms after `GAID`. The same
+holds when the executor times out with COMMAND never clearing, and when `GAID` never
+reached the controller. The executor timeout for `GAID` is 3000 ms, so the COMMAND
+poll outlasts the delay if COMMAND keeps reading `GAID` until the restart. Stage 3
+judges the reset by VERSION and BOOT_FLAGS changing and by the `GAID` row of the
+timing table, not by the returned status, and the rule is then set from that
+measurement.
+
 ### Status values and the state each leaves
 
 | `EepromUpdateStatus` | Raised by | EEPROM state afterwards |
@@ -366,13 +460,13 @@ prints the Patch Config Source and region flags.
 | `NoBootableRegion` | Selection, pre-flight | Unchanged |
 | `EepromNotBlank` | `programBlank()` pre-flight | Unchanged |
 | `PointerEraseFailed` | Step 1 | Target pointer uncertain; other region still boots (Figure 2-6 or 2-7) |
-| `SetAddressFailed` | `FLad` | Target pointer 0; other region boots (Figure 2-7) |
+| `SetAddressFailed` | `FLad`, including the second `FLad` of step 2 and the `FLad` of a busy retry | Target pointer 0; other region boots (Figure 2-7) |
 | `WriteFailed`, `FlashBusy` | `FLwd` | Target region partly written, pointer 0; other region boots |
 | `VerifyFailed` | `FLvy` | Target written but not valid, pointer 0; other region boots (Figure 2-8) |
-| `CompareMismatch` | `compareRegion()` | Same as `VerifyFailed` |
+| `CompareMismatch` | `compareRegion()` in step 3; the read-back of the first two chunks in step 2 | Step 3: same as `VerifyFailed`. Step 2: at most two chunks written, pointer 0; other region boots |
 | `PointerRestoreFailed` | Step 3 pointer write | Target pointer uncertain; other region boots |
 | `OldPointerEraseFailed` | Step 4 | Both pointers may be valid; low boots first (Figure 2-9) |
-| `PointerNeighborsChanged` | Neighbor check | Bytes 4 to 15 after a pointer changed; stop and dump |
+| `PointerNeighborsChanged` | Neighbor check of a pointer write; the pointer-area check in step 2 | Bytes 4 to 15 after a pointer changed; stop and dump. From step 2: the first chunks landed after the target's pointer word, pointer 0; other region boots |
 | `ResetTimeout` | `coldReset()` | Unchanged; controller did not return to APP |
 | `CommandRejected`, `CommandTimeout`, `I2cError` | Executor | Depends on the step; `lastStep()` reports it |
 
@@ -472,6 +566,11 @@ receives `r` over serial, so a monitor attached late still captures a full dump.
   them. `scripts/` is not in the published package.
 - Gate: hardware stages 2, 3, and 4.
 
+Status, 2026-11-23: implemented; the review found no blocker and its findings are
+fixed; the delta review of the step 2 read-back and `p2` is in progress. No EEPROM
+write has been made. `src/TPS25751EepromUpdater.cpp` has 100% line coverage (429 of
+429 lines) and the updater suite has 127 tests.
+
 ### Batch 3: blank programming and documentation
 
 - `programBlank()` and the example's recovery path, which runs
@@ -552,6 +651,11 @@ Ordered from safe to destructive. Each stage states its recovery.
    restore it to 0x4400. Confirms that `FLwd` writes exactly four bytes (neighbor check)
    and the read-back. This is step 1 of the app note's own flow, so the controller
    still boots from the low region if it fails. Recovery: `write-flash.zsh`.
+
+   Procedure, set on 2026-11-23: run `p`, then `p2`, then `r`, and compare the dump
+   with `..._F8091166_fullFlash.bin`. `p` shows the read-back and the erase and restore
+   of the pointer. `p2` shows whether `FLwd` writes more than the four bytes given,
+   which `p` cannot show. The full dump shows that nothing else changed.
 3. Single-region update to the `F8091164` bundle, with timing recorded per task. Then
    `coldReset()`; VERSION must read 0xF8091164 and BOOT_STATUS must show the high region
    used. Record BOOT_STATUS with the low pointer erased, and the time to APP. Before the
@@ -559,6 +663,16 @@ Ordered from safe to destructive. Each stage states its recovery.
    whether `FLvy` reports it. Then update back to `F8091166` with `updateBothRegions()`
    and compare a full dump with `..._fullFlash.bin`. Recovery: the untouched region, then
    `write-flash.zsh`.
+
+   Procedure notes, set on 2026-11-23. After `u` and before `x`, run `r` and diff the
+   whole dump against the stage 1 dump: only the target region and its pointer word,
+   and the other pointer word, may differ. Until a reset, the running controller can
+   still repair the EEPROM. The first reset after `u` has no fallback inside the
+   EEPROM: the old pointer is 0 by design, so a new region that did not boot would
+   leave the controller in PTCH. Recovery from that state is a PBM load with the
+   `load-patch-bundle` example followed by an update, or `write-flash.zsh` with the
+   clip; "the untouched region" above is reachable only by one of those. Before stage
+   3, check the SHA-256 that `bin_to_header.py` prints against the TI export.
 4. Interrupted updates. Cut the update after each of the four steps (a debug hook in
    the example), power-cycle, and confirm the controller boots the region the status
    table predicts. Recovery: as stage 3.

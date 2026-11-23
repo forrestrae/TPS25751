@@ -15,8 +15,13 @@ The TPS25751 library is an object-oriented C++ library for interfacing with the 
 - RAII memory management for embedded systems
 - Platform-optimized for Teensy 4.x (ARM Cortex-M7, no RTTI)
 
-**Last Updated:** 2026-11-19
-**Current Phase:** Rev B register coverage complete, 37 of the 37 registers in TRM SLVUCR8B,
+**Last Updated:** 2026-11-23
+**Current Phase:** EEPROM update over I2Ct on `feat/eeprom-update`
+([eeprom-update.md](docs/plans/feature/eeprom-update.md)): `TPS25751EepromUpdater` updates,
+reads back, and blank-programs the configuration EEPROM through the flash 4CC tasks
+(ADR-014). Batches 1 to 3 are implemented. Hardware stages 1 to 4 passed on 2026-11-22
+and 23; stage 5, blank programming after a PBM load, has not run. Before that: Rev B
+register coverage complete, 37 of the 37 registers in TRM SLVUCR8B,
 with typed USB PD decode (Batch L).
 [trm-revB-audit-remaining-registers.md](docs/plans/trm-revB-audit-remaining-registers.md)
 adds the ten registers rev B documents that the library did not decode, in Batches G
@@ -326,6 +331,17 @@ a UFP VDO 2, and index 5 a dual-role partner's DFP VDO (USB PD R3.3 page 158).
   Builds entirely on `TPS25751::executeCommand()` (for the PBMs/PBMc 4CC handshakes)
   and `TPS25751::burstWrite()` (raw chunked burst to I2C address 0x30); see ADR-011
   in [ARCHITECTURE.md](docs/engineering/ARCHITECTURE.md)
+- **`TPS25751CommandExecutor`**, **`TPS25751HostExecutor`**
+  (`include/TPS25751CommandExecutor.h`, `include/TPS25751HostExecutor.h`): the host
+  operations a task sequencer needs (`executeCommand()`, the MODE and BOOT_FLAGS reads,
+  a delay, and a clock) as an interface without `Wire.h`, and its pass-through adapter
+  for a `TPS25751`. The interface lets the EEPROM updater run in the native tests; the
+  adapter is excluded from the native build. See ADR-014
+- **`TPS25751EepromUpdater`** (`include/TPS25751EepromUpdater.h`): updates, reads back,
+  and blank-programs the external configuration EEPROM through the flash 4CC tasks
+  (`FLrd`, `FLad`, `FLwd`, `FLvy`), and restarts the controller with `GAID`, following
+  TI SLVAFL1. Not a register class and not in the factory; built on
+  `TPS25751CommandExecutor`. See "EEPROM Update over I2Ct" below and ADR-014
 > **BQ25798 driver:** the typed driver for the BQ25798 buck-boost charger
 > (`BQ25798::Device`) now lives in the sibling **`lib/BQ25798`** repository — it is
 > the reference implementation of the downstream-device driver tier defined by
@@ -428,6 +444,31 @@ new `TPS25751::burstWrite()` primitive (the only addition to the core class).
 See ADR-011 in [ARCHITECTURE.md](docs/engineering/ARCHITECTURE.md) and the PBM
 subsection of [CONSTRAINTS.md](docs/engineering/CONSTRAINTS.md) for protocol details
 and correctness traps.
+
+### EEPROM Update over I2Ct
+
+`TPS25751EepromUpdater` (`include/TPS25751EepromUpdater.h`,
+`src/TPS25751EepromUpdater.cpp`) rewrites the configuration EEPROM at 0x50 on I2Cc while
+the controller runs in APP, following TI application note SLVAFL1. It issues its tasks
+through `TPS25751CommandExecutor`, so it compiles and is tested in `[env:native]`.
+
+- `updateInactiveRegion()` and `updateRegion()` run the four steps of SLVAFL1 Figure 2-3:
+  erase the target pointer; write the bundle in 32-byte chunks, with a read-back after the
+  first two; `FLvy` and an `FLrd` compare, then the pointer; erase the old pointer.
+  `updateBothRegions()` leaves the new bundle in both regions with both pointers valid.
+- `programBlank()` is for an EEPROM with no valid pointer, after a PBM load: it writes both
+  pointers, both AppConfigOffset words, and the image in both regions (SLVAFL1 Figure 4-1).
+- `readRegionPointer()`, `selectTargetRegion()`, `compareRegion()`, and `dump()` only read.
+  `coldReset()` issues `GAID` and waits for APP; the port disconnects.
+
+Traps: choose the target from the region pointers first, because BOOT_FLAGS stays stale
+until a restart; never write a pointer before the region has been compared; `FLrd` data
+starts at `outData[0]` and has no return code. Hardware stages 1 to 4 verified the layout,
+the result offsets, a full region update, and the boot region after an update cut at each
+step; `programBlank()` waits for stage 5. The `eeprom-update` example drives every call over
+serial. See ADR-014 in [ARCHITECTURE.md](docs/engineering/ARCHITECTURE.md), the "Flash tasks
+and EEPROM update" subsection of [CONSTRAINTS.md](docs/engineering/CONSTRAINTS.md), and the
+plan.
 
 ### Downstream Device Drivers (external)
 
@@ -546,7 +587,8 @@ auto statusReg = tps.readStatusRegister(true);  // with validation
     │   └── CODE_REVIEW_GUIDELINES.md   # Review checklist (embedded C++ / TPS25751-specific)
     └── plans/
         ├── plan-impl-v01.md            # Completed plan for the first 27 registers
-        └── trm-revB-audit-remaining-registers.md  # Current plan: the other ten rev B registers
+        ├── trm-revB-audit-remaining-registers.md  # Current plan: the other ten rev B registers
+        └── feature/eeprom-update.md    # EEPROM updater plan, reviews, and hardware results
 ```
 
 Sibling repositories (side-by-side in the parent project's `lib/`):
@@ -748,6 +790,7 @@ example's `src/` directory, so examples build directly from this root.
 # From this library root (where platformio.ini lives):
 pio run -e example-read-registers            # compile the read-registers example
 pio run -e example-load-patch-bundle         # compile the PBM patch-loader example
+pio run -e example-eeprom-update             # compile the EEPROM update example
 pio run -e example-read-registers -t upload  # build + flash to Teensy 4.0
 pio device monitor                           # serial monitor @ 115200 baud
 

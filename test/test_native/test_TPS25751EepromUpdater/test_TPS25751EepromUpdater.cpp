@@ -2565,6 +2565,13 @@ void test_update_region_return_code_fault_at_every_call()
     // real one. No case is left out. The bundle FLad that returns 0x00 without
     // taking effect, which once wrote the whole image across the other region,
     // is stopped by the read-back after two chunks.
+    //
+    // The second FLad of step 2 returning 0x00 without taking effect passes
+    // here only under the fake's default model, in which FLrd does not move
+    // the write address (assumption, not in the TRM): the address then still
+    // points at the next unwritten byte, and the missing FLad changes nothing.
+    // test_update_region_read_order_when_flrd_moves_the_write_address covers
+    // the model in which FLrd does move it.
     const uint8_t codes[] = {0x01, 0xFF, 0x00};
     const size_t lengths[] = {SMALL_LEN, BUNDLE_LEN};
     for (size_t length : lengths) {
@@ -2658,13 +2665,70 @@ void test_update_region_read_back_bounds_a_misplaced_bundle_write()
     }
 }
 
+void test_update_region_read_order_when_flrd_moves_the_write_address()
+{
+    // The fake's opt-in model of a device whose FLrd leaves the write address
+    // at the address it read plus 16 (hypothetical; the TRM does not say
+    // whether a read moves the write address, and the fake's default is that it
+    // does not).
+
+    // With every FLad taking effect the update is unaffected: each run of
+    // writes begins with its own FLad, after whatever was read before it.
+    for (EepromRegion target : {EepromRegion::Low, EepromRegion::High}) {
+        Board b(BUNDLE_LEN);
+        b.fake.flrdMovesWriteAddress = true;
+        TPS25751EepromUpdater u(b.fake);
+
+        ASSERT_STATUS(EepromUpdateStatus::Success, u.updateRegion(target, b.newBundle.data(), b.newBundle.size()));
+        TEST_ASSERT_TRUE(regionHolds(b.fake, target, b.newBundle));
+        TEST_ASSERT_TRUE(pointerValid(b.fake, target));
+        assertUnchangedOutside(b, {{TPS25751EepromUpdater::regionPointerAddress(TPS25751EepromUpdater::otherRegion(target)), 4},
+                                   {TPS25751EepromUpdater::bundleStart(target), BUNDLE_LEN}});
+    }
+
+    // The double case the read order is for: FLrd moves the write address, and
+    // the second FLad of step 2 reports 0x00 without taking effect. The 446
+    // remaining chunks then start wherever the last FLrd left the address. The
+    // pointer row is read first and the bundle start last, so that last read is
+    // at bundle start + 48 and the address is bundle start + 64: the next
+    // unwritten byte. The remainder lands where it belongs, the call returns
+    // Success, and the target region boots with the complete image. Had the
+    // pointer row been read last, the remainder would have started 16 bytes
+    // past the target's pointer, across the other region.
+    for (EepromRegion target : {EepromRegion::Low, EepromRegion::High}) {
+        const EepromRegion other = TPS25751EepromUpdater::otherRegion(target);
+        Board b(BUNDLE_LEN);
+        b.fake.flrdMovesWriteAddress = true;
+        b.fake.failCall(IDX_RESUME_FLAD, Fault::returnCodeOnly(0x00));
+        TPS25751EepromUpdater u(b.fake);
+
+        ASSERT_STATUS(EepromUpdateStatus::Success, u.updateRegion(target, b.newBundle.data(), b.newBundle.size()));
+        ASSERT_STEP(EepromUpdateStep::Done, u.lastStep());
+
+        // The last read before the faulted FLad was inside the target region.
+        const uint32_t start = TPS25751EepromUpdater::bundleStart(target);
+        const FakeCommandExecutor::Call &lastRead = b.fake.calls[IDX_RESUME_FLAD - 1];
+        assertPayload(lastRead, "FLrd", le32(start + 48), 200);
+
+        // The remainder landed at bundle start + 64: the region holds the whole
+        // image, and nothing outside it changed but the other pointer, which
+        // step 4 erased as requested.
+        TEST_ASSERT_TRUE(regionHolds(b.fake, target, b.newBundle));
+        TEST_ASSERT_TRUE(pointerValid(b.fake, target));
+        TEST_ASSERT_EQUAL_HEX32(0, pointerOf(b.fake, other));
+        TEST_ASSERT_TRUE(regionHolds(b.fake, other, b.oldBundle));
+        assertUnchangedOutside(b, {{TPS25751EepromUpdater::regionPointerAddress(other), 4}, {start, BUNDLE_LEN}});
+        assertStillBoots(b);
+    }
+}
+
 void test_update_region_limit_of_the_read_back_in_step_2()
 {
     // Stated limits of the read-back, pinned here so that they are not mistaken
-    // for covered. Neither is behaviour to rely on. Both use hooks that move
-    // the fake's write address, which stands for a controller whose address is
-    // not where FLad put it (assumption, not in the TRM). updateRegion()'s
-    // Doxygen states both limits.
+    // for covered. None is behaviour to rely on. Each moves the fake's write
+    // address, by a hook or by the fake's opt-in model of an FLrd that moves it,
+    // which stands for a controller whose address is not where FLad put it
+    // (assumption, not in the TRM). updateRegion()'s Doxygen states the limits.
 
     // 1. The read-back checks the first two chunks only. Here the write address
     //    moves into the other region after the fifth chunk. The remaining 443
@@ -2721,6 +2785,33 @@ void test_update_region_limit_of_the_read_back_in_step_2()
         TEST_ASSERT_FALSE(regionHolds(b.fake, EepromRegion::Low, b.newBundle));
         // Exactly 64 bytes are misplaced: nothing else changed but the Low pointer.
         assertUnchangedOutside(b, {{LOW_PTR, 4}, {LOW_START + 0x200, 64}});
+    }
+
+    // 3. The check on the target's pointer row sees a stale write address only
+    //    if that address is just past the pointer word. In the model in which
+    //    FLrd moves the write address, step 1's own read-back leaves it 16 bytes
+    //    past the pointer, outside the row the check reads. Both regions hold
+    //    the image and the FLad to the bundle start does not take: the first
+    //    two chunks land at pointer + 16 unseen, the second FLad takes, and the
+    //    call returns Success with 64 misplaced bytes in the pointer area.
+    {
+        Board b(BUNDLE_LEN);
+        b.fake.writeBytes(LOW_START, b.newBundle.data(), b.newBundle.size());
+        b.fake.writeBytes(HIGH_START, b.newBundle.data(), b.newBundle.size());
+        b.snapshot();
+        b.fake.flrdMovesWriteAddress = true;
+        b.fake.failCall(IDX_BUNDLE_FLAD, Fault::returnCodeOnly(0x00));
+        TPS25751EepromUpdater u(b.fake);
+
+        ASSERT_STATUS(EepromUpdateStatus::Success,
+                      u.updateRegion(EepromRegion::High, b.newBundle.data(), b.newBundle.size()));
+        TEST_ASSERT_TRUE(regionHolds(b.fake, EepromRegion::High, b.newBundle));
+        TEST_ASSERT_TRUE(pointerValid(b.fake, EepromRegion::High));
+        TEST_ASSERT_EQUAL_HEX8_ARRAY(b.newBundle.data(), &b.fake.eeprom[HIGH_PTR + 16], 64);
+        // The 12 bytes the checks look at are untouched, so a later update
+        // finds no trace either.
+        for (uint32_t i = 4; i < 16; ++i) TEST_ASSERT_EQUAL_HEX8(0xFF, b.fake.eeprom[HIGH_PTR + i]);
+        assertUnchangedOutside(b, {{LOW_PTR, 4}, {HIGH_PTR + 16, 64}});
     }
 }
 
@@ -3668,6 +3759,7 @@ int main(int, char **)
     RUN_TEST(test_update_region_executor_failure_at_every_call);
     RUN_TEST(test_update_region_return_code_fault_at_every_call);
     RUN_TEST(test_update_region_read_back_bounds_a_misplaced_bundle_write);
+    RUN_TEST(test_update_region_read_order_when_flrd_moves_the_write_address);
     RUN_TEST(test_update_region_limit_of_the_read_back_in_step_2);
     RUN_TEST(test_progress_callback_sequence);
     RUN_TEST(test_progress_callback_marks_the_step_boundaries);

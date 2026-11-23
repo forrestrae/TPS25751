@@ -21,7 +21,11 @@
 //   - FLrd: 16 bytes starting at the address, DATA byte 0 holding the byte at
 //     the address (Table 4-19 gives 16 bytes and no return-code byte; the byte
 //     order was verified in hardware stage 1). Bytes past the end of the EEPROM
-//     read 0xFF (assumption, not in the TRM).
+//     read 0xFF (assumption, not in the TRM). FLrd leaves the FLad write
+//     address alone (assumption, not in the TRM, which does not say whether a
+//     read disturbs it). Setting flrdMovesWriteAddress models the other case, a
+//     hypothetical device whose FLrd leaves the write address at the address it
+//     read plus 16; it is off by default.
 //   - FLad: loads the write-address register and returns 0x00 (Table 4-20 and
 //     the standard return codes of Table 4-1). An address at or past the end of
 //     the EEPROM returns 0x03 (assumption, not in the TRM).
@@ -150,6 +154,11 @@ public:
 
     uint32_t writeAddress = 0;
     bool writeAddressSet = false;
+
+    // Hypothetical device behaviour, off by default: every FLrd leaves the write
+    // address at the address it read plus 16. Not in the TRM, which is silent on
+    // whether a read moves the write address; the default is that it does not.
+    bool flrdMovesWriteAddress = false;
 
     uint32_t now = 0;
     uint32_t msPerCommand = 0;
@@ -368,9 +377,14 @@ private:
     {
         if (code == "FLrd") {
             // Byte order verified in hardware stage 1; 0xFF past the end is an
-            // assumption, not in the TRM.
+            // assumption, not in the TRM. So is the write address staying where
+            // it was: the TRM does not say whether FLrd moves it.
             const uint32_t addr = le32(in, inLen);
             for (uint32_t i = 0; i < 16; ++i) data[i] = byteAt(addr + i);
+            if (flrdMovesWriteAddress) {  // hypothetical, off by default
+                writeAddress = addr + 16;
+                writeAddressSet = true;
+            }
             return TPS25751TaskStatus::Success;
         }
         if (code == "FLad") {

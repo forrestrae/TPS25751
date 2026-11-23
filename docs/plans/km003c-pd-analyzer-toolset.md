@@ -44,6 +44,39 @@ Phase 3 facts and known limits, for later phases:
 - `KM003C_ENABLE_TRIGGER`: unset gives the default (registered upstream, absent in the
   fork), `1` registers the tools, and any other value leaves them out.
 
+Phase 4 complete 2026-11-23: `upstream/pd-capture-files` (cut from `upstream/trigger-gate`,
+offerable upstream) and the fork branch that merges it into the fork's code are merged
+into the fork's local `main` after an independent review. On the fork's `main`, 399 unit
+tests pass, and the hardware tests pass 10 of 10, with the interactive one skipped. The
+cold-attach hardware test ran with the human through `km003c-capture record --stop-on
+contract --settle-ms 4000`. It stopped on `contract`, with the header recording firmware
+2.0.0, and recorded the same 16 messages as Phase 1; that file is now a test fixture.
+Next: Phases 5 and 6 in this library, which may run in parallel.
+
+Phase 4 corrections and facts, for later phases:
+- Connection events carry a 32-bit timestamp in bytes 1 to 4, like PD messages; the
+  24-bit wrap in the Phase 4 section (from the protocol-research docs) is wrong. At
+  about 40.1 million ms of uptime, a connection event read `450eef630211`: 40103694 ms,
+  code 0x11. The reader uses the timestamps as stored.
+- `pd_capture_read` pages by position, not time: `messages` and `full` take `after` (a
+  line number in the file, exclusive) and return `next_after`, absent on the last page;
+  `since` is an inclusive meter-time window. Phase 7's `since=<last t>` becomes
+  `after=<next_after>`.
+- `facts` is bounded to about 8 KB. It always keeps the final contract's Request and the
+  Source_Capabilities it named, and the latest Discover Identity ACK per SOP and sender,
+  and it reports what it omitted.
+- Phase 7's sanity rule "only `conn` records: PD monitoring was not active" does not hold
+  on firmware 2.0.0, which captures with the monitor disabled. There, only connection
+  records more likely means no PD traffic (for example a non-PD source). The `summary`
+  warning quotes the header's `pd_monitor` and should be read that way.
+- A retransmitted message (same bytes, sender, and SOP with no GoodCRC between) appears as
+  "(retry)" in `summary` and counts once toward `stop_after_messages`, the footer, and
+  `facts`.
+- The server writes the footer on SIGTERM (reason `manual`). `km003c-capture record`
+  exits 0 on its stop condition, 3 when it timed out before one, and 2 for a file it
+  cannot read.
+- `settle_ms` and `status_interval_ms` run on meter time; `timeout_s` runs on host time.
+
 Correction found in Phase 0, affecting Phase 5: since `ci/verify-launcher`, `verify.py`
 is a launcher that runs `main`'s copy of `scripts/verify_gate.py`, and agents may edit
 `verify_gate.py` on a topic branch. The two Phase 5 checks therefore go into

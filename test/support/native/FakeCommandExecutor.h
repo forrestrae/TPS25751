@@ -30,11 +30,12 @@
 //     the standard return codes of Table 4-1). An address at or past the end of
 //     the EEPROM returns 0x03 (assumption, not in the TRM).
 //   - FLwd: writes the inLen input bytes at the write address, auto-increments
-//     the address, and returns 0x00 (Table 4-21). Writing exactly inLen bytes is
-//     an assumption until hardware stage 2 confirms it. Returning 0x03 when no
-//     FLad was issued since the last reset, or when the write would pass the
-//     end, is an assumption, not in the TRM: Table 4-21 documents only 0x00
-//     (written) and 0xFF (busy). 0xFF is produced only by an injected fault.
+//     the address, and returns 0x00 (Table 4-21). Writing exactly inLen bytes
+//     is not documented; hardware stage 2 verified it for a 4-byte write on the
+//     test board (2026-11-23), and for other lengths it remains a model.
+//     Returning 0x03 when no FLad was issued since the last reset, or when the
+//     write would pass the end, is an assumption, not in the TRM: Table 4-21
+//     documents only 0x00 (written) and 0xFF (busy). 0xFF is produced only by an injected fault.
 //     The write address is whatever the last FLad or FLwd left behind. When a
 //     fault makes an FLad report success without taking effect, the next FLwd
 //     therefore writes at the stale address, straight after the bytes written
@@ -401,7 +402,8 @@ private:
         if (code == "FLwd") {
             // Rejecting these with 0x03 is an assumption, not in the TRM: Table
             // 4-21 documents only 0x00 and 0xFF. Writing exactly inLen bytes is
-            // also an assumption until hardware stage 2. So is the address: the
+            // not documented either; stage 2 verified it for a 4-byte write on
+            // the test board, other lengths are a model. The address: the
             // write goes wherever the last FLad or FLwd left writeAddress, even
             // when a later FLad was faulted into having no effect (assumption,
             // not in the TRM).

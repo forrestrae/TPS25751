@@ -22,12 +22,47 @@ Replace `example-read-registers` with any environment from the table below.
 | Example | Environment | Demonstrates |
 |---|---|---|
 | [`read-registers`](read-registers/) | `example-read-registers` | Reading core TPS25751 **host** registers (STATUS, MODE, VERSION, PD3_CONFIGURATION, GLOBAL_SYSTEM_CONFIGURATION, RECEIVED_SOP_IDENTITY, TX_SOURCE_INFO, TRANSMITTED_PPS_STATUS, TX_SOURCE_CAPABILITIES_EXTENDED, TRANSMITTED_BATTERY_STATUS, TX_BATTERY_CAPABILITIES, TRANSMIT_SINK_CAPABILITIES_EXTENDED, POWER_PATH_STATUS, BOOT_FLAGS, PORT_CONFIG, internal-ADC telemetry via ADC_RESULTS, …) and decoding interrupt events via an IRQ pin. The starting point for the host controller. |
+| [`eeprom-update`](eeprom-update/) | `example-eeprom-update` | Reading and rewriting the configuration EEPROM through the flash 4CC tasks with `TPS25751EepromUpdater` (TI SLVAFL1), and recovering a board whose EEPROM does not boot. Driven over serial, one command per line; see "The eeprom-update example" below. This example writes the EEPROM. |
 | [`load-patch-bundle`](load-patch-bundle/) | `example-load-patch-bundle` | **Host-side Patch Burst Mode (PBM)** bring-up: loads a TI patch bundle directly into the TPS25751 over I2Ct when no external EEPROM is present (EEPROM-less PTCH → APP path). Demonstrates `TPS25751PatchLoader` — the 17-step PBM sequencing from TI app note SLVAFV8A §4.1 — and prints the `PatchLoadStatus` outcome. Requires replacing `patch_bundle.h` with the real low-region binary from TI's USBCPD Application Customization Tool; ships with a placeholder array so the example compiles as-is. |
 
 > **BQ25798 downstream-device examples** (status, charge-config, telemetry,
 > set-charge, fault-investigator, direct-i2c, read-downstream-bq25798-reg) moved to
 > the sibling [BQ25798 repo](https://github.com/forrestrae/BQ25798)'s `examples/`
 > (checked out side-by-side as `lib/BQ25798` during development).
+
+## The eeprom-update example
+
+The example inspects, updates, and recovers the TPS25751's configuration EEPROM over I2Ct.
+It is the tool for the hardware stages of `docs/plans/feature/eeprom-update.md`. Each
+command that changes the EEPROM or the controller's RAM prints its plan and acts only on
+the line `yes` sent after its `[confirm]` prompt.
+
+| Command | What it does | Writes the EEPROM |
+|---|---|---|
+| `r` | Report: MODE, VERSION, BOOT_FLAGS, both region pointers, the region an update would target, `FLvy` for each region, and a dump of 0x0000 to 0x7C00. In PTCH it says to recover with `l`, then `pb` | No |
+| `x` | `coldReset()`: `GAID`, then waits for APP; the port disconnects | No |
+| `l` | Only in PTCH: loads the embedded image into the controller's RAM with `TPS25751PatchLoader` (Patch Burst Mode) | No |
+| `p`, `p2` | Pointer tests of hardware stage 2: erase and restore the High pointer; show whether `FLwd` writes more than the bytes it is given | Yes |
+| `u`, `b` | `updateInactiveRegion()` and `updateBothRegions()` with the embedded image | Yes |
+| `c1` to `c4` | An update cut after step 1, 2, 3, or 4 of SLVAFL1 Figure 2-3 (hardware stage 4) | Yes |
+| `v` | The `FLvy` experiment of hardware stage 3: writes the image, corrupts one byte, and reports what `FLvy` and the compare say | Yes |
+| `pb` | `programBlank()`: both pointers, both AppConfigOffset words, and the image in both regions, for an EEPROM with no valid pointer | Yes |
+
+To recover a board whose EEPROM does not boot, so that the controller sits in PTCH, send
+`l`, then `pb`, then `x`.
+
+The example ships with a placeholder `src/patch_bundle.h` that is not a patch bundle, and
+refuses every command that writes, and `l`, while it is in place. Generate the real header
+from the low-region binary that TI's Application Customization Tool exports, from the
+library root:
+
+```bash
+scripts/bin_to_header.py <build>_lowRegion.bin -o examples/eeprom-update/src/patch_bundle.h
+```
+
+The script checks that the file is a patch bundle, rejects a full-flash image, and records
+the size, SHA-256, and version word in the header. `scripts/` is not part of the package
+published to the PlatformIO Registry.
 
 ## Further Reading
 

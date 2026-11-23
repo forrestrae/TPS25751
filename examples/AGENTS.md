@@ -62,8 +62,12 @@ consumption and are not the primary build path used in this repo.
   purpose, for hardware stage 5; its plan names `pb` as the next step, before any reset.
   `u`, `b`, and `c1` to `c4` rely on `updateRegion()` to refuse when an AppConfigOffset
   word is not 0; keep the library as the place that check is made.
+  `pd-bench` is the other exception: a host program drives it, and its `CMD`, `WR`, and
+  `RESTART` commands change the controller. The allowlists that bound them are in
+  `TPS25751BenchProtocol`; keep the limits there, not in the sketch.
 - Serial is 115200 baud; sketches wait briefly for the USB serial connection in
-  `setup()`.
+  `setup()`. `pd-bench` builds with `-D USB_DUAL_SERIAL` and keeps `SerialUSB1` for the
+  console protocol: print logs on `Serial` only.
 - Debug output is configured via `TPS25751::setDebugLevel()` /
   `setDebugCategories()` rather than build flags.
 - BQ25798 downstream-device examples now live in the sibling `lib/BQ25798` repo

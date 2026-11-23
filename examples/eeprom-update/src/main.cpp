@@ -24,6 +24,14 @@
 //        valid. When neither is, the controller would come up in PTCH, so x
 //        warns and waits for the line "yes" first.
 //
+// COMMAND THAT LOADS THE CONTROLLER'S RAM (no EEPROM write)
+//   l    Only while MODE reads PTCH, which is where the controller waits when
+//        it finds no bundle to boot: TPS25751PatchLoader::loadPatchBundle()
+//        with the embedded image (the low-region bundle serves as the Patch
+//        Burst Mode image, SLVAFV8A), then MODE, VERSION, and BOOT_FLAGS. The
+//        controller runs the image from RAM; the EEPROM is not written. Waits
+//        for the line "yes" first. Refused in any other mode.
+//
 // COMMANDS THAT WRITE THE EEPROM
 //   p    Pointer test: writes the High pointer to 0 and back to 0x4400, and
 //        prints the 64 bytes at 0x0400 before, between, and after. Starts
@@ -53,6 +61,16 @@
 //        bytes after the pointer before it starts, and a read-back after the
 //        first two chunks. A failed check stops it with nothing further
 //        written.
+//   pb   programBlank() with the embedded image: writes both pointers, both
+//        AppConfigOffset words, and the image in both regions, the layout of
+//        the full-flash binary. Only when MODE reads APP and no region pointer
+//        is valid, which is the state after l on a blank or corrupt EEPROM.
+//        Its plan adds both AppConfigOffset words.
+//
+// RECOVERY OF AN EEPROM THAT DOES NOT BOOT (hardware stage 5)
+//   The controller comes up in PTCH. Send l, then pb, then x: the controller
+//   restarts from the EEPROM pb wrote. r at start-up and on request says so
+//   when MODE reads PTCH.
 //
 // Every command that writes first prints its plan (target region, image
 // version, current VERSION, both pointers) and then waits for the line
@@ -64,8 +82,8 @@
 // the prompt is discarded, so a "yes" queued behind a command cannot confirm
 // a plan nobody has read.
 //
-// Every command that writes is also refused while src/patch_bundle.h is the
-// placeholder, because TPS25751EepromUpdater::checkImage() rejects it.
+// Every command that writes, and l, is also refused while src/patch_bundle.h
+// is the placeholder, because TPS25751EepromUpdater::checkImage() rejects it.
 // Generate the real header with scripts/bin_to_header.py (see patch_bundle.h).
 //
 // c1 and c2 halt inside the progress callback and never return to the command
@@ -75,7 +93,7 @@
 //
 // OUTPUT
 //   Every line starts with a tag in brackets. A command ends with "[done] <cmd>"
-//   followed by "[ready] ...". After p, p2, u, b, v, x, and the c commands a
+//   followed by "[ready] ...". After p, p2, u, b, v, x, pb, and the c commands a
 //   "[timing]" table gives, per 4CC task, the calls, total time, average, and
 //   maximum, measured around each executor call, then the calls the executor
 //   did not complete (not_success), the completed calls that returned a
@@ -100,7 +118,8 @@
 //
 // HARDWARE:
 //   - Teensy 4.x MCU
-//   - TPS25751 on Wire (I2C pins 18/19, address 0x20), in APP mode
+//   - TPS25751 on Wire (I2C pins 18/19, address 0x20), in APP mode, or in
+//     PTCH mode for l
 //   - External EEPROM on the TPS25751's I2Cc bus (24LC256, 32 KB)
 // ---------------------------------------------------------------------------
 
@@ -266,6 +285,7 @@ TPS25751 pd(Wire, TPS25751_I2CT_ADDRESS_IDX[0]);
 TPS25751HostExecutor hostExec(pd);
 TimingExecutor exec(hostExec);
 TPS25751EepromUpdater updater(exec);
+TPS25751PatchLoader loader(pd);  // l: COMMAND polling only, no I2Ct_IRQ pin
 
 // ---------------------------------------------------------------------------
 // Printing helpers
@@ -299,8 +319,13 @@ static void printRow(uint32_t addr, const uint8_t* bytes)
     Serial.println();
 }
 
-static bool printMode()
+/// Prints MODE and returns true when it reads APP. @p patch, when given,
+/// receives true when MODE read PTCH.
+static bool printMode(bool* patch = nullptr)
 {
+    if (patch != nullptr) {
+        *patch = false;
+    }
     TPS25751Mode mode;
     if (!pd.readMode(mode)) {
         Serial.println(F("[mode] Failed to read MODE"));
@@ -309,6 +334,9 @@ static bool printMode()
     Serial.print(F("[mode] MODE = '"));
     Serial.print(mode.modeString());
     Serial.println(F("'"));
+    if (patch != nullptr) {
+        *patch = mode.isPatchMode();
+    }
     return mode.isApplicationMode();
 }
 
@@ -478,12 +506,18 @@ static void dumpEeprom()
 /// Returns true when MODE reads APP.
 static bool printStatus()
 {
-    const bool app = printMode();
+    bool patch = false;
+    const bool app = printMode(&patch);
     printVersion();
     printBootFlags();
 
     if (!app) {
         Serial.println(F("[report] Not in APP mode; SLVAFL1 describes EEPROM access in APP mode. Skipping the flash tasks."));
+        if (patch) {
+            Serial.println(F("[report] MODE reads PTCH: the controller found no bundle it could boot and waits for a patch over I2Ct. To recover, send l to load the embedded image into its RAM, then pb to program the EEPROM, then x to restart from it."));
+        } else {
+            Serial.println(F("[report] This example recovers only from PTCH. In any other mode, wait for APP or restart the controller, then send r."));
+        }
         return false;
     }
     printPointers();
@@ -1049,8 +1083,12 @@ static void cmdPointerRewriteTest()
         return;
     }
     size_t showing = 0;
+    size_t firstShowing = 0;  // the first DATA position that differs, 0 for none
     for (size_t i = 4; i < POINTER_WINDOW; ++i) {
         if (dataNow[i] != before[i]) {
+            if (showing == 0) {
+                firstShowing = i;
+            }
             ++showing;
         }
     }
@@ -1120,9 +1158,16 @@ static void cmdPointerRewriteTest()
     } else if (!flwdOk) {
         Serial.println(F("[p2] Verdict: not conclusive. writeData() did not return Success, so this run does not show what FLwd writes."));
     } else {
-        Serial.print(F("[p2] Verdict: FLwd wrote only the four bytes given. "));
+        // A write of N bytes covers DATA positions 0 to N-1, so the first
+        // differing position P shows any write of P+1 bytes or more. A write
+        // of 5 to P bytes would have put back the bytes already there.
+        Serial.print(F("[p2] Verdict: FLwd wrote only the four bytes given. A write of "));
+        Serial.print(firstShowing + 1);
+        Serial.print(F(" bytes or more would have shown (first differing DATA position "));
+        Serial.print(firstShowing);
+        Serial.print(F("; "));
         Serial.print(showing);
-        Serial.println(F(" of 60 positions would have shown more."));
+        Serial.println(F(" of 60 positions differ)."));
     }
     if (afterOk && memcmp(after, word, sizeof(word)) != 0) {
         Serial.println(F("[p2] The High pointer no longer reads 0x00004400. Run u or b to rewrite the High region."));
@@ -1547,12 +1592,160 @@ static void cmdColdReset()
 }
 
 // ---------------------------------------------------------------------------
+// l: load the image into the controller's RAM (PTCH only), and pb: program a
+// blank or corrupt EEPROM (hardware stage 5). SLVAFL1 Figure 4-1: push a patch
+// with the PBM tasks, then correct the EEPROM with the flash tasks.
+// ---------------------------------------------------------------------------
+
+static void cmdLoadPatch()
+{
+    const EepromUpdateStatus image = imageStatus();
+    if (image != EepromUpdateStatus::Success) {
+        Serial.print(F("[refused] The embedded image is not a usable patch bundle: checkImage() = "));
+        Serial.println(TPS25751EepromUpdater::toString(image));
+        Serial.println(F("[refused] Replace src/patch_bundle.h (scripts/bin_to_header.py). Nothing was loaded."));
+        return;
+    }
+    TPS25751Mode mode;
+    if (!pd.readMode(mode)) {
+        Serial.println(F("[refused] MODE could not be read. Nothing was loaded."));
+        return;
+    }
+    if (!mode.isPatchMode()) {
+        Serial.print(F("[refused] l runs only while MODE reads PTCH; MODE reads '"));
+        Serial.print(mode.modeString());
+        Serial.println(F("'. Nothing was loaded."));
+        return;
+    }
+
+    Serial.println(F("[plan] Action: l: TPS25751PatchLoader::loadPatchBundle() with the embedded image (Patch Burst Mode over I2Ct)"));
+    Serial.print(F("[plan] Image: "));
+    Serial.print(IMAGE_SIZE);
+    Serial.print(F(" bytes, version "));
+    printHex32(TPS25751EepromUpdater::imageVersion(IMAGE, IMAGE_SIZE));
+    Serial.println();
+    Serial.println(F("[plan] This command loads the controller's RAM. It does not write the EEPROM; after a restart the controller boots from the EEPROM again."));
+    if (!confirm()) {
+        return;
+    }
+
+    const uint32_t started = millis();
+    const PatchLoadStatus s = loader.loadPatchBundle(IMAGE, IMAGE_SIZE);
+    const uint32_t elapsed = millis() - started;
+
+    Serial.print(F("[l] Result: "));
+    Serial.println(TPS25751PatchLoader::toString(s));
+    Serial.print(F("[l] Elapsed: "));
+    Serial.print(elapsed);
+    Serial.println(F(" ms"));
+    printMode();
+    printVersion();
+    printBootFlags();
+    if (s == PatchLoadStatus::Success) {
+        Serial.println(F("[l] The controller runs the image from RAM. The EEPROM is unchanged: send pb to program it when no region pointer is valid, or r to inspect it first."));
+    } else {
+        Serial.println(F("[l] The load did not complete. MODE above shows where the controller stands; nothing was written to the EEPROM."));
+    }
+}
+
+/// One AppConfigOffset line. The controller looks for a region's Header_ID at
+/// the region start plus this word (SLVAFL1 Boot Process), so it must be 0.
+static void printAppConfigOffset(EepromRegion r)
+{
+    const uint32_t addr = TPS25751EepromUpdater::appConfigOffsetAddress(r);
+    Serial.print(F("[offset] "));
+    Serial.print(TPS25751EepromUpdater::toString(r));
+    Serial.print(F(" AppConfigOffset at "));
+    printHex32(addr);
+    Serial.print(F(" = "));
+
+    uint8_t row[TPS25751EepromUpdater::kFlashReadBytes];
+    const EepromUpdateStatus s = updater.readFlash(addr, row);
+    if (s != EepromUpdateStatus::Success) {
+        Serial.print(F("read failed: "));
+        Serial.println(TPS25751EepromUpdater::toString(s));
+        return;
+    }
+    const uint32_t value = static_cast<uint32_t>(row[0]) | (static_cast<uint32_t>(row[1]) << 8) |
+                           (static_cast<uint32_t>(row[2]) << 16) | (static_cast<uint32_t>(row[3]) << 24);
+    printHex32(value);
+    Serial.println(value == 0 ? F(" (0)") : F(" (not 0)"));
+}
+
+static void printAppConfigOffsets()
+{
+    printAppConfigOffset(EepromRegion::Low);
+    printAppConfigOffset(EepromRegion::High);
+}
+
+static void cmdProgramBlank()
+{
+    pointerTestLeftHighErased = false;  // another writing command has started
+    // In PTCH, say what comes first; with the placeholder, writeAllowed() says why not.
+    TPS25751Mode mode;
+    if (imageStatus() == EepromUpdateStatus::Success && pd.readMode(mode) && mode.isPatchMode()) {
+        Serial.println(F("[refused] MODE reads PTCH. Send l first to load the image into the controller's RAM. Nothing was written."));
+        return;
+    }
+    if (!writeAllowed()) {
+        return;
+    }
+    uint32_t low = 0;
+    uint32_t high = 0;
+    if (updater.readRegionPointer(EepromRegion::Low, low) != EepromUpdateStatus::Success ||
+        updater.readRegionPointer(EepromRegion::High, high) != EepromUpdateStatus::Success) {
+        Serial.println(F("[refused] The region pointers could not be read. Nothing was written."));
+        return;
+    }
+    if (low == TPS25751EepromUpdater::bundleStart(EepromRegion::Low) ||
+        high == TPS25751EepromUpdater::bundleStart(EepromRegion::High)) {
+        Serial.println(F("[refused] A region pointer is valid, so the EEPROM can boot. pb is only for an EEPROM with no valid pointer; inspect it with r and update it with u or b. Nothing was written."));
+        printPointers();
+        return;
+    }
+
+    printPlan(F("pb: programBlank() with the embedded image. Writes both pointers, both AppConfigOffset words, and the image in both regions"),
+              EepromRegion::Low, true);
+    printAppConfigOffsets();
+    Serial.println(F("[plan] On success the EEPROM holds the full-flash layout. A failure in the Low pass leaves no region that boots; a failure in the High pass leaves the Low region bootable."));
+    if (!confirm()) {
+        return;
+    }
+
+    exec.reset();
+    resetProgress(0);
+    const uint32_t started = millis();
+    const EepromUpdateStatus s = updater.programBlank(IMAGE, IMAGE_SIZE);
+    printUpdateResult(s, millis() - started);
+    printPointers();
+    printAppConfigOffsets();
+    printTiming();
+
+    if (s == EepromUpdateStatus::Success) {
+        Serial.println(F("[pb] The EEPROM holds the full-flash layout. The controller still runs the image in its RAM. Send x to restart it from the EEPROM, then r to check."));
+        return;
+    }
+    if (updater.lastStep() == EepromUpdateStep::Preflight) {
+        return;  // refused before any write; the result line says why
+    }
+    if (updater.lastStep() == EepromUpdateStep::ClearAppConfigOffset &&
+        s == EepromUpdateStatus::PointerNeighborsChanged) {
+        Serial.println(F("[pb] Bytes after an AppConfigOffset word changed during its write. Dump the EEPROM with r before any further write."));
+    }
+    if (updater.lastTarget() == EepromRegion::High) {
+        Serial.println(F("[pb] The Low pass completed: the Low region holds the image behind a valid pointer and boots. The High region does not."));
+    } else {
+        Serial.println(F("[pb] The Low pass did not complete. No region boots unless a pointer above reads valid. A restart now comes up in PTCH; l then pb recovers from there."));
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Command loop
 // ---------------------------------------------------------------------------
 
 static void printReady()
 {
-    Serial.println(F("[ready] Commands: r p p2 u b x c1 c2 c3 c4 v"));
+    Serial.println(F("[ready] Commands: r p p2 u b x c1 c2 c3 c4 v l pb"));
 }
 
 static void runCommand(const char* line)
@@ -1579,6 +1772,10 @@ static void runCommand(const char* line)
         cmdCut(4);
     } else if (strcmp(line, "v") == 0) {
         cmdVerifyExperiment();
+    } else if (strcmp(line, "l") == 0) {
+        cmdLoadPatch();
+    } else if (strcmp(line, "pb") == 0) {
+        cmdProgramBlank();
     } else {
         Serial.print(F("[error] Unknown command: "));
         Serial.println(line);
@@ -1605,7 +1802,7 @@ void setup()
     updater.setProgressCallback(onProgress, nullptr);
 
     Serial.println(F("[setup] TPS25751 EEPROM update example"));
-    Serial.println(F("[setup] r reads. x restarts the controller. p p2 u b c1 c2 c3 c4 v write the EEPROM, each after a typed yes."));
+    Serial.println(F("[setup] r reads. x restarts the controller. l loads the image into the controller's RAM in PTCH mode. p p2 u b c1 c2 c3 c4 v pb write the EEPROM. l and each command that writes wait for a typed yes."));
     printImage();
     printStatus();
     printReady();

@@ -404,7 +404,9 @@ verify gate runs this suite.
 ### Bench server tests
 
 The MCP server in `tools/pd-bench` has its own pytest suite. It talks to a simulated
-console behind a fake serial port and never opens a real one. Run it from its directory:
+console behind a fake serial port. `tests/conftest.py` makes a real port unreachable for
+every test: it names a port that does not exist, which also switches discovery off, and
+makes opening any pyserial port raise. Run the suite from its directory:
 
 ```bash
 cd tools/pd-bench && uv run --locked pytest

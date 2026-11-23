@@ -988,13 +988,20 @@ Decision:
   page 62), so the console writes a marker to DATA, issues the task, and waits until
   COMMAND reads clear and one of three observations shows the restart: DATA lost the
   marker, the controller stopped answering for a while, or COMMAND held the task code and
-  then cleared.
+  then cleared. A COMMAND write that was not acknowledged, and a `!CMD` that arrives
+  after the issue window, each end the wait at once with their own error.
 - One read of PTCH does not start a patch load, because a controller with an EEPROM reads
   PTCH on its way to APP. The console gives the controller 3 s to reach APP; PTCH with
   INT_EVENT1 Ready for Patch ends that wait early. The loader then makes its own Ready
   for Patch and MODE checks (ADR-011) and sends nothing without them. `GAID` is refused up
   front when BOOT_FLAGS says the configuration did not come from an EEPROM and no bundle
   is set.
+- Reading commands only read. `HELLO`, `RD`, and `DEC` change nothing, so a host can mark
+  them read-only. Only `begin()` and `RESTART` load the patch bundle; `HELLO` reports
+  `mode=PTCH` and `patch_pending=1` instead.
+- Whole reply lines. Every I2C access of a command happens before the reply line that
+  reports it starts. The library can print an I2C error on its debug stream, and when
+  that stream is the console's, the report then lands between reply lines.
 
 Consequences:
 

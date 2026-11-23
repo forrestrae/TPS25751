@@ -125,6 +125,48 @@ Still unknown, each with a hardware check: whether `FLwd` honors a 4-byte length
 exactly (stage 2), whether a zero pointer sets BOOT_STATUS Region Invalid (stage 3),
 and how long the controller takes to return to APP after `GAID` (stage 3).
 
+### Notes from the Batch 1 review (2026-11-22)
+
+The Batch 1 reviewer read TRM pages 61, 62, 81, and 82 and the app note against this
+section and found no contradiction. It found three places where the text above is less
+precise than the TRM. None changes Batch 1 code. The first needs a decision before
+`setWriteAddress()` is written in Batch 2.
+
+1. Table 4-1 (page 61) puts the standard result, TaskResult, in bits 3:0 of the return
+   byte. Bits 7:4 "may be used by certain Tasks", and a successful task can use them
+   provided TaskResult is 0x0. "Require return code 0" above compares the whole byte.
+   That can report a false failure and never a false success. Open: compare the whole
+   byte, or bits 3:0 only.
+2. Table 4-21 (page 82) gives `FLwd` its own ReturnCode with two values, 0x00 and 0xFF.
+   It does not refer to Table 4-1, so no documented code produces `WriteFailed`. The
+   status stays as a defensive branch for any other value.
+3. The TRM states the address byte order only for `FLad` (Table 4-20). Little-endian
+   addresses for `FLrd` and `FLvy`, and `FLrd` returning the byte at the address in DATA
+   byte 0, are inferred from Table 4-20, from "Memory contents (little-endian)" in
+   Table 4-19, and from the app note's source on page 12. Stage 1 settles both: the
+   pointers must read 0x00000800 and 0x00004400, and the dump must equal the image.
+
+Other points recorded during Batch 1:
+
+- Register 0x2D is BOOT_FLAGS in the TRM (page 33) and, since `c092f80` on `main`, in
+  the library (`Address::BOOT_FLAGS`). The app note calls it BOOT_STATUS. Every
+  "BOOT_STATUS" in this plan means register 0x2D; the code and the example print
+  BOOT_FLAGS.
+- TRM Table 4-3 (page 62) describes `GAID` as a cold restart in its Description and
+  Side Effects rows, and as "a warm restart" in its Additional Information row, which
+  repeats the `Gaid` text of Table 4-2. Stage 3 records what the controller does.
+- App note Figure 2-3 gives OldRegStart = 0x0400 on the High-region branch. The layout
+  on the same page and Figure 2-6 put the low bundle at 0x0800. The library uses the
+  layout table above, not the figure's value.
+- The status table has no value for an address outside the EEPROM. `readFlash()` and
+  `dump()` document that the caller owns the range. Open for Batch 2: whether
+  `setWriteAddress()` and the pointer writes need an out-of-range status.
+- The fake executor models behaviour the TRM does not describe: `FLrd` past the end of
+  the part, `FLad` and `FLwd` rejecting with 0x03, `FLwd` writing exactly the given
+  length, and `FLvy` checking only Header_ID. Each is labelled as an assumption in
+  `test/support/native/FakeCommandExecutor.h`. Batch 2 tests must not depend on `FLwd`
+  returning 0x03.
+
 ## Reused as-is
 
 - `TPS25751::executeCommand()` and `TPS25751FourCC`, `TPS25751TaskStatus`,
@@ -398,6 +440,13 @@ write the EEPROM (2 to 5) start only on my explicit go-ahead for that stage.
   both pointers, the selected target, the `FLvy` result for each region, and a hex dump.
 - Confirm the 24LC256 page size and write time from the Microchip datasheet.
 - Gate: hardware stage 1.
+
+Status, 2026-11-22: implemented and reviewed; stage 1 not yet run. The native suite has
+49 tests and `src/TPS25751EepromUpdater.cpp` has 100% line coverage (162 of 162 lines).
+Two `platformio.ini` entries that Batch 3 lists landed here, because the Batch 1 tests
+and the stage 1 build need them: `+<TPS25751EepromUpdater.cpp>` in `[env:native]` and
+`[env:example-eeprom-update]`. The example reruns its read-only report when it
+receives `r` over serial, so a monitor attached late still captures a full dump.
 
 ### Batch 2: region update and reset
 

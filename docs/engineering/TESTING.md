@@ -573,14 +573,18 @@ include as `"fixtures/PdCapture_<bundle>.h"` through the native env's
 `-I test/support/native`. The headers are committed, so `pio test -e native` needs
 no Python.
 
-A test that uses a bundle builds the register class from the bundle's register
-bytes and checks that it decodes to the wire words. Write the expected field values
-by hand from the `usb-pd-docs` tables and cite the table, so the generator cannot
-hide a decode error. After changing a bundle, rerun the generator; `--check` fails
-while a header is stale:
+A register suite that uses a bundle (0x30, 0x34, 0x35) builds the register class
+from the bundle's register bytes and checks that it decodes to the wire words. The
+`TPS25751Pdo` and `TPS25751Rdo` suites decode the wire words directly, and the
+`TPS25751ReceivedSOPIdentity` suite feeds wire Discover Identity VDOs through the 0x48
+decoders, since no bundle yet holds a partner identity. Write the expected field
+values by hand from the `usb-pd-docs` tables and cite the table, so the generator
+cannot hide a decode error. After changing a bundle, rerun the generator; `--check`
+fails while a header is stale. The generator has its own unit tests:
 
 ```bash
 python3 test/support/pd_capture_fixture.py --check
+python3 -m unittest discover -s test/support -p "test_*.py"
 ```
 
 ---

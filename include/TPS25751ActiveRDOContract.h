@@ -16,6 +16,20 @@
  * - Bits 127:96  RequestedRDO: the RDO the port partner requested while the
  *                PD controller is the source (see requestedRDO())
  *
+ * The accessors decode bits 31:0 as a Fixed and Variable RDO (USB PD R3.3 Table
+ * 6.19, page 142), which is the TRM's field layout. The RDO's format follows the
+ * PDO at objectPosition() in the Source_Capabilities (0x30), so for other
+ * contracts the lower fields mean something else: in a Battery RDO (Table 6.20)
+ * bits 19:10 are Operating Power in 250 mW units, and in a PPS or AVS RDO (Tables
+ * 6.21, 6.22) bits 20:9 are Output Voltage and bits 6:0 Operating Current in 50 mA
+ * units. TRM reserved bit 22 is EPR Capable in every RDO. ACTIVE_PDO_CONTRACT
+ * (0x34) pdoType() and apdoSubtype() tell which applies.
+ *
+ * Hardware reading (board sinking on a 20 V Fixed contract, two chargers,
+ * 2026-11-19 and 2026-11-22): RequestedRDO read the same word as bits 31:0
+ * (0x4184B12C, then 0x4104B12C), although the TRM describes it as the RDO a
+ * partner sends while this device is source.
+ *
  * Register Size: 16 bytes
  * Access: Read-only
  * Address: 0x35

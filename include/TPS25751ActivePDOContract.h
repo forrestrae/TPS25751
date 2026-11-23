@@ -22,10 +22,10 @@ constexpr uint8_t kApdoSubtypeSprPps = 0b00;
  * @brief APDO subtype of a PDO word (bits 29:28)
  *
  * Meaningful only when bits 31:30 are 11b (PDOType::Augmented). Subtype 00b is
- * the SPR PPS APDO. USB PD 3.1 and later use the other values for further APDO
- * kinds, which this library does not decode yet. A TPS25751 test board's
- * TRANSMIT_SOURCE_CAPABILITIES (0x32) carries a subtype 10b APDO, observed on
- * hardware on 2026-11-18.
+ * the SPR PPS APDO. USB PD R3.3 Table 6.7 defines 01b as EPR AVS and 10b as SPR
+ * AVS (11b is invalid); this library does not decode those yet. A TPS25751 test
+ * board's TRANSMIT_SOURCE_CAPABILITIES (0x32) carries a subtype 10b APDO, an SPR
+ * AVS Source APDO (Table 6.15), observed on hardware on 2026-11-18.
  */
 inline uint8_t apdoSubtype(uint32_t pdo)
 {
@@ -77,6 +77,16 @@ public:
      * PDO-specific information drawn from the first PDO, whichever PDO was
      * selected. Source: SLVUCR8B (Rev. B, 2026-08), page 38.
      *
+     * These are bits 29:20 of PDO 1, the vSafe5V Fixed Supply PDO (USB PD R3.3
+     * Table 6.8, page 132): bit 9 here is Dual-Role Power (PDO bit 29), bit 8 USB
+     * Suspend Supported, bit 7 Unconstrained Power, bit 6 USB Communications
+     * Capable, bit 5 Dual-Role Data, bit 4 Unchunked Extended Messages Supported,
+     * bit 3 EPR Capable, bit 2 reserved, and bits 1:0 Peak Current. The TRM does
+     * not state this mapping. On hardware it held with two chargers: 0x098 here
+     * with PDO 1 of RECEIVED_SOURCE_CAPABILITIES (0x30) = 0x0981912C, whose bits
+     * 29:20 are 0x098 (2026-11-19), and 0x080 here with PDO 1 decoding as
+     * Unconstrained Power set (2026-11-22).
+     *
      * @return 10-bit control value
      */
     uint16_t firstPDOControlBits() const;
@@ -93,7 +103,11 @@ public:
      */
     bool hasActiveContract() const;
 
-    // Fixed Supply PDO fields (type 00)
+    // Fixed Supply PDO fields (type 00). The flag accessors read bits 29:24 of
+    // the active PDO. In a Fixed PDO above 5 V those bits are Device Flags,
+    // reserved and populated only in PDO 1 (USB PD R3.3 Table 6.10), so for a
+    // contract above 5 V they are not the partner's flags; firstPDOControlBits()
+    // carries PDO 1's flags whichever PDO is active.
     uint16_t fixedVoltage_mV() const;          ///< Voltage in millivolts (50mV units)
     uint16_t fixedMaxCurrent_mA() const;       ///< Max current in milliamps (10mA units)
     bool fixedDualRolePower() const;

@@ -95,7 +95,10 @@ public:
      */
     uint8_t getPowerPathForPDO(uint8_t index) const;
 
-    // Helper methods to parse Fixed Supply PDO (type 00)
+    // Helper methods to parse Fixed Supply PDO (type 00). The flag getters read
+    // bits 29:24 of the PDO at index. Only PDO 1 (index 0) carries these flags:
+    // in a Fixed PDO above 5 V, bits 29:22 are Device Flags, reserved (USB PD R3.3
+    // Table 6.10).
     uint16_t getFixedVoltage_mV(uint8_t index) const;
     uint16_t getFixedMaxCurrent_mA(uint8_t index) const;
     bool getFixedDualRolePower(uint8_t index) const;

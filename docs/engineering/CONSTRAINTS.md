@@ -775,10 +775,13 @@ Augmented PDO (APDO); bits 29:28 then select the APDO subtype, and only 00b is
 the SPR PPS layout above. On 2026-11-18 the test board's TRANSMIT_SOURCE_CAPS
 (0x32, EEPROM configuration) carried PDO 5 = `0xE004B1F4`, subtype 10b. Read with
 the PPS layout it gave a 17700 mV minimum and a 200 mV maximum, and the whole
-register failed `isSemanticallyValid()`. USB PD 3.1 and later define further APDO
-subtypes; their layouts are not yet checked against the specification. The
-`usb-pd-docs` MCP server serves USB PD R3.3 but not yet its PDO or APDO tables
-(checked 2026-11-19: it serves 16 data objects, Tables 6.24 to 6.70, none a PDO). Every PDO class (`TPS25751ActivePDOContract`,
+register failed `isSemanticallyValid()`. USB PD R3.3 Table 6.7 defines the subtypes:
+00b SPR PPS, 01b EPR AVS, 10b SPR AVS, and 11b invalid. That PDO 5 is an SPR AVS
+Source APDO (Table 6.15): Peak Current 00b, Maximum Current 15V 300 (3.0 A), and
+Maximum Current 20V 500 (5.0 A), all in range. The `usb-pd-docs` MCP server serves
+the PDO, APDO, and RDO tables (6.6 to 6.22) since `device-register-mcp-server`
+c4cca8f and c000cdf (2026-11-20), but the library still decodes only the SPR PPS
+APDO. Every PDO class (`TPS25751ActivePDOContract`,
 `TPS25751Received{Source,Sink}Caps`, `TPS25751Transmit{Source,Sink}Caps`)
 therefore exposes the subtype (`apdoSubtype()` / `getAPDOSubtype()`) and
 `isSprPps()` / `isSprPpsPDO()`. The PPS accessors return 0 (or false) for any
@@ -932,22 +935,47 @@ from memory. Points that are easy to get wrong:
 - Finding the mapping. Since `device-register-mcp-server` 8673c30, `tps25751-docs`
   prints a Specification block for 48h, 77h, 78h, 7Ah, 7Bh, 7Dh, and 7Eh that names
   the object and bits each register carries, and `explain_bitfield` names the object
-  field under each register field. Start there, then read the object in `usb-pd-docs`.
+  field under each register field. Since 696c854 (2026-11-22) it does the same for
+  30h to 35h, the PDOs and RDOs. Start there, then read the object in `usb-pd-docs`.
+- 0x48 VDO slots. For a dual-role partner the response is the UFP VDO, a 32-bit Pad
+  Object of all 0s, then the DFP VDO (USB PD R3.3 page 158, Figure 6.5), so VDO index 4
+  can read zero with a valid VDO count. After a version 1.0 UFP VDO 1 (Table 6.41),
+  index 4 is UFP VDO 2 (Table 6.42). The library keeps indices 3 to 5 raw.
+- PDOs and RDOs (cross-check against `usb-pd-docs` on 2026-11-22). The PDO field
+  layouts the classes decode match Tables 6.8 to 6.13. Three points the tables add:
+  - Bits 29:22 of a Fixed PDO above 5 V are Device Flags, reserved and populated only
+    in PDO 1 (Table 6.10). The `getFixed*()` flag getters of the capability classes
+    and the `fixed*()` flag accessors of 0x34 read those bits from any PDO, so for any
+    PDO but the first they return reserved bits, not the port's flags.
+  - 0x34 bits 41:32 (First PDO Control Bits) are bits 29:20 of PDO 1, Dual-Role Power
+    through Peak Current (Table 6.8). The TRM does not say so. Hardware confirms it
+    with two chargers: on 2026-11-19 0x34 read 0x098 there while PDO 1 of 0x30 was
+    0x0981912C, whose bits 29:20 are 0x098, and on 2026-11-22 it read 0x080 (bit 7,
+    Unconstrained Power) while PDO 1 decoded as Unconstrained Power set. With that
+    second charger on a 20 V contract, the 0x34 debug output printed Unconstrained
+    Power: No from the active PDO's reserved bits.
+  - 0x35 bits 31:0 follow the Fixed and Variable RDO (Table 6.19), which is TI's
+    layout. In a Battery RDO (Table 6.20) bits 19:10 are Operating Power in 250 mW
+    units, and in a PPS or AVS RDO (Tables 6.21, 6.22) bits 20:9 are Output Voltage and
+    bits 6:0 Operating Current in 50 mA units, so `operatingCurrent_mA()` holds only for
+    a Fixed or Variable contract. TRM reserved bit 22 is EPR Capable in every RDO.
+    On hardware, with the board sinking, 0x35 RequestedRDO (bits 127:96) read the
+    same word as bits 31:0 with both chargers (0x4184B12C, then 0x4104B12C), although
+    the TRM describes it as the RDO a partner sends while this device is source.
+  The validation rules of 0x30 to 0x33 differ from the tables in places (zero currents
+  allowed by the tables are rejected, upper limits are not checked, and PDO 1 is not
+  required to be a Fixed PDO); see the follow-up section of the rev B plan.
 
 ### USB PD Specification Reference
 
 For complete details, refer to:
 - **USB Power Delivery Specification R3.3 V1.0**, via the `usb-pd-docs` MCP server:
-  Table 6.24 (BSDO), 6.29 and 6.30 (Source_Info SIDO1 and SIDO2), 6.34 (ID Header
+  Tables 6.6 and 6.7 (PDO and APDO type), 6.8 to 6.12 (Fixed, Battery, and Variable
+  PDOs), 6.13 to 6.17 (PPS and AVS APDOs), 6.18 (PDO Peak Current), 6.19 to 6.22
+  (RDOs), 6.24 (BSDO), 6.29 and 6.30 (Source_Info SIDO1 and SIDO2), 6.34 (ID Header
   VDO), 6.38 (Cert Stat VDO), 6.39 (Product VDO), 6.40 to 6.44 and 6.53 (Product Type
   VDOs, not decoded), 6.59 (Source_Capabilities_Extended), 6.64 (Battery
   Capabilities), 6.67 (PPS Status), and 6.70 (Sink_Capabilities_Extended)
-- **USB Power Delivery Specification 3.1**
-- Section 6.4.1: Power Data Objects
-- Table 6-7: Fixed Supply PDO
-- Table 6-9: Battery Supply PDO
-- Table 6-11: Variable Supply PDO
-- Table 6-13: Augmented Power Data Object
 
 ---
 
@@ -1208,7 +1236,7 @@ void foo() {
    - Register definitions
    - Electrical characteristics
 
-2. **USB Power Delivery Specification 3.1**
+2. **USB Power Delivery Specification R3.3 V1.0** (via the `usb-pd-docs` MCP server)
    - PDO/RDO formats
    - Negotiation protocols
    - Voltage/current encoding
@@ -1243,6 +1271,7 @@ void foo() {
 | 1.12 | 2026-11-19 | Claude Code | ADR-012: the base-class bit helpers take a 16-bit bit position, so IO_CONFIG (0x5C) and TX_BATTERY_CAPABILITIES (0x7D) read and write through them (Read-Only Registers section, IO_CONFIG note) |
 | 1.13 | 2026-11-19 | Claude Code | USB PD cross-check against the linked `tps25751-docs` output: 0x77 byte 14 is the EPR Source PDP Rating, 0x78 is SIDO1 and SIDO2, and the Specification block (USB PD Specification Structures section) |
 | 1.14 | 2026-11-19 | Claude Code | TX_SOURCE_INFO (0x78) semantic validation checks the USB PD R3.3 Table 6.29 and 6.30 rules: DPS Port requires both Port Type bits Managed, and the 1 W Port Maximum PDP equals the 0.5 W value rounded down (USB PD Specification Structures and Read/Write Registers sections) |
+| 1.15 | 2026-11-22 | Claude Code | PDO, APDO, and RDO cross-check against `usb-pd-docs` (device-register-mcp-server 696c854): the 0x32 subtype 10b APDO is an SPR AVS Source APDO, 0x34 First PDO Control Bits are PDO 1 bits 29:20 (confirmed on hardware), fixed-PDO flags are reserved outside PDO 1, 0x35 decodes as a Fixed or Variable RDO only, and the 0x48 Pad Object (USB PD Specification Structures section) |
 
 ---
 

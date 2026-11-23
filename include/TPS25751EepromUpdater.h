@@ -4,11 +4,12 @@
  * @file TPS25751EepromUpdater.h
  * @brief Read-back and inspection of the TPS25751 configuration EEPROM over I2Ct
  *
- * The TPS25751 boots its patch bundle from an external EEPROM on its I2Cc bus. In
- * APP mode a host on I2Ct reaches that EEPROM through the flash 4CC tasks: FLrd
- * reads, FLad and FLwd write, FLvy validates a bundle header (TRM SLVUCR8B
- * Tables 4-19 to 4-22, pages 81 and 82). TI application note SLVAFL1 describes
- * the two-region layout and the update flow.
+ * The TPS25751 boots its patch bundle from an external EEPROM on its I2Cc bus. A
+ * host on I2Ct reaches that EEPROM through the flash 4CC tasks: FLrd reads, FLad
+ * and FLwd write, FLvy validates a bundle header (TRM SLVUCR8B Tables 4-19 to
+ * 4-22, pages 81 and 82). TI application note SLVAFL1 describes the two-region
+ * layout and the update flow, and its EEPROM Boot Flow section says the host
+ * writes the EEPROM once MODE reads APP.
  *
  * This version provides the read-only part: the FLrd and FLvy primitives, region
  * pointer reads, target-region selection, comparison with an image, a hex dump,
@@ -95,7 +96,7 @@ enum class EepromUpdateStatus : uint8_t {
     NoBootableRegion,         ///< Neither region pointer equals its bundle start
     EepromNotBlank,           ///< Blank programming refused: a region pointer is valid
     PointerEraseFailed,       ///< Update step 1: the target pointer could not be written to 0
-    SetAddressFailed,         ///< FLad returned a nonzero task return code
+    SetAddressFailed,         ///< FLad reported a failure in its task return code (TRM Table 4-20; Table 4-1 puts the standard TaskResult in bits 3:0)
     WriteFailed,              ///< FLwd returned an error other than busy
     FlashBusy,                ///< FLwd still reported busy (0xFF) after the retries
     VerifyFailed,             ///< FLvy reported the bundle not valid (0x01) or an unknown code
@@ -117,7 +118,10 @@ enum class EepromUpdateStatus : uint8_t {
  * @brief Sequencer for the TPS25751 flash 4CC tasks (read-back subset)
  *
  * Holds a reference to a TPS25751CommandExecutor and the EEPROM size. Every call
- * is synchronous. The controller must be in APP mode for the flash tasks.
+ * is synchronous. Use it with the controller in APP mode: SLVAFL1's EEPROM Boot
+ * Flow section describes the EEPROM update in APP mode. The TRM task tables
+ * (pages 81 and 82) state no mode requirement, and this class does not check
+ * MODE.
  *
  * @note Not a register class. Does not inherit TPS25751Register. Does not
  *       register with TPS25751RegisterFactory.
@@ -212,9 +216,14 @@ public:
     /**
      * @brief Read 16 bytes of the EEPROM with FLrd
      *
-     * Sends the 4-byte little-endian address and copies the 16 bytes from DATA
-     * byte 0. FLrd has no return-code byte, so the executor's returnCode is
-     * ignored. @p out is written only on Success.
+     * Sends the 4-byte address least significant byte first and copies the 16
+     * bytes from DATA byte 0. FLrd has no return-code byte (TRM Table 4-19), so
+     * the executor's returnCode is ignored. @p out is written only on Success.
+     *
+     * Two details are inferred, not stated by the TRM, and hardware stage 1
+     * confirms them: the address byte order (Table 4-20 states little-endian
+     * for FLad only; the SLVAFL1 source code casts a uint32_t the same way for
+     * FLrd), and that DATA byte 0 holds the EEPROM byte at @p addr.
      *
      * @param addr EEPROM address
      * @param out  Buffer of at least kFlashReadBytes bytes; must not be nullptr
@@ -228,7 +237,8 @@ public:
      *
      * FLvy completes after the bundle header is checked; whether it also checks
      * the bundle CRC is not documented, so a Success here does not prove the
-     * bundle body is intact. Use compareRegion() for that.
+     * bundle body is intact. Use compareRegion() for that. The address goes
+     * out least significant byte first, inferred as for readFlash().
      *
      * @param addr EEPROM address of the bundle (normally bundleStart())
      * @return Success for return code 0x00; VerifyFailed for 0x01 or any other
@@ -242,7 +252,8 @@ public:
     /**
      * @brief Read a region pointer word
      * @param r     Region
-     * @param value Receives the little-endian 32-bit word; written only on Success
+     * @param value Receives the 32-bit word, assembled least significant byte
+     *              first (SLVAFL1 page 12 source code); written only on Success
      * @return Success, or the readFlash() failure
      * @see SLVAFL1 Figure 2-1
      */

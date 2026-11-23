@@ -59,7 +59,13 @@ Writable through a `write<Name>()` method: 0x16, 0x18, 0x27, 0x32, 0x33, 0x37, 0
 ## Classes that are not registers
 
 `TPS25751PatchLoader`, `TPS25751EepromUpdater`, `TPS25751CommandExecutor`,
-`TPS25751HostExecutor`, and `TPS25751DownstreamDevice` do not inherit `TPS25751Register`
-and are not in the factory. STANDARDS.md does not govern them; their headers and
-ADR-007, ADR-011, and ADR-014 in
-[ARCHITECTURE.md](../docs/engineering/ARCHITECTURE.md) do.
+`TPS25751HostExecutor`, `TPS25751DownstreamDevice`, `TPS25751BenchProtocol`, and
+`TPS25751BenchConsole` do not inherit `TPS25751Register` and are not in the factory.
+STANDARDS.md does not govern them; their headers and ADR-007, ADR-011, ADR-014, and
+ADR-015 in [ARCHITECTURE.md](../docs/engineering/ARCHITECTURE.md) do.
+
+`TPS25751BenchConsole.h` is the one header `TPS25751.h` does not include; firmware that
+wants the console includes it. `TPS25751BenchProtocol.h` holds the line protocol, the
+`CMD` task allowlist, the `WR` register allowlist, and the snapshot register list, with no
+I2C and no clock. A change to any of them is a protocol change: the host side in
+`tools/pd-bench` and its README change with it.

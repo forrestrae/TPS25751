@@ -101,7 +101,7 @@ ignored. The old `#minor` and `#major` subject tokens have no effect.
 
 The `export.exclude` list in `library.json` filters the registry package: tooling, IDE
 configuration, every `AGENTS.md` and `CLAUDE.md`, `docs/plans/`, `platformio.ini`,
-`scripts/`, and `test/` are not shipped. `pio pkg pack` shows what would be published.
+`scripts/`, `test/`, `tools/`, and `plugins/` are not shipped. `pio pkg pack` shows what would be published.
 The workflow needs a `PLATFORMIO_AUTH_TOKEN` repository secret, generated with
 `pio account token`.
 

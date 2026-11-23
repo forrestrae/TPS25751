@@ -15,6 +15,9 @@ change, and points to the place where the detail for each area lives.
   PD R3.3 for the registers that carry specification objects.
 - The 4CC command-task interface, the I2Cc downstream-device proxy, the Patch Burst Mode
   loader, and the EEPROM updater are implemented and were run on hardware.
+- A bench console (`TPS25751BenchConsole`) and its MCP server (`tools/pd-bench`) give a
+  host program register reads, allowlisted tasks and writes, and restarts over a serial
+  line protocol, for checks against a USB PD analyzer.
 - Native tests cover 99% of the lines in `src/` (`test/coverage.sh`, 2026-11-24).
 - Plans and their hardware results are in `docs/plans/`. They are history: do not treat a
   plan as a description of the current code.
@@ -31,6 +34,7 @@ other agents load only this file, so open the sub-directory file yourself.
 | Tests in `test/` | [test/AGENTS.md](test/AGENTS.md), then [TESTING.md](docs/engineering/TESTING.md) |
 | Example sketches | [examples/AGENTS.md](examples/AGENTS.md) |
 | `scripts/`, hooks, releases | [scripts/AGENTS.md](scripts/AGENTS.md) |
+| The bench console, its protocol, or the bench server | `include/TPS25751BenchProtocol.h` and `include/TPS25751BenchConsole.h`, then [tools/pd-bench/README.md](tools/pd-bench/README.md) |
 | The bus protocol, 4CC tasks, PBM, flash tasks, or a difference between hardware and the TRM | [CONSTRAINTS.md](docs/engineering/CONSTRAINTS.md) |
 | Structure, data flow, and the decision records (ADRs) | [ARCHITECTURE.md](docs/engineering/ARCHITECTURE.md) |
 | Reviewing a change | [CODE_REVIEW_GUIDELINES.md](docs/engineering/CODE_REVIEW_GUIDELINES.md) |
@@ -53,6 +57,10 @@ USB PD table and bits each field maps to; look the object up in `usb-pd-docs`
 (`get_register` takes a table number such as `6.59`) and cite both the TRM page and the
 specification table. Claude Code reads `.mcp.json` and `.claude/settings.json`. A Codex
 configuration under `.codex/config.toml` is planned and not yet in the repository.
+
+A third server, `tps25751-bench` in `tools/pd-bench`, talks to a board through the bench
+console instead of serving documents. No agent configuration in this repository starts it
+yet; its README says how to run it and which of its tools change the board.
 
 ## Rules for every change
 
@@ -83,13 +91,14 @@ components, each documented in its header:
 
 | Component | Role | Background |
 |---|---|---|
-| `TPS25751` | Owns the bus and address; typed reads and writes for all 37 registers; `executeCommand()`, `issueCommand()`, `writeCommandData()`, `burstWrite()` | ARCHITECTURE.md, Layer Responsibilities |
+| `TPS25751` | Owns the bus and address; typed reads and writes for all 37 registers; `readRegisterRaw()`; `executeCommand()`, `issueCommand()`, `writeCommandData()`, `burstWrite()` | ARCHITECTURE.md, Layer Responsibilities |
 | `TPS25751Register` | Base class: byte buffer, `extractBits*()`, `setBits()`, the first two validation tiers | ADR-012 |
 | `TPS25751RegisterFactoryImpl`, `TPS25751Factory` | Create a register class from an `Address` | STANDARDS.md, Wiring a new register in |
 | `TPS25751Pdo`, `TPS25751Rdo` | Value types for one PDO or RDO word; `validatePdoList()` | ADR-013 |
 | `TPS25751DownstreamDevice` | Register access to a part on the I2Cc bus through `I2Cr` and `I2Cw`, or directly on a `TwoWire` | ADR-007, ADR-010 |
 | `TPS25751PatchLoader` | Loads a firmware and configuration image into a controller in PTCH (TI SLVAFV8A) | ADR-011; CONSTRAINTS.md, Patch Burst Mode |
 | `TPS25751EepromUpdater` on `TPS25751CommandExecutor` | Updates, reads back, and blank-programs the configuration EEPROM (TI SLVAFL1) | ADR-014; CONSTRAINTS.md, Flash tasks and EEPROM update |
+| `TPS25751BenchConsole` on `TPS25751BenchProtocol` | Answers a line protocol on a `Stream`: raw and decoded register reads, a snapshot, allowlisted tasks and writes, and restarts. Not included by `TPS25751.h` | ADR-015; tools/pd-bench/README.md |
 
 The typed driver for the BQ25798 charger lives in the sibling `lib/BQ25798` repository
 and depends on this library; nothing here depends on it.
@@ -135,6 +144,13 @@ pio run -e example-read-registers -t upload
 
 `pio test` without `-e native` targets the hardware environments and tries to upload.
 A green native run is required for every change. The serial monitor runs at 115200 baud.
+
+The bench server has its own tests, which use a fake serial port and never open a real
+one:
+
+```bash
+cd tools/pd-bench && uv run --locked pytest
+```
 
 ## Git Workflow
 

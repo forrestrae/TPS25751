@@ -587,7 +587,7 @@ auto statusReg = tps.readStatusRegister(true);  // with validation
     │   └── CODE_REVIEW_GUIDELINES.md   # Review checklist (embedded C++ / TPS25751-specific)
     └── plans/
         ├── plan-impl-v01.md            # Completed plan for the first 27 registers
-        ├── trm-revB-audit-remaining-registers.md  # Current plan: the other ten rev B registers
+        ├── trm-revB-audit-remaining-registers.md  # Plan for the other ten rev B registers
         └── feature/eeprom-update.md    # EEPROM updater plan, reviews, and hardware results
 ```
 

@@ -226,9 +226,11 @@ assumption: `FLrd` past the end of the part reads 0xFF; `FLad` past the end and 
 without an `FLad` return 0x03; an `FLwd` after an `FLad` that was faulted into having no
 effect writes at the stale address; `FLvy` decides validity from the Header_ID alone;
 `GAID` clears the write address and reboots at once. A test that depends on one of these
-pins the fake, not the device. Hardware has since confirmed some of the documented
-behaviour the fake follows, for example the `FLrd` byte order (stage 1) and the exact
-4-byte `FLwd` (stage 2), and contradicted none. One device behaviour is modelled only on
+pins the fake, not the device. Two behaviours the fake follows were inferred from the
+documents rather than stated by them and have since been verified on the test board: the
+`FLrd` byte order and address order (stage 1) and the exact length of a 4-byte `FLwd`
+(stage 2; other lengths remain a model). Hardware has contradicted none of the fake's
+choices so far. One device behaviour is modelled only on
 request: `flrdMovesWriteAddress` makes every `FLrd` leave the write address at the address
 it read plus 16. The TRM does not say whether a read moves the write address, hardware has
 not shown it, and the default is that it does not.

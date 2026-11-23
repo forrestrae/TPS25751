@@ -1397,7 +1397,8 @@ host-run tests that inject a fault at every task, and `src/TPS25751.cpp`, which 
   written. The TRM says `FLvy` completes after the header is checked. Stage 3 saw it reject
   a bundle with one inverted body byte, which is a sample of one, and SLVAFL1 (page 2)
   says a CRC error in a Low region with a correct header ends the boot without trying
-  High, so a pointer written over a damaged body costs both regions.
+  High, so a valid Low pointer over a damaged Low body costs both regions. A High CRC
+  error does fall back to Low.
 - Step 2 of an update reads back before it trusts the controller's write address. Before
   any task it checks that the 12 bytes after the erased pointer are not the start of the
   image, the trace of an earlier misplaced write. After the first two chunks it reads the

@@ -18,7 +18,8 @@
  * out. Without it, write the two definitions below by hand from the binary.
  *
  * While this placeholder is in place the example refuses every command that
- * writes the EEPROM: the bytes below are not a patch bundle, so
+ * writes the EEPROM, and l, which would load these bytes into the controller's
+ * RAM: the bytes below are not a patch bundle, so
  * TPS25751EepromUpdater::checkImage() returns BadImageHeader for them. The
  * read-only report and the cold reset still work.
  */

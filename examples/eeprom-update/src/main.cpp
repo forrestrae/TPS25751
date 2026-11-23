@@ -74,7 +74,11 @@
 // RECOVERY OF AN EEPROM THAT DOES NOT BOOT (hardware stage 5)
 //   The controller comes up in PTCH. Send l, then pb, then x: the controller
 //   restarts from the EEPROM pb wrote. r at start-up and on request says so
-//   when MODE reads PTCH.
+//   when MODE reads PTCH. SLVAFL1 (Recovering From EEPROM Failure, page 13)
+//   notes that this boot flow needs a host that can run and correct the
+//   EEPROM while the controller sits in PTCH; if the system needs the sink
+//   path before it can boot, the ADCINx pins must select a suitable
+//   dead-battery configuration (SafeMode does not apply).
 //
 // Every command that writes first prints its plan (target region, image
 // version, current VERSION, both pointers) and then waits for the line
@@ -502,7 +506,7 @@ static void printImage()
     Serial.print(F(", checkImage() = "));
     Serial.println(TPS25751EepromUpdater::toString(imageStatus()));
     if (imageStatus() != EepromUpdateStatus::Success) {
-        Serial.println(F("[image] Placeholder or unusable image: every command that writes the EEPROM is refused."));
+        Serial.println(F("[image] Placeholder or unusable image: every command that writes the EEPROM, and l, is refused."));
     }
 }
 

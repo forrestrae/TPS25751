@@ -1,53 +1,31 @@
 # TPS25751 Arduino Library
 
-An object-oriented C++ library for the **Texas Instruments TPS25751** USB-C Power
-Delivery controller, driven over I2C. It provides type-safe, per-register classes
-with named accessors, three-tier validation, and configurable debug output.
+An object-oriented C++ library for the Texas Instruments
+[TPS25751](https://www.ti.com/lit/pdf/SLVSH93) USB-C Power Delivery controller, driven
+over I2C. Each register decodes into its own class with named accessors, optional
+validation, and debug output. Read/write registers add field setters and a matching
+`write…()` method.
 
-The library also reaches devices on the TPS25751's secondary I2Cc bus through the
-controller's 4CC command-task interface. A complete typed driver for the **BQ25798**
-buck-boost charger builds on this and lives in the sibling
-[BQ25798 repository](https://github.com/forrestrae/BQ25798) (checked out
-side-by-side as `lib/BQ25798` during development).
+The library also configures the PDOs the controller advertises, sets the PD 3.x data
+blocks it sends in reply to Get_* messages, loads a patch bundle into a controller
+that boots without an EEPROM, and reaches devices on the controller's secondary I2Cc
+bus. A typed driver for the BQ25798 buck-boost charger builds on that last feature and
+lives in the [BQ25798 repository](https://github.com/forrestrae/BQ25798).
 
-Designed for **Teensy 4.x** (ARM Cortex-M7) and the Arduino framework.
+The library targets Teensy 4.x and the Arduino framework.
 
-## Highlights
+## Hardware requirements
 
-- **Type-safe register access** — each register decodes into a dedicated class with
-  named accessors instead of raw bit-twiddling. Read/write registers add field
-  setters and matching `write…()` methods (reserved bits preserved) for
-  read-modify-write configuration.
-- **Advertised-capability configuration** — build the Source/Sink Capabilities the
-  controller advertises over USB PD with typed PDO word builders for all four PDO
-  types (Fixed, Battery, Variable, and PPS/Augmented), correct unit scaling
-  included.
-- **PD 3.x extended and battery data replies** — set the data blocks the controller
-  sends in reply to PD 3.x Get_* messages (Source Info, PPS Status, Source and Sink
-  Capabilities Extended, Battery Status, and Battery Capabilities), each enabled by
-  its PD3_CONFIGURATION bit. Extended-capability, battery, and received identity
-  fields decode per USB PD R3.3 into typed flags, enums, and units beside the raw
-  values.
-- **Downstream device support** — talk to chips on the TPS25751's I2Cc bus via
-  `TPS25751DownstreamDevice`; typed per-device drivers (e.g. the BQ25798 charger
-  driver in the sibling `lib/BQ25798` repo) build on it.
-- **Patch-bundle loading** — `TPS25751PatchLoader` implements the EEPROM-less
-  PTCH → APP bring-up path (Patch Burst Mode, TI app note SLVAFV8A), streaming
-  a firmware image directly over I2Ct in Wire-buffer-sized chunks.
-- **Validation and debug** — optional per-read validation and runtime-configurable,
-  category-filtered debug output.
-- **Embedded-friendly** — RAII / `std::unique_ptr` ownership, no RTTI, no exceptions.
+| Component   | Details                                        |
+|-------------|------------------------------------------------|
+| MCU         | Teensy 4.0 or 4.1 (ARM Cortex-M7)              |
+| IC          | Texas Instruments TPS25751 USB-C PD controller |
+| Interface   | I2C (Arduino Wire library)                     |
+| I2C address | 0x20 to 0x23, set by the ADDR pins             |
 
-## Hardware Requirements
+The library requires C++17 and compiles with `-fno-rtti`.
 
-| Component     | Details                                        |
-|---------------|------------------------------------------------|
-| MCU           | Teensy 4.0 or 4.1 (ARM Cortex-M7)              |
-| IC            | Texas Instruments TPS25751 USB-C PD controller |
-| Interface     | I2C (Arduino Wire library)                      |
-| I2C address   | 0x20 – 0x23 (set by ADDR pins)                 |
-
-## Quick Start
+## Quick start
 
 ```cpp
 #include <TPS25751.h>
@@ -70,65 +48,26 @@ void loop() {
 ```
 
 Read methods return a `std::unique_ptr` to the decoded register, or `nullptr` on
-failure. See the [examples](examples/) for runnable sketches covering the host
-controller (downstream-charger examples live with the BQ25798 driver in the
-sibling `lib/BQ25798` repo).
-
-## Running the Examples
-
-Each example is a small sketch under [`examples/`](examples/), built through a
-dedicated PlatformIO environment defined in this library's `platformio.ini`. Build
-and flash from **this library's root** directory:
-
-```bash
-# List the available example environments
-pio project config
-
-# Build, upload, and monitor one example (Teensy 4.0)
-pio run -e example-read-registers -t upload
-pio device monitor          # 115200 baud
-```
-
-Substitute any `example-*` environment name — for instance
-`example-load-patch-bundle`. See [`examples/README.md`](examples/README.md) for a
-description of what each example demonstrates.
+failure. [examples/README.md](examples/README.md) describes the bundled sketches and
+how to build them.
 
 ## Documentation
 
-This README is intentionally brief. For deeper detail, see:
-
-- **[examples/README.md](examples/README.md)** — what each bundled example demonstrates
-- **[AGENTS.md](AGENTS.md)** — developer guide: architecture overview, register list,
-  4CC / downstream-device interface, and development workflow
-- **[docs/engineering/ARCHITECTURE.md](docs/engineering/ARCHITECTURE.md)** — system
-  design, patterns, and architectural decision records
-- **[docs/engineering/STANDARDS.md](docs/engineering/STANDARDS.md)** — implementation
-  standards for adding register classes
-- **[docs/engineering/CONSTRAINTS.md](docs/engineering/CONSTRAINTS.md)** —
-  platform constraints and I2C / 4CC protocol gotchas
-
-Official Texas Instruments references:
-
-- [TPS25751 Datasheet](https://www.ti.com/lit/gpn/tps25751)
-- [TPS25751 Technical Reference Manual](https://www.ti.com/lit/pdf/slvucr8)
-
-## Platform Notes
-
-- Compiled with `-fno-rtti`; the library uses `static_cast` and a factory pattern
-  instead of `dynamic_cast` / `typeid`.
-- Requires C++17 or later.
-- Tested on Teensy 4.0 and 4.1; may work on other Arduino-compatible ARM platforms.
+- [AGENTS.md](AGENTS.md): the developer guide, covering the register list,
+  architecture, 4CC and downstream-device interface, patch loading, build and test
+  commands, and the git workflow.
+- [TPS25751 Technical Reference Manual](https://www.ti.com/lit/pdf/slvucr8): the
+  register reference the library implements.
 
 ## Contributing
 
-Contributions are welcome for non-commercial purposes. Review
-[`docs/engineering/STANDARDS.md`](docs/engineering/STANDARDS.md) before submitting
-changes — new register classes must follow the established architecture.
+Contributions are welcome for non-commercial purposes. New register classes must
+follow [docs/engineering/STANDARDS.md](docs/engineering/STANDARDS.md).
 
 ## License
 
 Copyright (c) 2025-2026 Forrest Rae
 
-Licensed under the **Apache License, Version 2.0**. You may use, copy, modify, and
+Licensed under the Apache License, Version 2.0. You may use, copy, modify, and
 redistribute this software, including for commercial purposes, subject to the terms
-of the license. See [`LICENSE`](LICENSE) for full terms.
+of the license. See [LICENSE](LICENSE) for the full terms.

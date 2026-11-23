@@ -460,7 +460,7 @@ void test_debug_print_all_pdo_types()
     TEST_ASSERT_TRUE(contains(out, "--- PDO 5 ---"));
     TEST_ASSERT_TRUE(contains(out, "Type: Fixed Supply"));
     TEST_ASSERT_TRUE(contains(out, "Voltage: 5000 mV"));
-    TEST_ASSERT_TRUE(contains(out, "Operational Current: 3000 mA"));
+    TEST_ASSERT_TRUE(contains(out, "Max Current: 3000 mA"));
     TEST_ASSERT_TRUE(contains(out, "Dual-Role Power: Yes"));
     TEST_ASSERT_TRUE(contains(out, "Higher Capability: Yes"));
     TEST_ASSERT_TRUE(contains(out, "Unconstrained Power: Yes"));
@@ -470,10 +470,10 @@ void test_debug_print_all_pdo_types()
     TEST_ASSERT_TRUE(contains(out, "(2)"));
     TEST_ASSERT_TRUE(contains(out, "Type: Battery"));
     TEST_ASSERT_TRUE(contains(out, "Max Voltage: 20000 mV"));
-    TEST_ASSERT_TRUE(contains(out, "Operational Power: 60000 mW"));
+    TEST_ASSERT_TRUE(contains(out, "Max Power: 60000 mW"));
     TEST_ASSERT_TRUE(contains(out, "Type: Variable Supply"));
     TEST_ASSERT_TRUE(contains(out, "Max Voltage: 12000 mV"));
-    TEST_ASSERT_TRUE(contains(out, "Operational Current: 1500 mA"));
+    TEST_ASSERT_TRUE(contains(out, "Max Current: 1500 mA"));
     TEST_ASSERT_TRUE(contains(out, "Type: SPR PPS APDO"));
     TEST_ASSERT_TRUE(contains(out, "Max Voltage: 21000 mV"));
     TEST_ASSERT_TRUE(contains(out, "Min Voltage: 5000 mV"));

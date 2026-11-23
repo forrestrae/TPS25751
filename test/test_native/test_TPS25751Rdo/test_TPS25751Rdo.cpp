@@ -136,6 +136,11 @@ void test_debug_print_per_kind()
     const std::string bad = captureStdout([] { TPS25751Rdo(0x4004B0C8, RdoKind::FixedVariable).debugPrint(Serial, ""); });
     TEST_ASSERT_NOT_NULL(strstr(bad.c_str(), "Maximum Operating Current (deprecated) differs: 2000 mA\n"));
 
+    // Battery: Operating Power 240 (60 W), deprecated copy 200 (50 W).
+    const std::string batBad = captureStdout([] { TPS25751Rdo(0x2003C0C8, RdoKind::Battery).debugPrint(Serial, ""); });
+    TEST_ASSERT_NOT_NULL(strstr(batBad.c_str(), "Operating Power: 60000 mW\n"));
+    TEST_ASSERT_NOT_NULL(strstr(batBad.c_str(), "Maximum Operating Power (deprecated) differs: 50000 mW\n"));
+
     const std::string unk = captureStdout([] { TPS25751Rdo(0x4184B12C, RdoKind::Unknown).debugPrint(Serial, ""); });
     TEST_ASSERT_NOT_NULL(strstr(unk.c_str(), "Kind unknown"));
     TEST_ASSERT_EQUAL_STRING("AVS", toString(RdoKind::Avs));

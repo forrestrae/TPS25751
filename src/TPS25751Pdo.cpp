@@ -385,7 +385,9 @@ void TPS25751Pdo::debugPrint(Stream &s, const char *indent) const
     switch (kind()) {
         case PdoKind::Fixed:
             line(s, indent, F("Voltage: ")); s.print(fixedVoltage_mV()); s.println(F(" mV"));
-            line(s, indent, role_ == PdoRole::Source ? F("Max Current: ") : F("Operational Current: "));
+            // Table 6.10 names a Sink's Fixed PDO above 5 V "Operational Current";
+            // Tables 6.8 to 6.10 otherwise call the field Maximum Current.
+            line(s, indent, (role_ == PdoRole::Sink && !isFirst()) ? F("Operational Current: ") : F("Max Current: "));
             s.print(fixedCurrent_mA()); s.println(F(" mA"));
             if (role_ == PdoRole::Source) {
                 line(s, indent, F("Peak Current: ")); printPeak(s, peakCurrent(), rawPeakCurrent());
@@ -413,14 +415,14 @@ void TPS25751Pdo::debugPrint(Stream &s, const char *indent) const
         case PdoKind::Battery:
             line(s, indent, F("Max Voltage: ")); s.print(batteryMaxVoltage_mV()); s.println(F(" mV"));
             line(s, indent, F("Min Voltage: ")); s.print(batteryMinVoltage_mV()); s.println(F(" mV"));
-            line(s, indent, role_ == PdoRole::Source ? F("Max Power: ") : F("Operational Power: "));
+            line(s, indent, F("Max Power: "));
             s.print(static_cast<unsigned long>(batteryPower_mW())); s.println(F(" mW"));
             break;
 
         case PdoKind::Variable:
             line(s, indent, F("Max Voltage: ")); s.print(variableMaxVoltage_mV()); s.println(F(" mV"));
             line(s, indent, F("Min Voltage: ")); s.print(variableMinVoltage_mV()); s.println(F(" mV"));
-            line(s, indent, role_ == PdoRole::Source ? F("Max Current: ") : F("Operational Current: "));
+            line(s, indent, F("Max Current: "));
             s.print(variableCurrent_mA()); s.println(F(" mA"));
             break;
 

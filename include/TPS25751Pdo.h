@@ -179,7 +179,8 @@ public:
 
     uint16_t rawFixedVoltage() const;  ///< Bits 19:10, 50 mV units; 0 unless kind() is Fixed
     uint16_t fixedVoltage_mV() const;  ///< Voltage in mV
-    /// Bits 9:0, 10 mA units: Maximum Current (Source), Operational Current (Sink); 0 unless Fixed
+    /// Bits 9:0, 10 mA units: Maximum Current, supported (Source) or consumed (Sink PDO 1); a Sink's
+    /// Fixed PDO above 5 V calls it Operational Current (Table 6.10). 0 unless Fixed
     uint16_t rawFixedCurrent() const;
     uint16_t fixedCurrent_mA() const;  ///< Current in mA
 
@@ -209,7 +210,7 @@ public:
     uint16_t batteryMaxVoltage_mV() const;
     uint16_t rawBatteryMinVoltage() const;   ///< Bits 19:10, 50 mV units
     uint16_t batteryMinVoltage_mV() const;
-    uint16_t rawBatteryPower() const;        ///< Bits 9:0, 250 mW units: maximum (Source) or operational (Sink) power
+    uint16_t rawBatteryPower() const;        ///< Bits 9:0, 250 mW units: Maximum Power, supported (Source) or consumed (Sink)
     uint32_t batteryPower_mW() const;
 
     // --- Variable PDO (Table 6.12) -------------------------------------------------
@@ -218,7 +219,7 @@ public:
     uint16_t variableMaxVoltage_mV() const;
     uint16_t rawVariableMinVoltage() const;  ///< Bits 19:10, 50 mV units
     uint16_t variableMinVoltage_mV() const;
-    uint16_t rawVariableCurrent() const;     ///< Bits 9:0, 10 mA units: maximum (Source) or operational (Sink) current
+    uint16_t rawVariableCurrent() const;     ///< Bits 9:0, 10 mA units: Maximum Current, supported (Source) or consumed (Sink)
     uint16_t variableCurrent_mA() const;
 
     // --- SPR PPS APDO (Table 6.13 Source, 6.14 Sink) --------------------------------

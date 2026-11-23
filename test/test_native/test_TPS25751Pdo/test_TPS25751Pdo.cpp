@@ -354,7 +354,9 @@ void test_debug_print_avs_and_unexpected_kinds()
 void test_debug_print_sink_pdo1()
 {
     const std::string out = captureStdout([] { snk(0x1001912C, 1).debugPrint(Serial, ""); });
-    TEST_ASSERT_NOT_NULL(strstr(out.c_str(), "  Operational Current: 3000 mA\n"));
+    TEST_ASSERT_NOT_NULL(strstr(out.c_str(), "  Max Current: 3000 mA\n"));  // Table 6.9 name
+    const std::string later = captureStdout([] { snk(0x0004B12C, 3).debugPrint(Serial, ""); });
+    TEST_ASSERT_NOT_NULL(strstr(later.c_str(), "  Operational Current: 3000 mA\n"));  // Table 6.10, Sink
     TEST_ASSERT_NOT_NULL(strstr(out.c_str(), "  Higher Capability: Yes\n"));
     TEST_ASSERT_NOT_NULL(strstr(out.c_str(), "  Fast Role Swap Current: Not supported (0)\n"));
     TEST_ASSERT_NULL(strstr(out.c_str(), "Peak Current"));

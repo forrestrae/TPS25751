@@ -163,10 +163,10 @@ enum class EepromUpdateStatus : uint8_t {
     WriteFailed,              ///< FLwd returned a code other than written (0x00) or busy (0xFF)
     FlashBusy,                ///< FLwd reported busy (0xFF), in an update still busy after the retries
     VerifyFailed,             ///< FLvy reported the bundle not valid (0x01) or an unknown code
-    CompareMismatch,          ///< compareRegion(): the EEPROM differs from the image. writeRegionPointer(): the word read back differs from the value written
+    CompareMismatch,          ///< compareRegion(): the EEPROM differs from the image. writeRegionPointer(): the word read back differs from the value written. An update: the compare of step 3, or the first chunks did not read back at the bundle start in step 2
     PointerRestoreFailed,     ///< Update step 3: the target pointer could not be written to the bundle start
     OldPointerEraseFailed,    ///< Update step 4: the old region pointer could not be written to 0
-    PointerNeighborsChanged,  ///< Bytes 4 to 15 after a pointer changed during a pointer write
+    PointerNeighborsChanged,  ///< Bytes 4 to 15 after a pointer changed during a pointer write, or the 16 bytes at the target pointer changed while the first chunks of an update were written
     ResetTimeout,             ///< The controller did not return to APP after GAID
     CommandRejected,          ///< The executor reported "!CMD" (task code not recognized)
     CommandTimeout,           ///< The executor saw neither clear nor "!CMD" before the timeout
@@ -236,6 +236,7 @@ struct EepromUpdateOptions {
  * - then after every 16-byte read that matched the image, with @p done the
  *   image bytes compared so far. The last call has @p done == @p total.
  *
+ * The read-back after the first two chunks of the write phase makes no call.
  * A step that fails makes no further call, so a missing final call means the
  * phase did not complete. updateBothRegions() runs both phases once per region.
  *
@@ -284,6 +285,9 @@ public:
     /// Largest FLwd payload this class sends. The TRM accepts up to 64 bytes
     /// and recommends 32, the default EEPROM page size the task uses (Table 4-21).
     static constexpr size_t kFlashWriteChunk = 32;
+
+    /// Image bytes an update writes before it reads them back: two chunks.
+    static constexpr size_t kEarlyReadBackBytes = 2 * kFlashWriteChunk;
 
     /// Header_ID at the start of every patch bundle, little-endian (SLVAFL1 section 2.1).
     static constexpr uint32_t kBundleHeaderId = 0xACE00001UL;
@@ -582,14 +586,20 @@ public:
      *    Step 1 below is safe only when the region being kept is bootable.
      *    Only the pointer is checked, not the bundle behind it.
      *
-     * Then the four steps of SLVAFL1 Figure 2-3:
+     * Then the four steps of SLVAFL1 Figure 2-3, with a read-back added to
+     * step 2:
      *
      * 1. writeRegionPointer(@p target, 0).
      * 2. FLad to bundleStart(@p target), then FLwd in 32-byte chunks, the last
      *    chunk at its true length. A chunk whose FLwd reports busy (0xFF) is
      *    retried up to FLWD_BUSY_RETRIES times, each retry after
      *    FLWD_BUSY_RETRY_DELAY_MS and preceded by a fresh FLad to that chunk's
-     *    address.
+     *    address. After the first two chunks (kEarlyReadBackBytes, or the whole
+     *    image when it is shorter) the write pauses for a read-back: those
+     *    bytes are read at the bundle start with FLrd and compared with the
+     *    image, and the 16 bytes at the target pointer are read and compared
+     *    with what the read-back of step 1 saw. A fresh FLad to the next
+     *    unwritten byte follows, then the remaining chunks.
      * 3. FLvy at bundleStart(@p target); then, when @p opt.compareAfterWrite is
      *    set, an FLrd compare of the region with the image; then
      *    writeRegionPointer(@p target, bundleStart(@p target)).
@@ -605,13 +615,15 @@ public:
      * | Success | The whole flow | Target holds the image and its pointer is valid. Other pointer is 0 when invalidateOldRegion is set, else unchanged |
      * | NotInAppMode, NoEepromPresent, BadImageHeader, BadImageLength, NoBootableRegion | Pre-flight | Unchanged |
      * | PointerEraseFailed | Step 1, when its pointer write fails with SetAddressFailed, WriteFailed, FlashBusy, or CompareMismatch | Target pointer uncertain, target region untouched. Other region still boots (SLVAFL1 Figure 2-6 or 2-7) |
-     * | SetAddressFailed | Step 2, the FLad to the bundle start or the FLad of a busy retry | Target pointer 0, region untouched or partly written. Other region boots (Figure 2-7) |
+     * | SetAddressFailed | Step 2, the FLad to the bundle start, the FLad after the read-back, or the FLad of a busy retry | Target pointer 0, region untouched or partly written. Other region boots (Figure 2-7) |
      * | WriteFailed, FlashBusy | Step 2, an FLwd chunk | Target region partly written, pointer 0. Other region boots |
      * | VerifyFailed | Step 3, FLvy | Target written but not valid, pointer 0. Other region boots (Figure 2-8) |
-     * | CompareMismatch | Step 3, the compare | Same as VerifyFailed |
+     * | CompareMismatch | Step 2, the read-back of the first two chunks (lastStep() is WriteBundle) | Target pointer 0. The first chunks are not at the bundle start; where they went is unknown. Other region boots unless they landed on it (see below) |
+     * | CompareMismatch | Step 3, the compare (lastStep() is CompareBundle) | Same as VerifyFailed |
      * | PointerRestoreFailed | Step 3, when its pointer write fails as for step 1 | Target holds the image, its pointer uncertain. Other region boots |
      * | OldPointerEraseFailed | Step 4, when its pointer write fails as for step 1 | Target holds the image and its pointer is valid. Other pointer uncertain, so both may be valid; the low region boots first (Figure 2-9) |
      * | PointerNeighborsChanged | The neighbor check of the pointer write in step 1, 3, or 4 | Bytes 4 to 15 after that pointer changed. Stop and dump the EEPROM |
+     * | PointerNeighborsChanged | Step 2, the pointer read of the read-back (lastStep() is WriteBundle) | Target pointer word or the 12 bytes after it changed while the first two chunks were written. Stop and dump the EEPROM |
      * | CommandRejected, CommandTimeout, I2cError | The executor, in any step | As the row of the step lastStep() names |
      *
      * For an executor failure, lastStep() gives the row: Preflight leaves the
@@ -622,17 +634,29 @@ public:
      * that timed out may still have run, which is why those pointer states
      * are "uncertain".
      *
-     * One limit of this sequence: step 2 trusts the controller's write
-     * address. Once the FLad to the bundle start has returned 0, the chunks
-     * are sent with no read-back until the compare of step 3. A controller
-     * that returned 0 and still held another address would write the whole
-     * image there. FLvy or the compare then fails the call unless the target
-     * region already held the same image; in that case both pass on the old
-     * contents and the call returns Success. Either way the bytes have
-     * landed by then, and they can land on the other region's bundle or
-     * pointer. The table above does not hold in that case, and no region may
-     * boot. No TI document describes such a failure. The sequence is the one
-     * SLVAFL1 Figure 2-3 gives.
+     * What the read-back in step 2 is for. The chunks go wherever the
+     * controller's write address points, and SLVAFL1 Figure 2-3 sends all of
+     * them on the strength of one FLad. After step 1 that address sits just
+     * past the target's pointer word, so an FLad that returned 0 without
+     * taking effect would put the bundle there, across the other region's
+     * pointer or bundle. The read-back stops this after two chunks. Either
+     * the bytes are missing at the bundle start (CompareMismatch), or, when
+     * the region already held the same image, the 12 bytes after the pointer
+     * word have changed (PointerNeighborsChanged). At most 64 bytes are then
+     * misplaced, in the unused bytes after the target's pointer word, and the
+     * other region and its pointer are untouched.
+     *
+     * What it does not prove. It checks the first two chunks only: a write
+     * address that goes wrong after the read-back is not seen before FLvy or
+     * the compare of step 3, when the bytes have landed, and not at all when
+     * the target already held the same image. When the target already held
+     * the same image, two chunks misplaced anywhere other than just past its
+     * pointer word also go unseen; the FLad after the read-back then sends
+     * the remaining chunks to the right place, so 64 bytes are misplaced. A
+     * misplaced write that only repeats bytes an earlier one left after the
+     * pointer word changes nothing and is not seen either. In these cases the
+     * table above does not hold. No TI document describes a write address
+     * that differs from the one FLad was given.
      *
      * The call blocks for the whole update. Stage 1 measured 17.7 ms per FLrd,
      * so the compare alone takes about 16 s for a 14336-byte image. An
@@ -888,13 +912,29 @@ private:
                                                      EepromUpdateStatus stepFailure);
 
     /// The four tasks of writeRegionPointer() for the 4-byte word at @p addr.
-    EepromUpdateStatus writeWordChecked(uint32_t addr, uint32_t value);
+    /// On Success, @p readBack (when not nullptr) receives the 16 bytes the
+    /// final read-back saw.
+    EepromUpdateStatus writeWordChecked(uint32_t addr, uint32_t value, uint8_t* readBack = nullptr);
 
     /// The four pre-flight checks of updateRegion(); issues no write.
     EepromUpdateStatus preflight(EepromRegion target, const uint8_t* image, size_t length);
 
-    /// Step 2 of updateRegion(): FLad, then the FLwd chunks, with progress calls.
-    EepromUpdateStatus writeBundle(EepromRegion target, const uint8_t* image, size_t length);
+    /// Step 2 of updateRegion(): FLad, the first two chunks, the early
+    /// read-back, a fresh FLad, and the remaining chunks, with progress calls.
+    /// @p pointerRow is the 16 bytes step 1's read-back saw at the target pointer.
+    EepromUpdateStatus writeBundle(EepromRegion target, const uint8_t* image, size_t length,
+                                   const uint8_t* pointerRow);
+
+    /// Image bytes @p from to @p to as chunks at the current write address,
+    /// with the busy retry and a progress call after each chunk.
+    EepromUpdateStatus writeChunks(uint32_t base, const uint8_t* image, size_t from, size_t to,
+                                   uint32_t total);
+
+    /// The early read-back of step 2: the first @p written image bytes read
+    /// back at the bundle start (CompareMismatch), and the 16 bytes at the
+    /// target pointer still equal to @p pointerRow (PointerNeighborsChanged).
+    EepromUpdateStatus checkEarlyChunks(EepromRegion target, const uint8_t* image, size_t written,
+                                        const uint8_t* pointerRow);
 
     /// One bundle chunk at the current write address, with the busy retry;
     /// @p addr is the chunk's EEPROM address, used by the fresh FLad of a retry.

@@ -167,6 +167,11 @@ public:
 
     std::vector<Call> calls;
 
+    // When false, the log keeps each call's code, sizes, timeout, and result but
+    // not its input bytes. A sweep that runs thousands of updates and looks
+    // only at the number of calls turns this off to save an allocation per call.
+    bool logPayloads = true;
+
     // --- Setup helpers -------------------------------------------------------
 
     void setMode(const char (&m)[5]) { memcpy(mode, m, kModeSize); }
@@ -237,7 +242,7 @@ public:
         now += msPerCommand;
 
         Call call{code, std::vector<uint8_t>(), outLen, timeoutMs, {TPS25751TaskStatus::Success, 0}};
-        if (inData != nullptr && inLen > 0) call.in.assign(inData, inData + inLen);
+        if (logPayloads && inData != nullptr && inLen > 0) call.in.assign(inData, inData + inLen);
 
         const Fault *fault = findFault(code, index);
 

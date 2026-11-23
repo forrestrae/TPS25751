@@ -213,7 +213,8 @@ EepromUpdateStatus TPS25751EepromUpdater::readRegionPointer(EepromRegion r, uint
     return EepromUpdateStatus::Success;
 }
 
-EepromUpdateStatus TPS25751EepromUpdater::writeWordChecked(uint32_t addr, uint32_t value)
+EepromUpdateStatus TPS25751EepromUpdater::writeWordChecked(uint32_t addr, uint32_t value,
+                                                           uint8_t* readBack)
 {
     // 1. Keep the 16 bytes at the address; bytes 4 to 15 must survive the write.
     uint8_t before[kFlashReadBytes];
@@ -255,6 +256,9 @@ EepromUpdateStatus TPS25751EepromUpdater::writeWordChecked(uint32_t addr, uint32
                         static_cast<unsigned long>(getLe32(after)),
                         static_cast<unsigned long>(value));
         return EepromUpdateStatus::CompareMismatch;
+    }
+    if (readBack != nullptr) {
+        memcpy(readBack, after, sizeof(after));
     }
     return EepromUpdateStatus::Success;
 }
@@ -381,8 +385,68 @@ EepromUpdateStatus TPS25751EepromUpdater::writeChunk(uint32_t addr, const uint8_
     return s;
 }
 
+EepromUpdateStatus TPS25751EepromUpdater::writeChunks(uint32_t base, const uint8_t* image,
+                                                      size_t from, size_t to, uint32_t total)
+{
+    // The write address advances after each successful FLwd (Table 4-21), so the
+    // chunks need no FLad between them. Both bundle starts are multiples of 32,
+    // so no chunk crosses a 32-byte page. The last chunk goes out at its true
+    // length.
+    size_t offset = from;
+    while (offset < to) {
+        const size_t remaining = to - offset;
+        const size_t n = (remaining < kFlashWriteChunk) ? remaining : kFlashWriteChunk;
+        const EepromUpdateStatus s = writeChunk(base + static_cast<uint32_t>(offset), image + offset, n);
+        if (s != EepromUpdateStatus::Success) {
+            TPS_DEBUG_ERROR(DEBUG_CAT_TASK, "EEPROM: bundle write stopped at image offset 0x%04lX (%s)",
+                            static_cast<unsigned long>(offset), toString(s));
+            return s;
+        }
+        offset += n;
+        reportProgress(static_cast<uint32_t>(offset), total);
+    }
+    return EepromUpdateStatus::Success;
+}
+
+EepromUpdateStatus TPS25751EepromUpdater::checkEarlyChunks(EepromRegion target, const uint8_t* image,
+                                                           size_t written, const uint8_t* pointerRow)
+{
+    // The first chunks must read back from the bundle start. A write address
+    // that was not where FLad was told to put it shows here, unless the region
+    // already held the same bytes.
+    EepromUpdateStatus s = compareImage(target, image, written, nullptr, /*report=*/false);
+    if (s != EepromUpdateStatus::Success) {
+        if (s == EepromUpdateStatus::CompareMismatch) {
+            TPS_DEBUG_ERROR(DEBUG_CAT_TASK,
+                            "EEPROM: the first %lu bytes did not read back at 0x%08lX; write stopped",
+                            static_cast<unsigned long>(written),
+                            static_cast<unsigned long>(bundleStart(target)));
+        }
+        return s;
+    }
+
+    // The 16 bytes at the target pointer must be as step 1 left them. After
+    // step 1 the controller's write address sits just past the pointer word, so
+    // an FLad that reported success without taking effect puts the chunks
+    // there, and the check above cannot see that when the region already held
+    // the image.
+    const uint32_t pointerAddr = regionPointerAddress(target);
+    uint8_t now[kFlashReadBytes];
+    s = readFlash(pointerAddr, now);
+    if (s != EepromUpdateStatus::Success) {
+        return s;
+    }
+    if (getLe32(now) != 0 || memcmp(now + 4, pointerRow + 4, kFlashReadBytes - 4) != 0) {
+        TPS_DEBUG_ERROR(DEBUG_CAT_TASK,
+                        "EEPROM: the 16 bytes at 0x%08lX changed while the first chunks were written; write stopped",
+                        static_cast<unsigned long>(pointerAddr));
+        return EepromUpdateStatus::PointerNeighborsChanged;
+    }
+    return EepromUpdateStatus::Success;
+}
+
 EepromUpdateStatus TPS25751EepromUpdater::writeBundle(EepromRegion target, const uint8_t* image,
-                                                      size_t length)
+                                                      size_t length, const uint8_t* pointerRow)
 {
     const uint32_t base = bundleStart(target);
     const uint32_t total = static_cast<uint32_t>(length);
@@ -395,24 +459,29 @@ EepromUpdateStatus TPS25751EepromUpdater::writeBundle(EepromRegion target, const
         return s;
     }
 
-    // The write address advances after each successful FLwd (Table 4-21), so the
-    // chunks need no FLad between them. Both bundle starts are multiples of 32,
-    // so no chunk crosses a 32-byte page. The last chunk goes out at its true
-    // length.
-    size_t offset = 0;
-    while (offset < length) {
-        const size_t remaining = length - offset;
-        const size_t n = (remaining < kFlashWriteChunk) ? remaining : kFlashWriteChunk;
-        s = writeChunk(base + static_cast<uint32_t>(offset), image + offset, n);
-        if (s != EepromUpdateStatus::Success) {
-            TPS_DEBUG_ERROR(DEBUG_CAT_TASK, "EEPROM: bundle write stopped at image offset 0x%04lX (%s)",
-                            static_cast<unsigned long>(offset), toString(s));
-            return s;
-        }
-        offset += n;
-        reportProgress(static_cast<uint32_t>(offset), total);
+    // The first two chunks, then proof that they are where they belong, before
+    // the other chunks follow them on the strength of the same write address.
+    const size_t early = (length < kEarlyReadBackBytes) ? length : kEarlyReadBackBytes;
+    s = writeChunks(base, image, 0, early, total);
+    if (s != EepromUpdateStatus::Success) {
+        return s;
     }
-    return EepromUpdateStatus::Success;
+    s = checkEarlyChunks(target, image, early, pointerRow);
+    if (s != EepromUpdateStatus::Success) {
+        return s;
+    }
+    if (early == length) {
+        return EepromUpdateStatus::Success;
+    }
+
+    // Whether an FLrd disturbs the controller's write address is not
+    // documented, so the address of the next unwritten byte is set again, as
+    // the busy retry does.
+    s = setWriteAddress(base + static_cast<uint32_t>(early));
+    if (s != EepromUpdateStatus::Success) {
+        return s;
+    }
+    return writeChunks(base, image, early, length, total);
 }
 
 EepromUpdateStatus TPS25751EepromUpdater::updateRegion(EepromRegion target, const uint8_t* image,
@@ -432,15 +501,18 @@ EepromUpdateStatus TPS25751EepromUpdater::updateRegion(EepromRegion target, cons
 
     // Step 1: erase the target pointer, so that the controller cannot load the
     // region while it is being written.
+    // The 16 bytes its read-back saw are kept: step 2 checks them again.
     _lastStep = EepromUpdateStep::ErasePointer;
-    s = mapPointerWriteFailure(writeRegionPointer(target, 0), EepromUpdateStatus::PointerEraseFailed);
+    uint8_t pointerRow[kFlashReadBytes];
+    s = mapPointerWriteFailure(writeWordChecked(regionPointerAddress(target), 0, pointerRow),
+                               EepromUpdateStatus::PointerEraseFailed);
     if (s != EepromUpdateStatus::Success) {
         return s;
     }
 
-    // Step 2: write the bundle.
+    // Step 2: write the bundle, with a read-back after the first two chunks.
     _lastStep = EepromUpdateStep::WriteBundle;
-    s = writeBundle(target, image, length);
+    s = writeBundle(target, image, length, pointerRow);
     if (s != EepromUpdateStatus::Success) {
         return s;
     }

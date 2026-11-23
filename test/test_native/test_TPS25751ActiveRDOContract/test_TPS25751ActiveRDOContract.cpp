@@ -298,6 +298,11 @@ void test_short_buffer_returns_zero_requested_rdo()
 // Suspend (bit 24), Unchunked (bit 23), Operating Current 300 (bits 19:10, 3000 mA in
 // 10 mA units), and the deprecated Maximum Operating Current copy 300 (bits 9:0). The
 // board is sinking, so bits 127:96 read the same word (see BOARD_SINKING).
+//
+// Because both words are equal here, these tests cannot catch a decoder that swaps the
+// own RDO (bits 31:0) and the requested RDO (bits 127:96). The source-role bundle that
+// Phase 7 of docs/plans/km003c-pd-analyzer-toolset.md adds, with the board as source
+// and an iPhone as sink, puts the partner's Request in bits 127:96 and covers it.
 
 void test_capture_own_rdo_is_the_wire_request()
 {
@@ -313,7 +318,9 @@ void test_capture_own_rdo_is_the_wire_request()
 void test_capture_own_rdo_fields_per_table_6_19()
 {
     TPS25751ActiveRDOContract reg(cap::kRegister0x35, cap::kRegister0x35Length);
-    const RdoKind kind = rdoKindFor(cap::kSourceCapabilitiesPdos[reg.ownRdo().objectPosition() - 1]);
+    TEST_ASSERT_EQUAL_UINT8(4, reg.ownRdo().objectPosition());
+    // Object Position 4 names wire PDO 4, Fixed 20 V, so the RDO is Fixed/Variable.
+    const RdoKind kind = rdoKindFor(cap::kSourceCapabilitiesPdos[4 - 1]);
     TEST_ASSERT_TRUE(RdoKind::FixedVariable == kind);
 
     const TPS25751Rdo own = reg.ownRdo(kind);

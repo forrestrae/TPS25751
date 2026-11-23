@@ -405,11 +405,8 @@ void test_debug_print_sink_pdo1()
 void test_wire_source_capabilities_header()
 {
     TEST_ASSERT_TRUE(cap::kHasSourceCapabilities);
+    TEST_ASSERT_FALSE(cap::kSourceCapabilitiesEpr);
     TEST_ASSERT_EQUAL_HEX16(0x41A1, cap::kSourceCapabilitiesHeader);
-    TEST_ASSERT_EQUAL_UINT8(1, cap::kSourceCapabilitiesHeader & 0x1F);         // Source_Capabilities
-    TEST_ASSERT_EQUAL_UINT8(1, (cap::kSourceCapabilitiesHeader >> 5) & 0x1);   // DFP
-    TEST_ASSERT_EQUAL_UINT8(1, (cap::kSourceCapabilitiesHeader >> 8) & 0x1);   // Source
-    TEST_ASSERT_EQUAL_UINT8(4, (cap::kSourceCapabilitiesHeader >> 12) & 0x7);  // data objects
     TEST_ASSERT_EQUAL_size_t(4, cap::kSourceCapabilitiesPdoCount);
 }
 

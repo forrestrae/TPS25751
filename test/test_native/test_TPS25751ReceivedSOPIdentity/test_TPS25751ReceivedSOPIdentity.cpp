@@ -417,8 +417,6 @@ void test_copy_and_move()
     TEST_ASSERT_EQUAL_HEX32(0xCAFEBABEu, target2.vdo(0));
 }
 
-// --- Runner ----------------------------------------------------------------------
-
 // --- Wire: Discover Identity ACKs from the 2026-11-23 capture ----------------------
 //
 // The capture holds two ACKs and neither one is a 0x48 check: the board's own ACK on
@@ -440,12 +438,7 @@ void test_copy_and_move()
 void test_wire_board_identity_ack_headers()
 {
     TEST_ASSERT_EQUAL_HEX16(0x428F, cap::kIdentityAckSopSinkUfpHeader);
-    TEST_ASSERT_EQUAL_UINT8(15, cap::kIdentityAckSopSinkUfpHeader & 0x1F);
-    TEST_ASSERT_EQUAL_UINT8(0, (cap::kIdentityAckSopSinkUfpHeader >> 5) & 0x1);  // UFP
-    TEST_ASSERT_EQUAL_UINT8(0, (cap::kIdentityAckSopSinkUfpHeader >> 8) & 0x1);  // Sink
     TEST_ASSERT_EQUAL_HEX32(0xFF00A041, cap::kIdentityAckSopSinkUfpVdmHeader);
-    TEST_ASSERT_EQUAL_UINT8(1, (cap::kIdentityAckSopSinkUfpVdmHeader >> 6) & 0x3);  // ACK
-    TEST_ASSERT_EQUAL_UINT8(1, cap::kIdentityAckSopSinkUfpVdmHeader & 0x1F);        // Discover Identity
     TEST_ASSERT_EQUAL_size_t(3, cap::kIdentityAckSopSinkUfpVdoCount);
 }
 
@@ -479,10 +472,7 @@ void test_wire_board_identity_ack_decodes_per_tables_6_34_6_38_6_39()
 void test_wire_cable_identity_ack_headers()
 {
     TEST_ASSERT_EQUAL_HEX16(0x514F, cap::kIdentityAckSopPrimeCablePlugHeader);
-    TEST_ASSERT_EQUAL_UINT8(15, cap::kIdentityAckSopPrimeCablePlugHeader & 0x1F);
-    TEST_ASSERT_EQUAL_UINT8(1, (cap::kIdentityAckSopPrimeCablePlugHeader >> 8) & 0x1);  // Cable Plug
     TEST_ASSERT_EQUAL_HEX32(0xFF008041, cap::kIdentityAckSopPrimeCablePlugVdmHeader);
-    TEST_ASSERT_EQUAL_UINT8(0, (cap::kIdentityAckSopPrimeCablePlugVdmHeader >> 13) & 0x3);  // SVDM 1.0
     TEST_ASSERT_EQUAL_size_t(4, cap::kIdentityAckSopPrimeCablePlugVdoCount);
 }
 
@@ -513,6 +503,8 @@ void test_wire_cable_identity_ack_shared_fields()
     TEST_ASSERT_EQUAL_HEX16(0x0310, reg.bcdDevice());
     TEST_ASSERT_EQUAL_HEX32(0x21082052, cap::kIdentityAckSopPrimeCablePlugVdos[3]);
 }
+
+// --- Runner ----------------------------------------------------------------------
 
 int main(int, char **)
 {

@@ -164,10 +164,6 @@ void test_wire_request_header()
     TEST_ASSERT_TRUE(cap::kHasContract);  // Accept, then PS_RDY, after this Request
     TEST_ASSERT_FALSE(cap::kRequestEpr);
     TEST_ASSERT_EQUAL_HEX16(0x1082, cap::kRequestHeader);
-    TEST_ASSERT_EQUAL_UINT8(2, cap::kRequestHeader & 0x1F);          // Request
-    TEST_ASSERT_EQUAL_UINT8(0, (cap::kRequestHeader >> 5) & 0x1);    // UFP
-    TEST_ASSERT_EQUAL_UINT8(0, (cap::kRequestHeader >> 8) & 0x1);    // Sink
-    TEST_ASSERT_EQUAL_UINT8(1, (cap::kRequestHeader >> 12) & 0x7);   // one RDO
 }
 
 void test_wire_request_rdo_decodes_per_table_6_19()
@@ -188,8 +184,6 @@ void test_wire_request_rdo_decodes_per_table_6_19()
     TEST_ASSERT_EQUAL_UINT16(3000, r.operatingCurrent_mA());
     TEST_ASSERT_EQUAL_UINT16(3000, r.maximumOperatingCurrent_mA());
     TEST_ASSERT_TRUE(r.deprecatedCopyMatches());
-    // The request stays within PDO 4's 4700 mA Maximum Current (Table 6.19, Operating Current).
-    TEST_ASSERT_TRUE(r.operatingCurrent_mA() <= 4700);
 }
 
 int main(int, char **)

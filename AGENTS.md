@@ -672,9 +672,14 @@ any later change to a hook needs approval again.
    must be clean, untracked files included), and run `scripts/verify.py`. It checks the
    branch name, the clean tree, and that the branch is based on `main`, then runs
    `main`'s copy of `scripts/verify_gate.py`, which lints every commit, refuses merge
-   commits on the branch and hand-edited version fields, and runs the script tests,
-   `pio test -e native`, and `pio run -e example-read-registers`. A pass records the
-   branch tip as verified. Because the gate comes from `main`, a branch that changes
+   commits on the branch and hand-edited version fields, and runs, in order: the script
+   tests; `python3 test/support/pd_capture_fixture.py --check` and the generator's
+   tests (`python3 -m unittest discover -s test/support -p "test_*.py"`), each skipped
+   with a notice while its file does not exist; the bench server's
+   `uv run --locked pytest` in `tools/pd-bench/`, skipped with a notice while that
+   directory does not exist, failing if `uv` is missing or the run leaves untracked
+   files there; `pio test -e native`; and `pio run -e example-read-registers`. A pass
+   records the branch tip as verified. Because the gate comes from `main`, a branch that changes
    `verify_gate.py` is still checked by the old gate; the change applies to later
    branches once it is pushed.
 4. Run `scripts/integrate.py <branch>` from the checkout that has `main`. It runs

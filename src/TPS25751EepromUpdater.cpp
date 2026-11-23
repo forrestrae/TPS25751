@@ -319,8 +319,8 @@ EepromUpdateStatus TPS25751EepromUpdater::selectTargetRegion(EepromRegion& targe
 // Update flows (SLVAFL1 Figure 2-3)
 // ---------------------------------------------------------------------------
 
-EepromUpdateStatus TPS25751EepromUpdater::preflight(EepromRegion target, const uint8_t* image,
-                                                    size_t length)
+EepromUpdateStatus TPS25751EepromUpdater::checkHostAndImage(const uint8_t* image, size_t length,
+                                                            uint32_t capacity)
 {
     // 1. SLVAFL1 describes the EEPROM update with the controller in APP mode.
     TPS25751Mode mode;
@@ -344,10 +344,20 @@ EepromUpdateStatus TPS25751EepromUpdater::preflight(EepromRegion target, const u
         return EepromUpdateStatus::NoEepromPresent;
     }
 
-    // 3. The image is a bundle and fits the target region.
-    EepromUpdateStatus s = checkImage(image, length, regionCapacity(target));
+    // 3. The image is a bundle and fits the region or regions to be written.
+    const EepromUpdateStatus s = checkImage(image, length, capacity);
     if (s != EepromUpdateStatus::Success) {
         TPS_DEBUG_ERROR(DEBUG_CAT_TASK, "EEPROM: image rejected (%s)", toString(s));
+    }
+    return s;
+}
+
+EepromUpdateStatus TPS25751EepromUpdater::preflight(EepromRegion target, const uint8_t* image,
+                                                    size_t length)
+{
+    // 1 to 3: MODE, BOOT_FLAGS, and the image against the target region.
+    EepromUpdateStatus s = checkHostAndImage(image, length, regionCapacity(target));
+    if (s != EepromUpdateStatus::Success) {
         return s;
     }
 
@@ -364,6 +374,39 @@ EepromUpdateStatus TPS25751EepromUpdater::preflight(EepromRegion target, const u
                         "EEPROM: %s pointer reads 0x%08lX, not its bundle start; update of %s refused",
                         toString(other), static_cast<unsigned long>(otherPointer), toString(target));
         return EepromUpdateStatus::NoBootableRegion;
+    }
+    return EepromUpdateStatus::Success;
+}
+
+EepromUpdateStatus TPS25751EepromUpdater::preflightBlank(const uint8_t* image, size_t length)
+{
+    // 1 to 3: MODE, BOOT_FLAGS, and the image against the smaller region,
+    // since both regions receive it.
+    const uint32_t lowCapacity = regionCapacity(EepromRegion::Low);
+    const uint32_t highCapacity = regionCapacity(EepromRegion::High);
+    EepromUpdateStatus s = checkHostAndImage(image, length,
+                                             (lowCapacity < highCapacity) ? lowCapacity : highCapacity);
+    if (s != EepromUpdateStatus::Success) {
+        return s;
+    }
+
+    // 4. No pointer may be valid: an EEPROM that can boot is updated with
+    //    updateRegion(), never rewritten from scratch.
+    uint32_t lowPointer = 0;
+    uint32_t highPointer = 0;
+    s = readRegionPointer(EepromRegion::Low, lowPointer);
+    if (s != EepromUpdateStatus::Success) {
+        return s;
+    }
+    s = readRegionPointer(EepromRegion::High, highPointer);
+    if (s != EepromUpdateStatus::Success) {
+        return s;
+    }
+    if (lowPointer == bundleStart(EepromRegion::Low) || highPointer == bundleStart(EepromRegion::High)) {
+        TPS_DEBUG_ERROR(DEBUG_CAT_TASK,
+                        "EEPROM: pointers low=0x%08lX high=0x%08lX, one is valid; blank programming refused",
+                        static_cast<unsigned long>(lowPointer), static_cast<unsigned long>(highPointer));
+        return EepromUpdateStatus::EepromNotBlank;
     }
     return EepromUpdateStatus::Success;
 }
@@ -502,35 +545,25 @@ EepromUpdateStatus TPS25751EepromUpdater::writeBundle(EepromRegion target, const
     return writeChunks(base, image, early, length, total);
 }
 
-EepromUpdateStatus TPS25751EepromUpdater::updateRegion(EepromRegion target, const uint8_t* image,
-                                                       size_t length, EepromUpdateOptions opt)
+EepromUpdateStatus TPS25751EepromUpdater::eraseTargetPointer(EepromRegion target, uint8_t* pointerRow)
 {
-    const EepromRegion other = otherRegion(target);
-    const uint32_t start = bundleStart(target);
-    _lastTarget = target;
-
-    // Every failure below returns at once: nothing is written after it.
-
-    _lastStep = EepromUpdateStep::Preflight;
-    EepromUpdateStatus s = preflight(target, image, length);
-    if (s != EepromUpdateStatus::Success) {
-        return s;
-    }
-
     // Step 1: erase the target pointer, so that the controller cannot load the
-    // region while it is being written.
-    // The 16 bytes its read-back saw are kept: step 2 checks them again.
+    // region while it is being written. The 16 bytes its read-back saw are
+    // kept: step 2 checks them again.
     _lastStep = EepromUpdateStep::ErasePointer;
-    uint8_t pointerRow[kFlashReadBytes];
-    s = mapPointerWriteFailure(writeWordChecked(regionPointerAddress(target), 0, pointerRow),
-                               EepromUpdateStatus::PointerEraseFailed);
-    if (s != EepromUpdateStatus::Success) {
-        return s;
-    }
+    return mapPointerWriteFailure(writeWordChecked(regionPointerAddress(target), 0, pointerRow),
+                                  EepromUpdateStatus::PointerEraseFailed);
+}
+
+EepromUpdateStatus TPS25751EepromUpdater::installBundle(EepromRegion target, const uint8_t* image,
+                                                        size_t length, const uint8_t* pointerRow,
+                                                        bool compare)
+{
+    const uint32_t start = bundleStart(target);
 
     // Step 2: write the bundle, with a read-back after the first two chunks.
     _lastStep = EepromUpdateStep::WriteBundle;
-    s = writeBundle(target, image, length, pointerRow);
+    EepromUpdateStatus s = writeBundle(target, image, length, pointerRow);
     if (s != EepromUpdateStatus::Success) {
         return s;
     }
@@ -543,7 +576,7 @@ EepromUpdateStatus TPS25751EepromUpdater::updateRegion(EepromRegion target, cons
         return s;
     }
 
-    if (opt.compareAfterWrite) {
+    if (compare) {
         _lastStep = EepromUpdateStep::CompareBundle;
         s = compareImage(target, image, length, nullptr, /*report=*/true);
         if (s != EepromUpdateStatus::Success) {
@@ -552,7 +585,32 @@ EepromUpdateStatus TPS25751EepromUpdater::updateRegion(EepromRegion target, cons
     }
 
     _lastStep = EepromUpdateStep::RestorePointer;
-    s = mapPointerWriteFailure(writeRegionPointer(target, start), EepromUpdateStatus::PointerRestoreFailed);
+    return mapPointerWriteFailure(writeRegionPointer(target, start), EepromUpdateStatus::PointerRestoreFailed);
+}
+
+EepromUpdateStatus TPS25751EepromUpdater::updateRegion(EepromRegion target, const uint8_t* image,
+                                                       size_t length, EepromUpdateOptions opt)
+{
+    const EepromRegion other = otherRegion(target);
+    _lastTarget = target;
+
+    // Every failure below returns at once: nothing is written after it.
+
+    _lastStep = EepromUpdateStep::Preflight;
+    EepromUpdateStatus s = preflight(target, image, length);
+    if (s != EepromUpdateStatus::Success) {
+        return s;
+    }
+
+    // Step 1.
+    uint8_t pointerRow[kFlashReadBytes];
+    s = eraseTargetPointer(target, pointerRow);
+    if (s != EepromUpdateStatus::Success) {
+        return s;
+    }
+
+    // Steps 2 and 3.
+    s = installBundle(target, image, length, pointerRow, opt.compareAfterWrite);
     if (s != EepromUpdateStatus::Success) {
         return s;
     }
@@ -607,6 +665,56 @@ EepromUpdateStatus TPS25751EepromUpdater::updateBothRegions(const uint8_t* image
     EepromUpdateOptions second;
     second.invalidateOldRegion = false;
     return updateRegion(otherRegion(_lastTarget), image, length, second);
+}
+
+EepromUpdateStatus TPS25751EepromUpdater::programBlank(const uint8_t* image, size_t length)
+{
+    _lastTarget = EepromRegion::Low;
+    _lastStep = EepromUpdateStep::Preflight;
+    EepromUpdateStatus s = preflightBlank(image, length);
+    if (s != EepromUpdateStatus::Success) {
+        return s;
+    }
+
+    // Low first, then High, each pass complete before the next starts. After a
+    // failure in the High pass the Low region is the one that boots.
+    // Every failure below returns at once: nothing is written after it.
+    const EepromRegion order[] = {EepromRegion::Low, EepromRegion::High};
+    for (const EepromRegion target : order) {
+        _lastTarget = target;
+
+        // Step 1, as in updateRegion().
+        uint8_t pointerRow[kFlashReadBytes];
+        s = eraseTargetPointer(target, pointerRow);
+        if (s != EepromUpdateStatus::Success) {
+            return s;
+        }
+
+        // The AppConfigOffset word to 0: the controller looks for the region's
+        // Header_ID at the region start plus this offset (SLVAFL1 Boot
+        // Process). The same checked four-byte write as a pointer, with its
+        // failures passed through as raised; lastStep() tells them apart.
+        // Its 16-byte read-back runs into the High pointer word (Low pass) or
+        // the start of the Low bundle (High pass). The check compares those
+        // bytes before and after the write, so bytes the Low pass put there
+        // cannot make the High pass refuse.
+        _lastStep = EepromUpdateStep::ClearAppConfigOffset;
+        s = writeWordChecked(appConfigOffsetAddress(target), 0);
+        if (s != EepromUpdateStatus::Success) {
+            return s;
+        }
+
+        // Steps 2 and 3, as in updateRegion(), with the compare always on.
+        s = installBundle(target, image, length, pointerRow, /*compare=*/true);
+        if (s != EepromUpdateStatus::Success) {
+            return s;
+        }
+    }
+
+    _lastStep = EepromUpdateStep::Done;
+    TPS_DEBUG_INFO(DEBUG_CAT_TASK, "EEPROM: blank programming complete, %lu bytes in each region",
+                   static_cast<unsigned long>(length));
+    return EepromUpdateStatus::Success;
 }
 
 // ---------------------------------------------------------------------------
@@ -791,6 +899,7 @@ const char* TPS25751EepromUpdater::toString(EepromUpdateStep step)
         case EepromUpdateStep::None:            return "None";
         case EepromUpdateStep::Preflight:       return "Preflight";
         case EepromUpdateStep::ErasePointer:    return "ErasePointer";
+        case EepromUpdateStep::ClearAppConfigOffset: return "ClearAppConfigOffset";
         case EepromUpdateStep::WriteBundle:     return "WriteBundle";
         case EepromUpdateStep::VerifyBundle:    return "VerifyBundle";
         case EepromUpdateStep::CompareBundle:   return "CompareBundle";

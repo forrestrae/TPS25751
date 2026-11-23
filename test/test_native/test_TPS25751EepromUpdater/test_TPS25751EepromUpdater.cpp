@@ -3281,6 +3281,940 @@ void test_update_both_regions_executor_failure_at_every_call()
     }
 }
 
+// --- programBlank ------------------------------------------------------------------------
+
+namespace {
+
+// A board after a PBM load in front of an unusable EEPROM: every byte erased to
+// 0xFF, MODE reading APP, BOOT_FLAGS reporting the EEPROM. That the controller
+// reports the EEPROM after a PBM boot is inferred (hardware stage 5 checks it);
+// the tests take it as given. image is the bundle to program.
+struct BlankBoard
+{
+    FakeCommandExecutor fake;
+    std::vector<uint8_t> image;
+    std::vector<uint8_t> before;
+
+    explicit BlankBoard(size_t len = SMALL_LEN, size_t eepromSize = 32768)
+        : fake(eepromSize), image(cachedBundle(len, true))
+    {
+        fake.setBootBit(FakeCommandExecutor::kBitI2cEepromPresent, true);
+        snapshot();
+    }
+
+    void snapshot() { before = fake.eeprom; }
+};
+
+uint32_t appConfigOffsetOf(const FakeCommandExecutor &f, EepromRegion r)
+{
+    return f.readLe32(TPS25751EepromUpdater::appConfigOffsetAddress(r));
+}
+
+// SLVAFL1 Figure 2-6 with image in both regions, on an otherwise erased part:
+// what the full-flash binary holds.
+std::vector<uint8_t> fullFlashLayout(const std::vector<uint8_t> &image, size_t eepromSize = 32768)
+{
+    FakeCommandExecutor f(eepromSize);
+    loadFullFlash(f, image);
+    return f.eeprom;
+}
+
+void assertEeprom(const FakeCommandExecutor &f, const std::vector<uint8_t> &expected, const char *message = nullptr)
+{
+    TEST_ASSERT_EQUAL_size_t_MESSAGE(expected.size(), f.eeprom.size(), message);
+    TEST_ASSERT_EQUAL_HEX8_ARRAY_MESSAGE(expected.data(), f.eeprom.data(), expected.size(), message);
+}
+
+// The four tasks of a checked word write, from the plan: FLrd, FLad, the
+// 4-byte FLwd, FLrd.
+void expectWordWrite(std::vector<Expect> &script, uint32_t addr, uint32_t value)
+{
+    script.push_back(flrd(addr));
+    script.push_back(flad(addr));
+    script.push_back(flwd(le32(value)));
+    script.push_back(flrd(addr));
+}
+
+// Steps 2 and 3 of an update with the compare on, from the plan, for any
+// image: the same sequence expectedUpdate() writes out for updateRegion().
+void expectBundleSteps(std::vector<Expect> &s, EepromRegion target, const std::vector<uint8_t> &image)
+{
+    const uint32_t start = TPS25751EepromUpdater::bundleStart(target);
+    const size_t early = image.size() < 64 ? image.size() : 64;
+    const auto chunks = [&](size_t from, size_t to) {
+        for (size_t off = from; off < to; off += 32) {
+            const size_t n = (to - off < 32) ? to - off : 32;
+            s.push_back(flwd(std::vector<uint8_t>(image.begin() + off, image.begin() + off + n)));
+        }
+    };
+    s.push_back(flad(start));
+    chunks(0, early);
+    s.push_back(flrd(TPS25751EepromUpdater::regionPointerAddress(target)));
+    for (size_t off = 0; off < early; off += 16) s.push_back(flrd(start + static_cast<uint32_t>(off)));
+    if (image.size() > early) {
+        s.push_back(flad(start + static_cast<uint32_t>(early)));
+        chunks(early, image.size());
+    }
+    s.push_back(flvy(start));
+    for (size_t off = 0; off < image.size(); off += 16) s.push_back(flrd(start + static_cast<uint32_t>(off)));
+    expectPointerWrite(s, target, start);
+}
+
+// The calls programBlank() must issue, from the plan: the pre-flight reads of
+// both pointers, then for Low and then High the pointer to 0, the
+// AppConfigOffset word to 0, and steps 2 and 3 of an update.
+std::vector<Expect> expectedProgramBlank(const std::vector<uint8_t> &image)
+{
+    std::vector<Expect> s = {flrd(LOW_PTR), flrd(HIGH_PTR)};
+    for (EepromRegion r : {EepromRegion::Low, EepromRegion::High}) {
+        expectPointerWrite(s, r, 0);
+        expectWordWrite(s, TPS25751EepromUpdater::appConfigOffsetAddress(r), 0);
+        expectBundleSteps(s, r, image);
+    }
+    return s;
+}
+
+// The step and the region of every call of expectedProgramBlank().
+struct BlankCall
+{
+    EepromUpdateStep step;
+    EepromRegion target;
+};
+
+std::vector<BlankCall> blankCallsOf(size_t len)
+{
+    std::vector<BlankCall> c(2, BlankCall{EepromUpdateStep::Preflight, EepromRegion::Low});
+    const size_t early = len < 64 ? len : 64;
+    for (EepromRegion r : {EepromRegion::Low, EepromRegion::High}) {
+        const auto add = [&](size_t n, EepromUpdateStep step) { c.insert(c.end(), n, BlankCall{step, r}); };
+        add(4, EepromUpdateStep::ErasePointer);
+        add(4, EepromUpdateStep::ClearAppConfigOffset);
+        add(1 + (len + 31) / 32 + (early + 15) / 16 + 1 + (len > early ? 1 : 0), EepromUpdateStep::WriteBundle);
+        add(1, EepromUpdateStep::VerifyBundle);
+        add((len + 15) / 16, EepromUpdateStep::CompareBundle);
+        add(4, EepromUpdateStep::RestorePointer);
+    }
+    return c;
+}
+
+// 2 pre-flight reads and 31 calls per region for SMALL_LEN; 2 and 1364 per
+// region for the real 14336 bytes.
+constexpr size_t SMALL_BLANK_CALLS = 64;
+constexpr size_t REAL_BLANK_CALLS = 2730;
+
+// Offsets of the calls of one pass from its first call. They hold for any
+// image longer than 64 bytes up to PASS_RESUME_FLAD.
+constexpr size_t PASS_PTR_READ = 0;
+constexpr size_t PASS_PTR_FLAD = 1;
+constexpr size_t PASS_PTR_FLWD = 2;
+constexpr size_t PASS_ACO_READ = 4;
+constexpr size_t PASS_ACO_FLAD = 5;
+constexpr size_t PASS_ACO_FLWD = 6;
+constexpr size_t PASS_ACO_READBACK = 7;
+constexpr size_t PASS_BUNDLE_FLAD = 8;
+constexpr size_t PASS_EARLY_READ = 12;  // the first read at the bundle start
+constexpr size_t PASS_RESUME_FLAD = 16;
+
+size_t passCalls(size_t len)
+{
+    return (blankCallsOf(len).size() - 2) / 2;
+}
+
+// Global call index of offset in the pass for region r.
+size_t blankIdx(EepromRegion r, size_t offset, size_t len = SMALL_LEN)
+{
+    return 2 + (r == EepromRegion::High ? passCalls(len) : 0) + offset;
+}
+
+// Global call index of the n-th call (zero-based) of a pass's step.
+size_t blankStepIdx(EepromRegion r, EepromUpdateStep step, size_t n, size_t len = SMALL_LEN)
+{
+    const std::vector<BlankCall> calls = blankCallsOf(len);
+    for (size_t i = 0; i < calls.size(); ++i) {
+        if (calls[i].target == r && calls[i].step == step) return i + n;
+    }
+    return calls.size();
+}
+
+// A pre-flight refusal: the status, no write-side task, an unchanged EEPROM,
+// and lastStep() Preflight with lastTarget() Low.
+void assertBlankRefused(const BlankBoard &b, const TPS25751EepromUpdater &u, EepromUpdateStatus expected,
+                        EepromUpdateStatus actual, const char *message = nullptr)
+{
+    ASSERT_STATUS_MESSAGE(expected, actual, message);
+    TEST_ASSERT_EQUAL_size_t_MESSAGE(0, b.fake.countOf("FLad"), message);
+    TEST_ASSERT_EQUAL_size_t_MESSAGE(0, b.fake.countOf("FLwd"), message);
+    TEST_ASSERT_EQUAL_size_t_MESSAGE(0, b.fake.countOf("FLvy"), message);
+    assertEeprom(b.fake, b.before, message);
+    ASSERT_STEP_MESSAGE(EepromUpdateStep::Preflight, u.lastStep(), message);
+    TEST_ASSERT_EQUAL_MESSAGE(EepromRegion::Low, u.lastTarget(), message);
+}
+
+// What must hold after any programBlank() call that started from an erased
+// part. A valid pointer leads only to a region that holds the image, compared,
+// behind an AppConfigOffset word of 0. After a failure in the High pass the Low
+// region is complete and boots. Success means the full-flash layout.
+void assertBlankInvariant(const BlankBoard &b, const TPS25751EepromUpdater &u, EepromUpdateStatus s,
+                          const char *where)
+{
+    for (EepromRegion r : {EepromRegion::Low, EepromRegion::High}) {
+        if (!pointerValid(b.fake, r)) continue;
+        TEST_ASSERT_TRUE_MESSAGE(regionHolds(b.fake, r, b.image), where);
+        TEST_ASSERT_EQUAL_HEX32_MESSAGE(0, appConfigOffsetOf(b.fake, r), where);
+    }
+    if (s == EepromUpdateStatus::Success) {
+        ASSERT_STEP_MESSAGE(EepromUpdateStep::Done, u.lastStep(), where);
+        assertEeprom(b.fake, fullFlashLayout(b.image, b.fake.eeprom.size()), where);
+        return;
+    }
+    TEST_ASSERT_TRUE_MESSAGE(u.lastStep() != EepromUpdateStep::Done, where);
+    if (u.lastTarget() == EepromRegion::High) {
+        TEST_ASSERT_TRUE_MESSAGE(pointerValid(b.fake, EepromRegion::Low), where);
+        TEST_ASSERT_TRUE_MESSAGE(regionHolds(b.fake, EepromRegion::Low, b.image), where);
+        TEST_ASSERT_EQUAL_HEX32_MESSAGE(0, appConfigOffsetOf(b.fake, EepromRegion::Low), where);
+    }
+}
+
+}  // namespace
+
+void test_program_blank_full_call_sequence()
+{
+    {
+        BlankBoard b;
+        TPS25751EepromUpdater u(b.fake);
+
+        ASSERT_STATUS(EepromUpdateStatus::Success, u.programBlank(b.image.data(), b.image.size()));
+
+        assertCalls(b.fake, expectedProgramBlank(b.image));
+        TEST_ASSERT_EQUAL_size_t(SMALL_BLANK_CALLS, b.fake.calls.size());
+        TEST_ASSERT_EQUAL_size_t(SMALL_BLANK_CALLS, blankCallsOf(SMALL_LEN).size());
+        ASSERT_STEP(EepromUpdateStep::Done, u.lastStep());
+        TEST_ASSERT_EQUAL(EepromRegion::High, u.lastTarget());
+        // MODE and BOOT_FLAGS are read once each, in pre-flight.
+        TEST_ASSERT_EQUAL_size_t(1, b.fake.modeReads);
+        TEST_ASSERT_EQUAL_size_t(1, b.fake.bootFlagsReads);
+    }
+
+    // The real length: 2730 tasks, as the Doxygen states. Per region 451 FLwd
+    // (pointer, AppConfigOffset, 448 chunks, pointer), 5 FLad, and 907 FLrd.
+    {
+        BlankBoard b(BUNDLE_LEN);
+        TPS25751EepromUpdater u(b.fake);
+
+        ASSERT_STATUS(EepromUpdateStatus::Success, u.programBlank(b.image.data(), b.image.size()));
+
+        assertCalls(b.fake, expectedProgramBlank(b.image));
+        TEST_ASSERT_EQUAL_size_t(REAL_BLANK_CALLS, b.fake.calls.size());
+        TEST_ASSERT_EQUAL_size_t(REAL_BLANK_CALLS, blankCallsOf(BUNDLE_LEN).size());
+        TEST_ASSERT_EQUAL_size_t(2 * 451, b.fake.countOf("FLwd"));
+        TEST_ASSERT_EQUAL_size_t(2 * 5, b.fake.countOf("FLad"));
+        TEST_ASSERT_EQUAL_size_t(2 + 2 * 907, b.fake.countOf("FLrd"));
+        TEST_ASSERT_EQUAL_size_t(2, b.fake.countOf("FLvy"));
+    }
+}
+
+void test_program_blank_on_a_blank_eeprom_equals_the_full_flash_layout()
+{
+    // The real image, the short image of the sequence tests, the smallest image
+    // checkImage() accepts (shorter than the two-chunk read-back), and the
+    // largest that fits the Low region, which ends at the High bundle start.
+    const size_t lengths[] = {BUNDLE_LEN, SMALL_LEN, TPS25751EepromUpdater::kMinImageLength, 0x3C00};
+    for (size_t length : lengths) {
+        BlankBoard b(length);
+        TPS25751EepromUpdater u(b.fake);
+        const char *where = at("length", length);
+
+        ASSERT_STATUS_MESSAGE(EepromUpdateStatus::Success, u.programBlank(b.image.data(), b.image.size()), where);
+
+        // Byte for byte: both pointers, both AppConfigOffset words 0, the image
+        // in both regions, and 0xFF everywhere else.
+        assertEeprom(b.fake, fullFlashLayout(b.image), where);
+        TEST_ASSERT_EQUAL_HEX32_MESSAGE(LOW_START, pointerOf(b.fake, EepromRegion::Low), where);
+        TEST_ASSERT_EQUAL_HEX32_MESSAGE(HIGH_START, pointerOf(b.fake, EepromRegion::High), where);
+        TEST_ASSERT_EQUAL_HEX32_MESSAGE(0, appConfigOffsetOf(b.fake, EepromRegion::Low), where);
+        TEST_ASSERT_EQUAL_HEX32_MESSAGE(0, appConfigOffsetOf(b.fake, EepromRegion::High), where);
+        assertCalls(b.fake, expectedProgramBlank(b.image));
+    }
+
+    // The part the board carries holds the 31744-byte full-flash image: the
+    // layout ends at 0x7C00 for the real length, and the last 1 KB stays erased.
+    BlankBoard b(BUNDLE_LEN);
+    TPS25751EepromUpdater u(b.fake);
+    ASSERT_STATUS(EepromUpdateStatus::Success, u.programBlank(b.image.data(), b.image.size()));
+    for (size_t i = FULL_LEN; i < b.fake.eeprom.size(); ++i) TEST_ASSERT_EQUAL_HEX8(0xFF, b.fake.eeprom[i]);
+}
+
+void test_program_blank_from_a_corrupt_start()
+{
+    // Old contents, pointers that are not valid, and AppConfigOffset words that
+    // are not 0. Every byte the layout defines is overwritten, so the result
+    // equals the full-flash layout when the old bundles have the new length.
+    const struct {
+        uint32_t lowPointer;
+        uint32_t highPointer;
+    } pointers[] = {
+        {0x00000000, 0x00000000},  // both erased, as after two interrupted updates
+        {0xFFFFFFFF, 0x12345678},  // never written, and garbage
+        {0x00004400, 0x00000800},  // each region's start in the other pointer
+        {0x00000801, 0x000043FF},  // one off
+    };
+    for (int sameImage = 0; sameImage < 2; ++sameImage) {
+        for (const auto &p : pointers) {
+            BlankBoard b(BUNDLE_LEN);
+            const std::vector<uint8_t> old = sameImage ? b.image : makeBundle(BUNDLE_LEN);
+            b.fake.writeBytes(LOW_START, old.data(), old.size());
+            b.fake.writeBytes(HIGH_START, old.data(), old.size());
+            b.fake.writeLe32(LOW_PTR, p.lowPointer);
+            b.fake.writeLe32(HIGH_PTR, p.highPointer);
+            b.fake.writeLe32(0x03FC, 0x00000100);
+            b.fake.writeLe32(0x07FC, 0xDEADBEEF);
+            b.snapshot();
+            TPS25751EepromUpdater u(b.fake);
+            const char *where = at(sameImage ? "same image, low pointer" : "old image, low pointer", p.lowPointer);
+
+            ASSERT_STATUS_MESSAGE(EepromUpdateStatus::Success, u.programBlank(b.image.data(), b.image.size()), where);
+            assertEeprom(b.fake, fullFlashLayout(b.image), where);
+        }
+    }
+}
+
+void test_program_blank_leaves_bytes_outside_the_layout()
+{
+    // programBlank() writes the two pointers, the two AppConfigOffset words,
+    // and the two bundles. Nothing else is erased: old bytes past the end of a
+    // shorter image, and other bytes in the pointer area, stay.
+    BlankBoard b(SMALL_LEN);
+    const std::vector<uint8_t> old = makeBundle(0x1000);
+    b.fake.writeBytes(LOW_START, old.data(), old.size());
+    b.fake.writeBytes(HIGH_START, old.data(), old.size());
+    const uint8_t junk[] = {0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88};
+    b.fake.writeBytes(0x0004, junk, sizeof(junk));
+    b.fake.writeBytes(0x0123, junk, sizeof(junk));
+    b.fake.writeBytes(0x7F00, junk, sizeof(junk));
+    b.snapshot();
+    TPS25751EepromUpdater u(b.fake);
+
+    ASSERT_STATUS(EepromUpdateStatus::Success, u.programBlank(b.image.data(), b.image.size()));
+
+    std::vector<uint8_t> expected = b.before;
+    const auto put = [&expected](uint32_t addr, const uint8_t *src, size_t len) {
+        memcpy(&expected[addr], src, len);
+    };
+    const std::vector<uint8_t> low = le32(LOW_START);
+    const std::vector<uint8_t> high = le32(HIGH_START);
+    const std::vector<uint8_t> zero = le32(0);
+    put(LOW_PTR, low.data(), 4);
+    put(0x03FC, zero.data(), 4);
+    put(HIGH_PTR, high.data(), 4);
+    put(0x07FC, zero.data(), 4);
+    put(LOW_START, b.image.data(), b.image.size());
+    put(HIGH_START, b.image.data(), b.image.size());
+    assertEeprom(b.fake, expected);
+    TEST_ASSERT_EQUAL_HEX8(old[SMALL_LEN], b.fake.eeprom[LOW_START + SMALL_LEN]);
+}
+
+void test_program_blank_refuses_a_non_blank_eeprom()
+{
+    // A valid pointer means the EEPROM can boot. Each case is refused after the
+    // two pointer reads, with no FLad or FLwd.
+    const struct {
+        uint32_t lowPointer;
+        uint32_t highPointer;
+        const char *name;
+    } cases[] = {
+        {LOW_START, 0, "Low valid only"},
+        {0, HIGH_START, "High valid only"},
+        {LOW_START, HIGH_START, "both valid"},
+        {LOW_START, 0xFFFFFFFF, "Low valid, High erased to 0xFF"},
+    };
+    for (const auto &c : cases) {
+        BlankBoard b;
+        b.fake.writeLe32(LOW_PTR, c.lowPointer);
+        b.fake.writeLe32(HIGH_PTR, c.highPointer);
+        b.snapshot();
+        TPS25751EepromUpdater u(b.fake);
+        // An earlier call left lastTarget() at High; programBlank() resets it.
+        ASSERT_STATUS(EepromUpdateStatus::BadImageLength, u.updateRegion(EepromRegion::High, nullptr, 0));
+        TEST_ASSERT_EQUAL(EepromRegion::High, u.lastTarget());
+
+        assertBlankRefused(b, u, EepromUpdateStatus::EepromNotBlank,
+                           u.programBlank(b.image.data(), b.image.size()), c.name);
+        const std::vector<Expect> script = {flrd(LOW_PTR), flrd(HIGH_PTR)};
+        assertCalls(b.fake, script);
+    }
+
+    // The full-flash layout itself, as the board ships.
+    Board full;
+    TPS25751EepromUpdater u(full.fake);
+    assertRefusedBeforeAnyWrite(full, u, EepromUpdateStatus::EepromNotBlank,
+                                u.programBlank(full.newBundle.data(), full.newBundle.size()));
+}
+
+void test_program_blank_preflight_failures()
+{
+    {
+        BlankBoard b;
+        b.fake.setMode("PTCH");
+        TPS25751EepromUpdater u(b.fake);
+        assertBlankRefused(b, u, EepromUpdateStatus::NotInAppMode, u.programBlank(b.image.data(), b.image.size()));
+        TEST_ASSERT_EQUAL_size_t(0, b.fake.calls.size());
+        TEST_ASSERT_EQUAL_size_t(0, b.fake.bootFlagsReads);
+    }
+    {
+        BlankBoard b;
+        b.fake.modeReadFails = true;
+        TPS25751EepromUpdater u(b.fake);
+        assertBlankRefused(b, u, EepromUpdateStatus::I2cError, u.programBlank(b.image.data(), b.image.size()));
+        TEST_ASSERT_EQUAL_size_t(0, b.fake.calls.size());
+    }
+    {
+        BlankBoard b;
+        b.fake.setBootBit(FakeCommandExecutor::kBitI2cEepromPresent, false);
+        TPS25751EepromUpdater u(b.fake);
+        assertBlankRefused(b, u, EepromUpdateStatus::NoEepromPresent, u.programBlank(b.image.data(), b.image.size()));
+        TEST_ASSERT_EQUAL_size_t(0, b.fake.calls.size());
+    }
+    {
+        BlankBoard b;
+        b.fake.bootFlagsReadFails = true;
+        TPS25751EepromUpdater u(b.fake);
+        assertBlankRefused(b, u, EepromUpdateStatus::I2cError, u.programBlank(b.image.data(), b.image.size()));
+        TEST_ASSERT_EQUAL_size_t(0, b.fake.calls.size());
+    }
+    {
+        // Image checks: no task at all.
+        BlankBoard b;
+        TPS25751EepromUpdater u(b.fake);
+        const std::vector<uint8_t> erased(0x100, 0xFF);
+        assertBlankRefused(b, u, EepromUpdateStatus::BadImageHeader, u.programBlank(erased.data(), erased.size()));
+        assertBlankRefused(b, u, EepromUpdateStatus::BadImageLength, u.programBlank(nullptr, 0x100));
+        assertBlankRefused(b, u, EepromUpdateStatus::BadImageLength,
+                           u.programBlank(b.image.data(), TPS25751EepromUpdater::kMinImageLength - 1));
+        const std::vector<uint8_t> big = makeNewBundle(0x3C01);
+        assertBlankRefused(b, u, EepromUpdateStatus::BadImageLength, u.programBlank(big.data(), big.size()));
+        TEST_ASSERT_EQUAL_size_t(0, b.fake.calls.size());
+    }
+    {
+        // A 64 KB part: 0x3C01 bytes fit the High region but not the Low one,
+        // and both receive the image.
+        BlankBoard b(SMALL_LEN, 65536);
+        const std::vector<uint8_t> image = makeNewBundle(0x3C01);
+        TPS25751EepromUpdater u(b.fake, 65536);
+        assertBlankRefused(b, u, EepromUpdateStatus::BadImageLength, u.programBlank(image.data(), image.size()));
+        TEST_ASSERT_EQUAL_size_t(0, b.fake.calls.size());
+    }
+    {
+        // Order: MODE before BOOT_FLAGS before the image before the pointers.
+        BlankBoard b;
+        b.fake.setMode("PTCH");
+        b.fake.setBootBit(FakeCommandExecutor::kBitI2cEepromPresent, false);
+        b.fake.writeLe32(LOW_PTR, LOW_START);
+        b.snapshot();
+        const std::vector<uint8_t> erased(0x100, 0xFF);
+        TPS25751EepromUpdater u(b.fake);
+        assertBlankRefused(b, u, EepromUpdateStatus::NotInAppMode, u.programBlank(erased.data(), erased.size()));
+        b.fake.setMode("APP ");
+        assertBlankRefused(b, u, EepromUpdateStatus::NoEepromPresent, u.programBlank(erased.data(), erased.size()));
+        b.fake.setBootBit(FakeCommandExecutor::kBitI2cEepromPresent, true);
+        assertBlankRefused(b, u, EepromUpdateStatus::BadImageHeader, u.programBlank(erased.data(), erased.size()));
+        TEST_ASSERT_EQUAL_size_t(0, b.fake.calls.size());
+        assertBlankRefused(b, u, EepromUpdateStatus::EepromNotBlank, u.programBlank(b.image.data(), b.image.size()));
+    }
+    {
+        // A pointer read that fails: its executor status, and nothing written.
+        const struct {
+            size_t index;
+            Fault fault;
+            EepromUpdateStatus expected;
+        } cases[] = {
+            {0, Fault::timeout(), EepromUpdateStatus::CommandTimeout},
+            {0, Fault::rejected(), EepromUpdateStatus::CommandRejected},
+            {1, Fault::i2cError(), EepromUpdateStatus::I2cError},
+        };
+        for (const auto &c : cases) {
+            BlankBoard b;
+            b.fake.failCall(c.index, c.fault);
+            TPS25751EepromUpdater u(b.fake);
+            assertBlankRefused(b, u, c.expected, u.programBlank(b.image.data(), b.image.size()));
+            TEST_ASSERT_EQUAL_size_t(c.index + 1, b.fake.calls.size());
+        }
+    }
+}
+
+void test_program_blank_pointer_erase_failures()
+{
+    // A failure of the pointer write that opens a pass: PointerEraseFailed, as
+    // step 1 of updateRegion() maps it, or PointerNeighborsChanged unchanged.
+    const auto neighbor = [](EepromRegion r) {
+        const uint32_t addr = TPS25751EepromUpdater::regionPointerAddress(r) + 9;
+        return Fault::withHook([addr](FakeCommandExecutor &f) { f.eeprom[addr] = 0x5A; });
+    };
+    for (EepromRegion r : {EepromRegion::Low, EepromRegion::High}) {
+        const struct {
+            size_t offset;
+            Fault fault;
+            EepromUpdateStatus expected;
+            size_t callsAfter;  // calls issued after the faulted one
+        } cases[] = {
+            {PASS_PTR_FLAD, Fault::returnCodeOnly(0x01), EepromUpdateStatus::PointerEraseFailed, 0},
+            {PASS_PTR_FLWD, Fault::returnCodeOnly(0x01), EepromUpdateStatus::PointerEraseFailed, 0},
+            {PASS_PTR_FLWD, Fault::busy(), EepromUpdateStatus::PointerEraseFailed, 0},
+            {PASS_PTR_FLWD, Fault::returnCodeOnly(0x00), EepromUpdateStatus::PointerEraseFailed, 1},
+            {PASS_PTR_FLWD, neighbor(r), EepromUpdateStatus::PointerNeighborsChanged, 1},
+            {PASS_PTR_READ, Fault::timeout(), EepromUpdateStatus::CommandTimeout, 0},
+        };
+        for (const auto &c : cases) {
+            BlankBoard b;
+            const size_t idx = blankIdx(r, c.offset);
+            b.fake.failCall(idx, c.fault);
+            TPS25751EepromUpdater u(b.fake);
+            const char *where = at("call", idx, TPS25751EepromUpdater::toString(c.expected));
+
+            const EepromUpdateStatus s = u.programBlank(b.image.data(), b.image.size());
+
+            ASSERT_STATUS_MESSAGE(c.expected, s, where);
+            ASSERT_STEP_MESSAGE(EepromUpdateStep::ErasePointer, u.lastStep(), where);
+            TEST_ASSERT_EQUAL_MESSAGE(r, u.lastTarget(), where);
+            TEST_ASSERT_EQUAL_size_t_MESSAGE(idx + 1 + c.callsAfter, b.fake.calls.size(), where);
+            // Nothing of the region beyond its pointer word was written.
+            TEST_ASSERT_EQUAL_HEX32_MESSAGE(0xFFFFFFFF, appConfigOffsetOf(b.fake, r), where);
+            TEST_ASSERT_FALSE_MESSAGE(regionHolds(b.fake, r, b.image), where);
+            assertBlankInvariant(b, u, s, where);
+            if (r == EepromRegion::Low) {
+                TEST_ASSERT_FALSE_MESSAGE(pointerValid(b.fake, EepromRegion::Low), where);
+                TEST_ASSERT_FALSE_MESSAGE(pointerValid(b.fake, EepromRegion::High), where);
+            }
+        }
+    }
+}
+
+void test_program_blank_app_config_offset_write_failures()
+{
+    // A failure of the AppConfigOffset write passes through as the task or the
+    // check raised it, and lastStep() names the write: SetAddressFailed from
+    // FLad, WriteFailed or FlashBusy from FLwd (no retry, as for a pointer),
+    // CompareMismatch when the word does not read back as 0.
+    for (EepromRegion r : {EepromRegion::Low, EepromRegion::High}) {
+        const struct {
+            size_t offset;
+            Fault fault;
+            EepromUpdateStatus expected;
+            size_t callsAfter;
+        } cases[] = {
+            {PASS_ACO_FLAD, Fault::returnCodeOnly(0x03), EepromUpdateStatus::SetAddressFailed, 0},
+            {PASS_ACO_FLWD, Fault::returnCodeOnly(0x01), EepromUpdateStatus::WriteFailed, 0},
+            {PASS_ACO_FLWD, Fault::busy(), EepromUpdateStatus::FlashBusy, 0},
+            {PASS_ACO_FLWD, Fault::returnCodeOnly(0x00), EepromUpdateStatus::CompareMismatch, 1},
+            {PASS_ACO_READ, Fault::i2cError(), EepromUpdateStatus::I2cError, 0},
+            {PASS_ACO_READBACK, Fault::timeout(), EepromUpdateStatus::CommandTimeout, 0},
+        };
+        for (const auto &c : cases) {
+            BlankBoard b;
+            const size_t idx = blankIdx(r, c.offset);
+            b.fake.failCall(idx, c.fault);
+            TPS25751EepromUpdater u(b.fake);
+            const char *where = at("call", idx, TPS25751EepromUpdater::toString(c.expected));
+
+            const EepromUpdateStatus s = u.programBlank(b.image.data(), b.image.size());
+
+            ASSERT_STATUS_MESSAGE(c.expected, s, where);
+            ASSERT_STEP_MESSAGE(EepromUpdateStep::ClearAppConfigOffset, u.lastStep(), where);
+            TEST_ASSERT_EQUAL_MESSAGE(r, u.lastTarget(), where);
+            TEST_ASSERT_EQUAL_size_t_MESSAGE(idx + 1 + c.callsAfter, b.fake.calls.size(), where);
+            // The region pointer reads 0, and no chunk of the region went out.
+            TEST_ASSERT_EQUAL_HEX32_MESSAGE(0, pointerOf(b.fake, r), where);
+            TEST_ASSERT_FALSE_MESSAGE(regionHolds(b.fake, r, b.image), where);
+            assertBlankInvariant(b, u, s, where);
+        }
+    }
+}
+
+void test_program_blank_app_config_offset_rows_and_the_low_bundle()
+{
+    // The 16 bytes read at 0x03FC run into the High pointer word; those at
+    // 0x07FC run into the first 12 bytes of the Low bundle, which the Low pass
+    // has written by then. The check compares them before and after the write,
+    // so the Low bundle does not make the High pass refuse (the success tests
+    // show that), and a change there is reported.
+
+    // Low pass: a byte of the High pointer word changes during the write.
+    {
+        BlankBoard b;
+        const size_t idx = blankIdx(EepromRegion::Low, PASS_ACO_FLWD);
+        b.fake.failCall(idx, Fault::withHook([](FakeCommandExecutor &f) { f.eeprom[HIGH_PTR + 1] = 0x44; }));
+        TPS25751EepromUpdater u(b.fake);
+
+        ASSERT_STATUS(EepromUpdateStatus::PointerNeighborsChanged, u.programBlank(b.image.data(), b.image.size()));
+        ASSERT_STEP(EepromUpdateStep::ClearAppConfigOffset, u.lastStep());
+        TEST_ASSERT_EQUAL(EepromRegion::Low, u.lastTarget());
+        TEST_ASSERT_EQUAL_size_t(idx + 2, b.fake.calls.size());
+        TEST_ASSERT_EQUAL_size_t(2, b.fake.countOf("FLwd"));
+    }
+
+    // High pass: a byte of the Low bundle changes during the write. The call
+    // stops, and the Low region, valid until then, no longer holds the image.
+    {
+        BlankBoard b;
+        const size_t idx = blankIdx(EepromRegion::High, PASS_ACO_FLWD);
+        b.fake.failCall(idx, Fault::withHook([](FakeCommandExecutor &f) { f.eeprom[LOW_START + 5] ^= 0xFF; }));
+        TPS25751EepromUpdater u(b.fake);
+
+        ASSERT_STATUS(EepromUpdateStatus::PointerNeighborsChanged, u.programBlank(b.image.data(), b.image.size()));
+        ASSERT_STEP(EepromUpdateStep::ClearAppConfigOffset, u.lastStep());
+        TEST_ASSERT_EQUAL(EepromRegion::High, u.lastTarget());
+        TEST_ASSERT_EQUAL_size_t(idx + 2, b.fake.calls.size());
+        TEST_ASSERT_TRUE(pointerValid(b.fake, EepromRegion::Low));
+        TEST_ASSERT_FALSE(regionHolds(b.fake, EepromRegion::Low, b.image));
+        TEST_ASSERT_EQUAL_HEX32(0, pointerOf(b.fake, EepromRegion::High));
+    }
+
+    // The High pass reads the Low bundle's Header_ID next to its AppConfigOffset
+    // word and is not refused: the trace check looks only at the bytes after
+    // the region pointer.
+    {
+        BlankBoard b;
+        TPS25751EepromUpdater u(b.fake);
+        b.fake.failCall(blankIdx(EepromRegion::High, PASS_ACO_READ), Fault::withHook([](FakeCommandExecutor &f) {
+            TEST_ASSERT_EQUAL_HEX32(TPS25751EepromUpdater::kBundleHeaderId, f.readLe32(LOW_START));
+            TEST_ASSERT_EQUAL_HEX32(TPS25751EepromUpdater::kBundleHeaderId,
+                                    static_cast<uint32_t>(f.data[4]) | (static_cast<uint32_t>(f.data[5]) << 8) |
+                                        (static_cast<uint32_t>(f.data[6]) << 16) |
+                                        (static_cast<uint32_t>(f.data[7]) << 24));
+        }));
+        ASSERT_STATUS(EepromUpdateStatus::Success, u.programBlank(b.image.data(), b.image.size()));
+        assertEeprom(b.fake, fullFlashLayout(b.image));
+    }
+}
+
+void test_program_blank_high_pass_failure_keeps_the_low_region()
+{
+    // After a failure in the High pass the Low pass is complete: the Low region
+    // holds the image, its AppConfigOffset word is 0, and its pointer is valid.
+    const auto corruptHigh = Fault::withHook([](FakeCommandExecutor &f) { f.eeprom[HIGH_START + 0x50] ^= 0xFF; });
+    const struct {
+        EepromUpdateStep step;
+        size_t n;
+        Fault fault;
+        EepromUpdateStatus expected;
+    } cases[] = {
+        {EepromUpdateStep::VerifyBundle, 0, Fault::returnCodeOnly(0x01), EepromUpdateStatus::VerifyFailed},
+        {EepromUpdateStep::VerifyBundle, 0, corruptHigh, EepromUpdateStatus::CompareMismatch},
+        // Call 9 of step 2 for 100 bytes: the first chunk after the read-back.
+        {EepromUpdateStep::WriteBundle, 9, Fault::returnCodeOnly(0x01), EepromUpdateStatus::WriteFailed},
+        {EepromUpdateStep::RestorePointer, 1, Fault::returnCodeOnly(0x01), EepromUpdateStatus::PointerRestoreFailed},
+    };
+    for (const auto &c : cases) {
+        BlankBoard b;
+        const size_t idx = blankStepIdx(EepromRegion::High, c.step, c.n);
+        b.fake.failCall(idx, c.fault);
+        TPS25751EepromUpdater u(b.fake);
+        const char *where = at("call", idx, TPS25751EepromUpdater::toString(c.expected));
+
+        const EepromUpdateStatus s = u.programBlank(b.image.data(), b.image.size());
+
+        ASSERT_STATUS_MESSAGE(c.expected, s, where);
+        TEST_ASSERT_EQUAL_MESSAGE(EepromRegion::High, u.lastTarget(), where);
+        TEST_ASSERT_EQUAL_HEX32_MESSAGE(0, pointerOf(b.fake, EepromRegion::High), where);
+        TEST_ASSERT_EQUAL_HEX32_MESSAGE(0, appConfigOffsetOf(b.fake, EepromRegion::High), where);
+        // The Low half of the full-flash layout is in place.
+        const std::vector<uint8_t> layout = fullFlashLayout(b.image);
+        TEST_ASSERT_EQUAL_HEX8_ARRAY_MESSAGE(&layout[0], &b.fake.eeprom[0], HIGH_PTR, where);
+        TEST_ASSERT_EQUAL_HEX8_ARRAY_MESSAGE(&layout[0x07FC + 4], &b.fake.eeprom[0x07FC + 4], HIGH_START - 0x0800,
+                                             where);
+        assertBlankInvariant(b, u, s, where);
+    }
+    // The compare of the High pass is the step that caught the corrupted byte.
+    BlankBoard b;
+    b.fake.failCall(blankStepIdx(EepromRegion::High, EepromUpdateStep::VerifyBundle, 0), corruptHigh);
+    TPS25751EepromUpdater u(b.fake);
+    u.programBlank(b.image.data(), b.image.size());
+    ASSERT_STEP(EepromUpdateStep::CompareBundle, u.lastStep());
+}
+
+void test_program_blank_stops_on_the_trace_of_an_earlier_misplaced_write()
+{
+    // Step 2's first check runs unchanged in each pass: when the 12 bytes after
+    // the region pointer already hold the start of the image, the pass stops
+    // before its bundle FLad, after the pointer and AppConfigOffset writes.
+    for (EepromRegion r : {EepromRegion::Low, EepromRegion::High}) {
+        BlankBoard b;
+        b.fake.writeBytes(TPS25751EepromUpdater::regionPointerAddress(r) + 4, b.image.data(), 12);
+        b.snapshot();
+        TPS25751EepromUpdater u(b.fake);
+        const char *where = at("region", static_cast<size_t>(r));
+
+        ASSERT_STATUS_MESSAGE(EepromUpdateStatus::PointerNeighborsChanged,
+                              u.programBlank(b.image.data(), b.image.size()), where);
+        ASSERT_STEP_MESSAGE(EepromUpdateStep::WriteBundle, u.lastStep(), where);
+        TEST_ASSERT_EQUAL_MESSAGE(r, u.lastTarget(), where);
+        TEST_ASSERT_EQUAL_size_t_MESSAGE(blankIdx(r, PASS_BUNDLE_FLAD), b.fake.calls.size(), where);
+        TEST_ASSERT_EQUAL_HEX32_MESSAGE(0, pointerOf(b.fake, r), where);
+        TEST_ASSERT_EQUAL_HEX32_MESSAGE(0, appConfigOffsetOf(b.fake, r), where);
+        TEST_ASSERT_TRUE_MESSAGE(r == EepromRegion::High || !pointerValid(b.fake, EepromRegion::High), where);
+        assertBlankInvariant(b, u, EepromUpdateStatus::PointerNeighborsChanged, where);
+    }
+}
+
+void test_program_blank_executor_failure_at_every_call()
+{
+    // One executor failure at every call, for each failure kind, with the task
+    // not run or run before the host saw the failure. Each returns the mapped
+    // status, names the step and the region the call belongs to, issues nothing
+    // afterwards, and leaves the invariant of assertBlankInvariant(). At the
+    // real length every call is swept except among the compare reads of each
+    // pass, where the first, every 16th, and the last are, as in the
+    // updateRegion() sweep.
+    const struct {
+        Fault fault;
+        EepromUpdateStatus expected;
+    } kinds[] = {
+        {Fault::rejected(), EepromUpdateStatus::CommandRejected},
+        {Fault::timeout(), EepromUpdateStatus::CommandTimeout},
+        {Fault::i2cError(), EepromUpdateStatus::I2cError},
+    };
+    const size_t lengths[] = {SMALL_LEN, BUNDLE_LEN};
+    for (size_t length : lengths) {
+        const std::vector<BlankCall> calls = blankCallsOf(length);
+        TEST_ASSERT_EQUAL_size_t(length == SMALL_LEN ? SMALL_BLANK_CALLS : REAL_BLANK_CALLS, calls.size());
+        // Position of each call within its run of compare reads.
+        std::vector<size_t> compareOrdinal(calls.size(), 0);
+        for (size_t i = 1; i < calls.size(); ++i) {
+            if (calls[i].step == EepromUpdateStep::CompareBundle && calls[i - 1].step == EepromUpdateStep::CompareBundle)
+                compareOrdinal[i] = compareOrdinal[i - 1] + 1;
+        }
+        size_t swept = 0;
+        for (int ran = 0; ran < 2; ++ran) {
+            for (const auto &kind : kinds) {
+                for (size_t idx = 0; idx < calls.size(); ++idx) {
+                    if (length == BUNDLE_LEN && calls[idx].step == EepromUpdateStep::CompareBundle) {
+                        const bool last = (calls[idx + 1].step != EepromUpdateStep::CompareBundle);
+                        if (compareOrdinal[idx] % 16 != 0 && !last) continue;
+                    }
+                    ++swept;
+                    BlankBoard b(length);
+                    b.fake.logPayloads = false;
+                    Fault f = kind.fault;
+                    f.runTask = (ran != 0);
+                    b.fake.failCall(idx, f);
+                    TPS25751EepromUpdater u(b.fake);
+                    const char *where = at("call", idx, TPS25751EepromUpdater::toString(kind.expected));
+
+                    const EepromUpdateStatus s = u.programBlank(b.image.data(), b.image.size());
+
+                    ASSERT_STATUS_MESSAGE(kind.expected, s, where);
+                    ASSERT_STEP_MESSAGE(calls[idx].step, u.lastStep(), where);
+                    TEST_ASSERT_EQUAL_MESSAGE(calls[idx].target, u.lastTarget(), where);
+                    TEST_ASSERT_EQUAL_size_t_MESSAGE(idx + 1, b.fake.calls.size(), where);
+                    assertBlankInvariant(b, u, s, where);
+                    if (calls[idx].step == EepromUpdateStep::Preflight) assertEeprom(b.fake, b.before, where);
+                }
+            }
+        }
+        // 6 variants of each swept call. Real length: 2730 calls less the 1792
+        // compare reads, plus the 57 of each pass's 896 that are swept.
+        TEST_ASSERT_EQUAL_size_t(6 * (length == SMALL_LEN ? SMALL_BLANK_CALLS : REAL_BLANK_CALLS - 1792 + 2 * 57),
+                                 swept);
+    }
+}
+
+void test_program_blank_return_code_fault_at_every_call()
+{
+    // A wrong DATA byte 0 at every call: 0x01, 0xFF, and 0x00 with the task not
+    // run (a write that writes nothing, an FLad that sets no address, a read
+    // that returns stale DATA). Whatever the status, the invariant of
+    // assertBlankInvariant() holds, and Success means the full-flash layout.
+    // The compare reads of the real length are thinned as in the executor
+    // sweep. The fake's answers where the TRM is silent (an FLwd at a stale
+    // address) are assumptions; the assertions do not depend on the status.
+    const uint8_t codes[] = {0x01, 0xFF, 0x00};
+    const size_t lengths[] = {SMALL_LEN, BUNDLE_LEN};
+    for (size_t length : lengths) {
+        const std::vector<BlankCall> calls = blankCallsOf(length);
+        std::vector<size_t> compareOrdinal(calls.size(), 0);
+        for (size_t i = 1; i < calls.size(); ++i) {
+            if (calls[i].step == EepromUpdateStep::CompareBundle && calls[i - 1].step == EepromUpdateStep::CompareBundle)
+                compareOrdinal[i] = compareOrdinal[i - 1] + 1;
+        }
+        for (uint8_t rc : codes) {
+            for (size_t idx = 0; idx < calls.size(); ++idx) {
+                if (length == BUNDLE_LEN && calls[idx].step == EepromUpdateStep::CompareBundle) {
+                    const bool last = (calls[idx + 1].step != EepromUpdateStep::CompareBundle);
+                    if (compareOrdinal[idx] % 16 != 0 && !last) continue;
+                }
+                BlankBoard b(length);
+                b.fake.logPayloads = false;
+                b.fake.failCall(idx, Fault::returnCodeOnly(rc));
+                TPS25751EepromUpdater u(b.fake);
+                const char *where = at("call", idx, rc == 0x01 ? "rc 0x01" : rc == 0xFF ? "rc 0xFF" : "rc 0x00");
+
+                const EepromUpdateStatus s = u.programBlank(b.image.data(), b.image.size());
+
+                assertBlankInvariant(b, u, s, where);
+            }
+        }
+    }
+}
+
+void test_program_blank_read_back_and_a_misplaced_bundle_write()
+{
+    // The modelled fault of the updateRegion() read-back test: the FLad to the
+    // bundle start reports 0x00 without taking effect, and the chunks go to
+    // the stale write address (assumption, not in the TRM). In programBlank()
+    // the last write before that FLad is the AppConfigOffset word, so the
+    // stale address is the word's address plus 4: 0x0400 in the Low pass and
+    // 0x0800 in the High pass.
+
+    // 1. Blank part, Low pass: the first two chunks land on the High pointer
+    //    row, and the read-back stops the call because the Low bundle start
+    //    is erased. The High pointer then reads 0xACE00001, which is not valid.
+    {
+        BlankBoard b(BUNDLE_LEN);
+        b.fake.failCall(blankIdx(EepromRegion::Low, PASS_BUNDLE_FLAD, BUNDLE_LEN), Fault::returnCodeOnly(0x00));
+        TPS25751EepromUpdater u(b.fake);
+
+        ASSERT_STATUS(EepromUpdateStatus::CompareMismatch, u.programBlank(b.image.data(), b.image.size()));
+        ASSERT_STEP(EepromUpdateStep::WriteBundle, u.lastStep());
+        TEST_ASSERT_EQUAL(EepromRegion::Low, u.lastTarget());
+        TEST_ASSERT_EQUAL_size_t(blankIdx(EepromRegion::Low, PASS_EARLY_READ, BUNDLE_LEN) + 1, b.fake.calls.size());
+
+        std::vector<uint8_t> expected = b.before;
+        memset(&expected[LOW_PTR], 0, 4);
+        memset(&expected[0x03FC], 0, 4);
+        memcpy(&expected[HIGH_PTR], b.image.data(), 64);
+        assertEeprom(b.fake, expected);
+        TEST_ASSERT_FALSE(pointerValid(b.fake, EepromRegion::High));
+    }
+
+    // 2. Blank part, High pass: the first two chunks land on the start of the
+    //    Low bundle, which holds the same bytes, and the read-back stops the
+    //    call because the High bundle start is erased. The Low region is intact.
+    {
+        BlankBoard b(BUNDLE_LEN);
+        b.fake.failCall(blankIdx(EepromRegion::High, PASS_BUNDLE_FLAD, BUNDLE_LEN), Fault::returnCodeOnly(0x00));
+        TPS25751EepromUpdater u(b.fake);
+
+        ASSERT_STATUS(EepromUpdateStatus::CompareMismatch, u.programBlank(b.image.data(), b.image.size()));
+        ASSERT_STEP(EepromUpdateStep::WriteBundle, u.lastStep());
+        TEST_ASSERT_EQUAL(EepromRegion::High, u.lastTarget());
+
+        std::vector<uint8_t> expected = fullFlashLayout(b.image);
+        memset(&expected[HIGH_PTR], 0, 4);
+        memset(&expected[HIGH_START], 0xFF, BUNDLE_LEN);
+        assertEeprom(b.fake, expected);
+        assertBlankInvariant(b, u, EepromUpdateStatus::CompareMismatch, "High pass");
+    }
+
+    // 3. Limit: when the Low region already holds the image, the read-back
+    //    cannot see the Low-pass case, because it watches the Low pointer row
+    //    and not 0x0400. The call succeeds with 60 stray bytes after the High
+    //    pointer word, which the High pass then rewrites.
+    {
+        BlankBoard b(BUNDLE_LEN);
+        b.fake.writeBytes(LOW_START, b.image.data(), b.image.size());
+        b.fake.writeBytes(HIGH_START, b.image.data(), b.image.size());
+        b.fake.writeLe32(LOW_PTR, 0);
+        b.fake.writeLe32(HIGH_PTR, 0);
+        b.snapshot();
+        b.fake.failCall(blankIdx(EepromRegion::Low, PASS_BUNDLE_FLAD, BUNDLE_LEN), Fault::returnCodeOnly(0x00));
+        TPS25751EepromUpdater u(b.fake);
+
+        ASSERT_STATUS(EepromUpdateStatus::Success, u.programBlank(b.image.data(), b.image.size()));
+        std::vector<uint8_t> expected = fullFlashLayout(b.image);
+        memcpy(&expected[HIGH_PTR + 4], b.image.data() + 4, 60);
+        assertEeprom(b.fake, expected);
+    }
+
+    // 4. The fake's opt-in model of an FLrd that moves the write address
+    //    (hypothetical). With every FLad taking effect it changes nothing.
+    {
+        BlankBoard b(BUNDLE_LEN);
+        b.fake.flrdMovesWriteAddress = true;
+        TPS25751EepromUpdater u(b.fake);
+        ASSERT_STATUS(EepromUpdateStatus::Success, u.programBlank(b.image.data(), b.image.size()));
+        assertEeprom(b.fake, fullFlashLayout(b.image));
+    }
+
+    // 5. Limit, the double fault: FLrd moves the write address and the FLad to
+    //    the High bundle start does not take effect. The last FLrd before it
+    //    read 0x07FC, so the first two chunks land 12 bytes into the Low
+    //    bundle. The read-back stops the call, but the Low region, behind its
+    //    valid pointer, no longer holds the image. programBlank()'s Doxygen
+    //    states this limit; no TI document describes either behaviour.
+    {
+        BlankBoard b(BUNDLE_LEN);
+        b.fake.flrdMovesWriteAddress = true;
+        b.fake.failCall(blankIdx(EepromRegion::High, PASS_BUNDLE_FLAD, BUNDLE_LEN), Fault::returnCodeOnly(0x00));
+        TPS25751EepromUpdater u(b.fake);
+
+        ASSERT_STATUS(EepromUpdateStatus::CompareMismatch, u.programBlank(b.image.data(), b.image.size()));
+        TEST_ASSERT_EQUAL(EepromRegion::High, u.lastTarget());
+        TEST_ASSERT_EQUAL_HEX8_ARRAY(b.image.data(), &b.fake.eeprom[LOW_START + 12], 64);
+        TEST_ASSERT_TRUE(pointerValid(b.fake, EepromRegion::Low));
+        TEST_ASSERT_FALSE(regionHolds(b.fake, EepromRegion::Low, b.image));
+    }
+}
+
+void test_program_blank_progress_sequence()
+{
+    // Per region, the write phase and the compare phase as for updateRegion().
+    // The write phase's done == 0 call comes after the AppConfigOffset word has
+    // read back as 0 and before the bundle FLad.
+    BlankBoard b;
+    TPS25751EepromUpdater u(b.fake);
+    ProgressLog log;
+    log.updater = &u;
+    std::vector<size_t> callsAtZero;
+    std::vector<uint32_t> appConfigAtZero;
+    log.onCall = [&](const ProgressLog::Entry &e) {
+        if (e.done == 0 && e.step == EepromUpdateStep::WriteBundle) {
+            callsAtZero.push_back(b.fake.calls.size());
+            appConfigAtZero.push_back(appConfigOffsetOf(b.fake, e.target));
+        }
+    };
+    u.setProgressCallback(recordProgress, &log);
+
+    ASSERT_STATUS(EepromUpdateStatus::Success, u.programBlank(b.image.data(), b.image.size()));
+
+    const uint32_t writeDone[] = {0, 32, 64, 96, 100};
+    const uint32_t compareDone[] = {0, 16, 32, 48, 64, 80, 96, 100};
+    TEST_ASSERT_EQUAL_size_t(2 * (5 + 8), log.entries.size());
+    for (size_t pass = 0; pass < 2; ++pass) {
+        const EepromRegion r = pass == 0 ? EepromRegion::Low : EepromRegion::High;
+        const size_t base = pass * 13;
+        for (size_t i = 0; i < 5; ++i) {
+            const ProgressLog::Entry &e = log.entries[base + i];
+            TEST_ASSERT_EQUAL_UINT32_MESSAGE(writeDone[i], e.done, at("write entry", base + i));
+            ASSERT_STEP_MESSAGE(EepromUpdateStep::WriteBundle, e.step, at("write entry", base + i));
+            TEST_ASSERT_EQUAL_MESSAGE(r, e.target, at("write entry", base + i));
+        }
+        for (size_t i = 0; i < 8; ++i) {
+            const ProgressLog::Entry &e = log.entries[base + 5 + i];
+            TEST_ASSERT_EQUAL_UINT32_MESSAGE(compareDone[i], e.done, at("compare entry", base + 5 + i));
+            ASSERT_STEP_MESSAGE(EepromUpdateStep::CompareBundle, e.step, at("compare entry", base + 5 + i));
+            TEST_ASSERT_EQUAL_MESSAGE(r, e.target, at("compare entry", base + 5 + i));
+        }
+    }
+    for (const ProgressLog::Entry &e : log.entries) TEST_ASSERT_EQUAL_UINT32(SMALL_LEN, e.total);
+
+    TEST_ASSERT_EQUAL_size_t(2, callsAtZero.size());
+    TEST_ASSERT_EQUAL_size_t(blankIdx(EepromRegion::Low, PASS_BUNDLE_FLAD), callsAtZero[0]);
+    TEST_ASSERT_EQUAL_size_t(blankIdx(EepromRegion::High, PASS_BUNDLE_FLAD), callsAtZero[1]);
+    TEST_ASSERT_EQUAL_HEX32(0, appConfigAtZero[0]);
+    TEST_ASSERT_EQUAL_HEX32(0, appConfigAtZero[1]);
+
+    // A failure ends the calls: an FLvy failure in the Low pass leaves its
+    // write phase complete and no compare phase.
+    BlankBoard f;
+    f.fake.failNth("FLvy", 0, Fault::returnCodeOnly(0x01));
+    TPS25751EepromUpdater fu(f.fake);
+    ProgressLog flog;
+    flog.updater = &fu;
+    fu.setProgressCallback(recordProgress, &flog);
+    ASSERT_STATUS(EepromUpdateStatus::VerifyFailed, fu.programBlank(f.image.data(), f.image.size()));
+    TEST_ASSERT_EQUAL_size_t(5, flog.entries.size());
+    TEST_ASSERT_EQUAL_UINT32(SMALL_LEN, flog.entries.back().done);
+}
+
 // --- coldReset -------------------------------------------------------------------------
 
 void test_cold_reset_issues_gaid_and_waits_for_app()
@@ -3522,6 +4456,7 @@ void test_to_string_covers_every_step()
         {EepromUpdateStep::None, "None"},
         {EepromUpdateStep::Preflight, "Preflight"},
         {EepromUpdateStep::ErasePointer, "ErasePointer"},
+        {EepromUpdateStep::ClearAppConfigOffset, "ClearAppConfigOffset"},
         {EepromUpdateStep::WriteBundle, "WriteBundle"},
         {EepromUpdateStep::VerifyBundle, "VerifyBundle"},
         {EepromUpdateStep::CompareBundle, "CompareBundle"},
@@ -3531,8 +4466,8 @@ void test_to_string_covers_every_step()
         {EepromUpdateStep::Done, "Done"},
     };
     for (const auto &e : all) TEST_ASSERT_EQUAL_STRING(e.name, TPS25751EepromUpdater::toString(e.step));
-    TEST_ASSERT_EQUAL_UINT8(10, sizeof(all) / sizeof(all[0]));
-    TEST_ASSERT_EQUAL_UINT8(9, static_cast<uint8_t>(EepromUpdateStep::Done));
+    TEST_ASSERT_EQUAL_UINT8(11, sizeof(all) / sizeof(all[0]));
+    TEST_ASSERT_EQUAL_UINT8(10, static_cast<uint8_t>(EepromUpdateStep::Done));
     TEST_ASSERT_EQUAL_STRING("Unknown", TPS25751EepromUpdater::toString(static_cast<EepromUpdateStep>(200)));
 }
 
@@ -3776,6 +4711,21 @@ int main(int, char **)
     RUN_TEST(test_update_both_regions_checks_the_image_against_both_regions_first);
     RUN_TEST(test_update_both_regions_refusals_write_nothing);
     RUN_TEST(test_update_both_regions_executor_failure_at_every_call);
+    RUN_TEST(test_program_blank_full_call_sequence);
+    RUN_TEST(test_program_blank_on_a_blank_eeprom_equals_the_full_flash_layout);
+    RUN_TEST(test_program_blank_from_a_corrupt_start);
+    RUN_TEST(test_program_blank_leaves_bytes_outside_the_layout);
+    RUN_TEST(test_program_blank_refuses_a_non_blank_eeprom);
+    RUN_TEST(test_program_blank_preflight_failures);
+    RUN_TEST(test_program_blank_pointer_erase_failures);
+    RUN_TEST(test_program_blank_app_config_offset_write_failures);
+    RUN_TEST(test_program_blank_app_config_offset_rows_and_the_low_bundle);
+    RUN_TEST(test_program_blank_high_pass_failure_keeps_the_low_region);
+    RUN_TEST(test_program_blank_stops_on_the_trace_of_an_earlier_misplaced_write);
+    RUN_TEST(test_program_blank_executor_failure_at_every_call);
+    RUN_TEST(test_program_blank_return_code_fault_at_every_call);
+    RUN_TEST(test_program_blank_read_back_and_a_misplaced_bundle_write);
+    RUN_TEST(test_program_blank_progress_sequence);
     RUN_TEST(test_cold_reset_issues_gaid_and_waits_for_app);
     RUN_TEST(test_cold_reset_treats_timeout_and_i2c_error_as_reset_issued);
     RUN_TEST(test_cold_reset_rejected_is_not_a_reset);

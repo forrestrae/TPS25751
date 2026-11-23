@@ -18,12 +18,15 @@
  *   the bytes that follow the pointer;
  * - the update flows of SLVAFL1 Figure 2-3: updateRegion(),
  *   updateInactiveRegion(), and updateBothRegions();
+ * - programBlank(), which writes the whole two-region layout to an EEPROM
+ *   with no valid region pointer, for the recovery of SLVAFL1 Figure 4-1;
  * - read-back with compareRegion() and dump(), and pure image checks;
  * - coldReset(), which issues GAID and waits for APP.
  *
  * Calls that change the EEPROM: setWriteAddress() followed by writeData(),
- * writeRegionPointer(), and the three update flows. coldReset() restarts the
- * controller and disconnects the port. Every other call only reads.
+ * writeRegionPointer(), the three update flows, and programBlank().
+ * coldReset() restarts the controller and disconnects the port. Every other
+ * call only reads.
  *
  * EEPROM layout (SLVAFL1 Figures 2-1 and 2-6, and the source code on page 10):
  *
@@ -146,9 +149,8 @@ enum class EepromRegion : uint8_t {
  * @brief Outcome of a TPS25751EepromUpdater call
  *
  * updateRegion() documents, for every value an update can return, the step
- * that raises it and the state it leaves the EEPROM in. EepromNotBlank belongs
- * to blank programming, which this version does not provide, so no call
- * returns it yet.
+ * that raises it and the state it leaves the EEPROM in. programBlank() does
+ * the same for blank programming, the only call that returns EepromNotBlank.
  */
 enum class EepromUpdateStatus : uint8_t {
     Success,                  ///< The call completed as requested
@@ -157,7 +159,7 @@ enum class EepromUpdateStatus : uint8_t {
     BadImageHeader,           ///< checkImage(): the image does not start with 0xACE00001
     BadImageLength,           ///< checkImage(): the image is shorter than 0x38 bytes or longer than the region. Also a null pointer or a length out of range passed to writeData() or compareRegion()
     NoBootableRegion,         ///< Selection: neither region pointer equals its bundle start. Pre-flight: the pointer of the region being kept does not
-    EepromNotBlank,           ///< Blank programming refused: a region pointer is valid
+    EepromNotBlank,           ///< programBlank() pre-flight: a region pointer is valid, so the EEPROM is not blank
     PointerEraseFailed,       ///< Update step 1: the target pointer could not be written to 0
     SetAddressFailed,         ///< FLad reported a failure in its task return code (TRM Table 4-20; Table 4-1 puts the standard TaskResult in bits 3:0)
     WriteFailed,              ///< FLwd returned a code other than written (0x00) or busy (0xFF)
@@ -177,24 +179,26 @@ enum class EepromUpdateStatus : uint8_t {
  * @brief The step an update or reset was in when it returned
  *
  * lastStep() returns this. It tells a caller which row of the state table in
- * updateRegion() applies when a call returns an executor failure
- * (CommandRejected, CommandTimeout, or I2cError), and it tells a progress
- * callback which phase is reporting.
+ * updateRegion() or programBlank() applies when a call returns an executor
+ * failure (CommandRejected, CommandTimeout, or I2cError), and it tells a
+ * progress callback which phase is reporting. In programBlank() the steps
+ * run once per region, and lastTarget() names the region.
  *
  * @see TPS25751EepromUpdater::lastStep()
  * @see SLVAFL1 Figure 2-3
  */
 enum class EepromUpdateStep : uint8_t {
-    None,             ///< No update or reset has run on this object
-    Preflight,        ///< Region selection or the pre-flight checks; this call has issued no write
-    ErasePointer,     ///< Step 1: writing the target region's pointer to 0
-    WriteBundle,      ///< Step 2: FLad to the bundle start, then the FLwd chunks
-    VerifyBundle,     ///< Step 3: FLvy at the bundle start
-    CompareBundle,    ///< Step 3: FLrd compare of the written region with the image
-    RestorePointer,   ///< Step 3: writing the target pointer to the bundle start
-    EraseOldPointer,  ///< Step 4: writing the other region's pointer to 0
-    Reset,            ///< coldReset(): GAID issued, or MODE being polled
-    Done              ///< The most recent update or reset completed
+    None,                  ///< No update or reset has run on this object
+    Preflight,             ///< Region selection or the pre-flight checks; this call has issued no write
+    ErasePointer,          ///< Step 1: writing the target region's pointer to 0
+    ClearAppConfigOffset,  ///< programBlank() only, between steps 1 and 2: writing the target region's AppConfigOffset word to 0
+    WriteBundle,           ///< Step 2: FLad to the bundle start, then the FLwd chunks
+    VerifyBundle,          ///< Step 3: FLvy at the bundle start
+    CompareBundle,         ///< Step 3: FLrd compare of the written region with the image
+    RestorePointer,        ///< Step 3: writing the target pointer to the bundle start
+    EraseOldPointer,       ///< Step 4: writing the other region's pointer to 0
+    Reset,                 ///< coldReset(): GAID issued, or MODE being polled
+    Done                   ///< The most recent update or reset completed
 };
 
 /**
@@ -221,12 +225,15 @@ struct EepromUpdateOptions {
  * @brief Progress callback for the update flows
  *
  * Called synchronously from updateRegion(), and so from updateInactiveRegion()
- * and updateBothRegions(), in two phases. TPS25751EepromUpdater::lastStep()
- * tells them apart, and @p total is the image length in both.
+ * and updateBothRegions(), and from programBlank(), in two phases.
+ * TPS25751EepromUpdater::lastStep() tells them apart, and @p total is the
+ * image length in both.
  *
  * Write phase, lastStep() == EepromUpdateStep::WriteBundle:
  * - once with @p done == 0, after step 1 has completed (the target pointer
- *   has been read back as 0) and before any task of step 2 is issued;
+ *   has been read back as 0), in programBlank() also after the target's
+ *   AppConfigOffset word has been read back as 0, and before any task of
+ *   step 2 is issued;
  * - then after every chunk whose FLwd reported success, with @p done the image
  *   bytes written so far. The last call has @p done == @p total.
  *
@@ -240,12 +247,14 @@ struct EepromUpdateOptions {
  * The check that precedes the first task of step 2 comes after the done == 0
  * call; when it stops the update, that call is the only one.
  * A step that fails makes no further call, so a missing final call means the
- * phase did not complete. updateBothRegions() runs both phases once per region.
+ * phase did not complete. updateBothRegions() and programBlank() run both
+ * phases once per region; lastTarget() names the region.
  *
  * A callback that never returns stops the update where it stands: at
  * @p done == 0 of the write phase the EEPROM is as step 1 left it (SLVAFL1
  * Figure 2-7), and at @p done == @p total of the write phase as step 2 left it
- * (Figure 2-8).
+ * (Figure 2-8). In programBlank() neither state has a bootable region during
+ * the Low pass; see its state table.
  *
  * The callback may call lastStep() and lastTarget(). A callback that returns
  * must not call any other member of the updater and must not issue 4CC tasks
@@ -751,6 +760,126 @@ public:
      */
     EepromUpdateStatus updateBothRegions(const uint8_t* image, size_t length);
 
+    /**
+     * @brief Write the full two-region layout to an EEPROM with no valid region pointer
+     *
+     * For a blank or corrupt EEPROM, with the controller already in APP mode
+     * from a patch it received over I2Ct, for example through
+     * TPS25751PatchLoader::loadPatchBundle(). SLVAFL1 (Recovering From EEPROM
+     * Failure, Figure 4-1, page 13) describes that recovery: push a patch with
+     * the PBM tasks, then correct the EEPROM with the flash tasks. The result
+     * is the layout of SLVAFL1 Figure 2-6 with @p image in both regions, the
+     * layout the full-flash binary holds (SLVAFL1 page 3 Note).
+     *
+     * Pre-flight, in this order, before any write. A failure here leaves the
+     * EEPROM unchanged:
+     *
+     * 1. MODE reads APP (NotInAppMode; I2cError if MODE cannot be read).
+     * 2. BOOT_FLAGS (0x2D) reports I2C EEPROM Present (NoEepromPresent;
+     *    I2cError if it cannot be read). The TRM (page 33) sets the bit when
+     *    an EEPROM device was discovered during boot. That it is set for a
+     *    blank EEPROM after a PBM boot is inferred; hardware stage 5 of the
+     *    plan checks it.
+     * 3. checkImage() accepts the image for the smaller of the two region
+     *    capacities (BadImageHeader, BadImageLength).
+     * 4. Neither region pointer equals its bundle start (EepromNotBlank), so
+     *    the call cannot overwrite an EEPROM that boots. Both pointers are
+     *    read, Low first; a read failure returns its status.
+     *
+     * Then, for the Low region and then the High region:
+     *
+     * 1. writeRegionPointer(region, 0), as step 1 of updateRegion().
+     * 2. The region's AppConfigOffset word (appConfigOffsetAddress()) to 0,
+     *    with the same four-task write and read-back as a pointer: FLrd of
+     *    the 16 bytes at the word, FLad, a 4-byte FLwd, FLrd again. Bytes 4
+     *    to 15 must not change and the word must read 0. The controller looks
+     *    for a region's Header_ID at the region start plus this offset
+     *    (SLVAFL1 Boot Process, page 2), so the word must be 0 before the
+     *    pointer is written to the bundle start.
+     * 3. Step 2 of updateRegion() unchanged: the check of the 12 bytes after
+     *    the region pointer against the start of the image, FLad, the first
+     *    two chunks, the read-back of the pointer row and of the chunks, a
+     *    fresh FLad, and the remaining chunks.
+     * 4. Step 3 of updateRegion() with the compare always on: FLvy, the FLrd
+     *    compare of the region with the image, then writeRegionPointer(region,
+     *    bundleStart(region)).
+     *
+     * There is no step 4: both pointers stay valid. The first failure ends the
+     * call, and nothing is written after it. A 14336-byte image issues 2730
+     * tasks with no retry, about the 52 s hardware stage 3 measured for
+     * updateBothRegions().
+     *
+     * What the read-backs of the AppConfigOffset write cover. The 16 bytes at
+     * 0x03FC run into the High pointer word at 0x0400 and the 8 bytes after
+     * it. The 16 bytes at 0x07FC run into the first 12 bytes of the Low
+     * bundle at 0x0800, which the Low pass has written and compared by then.
+     * The check compares those bytes before and after the write, not with
+     * erased bytes, so the Low bundle cannot make the High pass refuse, and
+     * no trace check applies to that row. Hardware stage 2 showed that a
+     * 4-byte FLwd writes exactly four bytes.
+     *
+     * State afterwards, with "region" the region of the pass that failed,
+     * which lastTarget() names, and the steps those of updateRegion():
+     *
+     * | Status | Raised by | EEPROM state afterwards |
+     * |---|---|---|
+     * | Success | The whole flow | Both pointers valid, both AppConfigOffset words 0, the image in both regions. Every other byte as before the call: a blank part then equals the full-flash layout byte for byte |
+     * | NotInAppMode, NoEepromPresent, BadImageHeader, BadImageLength, EepromNotBlank | Pre-flight | Unchanged |
+     * | PointerEraseFailed | Step 1 | Region pointer uncertain, nothing else of the region written |
+     * | SetAddressFailed, WriteFailed, FlashBusy, CompareMismatch (lastStep() is ClearAppConfigOffset) | The AppConfigOffset write | Region pointer 0, its AppConfigOffset word uncertain |
+     * | PointerNeighborsChanged (lastStep() is ClearAppConfigOffset) | The neighbor check of the AppConfigOffset write | Region pointer 0. The 12 bytes after the word changed: in the Low pass the High pointer word and the 8 bytes after it; in the High pass the first 12 bytes of the Low bundle, so the Low region may no longer boot. Stop and dump the EEPROM |
+     * | SetAddressFailed, WriteFailed, FlashBusy, CompareMismatch, PointerNeighborsChanged (lastStep() is WriteBundle) | Step 2 | As the step 2 rows of updateRegion(): region pointer 0, region untouched, partly written, or the first chunks misplaced |
+     * | VerifyFailed, CompareMismatch (lastStep() is CompareBundle) | Step 3, FLvy or the compare | Region written but not valid, pointer 0 |
+     * | PointerRestoreFailed, PointerNeighborsChanged (lastStep() is RestorePointer) | Step 3, the pointer write | Region holds the image, compared; its pointer uncertain |
+     * | CommandRejected, CommandTimeout, I2cError | The executor, in any step | As the row of the step lastStep() names |
+     *
+     * What else holds. A failure in the Low pass leaves the High pointer as
+     * pre-flight found it, not valid, so no region boots: the controller keeps
+     * running the patch it holds in RAM and comes up in PTCH at its next
+     * restart. A failure in the High pass leaves the Low pass complete: the
+     * Low region holds the image, compared, with its AppConfigOffset word 0
+     * and a valid pointer, and boots. After any failure a valid pointer leads
+     * only to a region that passed FLvy and the compare.
+     *
+     * Recovery. While no pointer reads valid, call programBlank() again; after
+     * PointerNeighborsChanged, or CompareMismatch from step 2, dump the EEPROM
+     * first. When a pointer reads valid, programBlank() refuses, and
+     * updateRegion() on the other region with invalidateOldRegion false
+     * completes the layout. updateRegion() does not write the AppConfigOffset
+     * word, so read that region's word first: it is 0 only if the failed pass
+     * got past ClearAppConfigOffset or it read 0 already.
+     *
+     * Limits beyond those of updateRegion(). In this flow the last write
+     * before the FLad to the bundle start is the AppConfigOffset word, not
+     * the pointer, and the last read is that word's read-back. An FLad that
+     * reported success without taking effect would therefore leave the write
+     * address after the AppConfigOffset word, not after the pointer: at
+     * 0x0400 in the Low pass, the High pointer word, and at 0x0800 in the High
+     * pass, the start of the Low bundle, which then receives its own bytes
+     * again. Step 2's read-back stops either case when the bundle start does
+     * not already hold the image, which holds for a blank EEPROM. It cannot see
+     * either case when the region already held the image, because it watches
+     * the region's pointer row and not those addresses; 64 bytes are then
+     * misplaced, at 0x0400 to 0x043F or over identical bytes. If, in
+     * addition, an FLrd moved the write address to the address it read plus
+     * 16, which is not documented either, the stale address in the High pass
+     * would be 0x080C, and the first two chunks would overwrite bytes 12 to
+     * 75 of the Low bundle. The read-back stops the call there on a blank
+     * High region, but the Low region would no longer boot. No TI document
+     * describes either behaviour.
+     *
+     * The progress callback runs as for updateRegion(), once per region;
+     * lastTarget() names the region in progress.
+     *
+     * @param image  Bundle image (a low-region binary); must stay valid for the call
+     * @param length Image length in bytes
+     * @return A status from the table above, or I2cError or a readFlash()
+     *         failure from pre-flight
+     * @see updateRegion() for steps 1 to 3 and their limits
+     * @see SLVAFL1 Figures 2-1, 2-3, 2-6, and 4-1
+     */
+    EepromUpdateStatus programBlank(const uint8_t* image, size_t length);
+
     // --- Read-back -----------------------------------------------------------
 
     /**
@@ -852,9 +981,9 @@ public:
     /**
      * @brief The step the most recent update or reset was in when it returned
      *
-     * Set by updateRegion(), updateInactiveRegion(), updateBothRegions(), and
-     * coldReset(); the primitives, writeRegionPointer(), compareRegion(), and
-     * dump() leave it unchanged. After a failure it names the step that
+     * Set by updateRegion(), updateInactiveRegion(), updateBothRegions(),
+     * programBlank(), and coldReset(); the primitives, writeRegionPointer(),
+     * compareRegion(), and dump() leave it unchanged. After a failure it names the step that
      * failed. Inside a progress callback it names the phase that is reporting.
      *
      * @return The step, None before the first flow, Done after a completed one
@@ -863,12 +992,15 @@ public:
     EepromUpdateStep lastStep() const { return _lastStep; }
 
     /**
-     * @brief The region the most recent updateRegion() pass wrote or meant to write
+     * @brief The region the most recent update pass wrote or meant to write
      *
      * Set when updateRegion() starts, whether called directly or through
      * updateInactiveRegion() or updateBothRegions(). It is the "target" of the
      * state table in updateRegion(). A selection failure in
      * updateInactiveRegion() leaves the value of the pass before it.
+     * programBlank() sets it to Low when it starts, pre-flight included, and
+     * to High when its High pass starts; it is the "region" of the state
+     * table in programBlank().
      *
      * @return The region; Low before the first update
      */
@@ -950,8 +1082,29 @@ private:
     /// final read-back saw.
     EepromUpdateStatus writeWordChecked(uint32_t addr, uint32_t value, uint8_t* readBack = nullptr);
 
+    /// Pre-flight checks 1 to 3, shared by updateRegion() and programBlank():
+    /// MODE reads APP, BOOT_FLAGS reports the EEPROM, and checkImage()
+    /// accepts the image for @p capacity. Issues no task.
+    EepromUpdateStatus checkHostAndImage(const uint8_t* image, size_t length, uint32_t capacity);
+
     /// The four pre-flight checks of updateRegion(); issues no write.
     EepromUpdateStatus preflight(EepromRegion target, const uint8_t* image, size_t length);
+
+    /// The four pre-flight checks of programBlank(); issues no write.
+    EepromUpdateStatus preflightBlank(const uint8_t* image, size_t length);
+
+    /// Step 1 of an update: the target pointer to 0, with lastStep() set to
+    /// ErasePointer and the failures of the write mapped to PointerEraseFailed.
+    /// @p pointerRow receives the 16 bytes the read-back saw.
+    EepromUpdateStatus eraseTargetPointer(EepromRegion target, uint8_t* pointerRow);
+
+    /// Steps 2 and 3 of an update, shared by updateRegion() and
+    /// programBlank(): the bundle write with its read-back, FLvy, the compare
+    /// when @p compare is set, and the target pointer to the bundle start.
+    /// Sets lastStep() for each phase. @p pointerRow is the 16 bytes step 1's
+    /// read-back saw at the target pointer.
+    EepromUpdateStatus installBundle(EepromRegion target, const uint8_t* image, size_t length,
+                                     const uint8_t* pointerRow, bool compare);
 
     /// Step 2 of updateRegion(): FLad, the first two chunks, the early
     /// read-back, a fresh FLad, and the remaining chunks, with progress calls.

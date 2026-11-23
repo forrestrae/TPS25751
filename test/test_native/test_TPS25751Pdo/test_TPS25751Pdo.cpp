@@ -312,6 +312,29 @@ void test_transmit_sink_rejects_avs_and_transmit_rejects_epr()
     TEST_ASSERT_TRUE(validate(epr, 2, PdoRole::Source, PdoListRules::ReceivedSource));
 }
 
+void test_minimum_above_maximum_is_a_transmit_rule()
+{
+    const uint32_t variable[] = {0x0001912C, TPS25751Pdo::encodeVariable(9000, 12000, 1000)};
+    TEST_ASSERT_TRUE(validate(variable, 2, PdoRole::Source, PdoListRules::ReceivedSource));
+    TEST_ASSERT_FALSE(validate(variable, 2, PdoRole::Source, PdoListRules::TransmitSource));
+    TEST_ASSERT_TRUE(validate(variable, 2, PdoRole::Sink, PdoListRules::ReceivedSink));
+    TEST_ASSERT_FALSE(validate(variable, 2, PdoRole::Sink, PdoListRules::TransmitSink));
+
+    const uint32_t battery[] = {0x0001912C, TPS25751Pdo::encodeBattery(9000, 12000, 15000)};
+    TEST_ASSERT_TRUE(validate(battery, 2, PdoRole::Source, PdoListRules::ReceivedSource));
+    TEST_ASSERT_FALSE(validate(battery, 2, PdoRole::Source, PdoListRules::TransmitSource));
+    TEST_ASSERT_FALSE(validate(battery, 2, PdoRole::Sink, PdoListRules::TransmitSink));
+
+    // Sink PPS: 9 V maximum, 12 V minimum, both inside Table 6.14's 5 to 21 V.
+    const uint32_t pps[] = {0x0001912C, TPS25751Pdo::encodeSprPps(9000, 12000, 3000)};
+    TEST_ASSERT_TRUE(validate(pps, 2, PdoRole::Sink, PdoListRules::ReceivedSink));
+    TEST_ASSERT_FALSE(validate(pps, 2, PdoRole::Sink, PdoListRules::TransmitSink));
+
+    // Equal minimum and maximum is allowed.
+    const uint32_t equal[] = {0x0001912C, TPS25751Pdo::encodeBattery(12000, 12000, 15000)};
+    TEST_ASSERT_TRUE(validate(equal, 2, PdoRole::Sink, PdoListRules::TransmitSink));
+}
+
 void test_an_invalid_pdo_fails_every_rule_set()
 {
     const uint32_t words[] = {0x0001912C, TPS25751Pdo::encodeFixed(9000, 5010)};
@@ -384,6 +407,7 @@ int main(int, char **)
     RUN_TEST(test_variable_80_percent_is_a_transmit_source_rule);
     RUN_TEST(test_avs_currents_must_match_fixed_pdos_when_transmitted);
     RUN_TEST(test_transmit_sink_rejects_avs_and_transmit_rejects_epr);
+    RUN_TEST(test_minimum_above_maximum_is_a_transmit_rule);
     RUN_TEST(test_an_invalid_pdo_fails_every_rule_set);
     RUN_TEST(test_debug_print_shows_flags_only_for_pdo1);
     RUN_TEST(test_debug_print_avs_and_unexpected_kinds);

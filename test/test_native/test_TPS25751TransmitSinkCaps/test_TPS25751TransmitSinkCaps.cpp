@@ -527,7 +527,7 @@ void test_semantic_fixed_rules()
 void test_semantic_battery_rules()
 {
     const uint32_t b = (1u << 30);
-    TEST_ASSERT_TRUE(make({FIXED_5V_3A, b | (100u << 20) | (400u << 10) | 240u}).isSemanticallyValid());   // min > max: valid
+    TEST_ASSERT_FALSE(make({FIXED_5V_3A, b | (100u << 20) | (400u << 10) | 240u}).isSemanticallyValid());  // min > max: transmit sender rule
     TEST_ASSERT_FALSE(make({FIXED_5V_3A, b | (400u << 20) | 240u}).isSemanticallyValid());                  // zero min
     TEST_ASSERT_FALSE(make({FIXED_5V_3A, b | (100u << 10) | 240u}).isSemanticallyValid());                  // zero max
     TEST_ASSERT_TRUE(make({FIXED_5V_3A, b | (400u << 20) | (100u << 10)}).isSemanticallyValid());           // zero power: valid

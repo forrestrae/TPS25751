@@ -982,12 +982,14 @@ from memory. Points that are easy to get wrong:
   11b, and a zero voltage; zero currents and powers are valid. Every list also
   requires PDO 1 to be a Fixed PDO at exactly 5 V. Transmit lists (0x32, 0x33) add
   the sender rules: the order Fixed, Battery, Variable, SPR AVS, PPS (page 130); no
-  EPR AVS or invalid APDO; in 0x32, a Variable PDO's minimum voltage at least 80% of
+  EPR AVS or invalid APDO; a minimum voltage at most the maximum in every Battery,
+  Variable, and SPR PPS PDO; in 0x32, a Variable PDO's minimum voltage at least 80% of
   its maximum (Table 6.12) and SPR AVS currents equal to the 15 V and 20 V Fixed PDOs'
-  (Table 6.15); in 0x33, no SPR AVS APDO (page 137). The old per-type rules (nonzero
-  current, a 4750 to 5250 mV PDO 1, minimum voltage at most maximum) are gone; the
-  tables do not tell a receiver to reject a minimum above the maximum. The board's
-  0x30, 0x32, and 0x33 values pass every rule.
+  (Table 6.15); in 0x33, no SPR AVS APDO (page 137). The minimum-at-most-maximum rule
+  is the library's own choice (2026-11-22): the tables state no such rule, so a
+  received list does not check it. The old per-type rules (nonzero current and a 4750
+  to 5250 mV PDO 1) are gone. The board's 0x30, 0x32, and 0x33 values pass every
+  rule.
 
 ### USB PD Specification Reference
 

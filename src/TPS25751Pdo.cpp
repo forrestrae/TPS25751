@@ -507,6 +507,29 @@ uint32_t TPS25751Pdo::encodeSprAvsSource(uint16_t current15V_mA, uint16_t curren
 
 namespace {
 
+// Minimum and maximum voltage codes of a Battery, Variable, or SPR PPS PDO. Returns
+// false for any other kind, which has no voltage range.
+bool voltageRange(const TPS25751Pdo &pdo, uint16_t &minV, uint16_t &maxV)
+{
+    switch (pdo.kind()) {
+        case PdoKind::Battery:
+            minV = pdo.rawBatteryMinVoltage();
+            maxV = pdo.rawBatteryMaxVoltage();
+            return true;
+        case PdoKind::Variable:
+            minV = pdo.rawVariableMinVoltage();
+            maxV = pdo.rawVariableMaxVoltage();
+            return true;
+        case PdoKind::SprPps:
+            // 100 mV units for both fields, so the codes compare directly.
+            minV = pdo.rawPpsMinVoltage();
+            maxV = pdo.rawPpsMaxVoltage();
+            return true;
+        default:
+            return false;
+    }
+}
+
 // Order rank of Section 6.4.1.1: Fixed, Battery, Variable, SPR AVS, PPS.
 int orderRank(PdoKind kind)
 {
@@ -557,6 +580,13 @@ bool validatePdoList(const TPS25751Pdo *pdos, uint8_t count, PdoListRules rules)
         if (rank < 0) return false;          // EPR AVS or invalid APDO
         if (rank < lastRank) return false;   // out of order
         lastRank = rank;
+
+        // Sender rule chosen by the user (2026-11-22): a transmitted range's minimum
+        // voltage is at most its maximum. The tables state no such rule, so
+        // received lists do not check it.
+        uint16_t minV = 0;
+        uint16_t maxV = 0;
+        if (voltageRange(pdos[i], minV, maxV) && minV > maxV) return false;
 
         if (rules == PdoListRules::TransmitSink && kind == PdoKind::SprAvs) {
             return false;  // a Sink Shall Not send the SPR AVS APDO (page 137)

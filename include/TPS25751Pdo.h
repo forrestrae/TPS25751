@@ -317,7 +317,9 @@ enum class PdoListRules : uint8_t {
  * Fixed PDO at exactly 5 V (100 x 50 mV, Tables 6.8, 6.9; Section 6.4.1.1, page 130).
  *
  * Transmit rule sets also require: the PDO order Fixed, Battery, Variable, SPR AVS,
- * PPS (Section 6.4.1.1, page 130); no EPR AVS or invalid APDO. TransmitSource also
+ * PPS (Section 6.4.1.1, page 130); no EPR AVS or invalid APDO; and a minimum voltage
+ * at most the maximum in every Battery, Variable, and SPR PPS PDO. The tables state
+ * no such rule; it is a library sender rule, so received lists do not check it. TransmitSource also
  * requires each Variable PDO's minimum voltage to be at least 80% of its maximum
  * (Table 6.12), and each SPR AVS APDO's 15 V and 20 V currents to equal the Maximum
  * Current of the 15 V and 20 V Fixed PDOs, with the 20 V current 0 when there is no

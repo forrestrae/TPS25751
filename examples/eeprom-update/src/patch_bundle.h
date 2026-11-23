@@ -5,9 +5,10 @@
  * @brief PLACEHOLDER image for the eeprom-update example
  *
  * Replace this file with the patch bundle to write before using any command
- * that writes the EEPROM. The bundle is the low-region binary that TI's
- * Application Customization Tool exports (File, Export, "Generate low region
- * binary"). Convert it with the script in the library root:
+ * that writes the EEPROM. The bundle is a Low Region binary. SLVAFL1 (page 3)
+ * says that TI's USBCPD Application Customization Tool can generate one, for
+ * the external host to use in the EEPROM update. Convert it with the script in
+ * the library root:
  *
  *   scripts/bin_to_header.py <build>_lowRegion.bin -o examples/eeprom-update/src/patch_bundle.h
  *

@@ -1,6 +1,6 @@
 # TPS25751 Library - Technical Constraints
 
-**Last Updated:** 2025-10-20
+**Last Updated:** 2026-11-23
 **Status:** Active
 
 ---
@@ -367,6 +367,135 @@ error).
 See `TPS25751PatchLoader` (`include/TPS25751PatchLoader.h`, `src/TPS25751PatchLoader.cpp`)
 for the complete 17-step implementation, and ADR-011 in ARCHITECTURE.md for the
 design rationale.
+
+### Flash tasks and EEPROM update
+
+The four flash tasks reach the external EEPROM (0x50 on I2Cc) only while MODE reads APP,
+and they do not share one result format. `TPS25751EepromUpdater` (ADR-014) applies the
+rules below; code that issues the tasks directly must apply them itself. Sources: TRM
+SLVUCR8B Tables 4-1, 4-3, and 4-19 to 4-22 (pages 61, 62, 81, and 82), TI application
+note SLVAFL1, and the hardware stages recorded in
+`docs/plans/feature/eeprom-update.md` (one board with a 24LC256, 2026-11-22 and 23).
+The datasheet (SLVSH93A, I2C Interface) asks for an EEPROM of at least 36 KB; the board's
+32 KB part holds the 31744-byte full-flash image and boots, and the updater takes the EEPROM
+size as a constructor parameter.
+
+#### Result offsets in library terms
+
+`TPS25751::executeCommand()` strips the I2C length byte and copies DATA from byte 0. The
+SLVAFL1 sample code reads `outdata[1]` because its buffer keeps the length byte; do not
+copy that offset.
+
+| Task | Input (DATA) | Result | Status |
+|---|---|---|---|
+| `FLrd` | 4-byte address, least significant byte first | `outData[0..15]`, the byte at the address first. There is no return code; `returnCode` is the first memory byte | Verified, stage 1 |
+| `FLad` | 4-byte address, least significant byte first (Table 4-20) | `returnCode`, standard return code, 0x00 success | 0x00 observed, stage 2 |
+| `FLwd` | 1 to 64 data bytes; the library sends at most 32 | `returnCode`: 0x00 written, 0xFF flash busy (Table 4-21) | 0x00 observed; busy never seen |
+| `FLvy` | 4-byte address, least significant byte first | `returnCode`: 0x00 valid, 0x01 not valid (Table 4-22) | Valid observed, stage 1; not valid observed, stage 3, exact byte not recorded |
+| `GAID` | none | none; the controller restarts (Table 4-3) | See "Cold reset" below |
+
+The TRM states the address byte order for `FLad` only. Stage 1 verified it for `FLrd`: both
+pointers read correctly and a dump of 0x0000 to 0x7C00 equalled the full-flash image. For
+`FLvy` the evidence is indirect: both bundles verified at 0x0800 and 0x4400, and either
+address byte-swapped lies outside the 32 KB part.
+
+Compare the whole return byte with 0. Table 4-1 puts the standard TaskResult in bits 3:0
+and lets a task use bits 7:4 while TaskResult is 0, so the whole-byte compare can report a
+false failure and never a false success. `FLwd` has its own two codes and does not refer to
+Table 4-1; the library treats any other value as `WriteFailed`.
+
+#### Chunk size and the EEPROM page
+
+Send `FLwd` data in 32-byte chunks. The TRM (Table 4-21) accepts up to 64 bytes and
+recommends 32, the default page size the task uses. The 24LC256 has a 64-byte page and a
+5 ms maximum write cycle, and a page write that crosses a page boundary wraps to the start
+of the same page (Microchip DS21203P). Both bundle starts are multiples of 64, so no
+32-byte chunk crosses a page. The pointer and AppConfigOffset words are 4-byte writes
+inside one page. The write address advances after each successful `FLwd`, so a bundle
+needs one `FLad`; stage 3 verified the advance across 446 chunks. The DATA write of one
+chunk fits the Teensy 4 `Wire` buffer of 136 bytes.
+
+#### What `FLvy` does and does not prove
+
+The TRM says `FLvy` completes after the header is checked and validated. Stage 3 inverted
+one body byte (image offset 0x1BE5) of a freshly written region, and `FLvy` reported it not
+valid, so it checks more than the header. One byte at one offset is the whole sample;
+whether it checks the CRC of every byte is not documented. Keep the `FLrd` compare before
+any pointer write.
+
+That matters because redundancy is one-directional. SLVAFL1 (Boot Process, page 2) says
+that after a correct Header_ID in the Low region, a CRC error while reading the Low bundle
+ends the load, and the controller does not try High. A High CRC error does fall back to
+Low. A valid Low pointer over a damaged Low body therefore does not boot, even with an
+intact High region.
+
+#### The stale BOOT_FLAGS trap
+
+BOOT_FLAGS (0x2D, BOOT_STATUS in SLVAFL1) and VERSION are latched at boot. After an update
+without a restart they describe the old layout. SLVAFL1 Figure 2-2 chooses the region to
+update from BOOT_FLAGS alone; in that state it would choose the region whose pointer is
+the only valid one, and step 1 would erase it. Stage 3 reached exactly that state: the Low
+pointer was 0 and BOOT_FLAGS still read as at boot. Choose the target from the region
+pointers first and read BOOT_FLAGS only when both pointers are valid, as
+`selectTargetRegion()` does.
+
+The controller looks for a region's Header_ID at the region start plus that region's
+AppConfigOffset word (0x03FC and 0x07FC; SLVAFL1 page 2). Both words are 0 in the board's
+image. `programBlank()` writes them to 0; `updateRegion()` neither reads nor writes them.
+
+#### DATA register behaviour
+
+TRM page 61 says the controller does not modify DATA after COMMAND reads 0, and that the
+bytes after a return code are task-defined. Stage 2 showed what that means on this
+controller: `FLad` leaves DATA bytes 4 to 63 as the preceding `FLrd` left them, and a 4-byte
+host write to DATA does not clear the rest. A 4-byte `FLwd` nevertheless wrote exactly four
+bytes. A check that compares neighbor bytes after a pointer write cannot by itself prove
+the write length, because DATA may hold those neighbors' own values; the example's `p2`
+command loads DATA with other bytes first.
+
+#### Timing
+
+Measured in stages 1 to 3 at the default I2C clock, with the executor reading all 64 DATA
+bytes after every task:
+
+| Item | Time |
+|---|---|
+| `FLrd`, `FLad` | 17.7 ms per call |
+| `FLwd`, 32 bytes | 20.7 ms, at most 20.8 ms; no busy result in 1798 calls |
+| `FLvy` | 0.56 to 0.60 s |
+| One region, 14272 bytes, with compare | 25979 ms |
+| Both regions, 14336 bytes each | 52049 ms |
+
+The library's timeouts (200 ms for `FLrd`, `FLad`, and `FLwd`, 1000 ms for `FLvy`) have
+ample margin. Most of each task's time is the 64-byte DATA read; an `outLen`-bounded read
+in `executeCommand()` is the first optimization if the update must be faster.
+
+#### Cold reset
+
+`GAID` never completes in the normal sense. An APP-mode controller enters Type-C Error
+Recovery and restarts after a typical 1-second delay (Table 4-3), and the port disconnects.
+Stages 3 and 4 measured the same sequence on every reset: COMMAND kept answering for 1276
+to 1277 ms, then the controller stopped acknowledging and `executeCommand()` returned
+`I2CError`; MODE read APP 1938 to 1939 ms after `GAID`. `coldReset()` treats `Success`,
+`Timeout`, and `I2CError` alike as "reset issued" and does not require the I2C failure
+before it accepts APP, so a `GAID` that never reached the controller would look the same.
+Confirm a restart by VERSION and BOOT_FLAGS changing, not by the returned status alone.
+Table 4-3 calls `GAID` a cold restart in its Description and a warm restart in its
+Additional Information row.
+
+#### Bus sharing
+
+The updater is synchronous. Every 4CC task shares COMMAND and DATA, and the bundle write
+relies on the write address the controller holds between chunks. The application must not
+issue other tasks, such as I2Cr or I2Cw through `TPS25751DownstreamDevice`, from an
+interrupt or another task during an update, and a progress callback that returns must not
+issue any. The TRM states the 5-second spacing for I2Cr and I2Cw only; nothing on pages 81
+and 82 applies it to the flash tasks. Each flash task makes the controller ignore the
+I2Cc_IRQ pin until it completes, so an interrupt from a device on I2Cc can be deferred;
+that has not been measured. The EEPROM also answers on the MCU's own bus where it is wired
+to one (`Wire2` on this board), and a direct read there matched the image. The controller
+masters the same bus at boot, for the BQ25798, and during every flash task, so a direct
+write needs its own review; the library does not offer one.
 
 ### Maximum Read Sizes
 
@@ -1298,6 +1427,7 @@ void foo() {
 | 1.14 | 2026-11-19 | Claude Code | TX_SOURCE_INFO (0x78) semantic validation checks the USB PD R3.3 Table 6.29 and 6.30 rules: DPS Port requires both Port Type bits Managed, and the 1 W Port Maximum PDP equals the 0.5 W value rounded down (USB PD Specification Structures and Read/Write Registers sections) |
 | 1.15 | 2026-11-22 | Claude Code | PDO, APDO, and RDO cross-check against `usb-pd-docs` (device-register-mcp-server 696c854): the 0x32 subtype 10b APDO is an SPR AVS Source APDO, 0x34 First PDO Control Bits are PDO 1 bits 29:20 (confirmed on hardware), fixed-PDO flags are reserved outside PDO 1, 0x35 decodes as a Fixed or Variable RDO only, and the 0x48 Pad Object (USB PD Specification Structures section) |
 | 1.16 | 2026-11-22 | Claude Code | PDOs and RDOs decode through `TPS25751Pdo` and `TPS25751Rdo` (ADR-013): fixed-PDO flags only for PDO 1, SPR AVS Source decode, RDOs by kind, and validation of 0x30 to 0x34 per USB PD R3.3 (USB PD Specification Structures and PDO Parsing Strategy sections) |
+| 1.17 | 2026-11-23 | Claude Code | Flash tasks and EEPROM update section: result offsets, return-code compare, 32-byte chunks and the 24LC256 page, the `FLvy` limit, one-directional redundancy, the stale BOOT_FLAGS trap, DATA behaviour, timing, cold reset, and bus sharing, with the hardware results of stages 1 to 4 (ADR-014) |
 
 ---
 

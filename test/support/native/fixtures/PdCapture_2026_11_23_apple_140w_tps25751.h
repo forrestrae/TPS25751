@@ -33,16 +33,19 @@
 namespace PdCapture_2026_11_23_apple_140w_tps25751 {
 
 // --- Wire: final contract (USB PD message header and data objects) ---------------
+// The last Request or EPR_Request on SOP that an Accept and then a PS_RDY completed,
+// and the capabilities before it, as the meter server's final_contract() finds them.
 
 // Source_Capabilities: record i=4, t_meter_ms=40104246, SOP, wire a1412c9181092cd102002cb10400d6410600
 constexpr bool kHasSourceCapabilities = true;
+constexpr bool kSourceCapabilitiesEpr = false;
 constexpr uint16_t kSourceCapabilitiesHeader = 0x41A1;
 constexpr size_t kSourceCapabilitiesPdoCount = 4;
 constexpr uint32_t kSourceCapabilitiesPdos[4] = {0x0981912C, 0x0002D12C, 0x0004B12C, 0x000641D6};
 
 // Request: record i=6, t_meter_ms=40104252, SOP, wire 82102cb18441
-constexpr bool kHasRequest = true;
-constexpr bool kRequestAccepted = true;
+constexpr bool kHasContract = true;
+constexpr bool kRequestEpr = false;
 constexpr uint16_t kRequestHeader = 0x1082;
 constexpr uint32_t kRequestRdo = 0x4184B12C;
 

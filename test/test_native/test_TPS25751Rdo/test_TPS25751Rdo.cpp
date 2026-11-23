@@ -161,8 +161,8 @@ void test_debug_print_per_kind()
 
 void test_wire_request_header()
 {
-    TEST_ASSERT_TRUE(cap::kHasRequest);
-    TEST_ASSERT_TRUE(cap::kRequestAccepted);
+    TEST_ASSERT_TRUE(cap::kHasContract);  // Accept, then PS_RDY, after this Request
+    TEST_ASSERT_FALSE(cap::kRequestEpr);
     TEST_ASSERT_EQUAL_HEX16(0x1082, cap::kRequestHeader);
     TEST_ASSERT_EQUAL_UINT8(2, cap::kRequestHeader & 0x1F);          // Request
     TEST_ASSERT_EQUAL_UINT8(0, (cap::kRequestHeader >> 5) & 0x1);    // UFP

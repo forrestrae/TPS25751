@@ -23,7 +23,9 @@ them is Phase 5 of [km003c-pd-analyzer-toolset.md](../../../docs/plans/km003c-pd
 A bundle whose registers were not read from the board at the time of the capture says
 so in `provenance.json`: `registers.synthesized` is true, `registers_synthesized_from`
 names the files the bytes came from, and `registers.omitted` lists the registers left
-out and why. A bundle never invents register bytes.
+out and why. Every byte a synthesized bundle assumes rather than takes from a bench read
+is recorded in `provenance.json`. In the first bundle, those are 0x30 bytes 17 to 52 (PDOs
+5 to 7 and the reserved bits, set to the TRM reset value of zero) and every length byte.
 
 ## registers.json
 
@@ -47,8 +49,8 @@ register, in any order:
 | `read_utc` | When the registers were read, ISO 8601 UTC; `null` when synthesized. Optional. |
 | `address` | Register address as a hex string, `0x00` to `0xFF`. Each address appears once. |
 | `name` | TRM register name. Optional and informative. |
-| `length` | The I2C length byte the controller returned before the data, 1 to 255. |
-| `data` | The data bytes that followed the length byte, as lowercase hex, exactly `length` bytes, in the order the library's register classes consume them. |
+| `length` | The I2C length byte the controller returned before the data, 1 to 255. `SNAP` must emit the length byte as read, not the library's `RegisterInfo` size, which follows the TRM except where a bench read showed otherwise (0x27 reads 14 bytes against the TRM's 116 bits). The synthesized first bundle has no read length bytes and uses `RegisterInfo` sizes, as its `provenance.json` records. |
+| `data` | The data bytes that followed the length byte, exactly `length` of them, in the order the library's register classes consume them. Lowercase hex only; the generator rejects uppercase. |
 
 The cross-check needs 0x30 to 0x35, 0x37, 0x48, STATUS (0x1A), and ADC_RESULTS (0x6A).
 `SNAP` also returns 0x03, 0x14, 0x26, 0x3F, 0x40, 0x42, and 0x69; the format takes any
@@ -61,10 +63,17 @@ into `test/support/native/fixtures/PdCapture_<bundle>.h`, with every non-alphanu
 character of the bundle name replaced by `_`. The header's namespace has the same name.
 It holds:
 
-- `kSourceCapabilitiesPdos`: the PDOs of the last Source_Capabilities on SOP before the
-  final Request, with the message header.
-- `kRequestRdo`: the final Request on SOP, which is the last one the Source answered
-  with Accept, or the last Request when none was accepted (`kRequestAccepted`).
+- `kRequestRdo`: the final contract's Request or EPR_Request (`kRequestEpr`; an
+  EPR_Request also gives `kRequestPdoCopy`). The generator applies the rules of the meter
+  server's `final_contract()` in the km003c fork (`src/km003c_mcp/capture_read.py`). Only
+  non-GoodCRC messages on SOP count, and a retransmission (the same bytes from the same
+  sender with no GoodCRC between) counts once. A Request starts a negotiation; the first
+  Accept, Reject, or Wait after it is its outcome; a PS_RDY after an Accept completes it;
+  a Soft_Reset abandons it. The final contract is the last completed negotiation.
+  `kHasContract` is false when there is none.
+- `kSourceCapabilitiesPdos`: the PDOs of the Source_Capabilities, or the reassembled
+  EPR_Source_Capabilities (`kSourceCapabilitiesEpr`), that preceded the final contract's
+  Request, with the message header. With no contract, the latest capabilities.
 - `kIdentityAck<Sop><Sender>Vdos`: the latest Discover Identity ACK per SOP and sender,
   with its message and VDM headers. The sender comes from the message header: power and
   data role on SOP (`SinkUfp`, `SourceDfp`), Cable Plug on SOP' and SOP'' (`CablePlug`,
@@ -81,8 +90,14 @@ python3 test/support/pd_capture_fixture.py --check  # exit 1 if a header is stal
 ```
 
 `--check` writes nothing. It also fails when a `PdCapture_*.h` has no bundle or when this
-index does not list a bundle by its directory name in backticks. A malformed bundle
-exits 2.
+index does not list a bundle by its directory name in backticks. A malformed bundle, or
+a bundle directory outside this one, exits 2 with one line naming the file.
+
+The generator's own tests cover malformed bundles and the final-contract rules:
+
+```bash
+python3 -m unittest discover -s test/support -p "test_*.py"
+```
 
 ## Adding a bundle
 

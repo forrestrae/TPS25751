@@ -34,7 +34,9 @@
 //   p2   Pointer rewrite test: shows whether FLwd writes more than the bytes
 //        it is given, which p cannot. Loads DATA with the 16 bytes at 0x4400,
 //        writes the High pointer with the value it already holds, and reports
-//        whether any of the 60 bytes after it changed. Needs both pointers
+//        whether any of the 60 bytes after it changed. It reads DATA before
+//        the write and stops, with nothing written, unless at least one DATA
+//        byte differs from the byte it would overwrite. Needs both pointers
 //        valid. Never changes the pointer's value and repairs nothing.
 //   u    updateInactiveRegion() with the embedded image.
 //   b    updateBothRegions() with the embedded image.
@@ -916,27 +918,30 @@ static void cmdPointerTest()
 // and any byte after it that changes came out of DATA.
 // ---------------------------------------------------------------------------
 
-/// Prints the 64-byte DATA register as the host reads it. Read only.
-static void printDataRegister()
+/// Reads the 64-byte DATA register as the host sees it into @p out and prints
+/// it. Read only. Returns false, after saying so, when the read fails.
+static bool readAndPrintDataRegister(uint8_t* out)
 {
     auto data = pd.readDataRegister(/*validate=*/false);
-    if (!data || data->size() < 64) {
+    if (!data || data->size() < POINTER_WINDOW) {
         Serial.println(F("[p2] DATA register before FLwd: read failed"));
-        return;
+        return false;
     }
+    memcpy(out, data->raw(), POINTER_WINDOW);
     Serial.println(F("[p2] DATA register before FLwd:"));
-    for (size_t off = 0; off < 64; off += 16) {
+    for (size_t off = 0; off < POINTER_WINDOW; off += 16) {
         char offset[5];
         snprintf(offset, sizeof(offset), "%02X:", static_cast<unsigned>(off));
         Serial.print(F("[p2] DATA+"));
         Serial.print(offset);
         for (size_t i = 0; i < 16; ++i) {
             char byte[4];
-            snprintf(byte, sizeof(byte), " %02x", data->raw()[off + i]);
+            snprintf(byte, sizeof(byte), " %02x", out[off + i]);
             Serial.print(byte);
         }
         Serial.println();
     }
+    return true;
 }
 
 static void printStatusLine(const __FlashStringHelper* what, EepromUpdateStatus s)
@@ -984,10 +989,10 @@ static void cmdPointerRewriteTest()
         return;
     }
 
-    // 2. Load DATA. FLrd returns its 16 bytes in DATA bytes 0 to 15, and
-    //    nothing below overwrites bytes 4 to 15 before the FLwd. Those bytes
-    //    must differ from what already follows the pointer, or a write of
-    //    them would change nothing and the test would prove nothing.
+    // 2. Load DATA. FLrd returns its 16 bytes in DATA bytes 0 to 15. If bytes
+    //    4 to 15 are erased bytes, they are what follows the pointer already
+    //    and the test would prove nothing. Whether the bytes really are in
+    //    DATA when FLwd runs is settled in step 4, from DATA itself.
     uint8_t loaded[TPS25751EepromUpdater::kFlashReadBytes];
     const EepromUpdateStatus load = updater.readFlash(highStart, loaded);
     printStatusLine(F("readFlash(0x00004400)"), load);
@@ -1004,8 +1009,8 @@ static void cmdPointerRewriteTest()
             allErased = false;
         }
     }
-    if (allErased || memcmp(loaded + 4, before + 4, sizeof(loaded) - 4) == 0) {
-        Serial.println(F("[p2] Bytes 4 to 15 at 0x00004400 are all 0xFF, or equal the bytes at 0x0404 to 0x040F, so writing them would show nothing. The test cannot be conclusive. Stopped before any write."));
+    if (allErased) {
+        Serial.println(F("[p2] Bytes 4 to 15 at 0x00004400 are all 0xFF, so writing them would show nothing. The test cannot be conclusive. Stopped before any write."));
         printPointers();
         printTiming();
         return;
@@ -1022,7 +1027,32 @@ static void cmdPointerRewriteTest()
     }
 
     // 4. What DATA holds now, which is what FLwd finds beyond its four bytes.
-    printDataRegister();
+    //    The test can show an over-write only where a DATA byte differs from
+    //    the byte it would replace, so that is counted here, from DATA as read
+    //    and not from what FLrd returned. With no such byte, or with no DATA
+    //    read, a clean result would prove nothing, and FLwd is not issued.
+    uint8_t dataNow[POINTER_WINDOW];
+    if (!readAndPrintDataRegister(dataNow)) {
+        Serial.println(F("[p2] Without the DATA bytes the test cannot be conclusive. Stopped before FLwd; nothing was written."));
+        printPointers();
+        printTiming();
+        return;
+    }
+    size_t showing = 0;
+    for (size_t i = 4; i < POINTER_WINDOW; ++i) {
+        if (dataNow[i] != before[i]) {
+            ++showing;
+        }
+    }
+    Serial.print(F("[p2] DATA bytes 4 to 63 that differ from the bytes at 0x0404 to 0x043F: "));
+    Serial.print(showing);
+    Serial.println(F(" of 60"));
+    if (showing == 0) {
+        Serial.println(F("[p2] No DATA byte differs from the byte an over-write would replace. The test cannot be conclusive. Stopped before FLwd; nothing was written."));
+        printPointers();
+        printTiming();
+        return;
+    }
 
     // 5. The pointer's own value, least significant byte first: 00 44 00 00.
     const uint8_t word[4] = {
@@ -1045,12 +1075,12 @@ static void cmdPointerRewriteTest()
     } else {
         Serial.println(memcmp(after, word, sizeof(word)) == 0 ? F(": yes") : F(": NO"));
     }
+    const bool flwdOk = (written == EepromUpdateStatus::Success);
+    const bool changed = afterOk && memcmp(before + 4, after + 4, POINTER_WINDOW - 4) != 0;
     Serial.print(F("[p2] Bytes 0x0404 to 0x043F equal the bytes before"));
     if (!afterOk) {
         Serial.println(F(": unknown (read failed)"));
-    } else if (memcmp(before + 4, after + 4, POINTER_WINDOW - 4) == 0) {
-        Serial.println(F(": yes"));
-    } else {
+    } else if (changed) {
         Serial.println(F(": NO"));
         for (size_t i = 4; i < POINTER_WINDOW; ++i) {
             if (before[i] == after[i]) {
@@ -1064,7 +1094,25 @@ static void cmdPointerRewriteTest()
             printHex8(after[i]);
             Serial.println();
         }
-        Serial.println(F("[p2] FLwd wrote more than the four bytes given."));
+    } else if (!flwdOk) {
+        // Unchanged bytes after a write that did not report success say
+        // nothing about what a successful FLwd writes.
+        Serial.println(F(": not conclusive (writeData() did not return Success)"));
+    } else {
+        Serial.println(F(": yes"));
+    }
+
+    if (changed) {
+        Serial.println(F("[p2] Verdict: FLwd wrote more than the four bytes given."));
+        Serial.println(F("[p2] No command of this example restores those bytes. Every later full dump will differ from the full-flash image at those offsets."));
+    } else if (!afterOk) {
+        Serial.println(F("[p2] Verdict: none. The bytes could not be read after the write."));
+    } else if (!flwdOk) {
+        Serial.println(F("[p2] Verdict: not conclusive. writeData() did not return Success, so this run does not show what FLwd writes."));
+    } else {
+        Serial.print(F("[p2] Verdict: FLwd wrote only the four bytes given. "));
+        Serial.print(showing);
+        Serial.println(F(" of 60 positions would have shown more."));
     }
     if (afterOk && memcmp(after, word, sizeof(word)) != 0) {
         Serial.println(F("[p2] The High pointer no longer reads 0x00004400. Run u or b to rewrite the High region."));

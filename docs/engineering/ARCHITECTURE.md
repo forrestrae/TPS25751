@@ -990,6 +990,10 @@ Decision:
   marker, the controller stopped answering for a while, or COMMAND held the task code and
   then cleared. A COMMAND write that was not acknowledged, and a `!CMD` that arrives
   after the issue window, each end the wait at once with their own error.
+- Answering is not being ready. On hardware COMMAND and DATA read 30 ms after a warm
+  restart, while MODE gave nothing for several seconds and the port attached a second
+  time. After a restart the console therefore polls MODE every 50 ms, for up to 10 s,
+  until it reads APP or PTCH, and takes read errors, an empty MODE, and BOOT as "not yet".
 - One read of PTCH does not start a patch load, because a controller with an EEPROM reads
   PTCH on its way to APP. The console gives the controller 3 s to reach APP; PTCH with
   INT_EVENT1 Ready for Patch ends that wait early. The loader then makes its own Ready

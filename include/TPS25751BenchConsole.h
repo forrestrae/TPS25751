@@ -70,6 +70,20 @@ public:
     /// Interval between polls while the console waits for a restart.
     static constexpr uint32_t kRestartPollMs = 20;
 
+    /// Longest wait, after the controller answers again, for MODE to read APP
+    /// or PTCH. On hardware a warm restart answered COMMAND and DATA within
+    /// 30 ms and then gave no MODE for more than 3.7 s, while the port detached
+    /// and attached a second time, so the wait is generous.
+    static constexpr uint32_t kRestartModeTimeoutMs = 10000;
+
+    /// Interval between MODE reads during that wait.
+    static constexpr uint32_t kRestartModePollMs = 50;
+
+    /// How often HELLO, begin(), and the patch path read MODE before they call
+    /// it unreadable, and the pause between the tries.
+    static constexpr uint8_t kModeReadAttempts = 3;
+    static constexpr uint32_t kModeReadRetryMs = 100;
+
     /// Longest wait for a controller in BOOT or PTCH mode to reach APP mode on
     /// its own (a load from EEPROM) before the console hands over to the patch
     /// loader. PTCH with INT_EVENT1 ReadyForPatch ends the wait early. The
@@ -167,8 +181,24 @@ private:
     /// controller does not answer or reports a length over 64 bytes.
     bool readRaw(uint8_t address, RawRegister &out) const;
 
-    /// Read MODE into a 5-character buffer without trailing spaces.
-    bool readMode(char mode[5]) const;
+    /// What one read of MODE gave.
+    enum class ModeRead : uint8_t {
+        NoAnswer,  ///< The read failed, or the length byte was not 4
+        NotAMode,  ///< Four bytes with no printable character, as before MODE is set
+        Mode       ///< A mode word, such as APP, PTCH, or BOOT
+    };
+
+    /// Read MODE into a 5-character buffer without trailing spaces. The buffer
+    /// holds "?" unless the result is ModeRead::Mode.
+    ModeRead readMode(char mode[5]) const;
+
+    /// readMode() with kModeReadAttempts tries. Returns true for a mode word.
+    bool readModeWithRetry(char mode[5]) const;
+
+    /// After a restart: poll MODE until it reads APP or PTCH, for up to
+    /// kRestartModeTimeoutMs. Read errors, an empty MODE, and BOOT mean "not
+    /// yet". Returns false on timeout, with the last result in @p last.
+    bool waitForRunningMode(char mode[5], uint32_t &waitedMs, ModeRead &last) const;
 
     /// Bring the controller to APP mode, loading the patch bundle when MODE
     /// reads PTCH. Returns true when MODE ends as APP.

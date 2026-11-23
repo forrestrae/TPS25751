@@ -262,33 +262,63 @@ bool TPS25751BenchConsole::readRaw(uint8_t address, RawRegister &out) const
     return true;
 }
 
-bool TPS25751BenchConsole::readMode(char mode[5]) const
+TPS25751BenchConsole::ModeRead TPS25751BenchConsole::readMode(char mode[5]) const
 {
+    mode[0] = '?';
+    mode[1] = '\0';
+
     RawRegister raw;
     if (!readRaw(static_cast<uint8_t>(Address::MODE), raw) ||
         raw.dataLength != TPS25751Registers::Registers::MODE.size) {
-        mode[0] = '?';
-        mode[1] = '\0';
-        return false;
+        return ModeRead::NoAnswer;
     }
     // MODE is four ASCII characters, padded with spaces: "APP ", "PTCH", "BOOT".
+    char word[5];
     size_t length = 0;
     for (size_t i = 0; i < 4; ++i) {
         const char c = static_cast<char>(raw.data[i]);
-        mode[i] = (c > ' ' && c <= '~') ? c : ' ';
-        if (mode[i] != ' ') length = i + 1;
+        word[i] = (c > ' ' && c <= '~') ? c : ' ';
+        if (word[i] != ' ') length = i + 1;
     }
-    mode[length] = '\0';
-    if (length == 0) {
-        mode[0] = '?';
-        mode[1] = '\0';
+    if (length == 0) return ModeRead::NotAMode;  // all zeros or spaces: not populated yet
+    word[length] = '\0';
+    memcpy(mode, word, length + 1);
+    return ModeRead::Mode;
+}
+
+bool TPS25751BenchConsole::readModeWithRetry(char mode[5]) const
+{
+    // A controller that just restarted can miss a read or return an empty MODE
+    // for a moment. One failed read must not be reported as "no controller".
+    for (uint8_t attempt = 0; attempt < kModeReadAttempts; ++attempt) {
+        if (attempt != 0) delay(kModeReadRetryMs);
+        if (readMode(mode) == ModeRead::Mode) return true;
     }
-    return true;
+    return false;
+}
+
+bool TPS25751BenchConsole::waitForRunningMode(char mode[5], uint32_t &waitedMs, ModeRead &last) const
+{
+    // On hardware the controller answered COMMAND and DATA within 30 ms of its
+    // warm restart and then did not give a MODE for several seconds, while the
+    // port detached and attached a second time. So "COMMAND reads clear" is
+    // not "ready": poll MODE, and take read errors and an empty or BOOT mode
+    // as "not yet".
+    const uint32_t start = millis();
+    for (;;) {
+        last = readMode(mode);
+        waitedMs = millis() - start;
+        if (last == ModeRead::Mode && (strcmp(mode, "APP") == 0 || strcmp(mode, "PTCH") == 0)) {
+            return true;
+        }
+        if (waitedMs >= kRestartModeTimeoutMs) return false;
+        delay(kRestartModePollMs);
+    }
 }
 
 bool TPS25751BenchConsole::ensureAppMode(PatchReport &report)
 {
-    if (!readMode(report.mode)) {
+    if (!readModeWithRetry(report.mode)) {
         report.i2cFailed = true;
         return false;
     }
@@ -312,10 +342,11 @@ bool TPS25751BenchConsole::ensureAppMode(PatchReport &report)
             }
         }
         delay(kPatchReadyPollMs);
-        if (!readMode(report.mode)) {
-            report.i2cFailed = true;
-            return false;
-        }
+        // A read that fails while the controller boots is not the last word:
+        // keep the mode read before and try again.
+        char now[5];
+        if (readMode(now) != ModeRead::Mode) continue;
+        memcpy(report.mode, now, sizeof(now));
         if (strcmp(report.mode, "APP") == 0) return true;
     }
     if (strcmp(report.mode, "PTCH") != 0) return false;
@@ -331,7 +362,7 @@ bool TPS25751BenchConsole::ensureAppMode(PatchReport &report)
     TPS25751PatchLoader loader(_pd);
     report.attempted = true;
     report.status = loader.loadPatchBundle(_patchBundle, _patchBundleLength);
-    readMode(report.mode);
+    readModeWithRetry(report.mode);
     return report.status == PatchLoadStatus::Success && strcmp(report.mode, "APP") == 0;
 }
 
@@ -348,8 +379,10 @@ void TPS25751BenchConsole::handleHello(const TPS25751BenchRequest &request)
     // is this one, the report must land between reply lines, never inside one.
     const unsigned long uptimeMs = millis();
 
+    // MODE gets a few tries, so a HELLO right after a restart does not report
+    // "?" for a controller that is merely still coming up.
     char mode[5];
-    readMode(mode);
+    readModeWithRetry(mode);
 
     // VERSION (0x0F) is a 32-bit little-endian word (SLVUCR8B p.18).
     RawRegister raw;
@@ -807,6 +840,33 @@ void TPS25751BenchConsole::handleRestart(const char *id, bool cold)
     _io.print(evidence);
     printMillis(_io);
     _io.println();
+
+    // The controller answers again, but that does not make it ready: wait for
+    // MODE to read APP, or PTCH for the patch path.
+    char mode[5];
+    uint32_t waitedMs = 0;
+    ModeRead lastRead = ModeRead::NoAnswer;
+    if (!waitForRunningMode(mode, waitedMs, lastRead)) {
+        beginFail(id, TPS25751BenchError::Timeout);
+        _io.print(F("MODE did not read APP or PTCH within "));
+        _io.print(static_cast<unsigned long>(kRestartModeTimeoutMs));
+        _io.print(F(" ms after the restart; last read: "));
+        if (lastRead == ModeRead::NoAnswer) {
+            _io.println(F("no answer"));
+        } else if (lastRead == ModeRead::NotAMode) {
+            _io.println(F("an empty MODE"));
+        } else {
+            _io.println(mode);
+        }
+        return;
+    }
+    Protocol::beginLine(_io, id);
+    _io.print(F("step=mode"));
+    printMillis(_io);
+    _io.print(F(" mode="));
+    _io.print(mode);
+    _io.print(F(" waited_ms="));
+    _io.println(static_cast<unsigned long>(waitedMs));
 
     PatchReport report;
     const bool inApp = ensureAppMode(report);

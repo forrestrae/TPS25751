@@ -156,8 +156,9 @@ under the exclusive lock alone and says so in its result as `owner_check`.
 
 The first `HELLO` waits up to 10 s for an answer. Right after a reset the console does
 not read the port while `begin()` runs, and on a board without an EEPROM that includes
-the patch load, about 9.5 s at the worst. A console that stays silent longer is reported
-as busy or still starting; call again.
+the patch load, a few seconds when it succeeds. A load that fails can run to the caps of
+the loader's waits, about 30 s in all. A console that stays silent longer than 10 s is
+reported as busy or still starting; call again.
 
 ## Protocol version 1
 
@@ -181,7 +182,22 @@ returns such lines under `log` and events under `events`. Reply text is space-se
 | `@4 SNAP` | `uptime_ms=5000`, one `RD` line per register, `int_clear=ok` |
 | `@5 WR 0x42 1a000800` | `reg=0x42 len=4 data=1a000800 match=1` |
 | `@6 CMD GSrC` | `task=GSrC status=success rc=0x00`, `data=` and 64 bytes of hex |
-| `@7 RESTART warm` | `step=issue task=Gaid status=timeout t_ms=5105`, `step=nak t_ms=6005`, `step=back evidence=data_cleared t_ms=6305`, `step=done mode=APP t_ms=6305` |
+| `@7 RESTART warm` | `step=issue task=Gaid status=timeout t_ms=5105`, `step=nak t_ms=6005`, `step=back evidence=data_cleared t_ms=6305`, `step=mode t_ms=8005 mode=APP waited_ms=1700`, `step=done mode=APP t_ms=8005` |
+
+After a restart the controller answers on I2C before it is ready: on the bench board
+COMMAND and DATA read within 30 ms of the warm restart, MODE gave nothing for several
+seconds, and the port detached and attached a second time. `RESTART` therefore polls
+MODE every 50 ms after `step=back`, for up to 10 s, treating read errors, an empty MODE,
+and BOOT as "not yet". `step=mode` reports the mode and how long it took; if neither APP
+nor PTCH appears, the reply is `ERR TIMEOUT` naming the last read. `HELLO` reads MODE up
+to three times, 100 ms apart, before it reports `mode=?`.
+
+A patch load does not start because MODE read PTCH once: a controller with an EEPROM reads
+PTCH on its way to APP. The console gives the controller 3 s to reach APP, and PTCH with
+INT_EVENT1 Ready for Patch ends that wait early. `TPS25751PatchLoader` then polls Ready
+for Patch and MODE itself and sends nothing without them, so a PTCH without Ready for
+Patch ends as `CommandTimeout`, not as a load. The server waits 60 s for a `RESTART`,
+against about 50 s inside the console when every wait runs to its cap.
 
 Error codes: `SYNTAX`, `TOOLONG`, `UNKNOWN`, `BADARG`, `REFUSED`, `I2C`, `TIMEOUT`,
 `REJECTED`, `NOBUNDLE`, `PATCH`, and `NODECODER`.

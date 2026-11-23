@@ -118,12 +118,37 @@ def test_restart_and_restart_cold(bench):
     warm = bench.tools.bench_renegotiate("restart")
     assert after_hello(bench) == ["RESTART warm"]
     steps = warm["steps"][0]["restart_steps"]
-    assert [s["step"] for s in steps] == ["issue", "nak", "back", "done"]
+    assert [s["step"] for s in steps] == ["issue", "nak", "back", "mode", "done"]
     assert steps[0]["task"] == "Gaid" and steps[2]["evidence"] == "data_cleared"
+    # How long the controller took to report a running mode after it answered again.
+    assert steps[3] == {"step": "mode", "t_ms": 8005, "mode": "APP", "waited_ms": 1700}
 
     cold = bench.tools.bench_renegotiate("restart_cold")
     assert bench.requests[-1] == "RESTART cold"
     assert cold["steps"][0]["restart_steps"][0]["task"] == "GAID"
+
+
+def test_restart_timeout_covers_the_console_worst_case():
+    # The console can take about 50 s for a restart with a slow MODE and a patch
+    # load in which every wait of the loader runs to its cap. The host must still
+    # be waiting when it answers.
+    from tps25751_pd_bench.server import CONSOLE_RESTART_WORST_CASE_S, RESTART_TIMEOUT_S, _task_timeout
+
+    assert CONSOLE_RESTART_WORST_CASE_S == 50.0
+    assert RESTART_TIMEOUT_S >= CONSOLE_RESTART_WORST_CASE_S + 5
+    # CMD Gaid and CMD GAID run the same sequence and get the same wait.
+    assert _task_timeout("Gaid") == _task_timeout("GAID") == RESTART_TIMEOUT_S
+
+
+def test_restart_reports_a_mode_that_never_came_back(bench):
+    bench.console.script["RESTART warm"] = [[
+        "step=issue task=Gaid status=timeout t_ms=5105",
+        "step=nak t_ms=6005",
+        "step=back evidence=data_cleared t_ms=6305",
+        "ERR TIMEOUT MODE did not read APP or PTCH within 10000 ms after the restart; last read: no answer"]]
+    result = bench.tools.bench_renegotiate("restart")
+    assert result["code"] == "TIMEOUT" and "last read: no answer" in result["error"]
+    assert result["reply_lines"][-1] == "step=back evidence=data_cleared t_ms=6305"
 
 
 def test_restart_failure_keeps_the_console_reply(bench):

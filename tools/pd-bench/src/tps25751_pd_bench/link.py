@@ -35,8 +35,10 @@ DRAIN_S = 0.05              # how long open() collects stale input
 # How long a console may stay silent before its port counts as "no console
 # here". Once it polls, the console answers HELLO within milliseconds. Right
 # after a reset it does not read the port while begin() runs: up to 3 s waiting
-# for PTCH readiness, then the patch load (PBMs up to 0.5 s, the burst about
-# 1 s, PBMc up to 5 s), about 9.5 s at the worst.
+# for APP or PTCH readiness, then the patch load, which takes a few seconds when
+# it succeeds. A load that fails can take far longer, because each wait of the
+# loader has a 5 s cap (about 30 s in all); such a console is reported as busy
+# or still starting, and the caller tries again.
 FIRST_LINE_TIMEOUT_S = 10.0
 
 _request_ids = itertools.count(int.from_bytes(os.urandom(2), "big") % 9000 + 1000)

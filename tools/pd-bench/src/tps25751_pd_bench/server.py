@@ -58,7 +58,16 @@ SNAPSHOT_TIMEOUT_S = 6.0
 WRITE_TIMEOUT_S = 4.0
 TASK_TIMEOUT_S = 4.0       # the console waits up to 2 s for a PD message task
 GPPI_TIMEOUT_S = 8.0       # and up to 5 s for GPPI
-RESTART_TIMEOUT_S = 40.0   # 10 s for the restart, 3 s for PTCH readiness, then the patch load
+
+# The longest a RESTART can take inside the console before it answers: 0.1 s to
+# issue the task, 10 s for the controller to restart, 10 s for MODE to read APP
+# or PTCH afterwards, 0.4 s of MODE retries, 3 s for APP or PTCH readiness, and
+# the patch load. The loader caps each of its waits (TPS25751PatchLoader.h):
+# Ready for Patch 5 s, PTCH 5 s, PBMs 0.5 s, the burst about 1 s, PBMc 5 s, the
+# DATA read 5 s, and APP 5 s. The host waits longer.
+PATCH_LOAD_WORST_CASE_S = 5.0 + 5.0 + 0.5 + 1.0 + 5.0 + 5.0 + 5.0
+CONSOLE_RESTART_WORST_CASE_S = 0.1 + 10.0 + 10.0 + 0.4 + 3.0 + PATCH_LOAD_WORST_CASE_S
+RESTART_TIMEOUT_S = 60.0
 
 ANEG_SETTLE_S = 1.5        # lets a contract reach PS_RDY before it is read back or changed again
 PORT_RESET_WATCH_S = 3.0   # how long port_reset watches STATUS for the disconnect
@@ -295,13 +304,18 @@ def _task_result(reply: Reply, code: str) -> dict:
 
 
 def _restart_steps(reply: Reply) -> list[dict]:
-    """The ``step=`` lines of a restart reply; ``t_ms`` is the console's uptime clock."""
+    """The ``step=`` lines of a restart reply.
+
+    ``t_ms`` is the console's uptime clock. ``step=mode`` carries ``waited_ms``:
+    how long after the controller answered again MODE took to read APP or PTCH.
+    """
     steps = []
     for line in reply.data_lines():
-        tokens = parse_tokens(line)
+        tokens: dict = parse_tokens(line)
         if "step" in tokens:
-            if tokens.get("t_ms", "").isdigit():
-                tokens["t_ms"] = int(tokens["t_ms"])
+            for name in ("t_ms", "waited_ms"):
+                if tokens.get(name, "").isdigit():
+                    tokens[name] = int(tokens[name])
             steps.append(tokens)
     return steps
 
@@ -485,7 +499,9 @@ def build_tools(service: BenchService) -> SimpleNamespace:
         - ssrc (board is source): SSrC. The board sends Source_Capabilities.
         - port_reset: rewrites 0x28 with its current value. Disconnect and
           reconnect; VBUS drops.
-        - restart: Gaid, a warm restart. VBUS drops for about 1 s.
+        - restart: Gaid, a warm restart. VBUS drops for about 1 s. The port can
+          detach and attach twice, and the console waits up to 10 s for MODE to
+          read APP before it answers.
         - restart_cold: GAID, a cold restart with a patch reload on a board
           without a configuration EEPROM. VBUS drops.
 

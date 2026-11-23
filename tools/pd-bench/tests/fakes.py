@@ -180,7 +180,9 @@ class FakeConsole:
         if command == "RESTART":
             task = "GAID" if words[1] == "cold" else "Gaid"
             return [f"step=issue task={task} status=timeout t_ms=5105", "step=nak t_ms=6005",
-                    "step=back evidence=data_cleared t_ms=6305", "step=done mode=APP t_ms=6305", "OK"]
+                    "step=back evidence=data_cleared t_ms=6305",
+                    "step=mode t_ms=8005 mode=APP waited_ms=1700",
+                    "step=done mode=APP t_ms=8005", "OK"]
         return ["ERR UNKNOWN unknown command"]
 
     def handle(self, line: str) -> list[str]:

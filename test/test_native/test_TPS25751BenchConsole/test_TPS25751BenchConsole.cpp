@@ -271,6 +271,38 @@ void test_hello_reports_a_mode_word_it_cannot_print()
     TEST_ASSERT_TRUE(hasLineStarting(b.run("@2 HELLO"), "@2 mode=? "));
 }
 
+void test_hello_retries_mode_before_reporting_it_unreadable()
+{
+    // Right after a restart MODE can miss a read or two. HELLO tries three
+    // times, 100 ms apart, so it does not report "?" for a controller that is
+    // only still coming up.
+    Bench b;
+    int modeReads = 0;
+    b.fake.beforeRead = [&modeReads](FakeBenchTarget &f, uint8_t reg, size_t) {
+        if (reg != 0x03) return;
+        if (++modeReads < 3) {
+            f.failRead[0x03] = true;
+        } else {
+            f.failRead.erase(0x03);
+        }
+    };
+    Lines lines = b.run("@1 HELLO");
+    TEST_ASSERT_EQUAL_STRING("@1 mode=APP version=f8091166 role=sink plug=1", lines[1].c_str());
+    TEST_ASSERT_EQUAL(3, modeReads);
+    TEST_ASSERT_EQUAL(kStartMillis + 200, millis());
+    // The uptime in the reply is the time the request arrived.
+    TEST_ASSERT_NOT_EQUAL(std::string::npos, lines[0].find(" uptime_ms=5000"));
+
+    // A MODE that stays unreadable is reported as "?" after the three tries.
+    b.fake.beforeRead = nullptr;
+    b.fake.failRead[0x03] = true;
+    modeReads = 0;
+    setMillis(kStartMillis);
+    lines = b.run("@2 HELLO");
+    TEST_ASSERT_EQUAL_STRING("@2 mode=? version=f8091166 role=sink plug=1", lines[1].c_str());
+    TEST_ASSERT_EQUAL(kStartMillis + 200, millis());
+}
+
 void test_hello_in_ptch_mode_reads_only()
 {
     // HELLO never loads the patch, even with a bundle at hand and the
@@ -864,15 +896,17 @@ void test_restart_warm_reports_each_step()
     };
 
     const Lines lines = b.run("@7 RESTART warm");
-    TEST_ASSERT_EQUAL(5, lines.size());
+    TEST_ASSERT_EQUAL(6, lines.size());
     // COMMAND kept the code for the 100 ms the console watched it.
     TEST_ASSERT_EQUAL_STRING("@7 step=issue task=Gaid status=timeout t_ms=5105", lines[0].c_str());
     // The controller went quiet 1000 ms after the task and returned at 1300 ms;
     // the console polls every 20 ms.
     TEST_ASSERT_EQUAL_STRING("@7 step=nak t_ms=6005", lines[1].c_str());
     TEST_ASSERT_EQUAL_STRING("@7 step=back evidence=data_cleared t_ms=6305", lines[2].c_str());
-    TEST_ASSERT_EQUAL_STRING("@7 step=done mode=APP t_ms=6305", lines[3].c_str());
-    TEST_ASSERT_EQUAL_STRING("@7 OK", lines[4].c_str());
+    // MODE read APP at the first try here, so the wait was 0 ms.
+    TEST_ASSERT_EQUAL_STRING("@7 step=mode t_ms=6305 mode=APP waited_ms=0", lines[3].c_str());
+    TEST_ASSERT_EQUAL_STRING("@7 step=done mode=APP t_ms=6305", lines[4].c_str());
+    TEST_ASSERT_EQUAL_STRING("@7 OK", lines[5].c_str());
 
     // DATA carried the marker before the task was issued.
     TEST_ASSERT_EQUAL_HEX8(0x09, b.fake.writes[0].reg);
@@ -1210,11 +1244,103 @@ void test_restart_reports_a_controller_stuck_in_boot()
         return Verdict::Pending;
     };
     const Lines lines = b.run("@7 RESTART warm");
-    TEST_ASSERT_EQUAL_STRING("@7 ERR TIMEOUT MODE stayed BOOT", lines.back().c_str());
+    TEST_ASSERT_EQUAL_STRING(
+        "@7 ERR TIMEOUT MODE did not read APP or PTCH within 10000 ms after the restart; "
+        "last read: BOOT",
+        lines.back().c_str());
 }
 
-void test_restart_reports_a_mode_read_failure_after_the_restart()
+void test_restart_waits_for_mode_after_the_controller_answers()
 {
+    // What the bench board did: COMMAND and DATA answer right after the warm
+    // restart, and then MODE cannot be read for a while because the controller
+    // is still booting. The console polls MODE every 50 ms instead of failing.
+    Bench b;
+    b.fake.taskHandler = [&b](const std::string &, std::vector<uint8_t> &) {
+        scriptRestart(b.fake, "APP ");
+        b.fake.schedule(millis() + 1300, [](FakeBenchTarget &f) { f.failRead[0x03] = true; });
+        b.fake.schedule(millis() + 3000, [](FakeBenchTarget &f) { f.failRead.erase(0x03); });
+        return Verdict::Pending;
+    };
+
+    const Lines lines = b.run("@7 RESTART warm");
+    TEST_ASSERT_EQUAL(6, lines.size());
+    TEST_ASSERT_EQUAL_STRING("@7 step=back evidence=data_cleared t_ms=6305", lines[2].c_str());
+    // MODE became readable 3000 ms after the task, at time 8000; the poll that
+    // started at 6305 reaches it at 8005, after 1700 ms.
+    TEST_ASSERT_EQUAL_STRING("@7 step=mode t_ms=8005 mode=APP waited_ms=1700", lines[3].c_str());
+    TEST_ASSERT_EQUAL_STRING("@7 step=done mode=APP t_ms=8005", lines[4].c_str());
+    TEST_ASSERT_EQUAL_STRING("@7 OK", lines[5].c_str());
+}
+
+void test_restart_waits_through_an_empty_mode_and_boot()
+{
+    // MODE answers with four zero bytes, then BOOT, then APP. Neither of the
+    // first two is a running mode.
+    Bench b;
+    b.fake.taskHandler = [&b](const std::string &, std::vector<uint8_t> &) {
+        scriptRestart(b.fake, "APP ");
+        b.fake.schedule(millis() + 1300, [](FakeBenchTarget &f) { f.setRegister(0x03, {0, 0, 0, 0}); });
+        b.fake.schedule(millis() + 2000, [](FakeBenchTarget &f) { f.setMode("BOOT"); });
+        b.fake.schedule(millis() + 2500, [](FakeBenchTarget &f) { f.setMode("APP "); });
+        return Verdict::Pending;
+    };
+    const Lines lines = b.run("@7 RESTART warm");
+    TEST_ASSERT_TRUE(hasLine(lines, "@7 step=mode t_ms=7505 mode=APP waited_ms=1200"));
+    TEST_ASSERT_EQUAL_STRING("@7 OK", lines.back().c_str());
+}
+
+void test_restart_cold_waits_for_mode_too()
+{
+    // 'GAID' on a board with an EEPROM: MODE is unreadable for a while, then
+    // PTCH while the controller loads its configuration, then APP.
+    Bench b;
+    b.fake.taskHandler = [&b](const std::string &code, std::vector<uint8_t> &) {
+        TEST_ASSERT_EQUAL_STRING("GAID", code.c_str());
+        scriptRestart(b.fake, "PTCH");
+        b.fake.schedule(millis() + 1300, [](FakeBenchTarget &f) { f.failRead[0x03] = true; });
+        b.fake.schedule(millis() + 2000, [](FakeBenchTarget &f) { f.failRead.erase(0x03); });
+        b.fake.schedule(millis() + 2600, [](FakeBenchTarget &f) { f.setMode("APP "); });
+        return Verdict::Pending;
+    };
+    const Lines lines = b.run("@7 RESTART cold");
+    // PTCH is a running mode for the wait; the patch path then waits for APP.
+    TEST_ASSERT_TRUE(hasLine(lines, "@7 step=mode t_ms=7005 mode=PTCH waited_ms=700"));
+    TEST_ASSERT_FALSE(hasLineStarting(lines, "@7 step=patch"));
+    TEST_ASSERT_TRUE(hasLineStarting(lines, "@7 step=done mode=APP t_ms="));
+    TEST_ASSERT_EQUAL_STRING("@7 OK", lines.back().c_str());
+}
+
+void test_restart_reloads_the_patch_after_waiting_for_mode()
+{
+    // An EEPROM-less board: MODE is unreadable for a while and then reads PTCH
+    // with ReadyForPatch, and the console loads the bundle.
+    Bench b;
+    b.console.setPatchBundle(patchImage, sizeof(patchImage));
+    b.fake.setRegister(0x2D, kBootFlagsI2c, sizeof(kBootFlagsI2c));
+    b.fake.taskHandler = [&b](const std::string &code, std::vector<uint8_t> &data) {
+        if (code == "GAID") {
+            scriptRestart(b.fake, "PTCH");
+            b.fake.schedule(millis() + 1300, [](FakeBenchTarget &f) {
+                f.failRead[0x03] = true;
+                setReadyForPatch(f);
+            });
+            b.fake.schedule(millis() + 2000, [](FakeBenchTarget &f) { f.failRead.erase(0x03); });
+            return Verdict::Pending;
+        }
+        return acceptPatch(b.fake, code, data);
+    };
+    const Lines lines = b.run("@7 RESTART cold");
+    TEST_ASSERT_TRUE(hasLine(lines, "@7 step=mode t_ms=7005 mode=PTCH waited_ms=700"));
+    TEST_ASSERT_TRUE(hasLineStarting(lines, "@7 step=patch result=Success t_ms="));
+    TEST_ASSERT_EQUAL_STRING("@7 OK", lines.back().c_str());
+    TEST_ASSERT_EQUAL(sizeof(patchImage), b.fake.pbmBytes.size());
+}
+
+void test_restart_times_out_when_mode_never_comes_back()
+{
+    // MODE cannot be read at all after the restart. The console gives up after
+    // kRestartModeTimeoutMs and names the last read.
     Bench b;
     b.fake.taskHandler = [&b](const std::string &, std::vector<uint8_t> &) {
         scriptRestart(b.fake, "APP ");
@@ -1222,11 +1348,34 @@ void test_restart_reports_a_mode_read_failure_after_the_restart()
         return Verdict::Pending;
     };
     const Lines lines = b.run("@7 RESTART warm");
-    TEST_ASSERT_EQUAL_STRING("@7 ERR I2C MODE read failed after the restart", lines.back().c_str());
+    TEST_ASSERT_TRUE(hasLine(lines, "@7 step=back evidence=data_cleared t_ms=6305"));
+    TEST_ASSERT_FALSE(hasLineStarting(lines, "@7 step=mode"));
+    TEST_ASSERT_EQUAL_STRING(
+        "@7 ERR TIMEOUT MODE did not read APP or PTCH within 10000 ms after the restart; "
+        "last read: no answer",
+        lines.back().c_str());
+    // It waited the whole window, counted from step=back, and no longer.
+    TEST_ASSERT_EQUAL(6305 + TPS25751BenchConsole::kRestartModeTimeoutMs, millis());
 }
 
-void test_restart_reports_a_mode_read_failure_while_waiting_for_app()
+void test_restart_times_out_on_a_mode_that_stays_empty()
 {
+    Bench b;
+    b.fake.taskHandler = [&b](const std::string &, std::vector<uint8_t> &) {
+        scriptRestart(b.fake, "APP ");
+        b.fake.schedule(millis() + 1300, [](FakeBenchTarget &f) { f.setRegister(0x03, {0, 0, 0, 0}); });
+        return Verdict::Pending;
+    };
+    const Lines lines = b.run("@7 RESTART warm");
+    TEST_ASSERT_EQUAL_STRING(
+        "@7 ERR TIMEOUT MODE did not read APP or PTCH within 10000 ms after the restart; "
+        "last read: an empty MODE",
+        lines.back().c_str());
+}
+
+void test_restart_times_out_when_mode_stops_answering_in_boot()
+{
+    // BOOT for a while, then no answer: the last read decides the message.
     Bench b;
     b.fake.taskHandler = [&b](const std::string &, std::vector<uint8_t> &) {
         scriptRestart(b.fake, "BOOT");
@@ -1234,7 +1383,61 @@ void test_restart_reports_a_mode_read_failure_while_waiting_for_app()
         return Verdict::Pending;
     };
     const Lines lines = b.run("@7 RESTART warm");
+    TEST_ASSERT_EQUAL_STRING(
+        "@7 ERR TIMEOUT MODE did not read APP or PTCH within 10000 ms after the restart; "
+        "last read: no answer",
+        lines.back().c_str());
+}
+
+void test_restart_reports_a_mode_that_fails_after_it_was_running()
+{
+    // MODE reads APP for the wait and then fails all three tries of the check
+    // that follows: that is an I2C failure, not a timeout.
+    Bench b;
+    b.fake.taskHandler = [&b](const std::string &, std::vector<uint8_t> &) {
+        scriptRestart(b.fake, "APP ");
+        return Verdict::Pending;
+    };
+    int modeReads = 0;
+    b.fake.beforeRead = [&modeReads](FakeBenchTarget &f, uint8_t reg, size_t) {
+        if (reg == 0x03 && ++modeReads == 2) f.failRead[0x03] = true;
+    };
+    const Lines lines = b.run("@7 RESTART warm");
+    TEST_ASSERT_TRUE(hasLine(lines, "@7 step=mode t_ms=6305 mode=APP waited_ms=0"));
     TEST_ASSERT_EQUAL_STRING("@7 ERR I2C MODE read failed after the restart", lines.back().c_str());
+}
+
+void test_restart_reports_a_controller_that_falls_back_to_boot()
+{
+    // MODE reads PTCH, which ends the wait, and then the controller restarts
+    // once more and stays in BOOT. The patch path gives it 3 s and reports it.
+    Bench b;
+    b.fake.taskHandler = [&b](const std::string &, std::vector<uint8_t> &) {
+        scriptRestart(b.fake, "PTCH");
+        b.fake.schedule(millis() + 1400, [](FakeBenchTarget &f) { f.setMode("BOOT"); });
+        return Verdict::Pending;
+    };
+    const Lines lines = b.run("@7 RESTART warm");
+    TEST_ASSERT_TRUE(hasLine(lines, "@7 step=mode t_ms=6305 mode=PTCH waited_ms=0"));
+    TEST_ASSERT_EQUAL_STRING("@7 ERR TIMEOUT MODE stayed BOOT", lines.back().c_str());
+}
+
+void test_patch_wait_tolerates_a_failed_mode_read()
+{
+    // While the console waits for a booting controller to reach APP, single
+    // failed MODE reads are skipped, not treated as the end.
+    Bench b;
+    b.console.setPatchBundle(patchImage, sizeof(patchImage));
+    b.fake.setMode("BOOT");
+    b.fake.schedule(kStartMillis + 100, [](FakeBenchTarget &f) { f.failRead[0x03] = true; });
+    b.fake.schedule(kStartMillis + 400, [](FakeBenchTarget &f) {
+        f.failRead.erase(0x03);
+        f.setMode("APP ");
+    });
+    b.console.begin();
+    TEST_ASSERT_EQUAL_STRING("! READY proto=1\n", b.io.take().c_str());
+    TEST_ASSERT_EQUAL(0, b.fake.tasks.size());
+    TEST_ASSERT_TRUE(millis() >= kStartMillis + 400);
 }
 
 // ---------------------------------------------------------------------------
@@ -1398,7 +1601,7 @@ void test_debug_output_on_the_console_stream_never_splits_a_reply_line()
         }
     }
     TEST_ASSERT_EQUAL(4, replies);
-    TEST_ASSERT_EQUAL(4, debug);
+    TEST_ASSERT_EQUAL(6, debug);   // MODE is tried three times, the other three registers once
     TEST_ASSERT_TRUE(hasLine(lines, "@5 mode=? version=? role=? plug=?"));
 
     // The other commands print after their reads as well.
@@ -1577,6 +1780,7 @@ int main(int, char **)
     RUN_TEST(test_hello_reports_the_patch_source_and_the_bundle);
     RUN_TEST(test_hello_answers_when_the_controller_does_not);
     RUN_TEST(test_hello_reports_a_mode_word_it_cannot_print);
+    RUN_TEST(test_hello_retries_mode_before_reporting_it_unreadable);
     RUN_TEST(test_hello_in_ptch_mode_reads_only);
     RUN_TEST(test_hello_reports_ptch_without_a_bundle);
 
@@ -1641,8 +1845,16 @@ int main(int, char **)
     RUN_TEST(test_restart_into_ptch_without_a_bundle);
     RUN_TEST(test_restart_reports_a_failed_patch_load);
     RUN_TEST(test_restart_reports_a_controller_stuck_in_boot);
-    RUN_TEST(test_restart_reports_a_mode_read_failure_after_the_restart);
-    RUN_TEST(test_restart_reports_a_mode_read_failure_while_waiting_for_app);
+    RUN_TEST(test_restart_waits_for_mode_after_the_controller_answers);
+    RUN_TEST(test_restart_waits_through_an_empty_mode_and_boot);
+    RUN_TEST(test_restart_cold_waits_for_mode_too);
+    RUN_TEST(test_restart_reloads_the_patch_after_waiting_for_mode);
+    RUN_TEST(test_restart_times_out_when_mode_never_comes_back);
+    RUN_TEST(test_restart_times_out_on_a_mode_that_stays_empty);
+    RUN_TEST(test_restart_times_out_when_mode_stops_answering_in_boot);
+    RUN_TEST(test_restart_reports_a_mode_that_fails_after_it_was_running);
+    RUN_TEST(test_restart_reports_a_controller_that_falls_back_to_boot);
+    RUN_TEST(test_patch_wait_tolerates_a_failed_mode_read);
 
     RUN_TEST(test_poll_answers_a_line_once_it_is_complete);
     RUN_TEST(test_poll_answers_several_lines_and_ignores_blank_ones);

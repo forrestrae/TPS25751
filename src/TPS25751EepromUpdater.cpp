@@ -216,6 +216,8 @@ EepromUpdateStatus TPS25751EepromUpdater::dump(uint32_t addr, size_t length, Str
     uint8_t bytes[kFlashReadBytes];
 
     for (size_t offset = 0; offset < length; offset += kFlashReadBytes) {
+        // Not bounded against the EEPROM size and may wrap; the caller owns the
+        // range (see the dump() Doxygen).
         const uint32_t lineAddr = addr + static_cast<uint32_t>(offset);
         const EepromUpdateStatus s = readFlash(lineAddr, bytes);
         if (s != EepromUpdateStatus::Success) {

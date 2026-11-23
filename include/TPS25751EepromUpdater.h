@@ -225,6 +225,10 @@ public:
      * for FLad only; the SLVAFL1 source code casts a uint32_t the same way for
      * FLrd), and that DATA byte 0 holds the EEPROM byte at @p addr.
      *
+     * The caller owns the range. The updater does not bound @p addr against
+     * the EEPROM size, and what the controller returns past the end of the
+     * part is undocumented.
+     *
      * @param addr EEPROM address
      * @param out  Buffer of at least kFlashReadBytes bytes; must not be nullptr
      * @return Success, or CommandRejected, CommandTimeout, or I2cError from the executor
@@ -313,6 +317,11 @@ public:
      * separated by single spaces, and nothing else. A final line holds fewer than
      * 16 bytes when @p length is not a multiple of 16. Lines printed before a
      * failure stay printed.
+     *
+     * The caller owns the range. The updater does not bound @p addr or
+     * @p addr + @p length against the EEPROM size, and the 32-bit address can
+     * wrap. What the controller returns past the end of the part is
+     * undocumented, so such lines are printed as if they were EEPROM data.
      *
      * @param addr   First EEPROM address
      * @param length Bytes to dump (0 prints nothing)

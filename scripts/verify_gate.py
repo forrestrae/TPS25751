@@ -13,12 +13,15 @@ Checks, in order:
   1. every commit message in main..HEAD
   2. no merge commits on the branch (rebase instead)
   3. version fields in library.json / library.properties unchanged from main
-  4. script unit tests, PD capture fixtures, bench server tests, native unit
-     tests, example build
+  4. script unit tests, PD capture fixtures, PD capture fixture tests, bench
+     server tests, native unit tests, example build
 
-The PD capture fixture check and the bench server tests run once their target
-exists (test/support/pd_capture_fixture.py, tools/pd-bench/); until then each
-prints a notice and is skipped.
+Three steps run only once their target exists, and until then print a notice and
+are skipped: the PD capture fixture check (test/support/pd_capture_fixture.py),
+the generator's own tests (test/support/test_pd_capture_fixture.py), and the
+bench server tests (tools/pd-bench/). The bench tests run `uv run --locked
+pytest`, so they never rewrite tools/pd-bench/uv.lock, and the gate fails if
+they leave untracked files in tools/pd-bench/ (a .venv that .gitignore misses).
 """
 
 from __future__ import annotations
@@ -41,14 +44,18 @@ class Gate:
     cmd: list[str]
     cwd: str = "."  # relative to the repository root
     requires: str | None = None  # skipped, with a notice, while this path does not exist
+    no_untracked: str | None = None  # fail if the step leaves untracked files under this path
 
 
 GATES = [
     Gate("script unit tests", [sys.executable, "-m", "unittest", "discover", "-s", "scripts/tests", "-t", "scripts", "-q"]),
     Gate("PD capture fixtures", [sys.executable, "test/support/pd_capture_fixture.py", "--check"],
          requires="test/support/pd_capture_fixture.py"),
-    Gate("bench server tests", ["uv", "run", "--extra", "dev", "pytest"],
-         cwd="tools/pd-bench", requires="tools/pd-bench"),
+    Gate("PD capture fixture tests",
+         [sys.executable, "-m", "unittest", "discover", "-s", "test/support", "-p", "test_*.py", "-q"],
+         requires="test/support/test_pd_capture_fixture.py"),
+    Gate("bench server tests", ["uv", "run", "--locked", "pytest"],
+         cwd="tools/pd-bench", requires="tools/pd-bench", no_untracked="tools/pd-bench"),
     Gate("native unit tests", ["pio", "test", "-e", "native"]),
     Gate("example build", ["pio", "run", "-e", "example-read-registers"]),
 ]
@@ -65,13 +72,23 @@ def run_gates(root: Path, gates: list[Gate] = GATES, run=subprocess.run) -> int:
         if gate.requires and not (root / gate.requires).exists():
             print(f"verify: skipping {gate.name}: {gate.requires} does not exist yet", flush=True)
             continue
+        cwd = root / gate.cwd
+        if not cwd.is_dir():
+            return fail(f"{gate.name}: working directory {gate.cwd} does not exist")
         print(f"verify: running {gate.name}: {' '.join(gate.cmd)}", flush=True)
         try:
-            returncode = run(gate.cmd, cwd=root / gate.cwd).returncode
+            returncode = run(gate.cmd, cwd=cwd).returncode
         except FileNotFoundError:
             return fail(f"{gate.name}: {gate.cmd[0]} is not installed or not on PATH")
+        except OSError as e:
+            return fail(f"{gate.name}: cannot run {gate.cmd[0]}: {e.strerror or e}")
         if returncode != 0:
             return fail(gate.name)
+        if gate.no_untracked:
+            left = wc.git("ls-files", "--others", "--exclude-standard", "--", gate.no_untracked, cwd=root)
+            if left:
+                return fail(f"{gate.name} left untracked files; add them to .gitignore:\n  "
+                            + "\n  ".join(left.splitlines()[:10]))
     return 0
 
 

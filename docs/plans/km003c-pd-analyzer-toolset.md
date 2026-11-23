@@ -19,6 +19,31 @@ branches follow on top: `feat/pd-status-during-capture` (item 6) and `feat/fork-
 (idle release on at 2 s, trigger tools off unless `KM003C_ENABLE_TRIGGER=1`). They merge
 into the fork's `main` in that order with `--no-ff`.
 
+Phase 3 complete 2026-11-23: all of the above, plus `upstream/disconnect-reply` and the
+fork-only `docs/upstream-branch-verify` and `fix/verify-dev-extras`, are merged into the
+fork's local `main` after an independent review and a re-review of its fixes. The
+`upstream/*` branches remain as pull-request heads. On the fork's `main`: 282 unit tests
+pass, and the hardware tests pass 9 of 9 (claim and release 10 times at about 1 ms per
+release, a PD capture during a 1000 SPS stream with 0 of 2306 samples dropped, the busy
+error naming the holder). Next: Phase 4 in the fork.
+
+Phase 3 facts and known limits, for later phases:
+- A second EnablePdMonitor returns Reject only when nothing is sent in between; after a
+  Connect it returns Accept again. `enable_pd_monitor()` sends Connect first, so it gets
+  Accept on this meter, and treats Reject as non-fatal for other firmware.
+- Each enable attempt waits at most 500 ms per request, so the device lock is held for
+  about 1 s at most. A meter slower than that would make `pd_capture_start` fail with
+  `PdMonitorNotEnabledError`; this meter answers in 3 to 17 ms.
+- `device_release` refuses while any lease is held (a capture, a stream, or another call
+  in flight), rather than releasing at once.
+- The USB-reset recovery for a late-answering meter is unit-tested only; the fault has not
+  recurred on hardware.
+- A corrupt meter reply to `pd_status` or `measure` raises an unhandled `ProtocolError`
+  instead of returning an error result (upstream behavior). Phase 4 handles it, since it
+  reworks the decode path.
+- `KM003C_ENABLE_TRIGGER`: unset gives the default (registered upstream, absent in the
+  fork), `1` registers the tools, and any other value leaves them out.
+
 Correction found in Phase 0, affecting Phase 5: since `ci/verify-launcher`, `verify.py`
 is a launcher that runs `main`'s copy of `scripts/verify_gate.py`, and agents may edit
 `verify_gate.py` on a topic branch. The two Phase 5 checks therefore go into

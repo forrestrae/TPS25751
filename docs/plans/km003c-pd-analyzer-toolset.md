@@ -1,9 +1,16 @@
 # Plan: KM003C USB PD analyzer toolset for TPS25751 development
 
 Status: approved 2026-11-22 (draft 2, with your answers to the ten open questions
-recorded under "Decisions recorded" at the end). Phase 0 in progress: this file and the
-kickoff prompt are committed on `docs/km003c-toolset-plan`. Nothing else is implemented,
-and no repository has been created.
+recorded under "Decisions recorded" at the end). Phase 0 complete 2026-11-22: the plan
+(`docs/km003c-toolset-plan`) and `chore/drop-cursor-vscode` are integrated, with the Codex
+row in `AGENTS.md` marked planned until Phase 8. Next: Phase 1, the hardware spike. No
+repository has been created.
+
+Correction found in Phase 0, affecting Phase 5: since `ci/verify-launcher`, `verify.py`
+is a launcher that runs `main`'s copy of `scripts/verify_gate.py`, and agents may edit
+`verify_gate.py` on a topic branch. The two Phase 5 checks therefore go into
+`verify_gate.py` on `build/verify-pd-bench-checks` without a `WORKFLOW_GUARD_OFF=1`
+session, and they take effect for branches verified after that branch is pushed.
 
 Supported agents: Claude Code and Codex only. Cursor, VS Code, and Windsurf are dropped
 (Phase 0).

@@ -6,8 +6,7 @@ and all device definitions (`devices/tps25751/`, `devices/bq25798/`) — now liv
 in the sibling **`lib/device-register-mcp-server`** repository, alongside the
 `/add-register-device` authoring skill.
 
-This repo still *uses* the server, twice: `.mcp.json` (and `.cursor/mcp.json` /
-`.vscode/mcp.json`) define `tps25751-docs` as
+This repo still *uses* the server, twice: `.mcp.json` defines `tps25751-docs` as
 `uv --directory ../device-register-mcp-server run server.py` with
 `DEVICE_CONFIG=devices/tps25751/device.json`, and `usb-pd-docs` the same way with
 `DEVICE_CONFIG=specifications/USB_PD/specification.json` (a relative `DEVICE_CONFIG`

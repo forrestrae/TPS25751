@@ -112,16 +112,14 @@ repo**, then point an MCP server entry at it from the consuming repo's `.mcp.jso
 
 ### Configuring the MCP Servers Per Tool
 
-The register-docs MCP server uses the standard MCP protocol and works with any compatible AI coding assistant. Tool-specific config files (each defining `tps25751-docs` and `usb-pd-docs` against the sibling server repo) are included in this repo:
+The register-docs MCP server uses the standard MCP protocol. This repo supports two agents, Claude Code and Codex, and each reads its own config file, defining `tps25751-docs` and `usb-pd-docs` against the sibling server repo:
 
 | Tool | Config File | Notes |
 |---|---|---|
 | **Claude Code** | `.mcp.json` + `.claude/settings.json` | Both servers listed in `enabledMcpjsonServers`, and their four tools each in `permissions.allow` |
-| **Cursor** | `.cursor/mcp.json` | Loaded automatically from project root |
-| **VS Code (Copilot)** | `.vscode/mcp.json` | Requires GitHub Copilot with MCP support enabled |
-| **Windsurf** | *(no project-level config)* | Add both servers manually via Windsurf global MCP settings |
+| **Codex** | `.codex/config.toml` (trusted project) | Planned (Phase 8 of `km003c-pd-analyzer-toolset.md`); not yet in the repository |
 
-> **Note:** The `.claude/` directory contains Claude Code-specific settings (permissions, plugin config). Other tools use their own config conventions and are not affected by it.
+> **Note:** The `.claude/` directory contains Claude Code-specific settings (permissions, plugin config). Codex uses its own `.codex/` directory and is not affected by it.
 
 ---
 
@@ -531,8 +529,6 @@ auto statusReg = tps.readStatusRegister(true);  // with validation
 ├── .mcp.json                           # Claude Code MCP server config
 ├── .claude/                            # Claude Code-specific settings
 ├── .githooks/                          # Git workflow hooks (see "Git Workflow")
-├── .cursor/mcp.json                    # Cursor MCP server config
-├── .vscode/mcp.json                    # VS Code Copilot MCP server config
 ├── library.json                        # PlatformIO library manifest
 ├── library.properties                  # Arduino library manifest
 ├── scripts/                            # Release + git workflow tooling (verify.py, integrate.py, ...)

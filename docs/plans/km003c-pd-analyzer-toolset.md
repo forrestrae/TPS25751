@@ -5,7 +5,19 @@ recorded under "Decisions recorded" at the end). Phase 0 complete 2026-11-22: th
 (`docs/km003c-toolset-plan`) and `chore/drop-cursor-vscode` are integrated, with the Codex
 row in `AGENTS.md` marked planned until Phase 8. Phase 1 complete 2026-11-22: S0 to S4
 ran (S5 was not needed); the results and the decisions they fix are under "Phase 1
-results" at the end. Next: Phase 2, the fork. No repository has been created.
+results" at the end. Phase 2 complete 2026-11-22: the public fork
+`forrestrae/mcp-powerz-km003c` is cloned at `lib/km003c-mcp` (push to `upstream`
+disabled), with worktree `lib/km003c-mcp-work`, and its workflow (hooks, `scripts/verify.sh`,
+`AGENTS.md`) is merged into the fork's local `main`. Next: Phase 3 in the fork.
+
+Phase 3 branch layout, decided at its start: the upstream items form one linear stack cut
+from `upstream/main` (`upstream/macos-backend`, `upstream/disconnect-reply`,
+`upstream/pd-monitor-enable`, `upstream/pd-poll-interval`, `upstream/busy-error`,
+`upstream/idle-release`, `upstream/trigger-gate`), because later items edit the same
+files as earlier ones. Each upstream branch keeps upstream's current defaults. Fork-only
+branches follow on top: `feat/pd-status-during-capture` (item 6) and `feat/fork-defaults`
+(idle release on at 2 s, trigger tools off unless `KM003C_ENABLE_TRIGGER=1`). They merge
+into the fork's `main` in that order with `--no-ff`.
 
 Correction found in Phase 0, affecting Phase 5: since `ci/verify-launcher`, `verify.py`
 is a launcher that runs `main`'s copy of `scripts/verify_gate.py`, and agents may edit

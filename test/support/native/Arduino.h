@@ -7,7 +7,8 @@
 // millis(), delay(), digitalRead(), strncpy_P). This header provides just
 // enough of that surface to compile and run them on the host; it is not a
 // general Arduino emulation. Wire.h beside it provides a TwoWire fake.
-// Output goes to stdout so debugPrint()/hexDump() remain usable in tests.
+// Output goes to stdout so debugPrint()/hexDump() remain usable in tests; a
+// test that wants the output instead uses the Stream double in FakeStream.h.
 //
 // Only the native env sees this file (via `-I test/support/native` in
 // platformio.ini); hardware builds use the real Teensy core headers.
@@ -63,22 +64,38 @@ inline char *strncpy_P(char *dest, const char *src, size_t n)
     return strncpy(dest, src, n);
 }
 
+// Stream follows the Arduino Print and Stream contract as far as the library
+// uses it: every print() ends in the virtual write(uint8_t), and the input side
+// is available(), read(), and peek(). The base class writes to stdout and has
+// no input, which is what the global Serial stand-in needs. FakeStream.h
+// overrides write() to capture output and the input calls to feed a reader.
 class Stream
 {
 public:
     virtual ~Stream() {}
 
-    size_t print(const char *s)
-    {
-        if (!s) return 0;
-        fputs(s, stdout);
-        return strlen(s);
-    }
-    size_t print(char c)
+    virtual size_t write(uint8_t c)
     {
         fputc(c, stdout);
         return 1;
     }
+    virtual size_t write(const uint8_t *buffer, size_t size)
+    {
+        size_t n = 0;
+        for (size_t i = 0; i < size; ++i) n += write(buffer[i]);
+        return n;
+    }
+    virtual int available() { return 0; }
+    virtual int read() { return -1; }
+    virtual int peek() { return -1; }
+    virtual void flush() {}
+
+    size_t print(const char *s)
+    {
+        if (!s) return 0;
+        return write(reinterpret_cast<const uint8_t *>(s), strlen(s));
+    }
+    size_t print(char c) { return write(static_cast<uint8_t>(c)); }
     size_t print(const __FlashStringHelper *s)
     {
         return print(reinterpret_cast<const char *>(s));
@@ -104,23 +121,22 @@ public:
         size_t n = print(v, base);
         return n + println();
     }
-    size_t println()
-    {
-        fputc('\n', stdout);
-        return 1;
-    }
+    size_t println() { return write(static_cast<uint8_t>('\n')); }
 
 private:
     size_t printSigned(long v, int base)
     {
-        int n = (base == HEX) ? printf("%lX", static_cast<unsigned long>(v))
-                              : printf("%ld", v);
-        return (n > 0) ? static_cast<size_t>(n) : 0;
+        char buf[24];
+        int n = (base == HEX) ? snprintf(buf, sizeof(buf), "%lX", static_cast<unsigned long>(v))
+                              : snprintf(buf, sizeof(buf), "%ld", v);
+        return (n > 0) ? write(reinterpret_cast<const uint8_t *>(buf), static_cast<size_t>(n)) : 0;
     }
     size_t printUnsigned(unsigned long v, int base)
     {
-        int n = (base == HEX) ? printf("%lX", v) : printf("%lu", v);
-        return (n > 0) ? static_cast<size_t>(n) : 0;
+        char buf[24];
+        int n = (base == HEX) ? snprintf(buf, sizeof(buf), "%lX", v)
+                              : snprintf(buf, sizeof(buf), "%lu", v);
+        return (n > 0) ? write(reinterpret_cast<const uint8_t *>(buf), static_cast<size_t>(n)) : 0;
     }
 };
 

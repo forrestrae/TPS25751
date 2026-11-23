@@ -6,9 +6,9 @@ Run them with:
 
 Layout:
 
-    support/native/   Arduino API stubs (Stream/Serial/F()/millis()) that let
-                      the platform-independent library sources compile on the
-                      host. Not a test suite.
+    support/native/   Arduino API stubs (Stream/Serial/Wire/F()/millis()) that
+                      let the library sources compile and run on the host, and
+                      the fakes the suites drive. Not a test suite.
     test_native/      Unity test suites, one directory per register class.
                       test_TPS25751Status is the seed/reference suite.
 

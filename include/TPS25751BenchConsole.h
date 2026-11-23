@@ -49,6 +49,9 @@
  * seconds. Call poll() from loop() and keep interrupt handlers off the
  * console's stream.
  *
+ * Only `RESTART`, `CMD`, and `WR` change the controller, and `SNAP` clears the
+ * INT_EVENT1 bits it reports. `HELLO`, `RD`, and `DEC` read only.
+ *
  * The console issues every 4CC task through TPS25751::executeCommand() and
  * loads the patch bundle with TPS25751PatchLoader::loadPatchBundle().
  */
@@ -107,6 +110,12 @@ public:
      * Optional. Prints the event `! READY proto=1`. When MODE reads PTCH and a
      * patch bundle is set, loads the bundle and reports the outcome as a
      * `! PATCH` event. Call it once after Wire and the stream are started.
+     *
+     * begin() and `RESTART` are the only places that load the bundle. `HELLO`
+     * reads only: for a controller in PTCH mode it reports `mode=PTCH` and
+     * `patch_pending=1`. begin() does not read the stream, so a request sent
+     * while it runs is answered afterwards; with the wait for PTCH readiness
+     * and the patch load that can be several seconds after a reset.
      */
     void begin();
 
@@ -114,7 +123,8 @@ public:
      * @brief Read pending input and answer every complete request line
      *
      * Returns at once when the stream has no input. A line longer than
-     * TPS25751BenchProtocol::kMaxLineLength is answered with `ERR TOOLONG`.
+     * TPS25751BenchProtocol::kMaxLineLength is answered with `ERR TOOLONG`,
+     * and a line that contains a NUL byte with `ERR SYNTAX`.
      */
     void poll();
 
@@ -164,6 +174,10 @@ private:
     /// reads PTCH. Returns true when MODE ends as APP.
     bool ensureAppMode(PatchReport &report);
 
+    /// Refuse the line in the buffer without parsing it as a request: a
+    /// reply when the line starts with a valid id, otherwise an event.
+    void rejectLine(TPS25751BenchError error, const __FlashStringHelper *text);
+
     /// Print `ok` and finish the request.
     void finishOk(const char *id);
 
@@ -185,5 +199,6 @@ private:
     char _line[TPS25751BenchProtocol::kMaxLineLength + 1] = {0};
     size_t _lineLength = 0;
     bool _lineOverflow = false;
+    bool _lineHasNul = false;
     TPS25751BenchError _lastError = TPS25751BenchError::None;
 };

@@ -29,7 +29,7 @@
  *
  * | Command | Reply |
  * |---|---|
- * | `HELLO` | Protocol and library version, build date, uptime, MODE, VERSION, role, patch bundle |
+ * | `HELLO` | Protocol and library version, build date, uptime, MODE, VERSION, role, patch bundle; reads only |
  * | `RESTART warm` or `cold` | Runs `Gaid` or `GAID`, waits for the controller, reloads the patch |
  * | `RD <addr>` | `reg=0x34 len=6 data=d64106009800`: the length byte as read, then the data |
  * | `DEC <addr>` | The `RD` line, then the register's debugPrint() output |

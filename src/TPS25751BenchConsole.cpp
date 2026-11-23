@@ -89,6 +89,8 @@ void TPS25751BenchConsole::begin()
     _io.print(F("! READY proto="));
     _io.println(static_cast<unsigned int>(Protocol::kVersion));
 
+    // begin() and RESTART are the only places that load the patch bundle.
+    // HELLO only reports that one is pending.
     PatchReport report;
     ensureAppMode(report);
     if (report.attempted) {
@@ -112,6 +114,9 @@ void TPS25751BenchConsole::poll()
         if (c < 0) break;
         if (c == '\r') continue;
         if (c != '\n') {
+            // A NUL would end the C string early and hide the rest of the line
+            // from the parser, so the whole line is refused.
+            if (c == '\0') _lineHasNul = true;
             if (_lineLength < Protocol::kMaxLineLength) {
                 _line[_lineLength++] = static_cast<char>(c);
             } else {
@@ -122,21 +127,37 @@ void TPS25751BenchConsole::poll()
 
         _line[_lineLength] = '\0';
         if (_lineOverflow) {
-            // The id sits at the start of the line, so it survives the cut.
-            TPS25751BenchRequest request;
-            Protocol::parse(_line, request);
-            if (request.id[0] != '\0') {
-                Protocol::writeError(_io, request.id, TPS25751BenchError::TooLong,
-                                     F("request line is too long"));
-            } else {
-                Protocol::writeEvent(_io, F("ERR TOOLONG request line is too long"));
-            }
+            rejectLine(TPS25751BenchError::TooLong, F("request line is too long"));
+        } else if (_lineHasNul) {
+            rejectLine(TPS25751BenchError::Syntax, F("request line contains a NUL byte"));
         } else {
             handleLine(_line);
         }
         _lineLength = 0;
         _lineOverflow = false;
+        _lineHasNul = false;
     }
+}
+
+void TPS25751BenchConsole::rejectLine(TPS25751BenchError error, const __FlashStringHelper *text)
+{
+    const uint32_t startedMs = millis();
+    _lastError = TPS25751BenchError::None;
+
+    // The id sits at the start of the line, so it survives a cut or a NUL
+    // further on. With an id the refusal is a reply; without one, an event.
+    TPS25751BenchRequest request;
+    Protocol::parse(_line, request);
+    if (request.id[0] != '\0') {
+        fail(request.id, error, text);
+    } else {
+        _lastError = error;
+        _io.print(F("! ERR "));
+        _io.print(Protocol::errorCode(error));
+        _io.print(' ');
+        _io.println(text);
+    }
+    logRequest(_line, startedMs);
 }
 
 void TPS25751BenchConsole::handleLine(const char *line)
@@ -322,8 +343,49 @@ void TPS25751BenchConsole::handleHello(const TPS25751BenchRequest &request)
 {
     const char *id = request.id;
 
-    // The first line needs no I2C, so a host probing for the console gets it
-    // at once, before a possible patch reload.
+    // HELLO only reads. Every read finishes before the first line starts: the
+    // library can report an I2C error on its debug stream, and if that stream
+    // is this one, the report must land between reply lines, never inside one.
+    const unsigned long uptimeMs = millis();
+
+    char mode[5];
+    readMode(mode);
+
+    // VERSION (0x0F) is a 32-bit little-endian word (SLVUCR8B p.18).
+    RawRegister raw;
+    uint8_t version[4] = {0, 0, 0, 0};
+    const bool haveVersion =
+        readRaw(static_cast<uint8_t>(Address::VERSION), raw) && raw.dataLength == sizeof(version);
+    if (haveVersion) {
+        for (size_t i = 0; i < sizeof(version); ++i) version[i] = raw.data[sizeof(version) - 1 - i];
+    }
+
+    // STATUS (0x1A): Plug Present is bit 0, Port Role bit 5 (SLVUCR8B p.25).
+    bool source = false;
+    bool plug = false;
+    const bool haveStatus = readRaw(static_cast<uint8_t>(Address::STATUS), raw);
+    if (haveStatus) {
+        const TPS25751Status status(raw.data, raw.dataLength);
+        source = status.portRole() == PORT_SOURCE;
+        plug = status.plugPresent();
+    }
+
+    // BOOT_FLAGS (0x2D) Patch Config Source, bits 31:29 (SLVUCR8B p.33).
+    const __FlashStringHelper *patchSource = F("?");
+    if (readRaw(static_cast<uint8_t>(Address::BOOT_FLAGS), raw)) {
+        const TPS25751BootFlags bootFlags(raw.data, raw.dataLength);
+        switch (bootFlags.patchConfigSource()) {
+            case PatchConfigSource::NoneLoaded:   patchSource = F("none"); break;
+            case PatchConfigSource::EEPROMLoaded: patchSource = F("eeprom"); break;
+            case PatchConfigSource::I2CLoaded:    patchSource = F("i2c"); break;
+            default:                              patchSource = F("other"); break;
+        }
+    }
+
+    // A controller in PTCH mode with a bundle at hand is waiting for RESTART
+    // (or a reset of the firmware, which runs begin()) to load it.
+    const bool patchPending = hasPatchBundle() && strcmp(mode, "PTCH") == 0;
+
     Protocol::beginLine(_io, id);
     _io.print(F("proto="));
     _io.print(static_cast<unsigned int>(Protocol::kVersion));
@@ -332,58 +394,33 @@ void TPS25751BenchConsole::handleHello(const TPS25751BenchRequest &request)
     _io.print(F(" build="));
     printToken(_io, __DATE__ " " __TIME__);
     _io.print(F(" uptime_ms="));
-    _io.println(static_cast<unsigned long>(millis()));
-
-    PatchReport report;
-    ensureAppMode(report);
-    if (report.attempted) {
-        Protocol::beginLine(_io, id);
-        _io.print(F("patch_reload="));
-        _io.println(TPS25751PatchLoader::toString(report.status));
-    }
+    _io.println(uptimeMs);
 
     Protocol::beginLine(_io, id);
     _io.print(F("mode="));
-    _io.print(report.mode);
-
-    // VERSION (0x0F) is a 32-bit little-endian word (SLVUCR8B p.18).
+    _io.print(mode);
     _io.print(F(" version="));
-    RawRegister raw;
-    if (readRaw(static_cast<uint8_t>(Address::VERSION), raw) && raw.dataLength == 4) {
-        const uint8_t word[4] = {raw.data[3], raw.data[2], raw.data[1], raw.data[0]};
-        Protocol::printHex(_io, word, sizeof(word));
+    if (haveVersion) {
+        Protocol::printHex(_io, version, sizeof(version));
     } else {
         _io.print('?');
     }
-
-    // STATUS (0x1A): Plug Present is bit 0, Port Role bit 5 (SLVUCR8B p.25).
-    if (readRaw(static_cast<uint8_t>(Address::STATUS), raw)) {
-        const TPS25751Status status(raw.data, raw.dataLength);
+    if (haveStatus) {
         _io.print(F(" role="));
-        _io.print(status.portRole() == PORT_SOURCE ? F("source") : F("sink"));
+        _io.print(source ? F("source") : F("sink"));
         _io.print(F(" plug="));
-        _io.print(status.plugPresent() ? '1' : '0');
+        _io.println(plug ? '1' : '0');
     } else {
-        _io.print(F(" role=? plug=?"));
+        _io.println(F(" role=? plug=?"));
     }
-    _io.println();
 
     Protocol::beginLine(_io, id);
     _io.print(F("patch_bundle="));
     _io.print(hasPatchBundle() ? '1' : '0');
-    // BOOT_FLAGS (0x2D) Patch Config Source, bits 31:29 (SLVUCR8B p.33).
+    _io.print(F(" patch_pending="));
+    _io.print(patchPending ? '1' : '0');
     _io.print(F(" patch_source="));
-    if (readRaw(static_cast<uint8_t>(Address::BOOT_FLAGS), raw)) {
-        const TPS25751BootFlags bootFlags(raw.data, raw.dataLength);
-        switch (bootFlags.patchConfigSource()) {
-            case PatchConfigSource::NoneLoaded:   _io.print(F("none")); break;
-            case PatchConfigSource::EEPROMLoaded: _io.print(F("eeprom")); break;
-            case PatchConfigSource::I2CLoaded:    _io.print(F("i2c")); break;
-            default:                              _io.print(F("other")); break;
-        }
-    } else {
-        _io.print('?');
-    }
+    _io.print(patchSource);
     _io.print(F(" swaps="));
     _io.println(TPS25751_BENCH_SWAPS_ALLOWED ? '1' : '0');
 
@@ -479,9 +516,13 @@ void TPS25751BenchConsole::handleSnapshot(const TPS25751BenchRequest &request)
     RawRegister event;
 
     for (uint8_t address : Protocol::kSnapshotRegisters) {
+        // Read first, then print the whole line: an I2C error the library
+        // reports on its debug stream must not land inside a reply line.
         RawRegister raw;
+        const bool answered = readRaw(address, raw);
+
         Protocol::beginLine(_io, id);
-        if (readRaw(address, raw)) {
+        if (answered) {
             Protocol::printRegister(_io, address, raw.lengthByte, raw.data, raw.dataLength);
             if (static_cast<Address>(address) == Address::INT_EVENT1) {
                 event = raw;
@@ -498,16 +539,16 @@ void TPS25751BenchConsole::handleSnapshot(const TPS25751BenchRequest &request)
 
     // Clear exactly the INT_EVENT1 bits this snapshot reported: a 1 written to
     // INT_CLEAR1 clears that event (SLVUCR8B p.23). An event that arrives
-    // after the read stays set for the next snapshot.
+    // after the read stays set for the next snapshot. The write comes before
+    // its line, for the same reason as the reads.
+    const __FlashStringHelper *cleared = F("skipped");
+    if (haveEvent && event.dataLength == TPS25751Registers::Registers::INT_CLEAR1.size) {
+        cleared = _pd.writeRegister(Address::INT_CLEAR1, event.data, event.dataLength) ? F("ok")
+                                                                                       : F("failed");
+    }
     Protocol::beginLine(_io, id);
     _io.print(F("int_clear="));
-    if (!haveEvent || event.dataLength != TPS25751Registers::Registers::INT_CLEAR1.size) {
-        _io.println(F("skipped"));
-    } else if (_pd.writeRegister(Address::INT_CLEAR1, event.data, event.dataLength)) {
-        _io.println(F("ok"));
-    } else {
-        _io.println(F("failed"));
-    }
+    _io.println(cleared);
 
     if (failed != 0) {
         beginFail(id, TPS25751BenchError::I2C);
@@ -687,14 +728,21 @@ void TPS25751BenchConsole::handleRestart(const char *id, bool cold)
     const __FlashStringHelper *evidence = F("none");
     const uint32_t start = millis();
 
+    // executeCommand() reports an I2C error both when the COMMAND write was not
+    // acknowledged and when the write went through and the controller, already
+    // rebooting, did not answer the poll. The first poll below tells them
+    // apart, so the first case does not wait out the whole timeout.
+    bool issueInDoubt = (issued.status == TPS25751TaskStatus::I2CError);
+
     while (millis() - start < kRestartTimeoutMs) {
-        delay(kRestartPollMs);
+        if (!issueInDoubt) delay(kRestartPollMs);
 
         uint8_t command[kCommandSize];
         uint8_t length = 0;
         if (!_pd.readRegisterRaw(static_cast<uint8_t>(Address::COMMAND), command,
                                  sizeof(command), length) ||
             length != kCommandSize) {
+            issueInDoubt = false;  // a silent controller is what a reboot looks like
             if (!sawNak) {
                 sawNak = true;
                 Protocol::beginLine(_io, id);
@@ -705,14 +753,33 @@ void TPS25751BenchConsole::handleRestart(const char *id, bool cold)
             continue;
         }
         if (memcmp(command, task.code, sizeof(command)) == 0) {
+            issueInDoubt = false;
             sawPending = true;  // still in Type-C Error Recovery
             continue;
         }
-        if (memcmp(command, TPS25751_CMD_CLEAR.code, sizeof(command)) != 0) continue;
+        if (memcmp(command, TPS25751_CMD_REJECTED.code, sizeof(command)) == 0) {
+            // The controller took longer than the issue window to refuse.
+            fail(id, TPS25751BenchError::Rejected,
+                 F("the controller answered !CMD while the restart was pending"));
+            return;
+        }
+        if (memcmp(command, TPS25751_CMD_CLEAR.code, sizeof(command)) != 0) {
+            issueInDoubt = false;
+            continue;
+        }
 
-        const bool markerGone = readRaw(static_cast<uint8_t>(Address::DATA), raw) &&
-                                raw.dataLength >= sizeof(kRestartMarker) &&
-                                memcmp(raw.data, kRestartMarker, sizeof(kRestartMarker)) != 0;
+        const bool dataRead = readRaw(static_cast<uint8_t>(Address::DATA), raw) &&
+                              raw.dataLength >= sizeof(kRestartMarker);
+        const bool markerGone =
+            dataRead && memcmp(raw.data, kRestartMarker, sizeof(kRestartMarker)) != 0;
+        if (issueInDoubt && dataRead && !markerGone) {
+            // The controller answers, holds no task, and DATA still has the
+            // marker: the COMMAND write is what failed.
+            fail(id, TPS25751BenchError::I2C,
+                 F("the COMMAND write failed and the task was not issued"));
+            return;
+        }
+        issueInDoubt = false;
         if (markerGone) {
             evidence = F("data_cleared");
         } else if (sawNak) {

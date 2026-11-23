@@ -16,6 +16,7 @@
 #include "FakeBenchTarget.h"
 #include "TPS25751.h"
 #include "TPS25751BenchConsole.h"
+#include "TPS25751Debug.h"
 #include "TPS25751PatchLoader.h"
 #include "fixtures/PdCapture_2026_11_23_apple_140w_tps25751.h"
 
@@ -114,6 +115,27 @@ size_t countContaining(const Lines &lines, const char *text)
     return n;
 }
 
+// True if the line is one complete reply line of request `id`: "OK", an "ERR"
+// line, or nothing but key=value tokens. Debug text spliced into a reply line
+// fails this, because it brings a '[' and words without '='.
+bool isWholeReplyLine(const std::string &line, const char *id)
+{
+    const std::string prefix = std::string("@") + id + " ";
+    if (line.compare(0, prefix.size(), prefix) != 0) return false;
+    const std::string text = line.substr(prefix.size());
+    if (text.find('[') != std::string::npos) return false;
+    if (text == "OK" || text.compare(0, 4, "ERR ") == 0) return true;
+    size_t start = 0;
+    while (start < text.size()) {
+        size_t end = text.find(' ', start);
+        if (end == std::string::npos) end = text.size();
+        const std::string token = text.substr(start, end - start);
+        if (token.find('=') == std::string::npos || token[0] == '=') return false;
+        start = end + 1;
+    }
+    return !text.empty();
+}
+
 std::string hexOf(const std::vector<uint8_t> &bytes)
 {
     static const char digits[] = "0123456789abcdef";
@@ -165,7 +187,12 @@ void setUp()
     setMillis(kStartMillis);
     for (size_t i = 0; i < sizeof(patchImage); ++i) patchImage[i] = static_cast<uint8_t>(i * 7 + 3);
 }
-void tearDown() {}
+void tearDown()
+{
+    // A test may point the library's debug output at its own stream.
+    TPS25751::setDebugLevel(DEBUG_LEVEL_NONE);
+    TPS25751::setDebugStream(&Serial);
+}
 
 // ---------------------------------------------------------------------------
 // HELLO
@@ -190,7 +217,8 @@ void test_hello_reports_the_console_and_the_controller()
         if (c == ' ') ++spaces;
     TEST_ASSERT_EQUAL(4, spaces);
     TEST_ASSERT_EQUAL_STRING("@1 mode=APP version=f8091166 role=sink plug=1", lines[1].c_str());
-    TEST_ASSERT_EQUAL_STRING("@1 patch_bundle=0 patch_source=eeprom swaps=0", lines[2].c_str());
+    TEST_ASSERT_EQUAL_STRING("@1 patch_bundle=0 patch_pending=0 patch_source=eeprom swaps=0",
+                             lines[2].c_str());
     TEST_ASSERT_EQUAL_STRING("@1 OK", lines[3].c_str());
 }
 
@@ -209,14 +237,14 @@ void test_hello_reports_the_patch_source_and_the_bundle()
     Bench b;
     b.console.setPatchBundle(patchImage, sizeof(patchImage));
     b.fake.setRegister(0x2D, kBootFlagsI2c, sizeof(kBootFlagsI2c));
-    TEST_ASSERT_TRUE(hasLine(b.run("@1 HELLO"), "@1 patch_bundle=1 patch_source=i2c swaps=0"));
+    TEST_ASSERT_TRUE(hasLine(b.run("@1 HELLO"), "@1 patch_bundle=1 patch_pending=0 patch_source=i2c swaps=0"));
 
     b.console.setPatchBundle(nullptr, 0);
     b.fake.setRegister(0x2D, kBootFlagsNone, sizeof(kBootFlagsNone));
-    TEST_ASSERT_TRUE(hasLine(b.run("@2 HELLO"), "@2 patch_bundle=0 patch_source=none swaps=0"));
+    TEST_ASSERT_TRUE(hasLine(b.run("@2 HELLO"), "@2 patch_bundle=0 patch_pending=0 patch_source=none swaps=0"));
 
     b.fake.setRegister(0x2D, kBootFlagsReserved, sizeof(kBootFlagsReserved));
-    TEST_ASSERT_TRUE(hasLine(b.run("@3 HELLO"), "@3 patch_bundle=0 patch_source=other swaps=0"));
+    TEST_ASSERT_TRUE(hasLine(b.run("@3 HELLO"), "@3 patch_bundle=0 patch_pending=0 patch_source=other swaps=0"));
 }
 
 void test_hello_answers_when_the_controller_does_not()
@@ -226,7 +254,7 @@ void test_hello_answers_when_the_controller_does_not()
     b.fake.silent = true;
     const Lines lines = b.run("@1 HELLO");
     TEST_ASSERT_TRUE(hasLine(lines, "@1 mode=? version=? role=? plug=?"));
-    TEST_ASSERT_TRUE(hasLine(lines, "@1 patch_bundle=0 patch_source=? swaps=0"));
+    TEST_ASSERT_TRUE(hasLine(lines, "@1 patch_bundle=0 patch_pending=0 patch_source=? swaps=0"));
     TEST_ASSERT_EQUAL_STRING("@1 OK", lines.back().c_str());
 }
 
@@ -243,27 +271,29 @@ void test_hello_reports_a_mode_word_it_cannot_print()
     TEST_ASSERT_TRUE(hasLineStarting(b.run("@2 HELLO"), "@2 mode=? "));
 }
 
-void test_hello_reloads_the_patch_when_mode_reads_ptch()
+void test_hello_in_ptch_mode_reads_only()
 {
+    // HELLO never loads the patch, even with a bundle at hand and the
+    // controller asking for one. It reports the mode and that a load is pending.
     Bench b;
     b.console.setPatchBundle(patchImage, sizeof(patchImage));
     b.fake.setMode("PTCH");
     setReadyForPatch(b.fake);
-    b.fake.taskHandler = [&b](const std::string &code, std::vector<uint8_t> &data) {
-        return acceptPatch(b.fake, code, data);
-    };
 
     const Lines lines = b.run("@1 HELLO");
-    TEST_ASSERT_TRUE(hasLine(lines, "@1 patch_reload=Success"));
-    TEST_ASSERT_TRUE(hasLine(lines, "@1 mode=APP version=f8091166 role=sink plug=1"));
-    TEST_ASSERT_EQUAL_STRING("@1 OK", lines.back().c_str());
+    TEST_ASSERT_EQUAL(4, lines.size());
+    TEST_ASSERT_EQUAL_STRING("@1 mode=PTCH version=f8091166 role=sink plug=1", lines[1].c_str());
+    TEST_ASSERT_EQUAL_STRING("@1 patch_bundle=1 patch_pending=1 patch_source=eeprom swaps=0",
+                             lines[2].c_str());
+    TEST_ASSERT_EQUAL_STRING("@1 OK", lines[3].c_str());
 
-    // The whole image went to the burst port, and nothing else did.
-    TEST_ASSERT_EQUAL(sizeof(patchImage), b.fake.pbmBytes.size());
-    TEST_ASSERT_EQUAL_HEX8_ARRAY(patchImage, b.fake.pbmBytes.data(), sizeof(patchImage));
-    TEST_ASSERT_EQUAL(2, b.fake.tasks.size());
-    TEST_ASSERT_EQUAL_STRING("PBMs", b.fake.tasks[0].c_str());
-    TEST_ASSERT_EQUAL_STRING("PBMc", b.fake.tasks[1].c_str());
+    // No Patch Burst Mode traffic, no task, no write of any kind, and no waiting.
+    TEST_ASSERT_EQUAL(0, b.fake.pbmBytes.size());
+    TEST_ASSERT_EQUAL(0, b.fake.tasks.size());
+    TEST_ASSERT_EQUAL(0, b.fake.writes.size());
+    TEST_ASSERT_EQUAL(kStartMillis, millis());
+    // Four reads: MODE, VERSION, STATUS, BOOT_FLAGS.
+    TEST_ASSERT_EQUAL(4, b.fake.reads.size());
 }
 
 void test_hello_reports_ptch_without_a_bundle()
@@ -272,61 +302,11 @@ void test_hello_reports_ptch_without_a_bundle()
     b.fake.setMode("PTCH");
     setReadyForPatch(b.fake);
     const Lines lines = b.run("@1 HELLO");
-    TEST_ASSERT_FALSE(hasLineStarting(lines, "@1 patch_reload="));
     TEST_ASSERT_TRUE(hasLineStarting(lines, "@1 mode=PTCH "));
+    // Nothing is pending without a bundle to load.
+    TEST_ASSERT_TRUE(hasLine(lines, "@1 patch_bundle=0 patch_pending=0 patch_source=eeprom swaps=0"));
     TEST_ASSERT_EQUAL_STRING("@1 OK", lines.back().c_str());
     TEST_ASSERT_EQUAL(0, b.fake.tasks.size());
-}
-
-void test_hello_reports_a_failed_reload()
-{
-    // PatchStartStatus 0x04 is a bad bundle size (SLVAFV8A Table 4-2).
-    Bench b;
-    b.console.setPatchBundle(patchImage, sizeof(patchImage));
-    b.fake.setMode("PTCH");
-    setReadyForPatch(b.fake);
-    b.fake.taskHandler = [](const std::string &, std::vector<uint8_t> &data) {
-        data[0] = 0x04;
-        return Verdict::Complete;
-    };
-    const Lines lines = b.run("@1 HELLO");
-    TEST_ASSERT_TRUE(hasLine(lines, "@1 patch_reload=BadBundleSize"));
-    TEST_ASSERT_TRUE(hasLineStarting(lines, "@1 mode=PTCH "));
-    TEST_ASSERT_EQUAL(0, b.fake.pbmBytes.size());
-}
-
-void test_hello_waits_for_a_controller_that_boots_from_eeprom()
-{
-    // BOOT, then PTCH without ReadyForPatch, then APP: the controller loads its
-    // own configuration, so the console must not start a patch load.
-    Bench b;
-    b.console.setPatchBundle(patchImage, sizeof(patchImage));
-    b.fake.setMode("BOOT");
-    b.fake.schedule(kStartMillis + 200, [](FakeBenchTarget &f) { f.setMode("PTCH"); });
-    b.fake.schedule(kStartMillis + 600, [](FakeBenchTarget &f) { f.setMode("APP "); });
-
-    const Lines lines = b.run("@1 HELLO");
-    TEST_ASSERT_FALSE(hasLineStarting(lines, "@1 patch_reload="));
-    TEST_ASSERT_TRUE(hasLineStarting(lines, "@1 mode=APP "));
-    TEST_ASSERT_EQUAL(0, b.fake.tasks.size());
-    TEST_ASSERT_TRUE(millis() >= kStartMillis + 600);
-}
-
-void test_hello_leaves_a_ptch_without_ready_for_patch_to_the_loader()
-{
-    // PTCH without ReadyForPatch: after kPatchReadyTimeoutMs the console hands
-    // over to the patch loader, which polls ReadyForPatch for its own
-    // PBM_READY_WAIT_CAP_MS and sends nothing without it.
-    Bench b;
-    b.console.setPatchBundle(patchImage, sizeof(patchImage));
-    b.fake.setMode("PTCH");
-    const Lines lines = b.run("@1 HELLO");
-    TEST_ASSERT_TRUE(hasLine(lines, "@1 patch_reload=CommandTimeout"));
-    TEST_ASSERT_TRUE(millis() >= kStartMillis + TPS25751BenchConsole::kPatchReadyTimeoutMs +
-                                     PBM_READY_WAIT_CAP_MS);
-    TEST_ASSERT_EQUAL(0, b.fake.tasks.size());
-    TEST_ASSERT_EQUAL(0, b.fake.writes.size());
-    TEST_ASSERT_EQUAL(0, b.fake.pbmBytes.size());
 }
 
 // ---------------------------------------------------------------------------
@@ -920,7 +900,9 @@ void test_restart_of_a_controller_that_reboots_at_once()
 
     const Lines lines = b.run("@7 RESTART warm");
     TEST_ASSERT_EQUAL_STRING("@7 step=issue task=Gaid status=i2c_error t_ms=5000", lines[0].c_str());
-    TEST_ASSERT_EQUAL_STRING("@7 step=nak t_ms=5020", lines[1].c_str());
+    // The console probes at once after the failed poll, so the quiet
+    // controller is noticed without a delay.
+    TEST_ASSERT_EQUAL_STRING("@7 step=nak t_ms=5000", lines[1].c_str());
     TEST_ASSERT_EQUAL_STRING("@7 step=back evidence=data_cleared t_ms=5400", lines[2].c_str());
     TEST_ASSERT_EQUAL_STRING("@7 OK", lines.back().c_str());
 }
@@ -1093,12 +1075,12 @@ void test_restart_fails_when_the_controller_stays_silent()
 
 void test_restart_keeps_waiting_while_command_holds_another_value()
 {
-    // COMMAND reads "!CMD" for a while after the restart begins; the console
-    // waits for it to clear.
+    // COMMAND reads as some other code for a while after the restart begins;
+    // the console waits for it to clear.
     Bench b;
     b.fake.taskHandler = [&b](const std::string &, std::vector<uint8_t> &) {
         b.fake.schedule(millis() + 500, [](FakeBenchTarget &f) {
-            f.registers[FakeBenchTarget::kCommand] = {'!', 'C', 'M', 'D'};
+            f.registers[FakeBenchTarget::kCommand] = {'B', 'O', 'O', 'T'};
         });
         b.fake.schedule(millis() + 900, [](FakeBenchTarget &f) {
             f.registers[FakeBenchTarget::kCommand] = std::vector<uint8_t>(4, 0);
@@ -1108,6 +1090,82 @@ void test_restart_keeps_waiting_while_command_holds_another_value()
     };
     const Lines lines = b.run("@7 RESTART warm");
     TEST_ASSERT_TRUE(hasLine(lines, "@7 step=back evidence=data_cleared t_ms=5905"));
+}
+
+void test_restart_fails_fast_when_the_command_write_fails()
+{
+    // The COMMAND write is not acknowledged. The controller still answers,
+    // holds no task, and DATA keeps the marker, so the console reports the
+    // failed write at once instead of waiting out the restart timeout.
+    Bench b;
+    b.fake.failWrite[FakeBenchTarget::kCommand] = true;
+
+    const Lines lines = b.run("@7 RESTART warm");
+    TEST_ASSERT_EQUAL(2, lines.size());
+    TEST_ASSERT_EQUAL_STRING("@7 step=issue task=Gaid status=i2c_error t_ms=5000", lines[0].c_str());
+    TEST_ASSERT_EQUAL_STRING("@7 ERR I2C the COMMAND write failed and the task was not issued",
+                             lines[1].c_str());
+    TEST_ASSERT_EQUAL(kStartMillis, millis());
+    TEST_ASSERT_EQUAL(0, b.fake.tasks.size());
+}
+
+void test_restart_fails_fast_on_a_late_rejection()
+{
+    // The controller refuses the task only after the 100 ms issue window.
+    Bench b;
+    b.fake.taskHandler = [&b](const std::string &, std::vector<uint8_t> &) {
+        b.fake.schedule(millis() + 500, [](FakeBenchTarget &f) {
+            f.registers[FakeBenchTarget::kCommand] = {'!', 'C', 'M', 'D'};
+        });
+        return Verdict::Pending;
+    };
+    const Lines lines = b.run("@7 RESTART warm");
+    TEST_ASSERT_EQUAL(2, lines.size());
+    TEST_ASSERT_EQUAL_STRING("@7 step=issue task=Gaid status=timeout t_ms=5105", lines[0].c_str());
+    TEST_ASSERT_EQUAL_STRING(
+        "@7 ERR REJECTED the controller answered !CMD while the restart was pending",
+        lines[1].c_str());
+    // It did not wait for the 10 s restart timeout.
+    TEST_ASSERT_TRUE(millis() - kStartMillis < 600);
+}
+
+void test_restart_survives_one_failed_poll_after_the_write()
+{
+    // The write went through and one poll of COMMAND failed. COMMAND then reads
+    // as the task code, so the task was issued and the restart proceeds.
+    Bench b;
+    b.fake.taskHandler = [&b](const std::string &, std::vector<uint8_t> &) {
+        scriptRestart(b.fake, "APP ");
+        return Verdict::Pending;
+    };
+    int commandReads = 0;
+    b.fake.beforeRead = [&commandReads](FakeBenchTarget &f, uint8_t reg, size_t) {
+        if (reg != FakeBenchTarget::kCommand) return;
+        if (++commandReads == 1) {
+            f.failRead[FakeBenchTarget::kCommand] = true;
+        } else {
+            f.failRead.erase(FakeBenchTarget::kCommand);
+        }
+    };
+
+    const Lines lines = b.run("@7 RESTART warm");
+    TEST_ASSERT_EQUAL_STRING("@7 step=issue task=Gaid status=i2c_error t_ms=5000", lines[0].c_str());
+    TEST_ASSERT_TRUE(hasLine(lines, "@7 step=back evidence=data_cleared t_ms=6300"));
+    TEST_ASSERT_EQUAL_STRING("@7 OK", lines.back().c_str());
+}
+
+void test_restart_treats_an_unreadable_data_register_as_no_evidence()
+{
+    // COMMAND reads clear after an I2C error at issue, and DATA cannot be read:
+    // nothing shows a restart and nothing shows a failed write, so the console
+    // waits, and reports the timeout.
+    Bench b;
+    b.fake.failWrite[FakeBenchTarget::kCommand] = true;
+    b.fake.beforeRead = [](FakeBenchTarget &f, uint8_t reg, size_t) {
+        if (reg == FakeBenchTarget::kCommand) f.failRead[FakeBenchTarget::kData] = true;
+    };
+    const Lines lines = b.run("@7 RESTART warm");
+    TEST_ASSERT_EQUAL_STRING("@7 ERR TIMEOUT no restart observed within 10000 ms", lines.back().c_str());
 }
 
 void test_restart_into_ptch_without_a_bundle()
@@ -1241,6 +1299,120 @@ void test_poll_reports_a_long_line_without_an_id_as_an_event()
     TEST_ASSERT_EQUAL_STRING("! ERR TOOLONG request line is too long\n", b.io.take().c_str());
 }
 
+void test_poll_rejects_a_line_with_a_nul_byte()
+{
+    // A NUL would end the C string early: "RD 0x34" would run and the rest of
+    // the line would vanish. The whole line is refused instead.
+    Bench b;
+    b.io.feed(std::string("@1 RD 0x34\0 trailing\n@2 RD 0x03\n", 32));
+    b.console.poll();
+    const Lines lines = b.io.takeLines();
+    TEST_ASSERT_EQUAL(3, lines.size());
+    TEST_ASSERT_EQUAL_STRING("@1 ERR SYNTAX request line contains a NUL byte", lines[0].c_str());
+    // The next line is handled normally, and only it reached the controller.
+    TEST_ASSERT_EQUAL_STRING("@2 reg=0x03 len=4 data=41505020", lines[1].c_str());
+    TEST_ASSERT_EQUAL(1, b.fake.reads.size());
+
+    // A NUL in front of the id leaves no id to answer, so it is an event.
+    b.io.feed(std::string("\0@3 RD 0x03\n", 12));
+    b.console.poll();
+    TEST_ASSERT_EQUAL_STRING("! ERR SYNTAX request line contains a NUL byte\n", b.io.take().c_str());
+    TEST_ASSERT_EQUAL(1, b.fake.reads.size());
+}
+
+void test_refused_lines_reach_the_log_stream()
+{
+    // A line that is too long or holds a NUL is logged like any other request.
+    Bench b;
+    FakeStream log;
+    b.console.setLogStream(&log);
+
+    std::string line = "@9 CMD GPPI ";
+    line += std::string(TPS25751BenchProtocol::kMaxLineLength, '0');
+    b.io.feed(line + "\n");
+    b.console.poll();
+    std::string logged = log.take();
+    TEST_ASSERT_TRUE(logged.compare(0, 20, "[bench] @9 CMD GPPI ") == 0);
+    const std::string tooLong = " -> ERR TOOLONG (0 ms)\n";
+    TEST_ASSERT_TRUE(logged.size() > tooLong.size() &&
+                     logged.compare(logged.size() - tooLong.size(), tooLong.size(), tooLong) == 0);
+
+    b.io.feed(std::string(TPS25751BenchProtocol::kMaxLineLength + 10, 'x') + "\n");
+    b.console.poll();
+    logged = log.take();
+    TEST_ASSERT_TRUE(logged.compare(logged.size() - tooLong.size(), tooLong.size(), tooLong) == 0);
+
+    b.io.feed(std::string("@1 RD 0x34\0\n", 12));
+    b.console.poll();
+    TEST_ASSERT_EQUAL_STRING("[bench] @1 RD 0x34 -> ERR SYNTAX (0 ms)\n", log.take().c_str());
+
+    // A refusal does not leak into the next request's summary.
+    b.run("@2 RD 0x03");
+    TEST_ASSERT_EQUAL_STRING("[bench] @2 RD 0x03 -> OK (0 ms)\n", log.take().c_str());
+}
+
+void test_debug_output_on_the_console_stream_never_splits_a_reply_line()
+{
+    // Firmware may send the library's debug output to the console's own stream.
+    // An I2C error report must then land between reply lines, never inside one,
+    // so every reply line still parses.
+    Bench b;
+    TPS25751::setDebugStream(&b.io);
+    TPS25751::setDebugCategories(DEBUG_CAT_ALL);
+    TPS25751::setDebugLevel(DEBUG_LEVEL_ERROR);
+    b.fake.failRead[0x30] = true;
+    b.fake.failRead[0x6A] = true;
+    b.fake.failWrite[0x18] = true;
+
+    Lines lines = b.run("@4 SNAP");
+    size_t replies = 0;
+    size_t debug = 0;
+    for (const std::string &line : lines) {
+        if (line.compare(0, 1, "[") == 0) {
+            ++debug;
+            TEST_ASSERT_NOT_EQUAL(std::string::npos, line.find("ERROR I2C: "));
+        } else {
+            ++replies;
+            TEST_ASSERT_TRUE_MESSAGE(isWholeReplyLine(line, "4"), line.c_str());
+        }
+    }
+    TEST_ASSERT_EQUAL(1 + 17 + 1 + 1, replies);   // uptime, registers, int_clear, final
+    TEST_ASSERT_TRUE(debug >= 3);                 // two failed reads and the failed clear
+    TEST_ASSERT_TRUE(hasLine(lines, "@4 reg=0x30 error=I2C"));
+    TEST_ASSERT_TRUE(hasLine(lines, "@4 int_clear=failed"));
+
+    // HELLO with every one of its reads failing.
+    b.fake.failRead[0x03] = true;
+    b.fake.failRead[0x0F] = true;
+    b.fake.failRead[0x1A] = true;
+    b.fake.failRead[0x2D] = true;
+    lines = b.run("@5 HELLO");
+    replies = 0;
+    debug = 0;
+    for (const std::string &line : lines) {
+        if (line.compare(0, 1, "[") == 0) {
+            ++debug;
+        } else {
+            ++replies;
+            TEST_ASSERT_TRUE_MESSAGE(isWholeReplyLine(line, "5"), line.c_str());
+        }
+    }
+    TEST_ASSERT_EQUAL(4, replies);
+    TEST_ASSERT_EQUAL(4, debug);
+    TEST_ASSERT_TRUE(hasLine(lines, "@5 mode=? version=? role=? plug=?"));
+
+    // The other commands print after their reads as well.
+    b.fake.failRead[0x34] = true;
+    for (const char *request : {"@6 RD 0x34", "@6 DEC 0x34", "@6 WR 0x42 1a000800", "@6 RESTART cold"}) {
+        b.fake.failRead[0x42] = true;
+        for (const std::string &line : b.run(request)) {
+            if (line.compare(0, 1, "[") != 0) {
+                TEST_ASSERT_TRUE_MESSAGE(isWholeReplyLine(line, "6"), line.c_str());
+            }
+        }
+    }
+}
+
 void test_line_without_an_id_is_reported_as_an_event()
 {
     Bench b;
@@ -1301,6 +1473,57 @@ void test_begin_reports_ptch_without_a_bundle()
     TEST_ASSERT_EQUAL_STRING("! PATCH result=NoBundle mode=PTCH", lines[1].c_str());
 }
 
+void test_begin_reports_a_failed_patch_load()
+{
+    // PatchStartStatus 0x04 is a bad bundle size (SLVAFV8A Table 4-2).
+    Bench b;
+    b.console.setPatchBundle(patchImage, sizeof(patchImage));
+    b.fake.setMode("PTCH");
+    setReadyForPatch(b.fake);
+    b.fake.taskHandler = [](const std::string &, std::vector<uint8_t> &data) {
+        data[0] = 0x04;
+        return Verdict::Complete;
+    };
+    b.console.begin();
+    const Lines lines = b.io.takeLines();
+    TEST_ASSERT_EQUAL_STRING("! PATCH result=BadBundleSize mode=PTCH", lines[1].c_str());
+    TEST_ASSERT_EQUAL(0, b.fake.pbmBytes.size());
+}
+
+void test_begin_waits_for_a_controller_that_boots_from_eeprom()
+{
+    // BOOT, then PTCH without ReadyForPatch, then APP: the controller loads its
+    // own configuration, so the console must not start a patch load.
+    Bench b;
+    b.console.setPatchBundle(patchImage, sizeof(patchImage));
+    b.fake.setMode("BOOT");
+    b.fake.schedule(kStartMillis + 200, [](FakeBenchTarget &f) { f.setMode("PTCH"); });
+    b.fake.schedule(kStartMillis + 600, [](FakeBenchTarget &f) { f.setMode("APP "); });
+
+    b.console.begin();
+    TEST_ASSERT_EQUAL_STRING("! READY proto=1\n", b.io.take().c_str());
+    TEST_ASSERT_EQUAL(0, b.fake.tasks.size());
+    TEST_ASSERT_TRUE(millis() >= kStartMillis + 600);
+}
+
+void test_begin_leaves_a_ptch_without_ready_for_patch_to_the_loader()
+{
+    // PTCH without ReadyForPatch: after kPatchReadyTimeoutMs the console hands
+    // over to the patch loader, which polls ReadyForPatch for its own
+    // PBM_READY_WAIT_CAP_MS and sends nothing without it.
+    Bench b;
+    b.console.setPatchBundle(patchImage, sizeof(patchImage));
+    b.fake.setMode("PTCH");
+    b.console.begin();
+    const Lines lines = b.io.takeLines();
+    TEST_ASSERT_EQUAL_STRING("! PATCH result=CommandTimeout mode=PTCH", lines[1].c_str());
+    TEST_ASSERT_TRUE(millis() >= kStartMillis + TPS25751BenchConsole::kPatchReadyTimeoutMs +
+                                     PBM_READY_WAIT_CAP_MS);
+    TEST_ASSERT_EQUAL(0, b.fake.tasks.size());
+    TEST_ASSERT_EQUAL(0, b.fake.writes.size());
+    TEST_ASSERT_EQUAL(0, b.fake.pbmBytes.size());
+}
+
 void test_patch_bundle_can_be_given_to_the_constructor()
 {
     FakeStream io;
@@ -1354,11 +1577,8 @@ int main(int, char **)
     RUN_TEST(test_hello_reports_the_patch_source_and_the_bundle);
     RUN_TEST(test_hello_answers_when_the_controller_does_not);
     RUN_TEST(test_hello_reports_a_mode_word_it_cannot_print);
-    RUN_TEST(test_hello_reloads_the_patch_when_mode_reads_ptch);
+    RUN_TEST(test_hello_in_ptch_mode_reads_only);
     RUN_TEST(test_hello_reports_ptch_without_a_bundle);
-    RUN_TEST(test_hello_reports_a_failed_reload);
-    RUN_TEST(test_hello_waits_for_a_controller_that_boots_from_eeprom);
-    RUN_TEST(test_hello_leaves_a_ptch_without_ready_for_patch_to_the_loader);
 
     RUN_TEST(test_read_returns_the_length_byte_and_the_data);
     RUN_TEST(test_read_reports_a_length_byte_longer_than_the_library_expects);
@@ -1414,6 +1634,10 @@ int main(int, char **)
     RUN_TEST(test_restart_accepts_a_cleared_command_as_evidence);
     RUN_TEST(test_restart_fails_when_the_controller_stays_silent);
     RUN_TEST(test_restart_keeps_waiting_while_command_holds_another_value);
+    RUN_TEST(test_restart_fails_fast_when_the_command_write_fails);
+    RUN_TEST(test_restart_fails_fast_on_a_late_rejection);
+    RUN_TEST(test_restart_survives_one_failed_poll_after_the_write);
+    RUN_TEST(test_restart_treats_an_unreadable_data_register_as_no_evidence);
     RUN_TEST(test_restart_into_ptch_without_a_bundle);
     RUN_TEST(test_restart_reports_a_failed_patch_load);
     RUN_TEST(test_restart_reports_a_controller_stuck_in_boot);
@@ -1425,12 +1649,18 @@ int main(int, char **)
     RUN_TEST(test_poll_with_no_input_does_nothing);
     RUN_TEST(test_poll_rejects_a_line_that_is_too_long);
     RUN_TEST(test_poll_reports_a_long_line_without_an_id_as_an_event);
+    RUN_TEST(test_poll_rejects_a_line_with_a_nul_byte);
+    RUN_TEST(test_refused_lines_reach_the_log_stream);
+    RUN_TEST(test_debug_output_on_the_console_stream_never_splits_a_reply_line);
     RUN_TEST(test_line_without_an_id_is_reported_as_an_event);
     RUN_TEST(test_malformed_requests_with_an_id_get_an_error_reply);
     RUN_TEST(test_handle_line_ignores_null_and_blank);
     RUN_TEST(test_begin_announces_the_console);
     RUN_TEST(test_begin_loads_the_patch_and_reports_it);
     RUN_TEST(test_begin_reports_ptch_without_a_bundle);
+    RUN_TEST(test_begin_reports_a_failed_patch_load);
+    RUN_TEST(test_begin_waits_for_a_controller_that_boots_from_eeprom);
+    RUN_TEST(test_begin_leaves_a_ptch_without_ready_for_patch_to_the_loader);
     RUN_TEST(test_patch_bundle_can_be_given_to_the_constructor);
     RUN_TEST(test_log_stream_gets_one_line_per_request);
 

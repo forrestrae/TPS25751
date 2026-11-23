@@ -98,6 +98,8 @@ All four flash tasks make the controller ignore the I2Cc_IRQ pin until they comp
    `returnCode` meaningless. Documented by the TRM. Verified in hardware stage 1 on
    2026-11-22 for `FLrd` (data from byte 0) and for `FLvy` reporting 0x00 on a valid
    bundle. The `FLad` and `FLwd` codes and `FLvy` reporting 0x01 are not yet observed.
+   Stage 2 on 2026-11-23 observed return code 0x00 for three successful `FLad` calls
+   and three successful `FLwd` calls. No failure code of any task has been observed.
 3. `FLvy` is not a full verification. The TRM says it completes after the header is
    checked. Whether it also checks the bundle CRC is unknown, so the updater compares
    the written region with the image through `FLrd` before it writes the pointer.
@@ -113,7 +115,10 @@ All four flash tasks make the controller ignore the I2Cc_IRQ pin until they comp
    add 7 to 18 s. Stage 3 replaces the estimate with a measurement. Stage 1 measured
    `FLrd` at 17.7 ms per call (1984 calls in 35071 ms, default I2C clock), so the
    compare of a 14336-byte region takes about 15.8 s, and the 200 ms timeout has ample
-   margin. `FLwd` and `FLvy` times are still estimates.
+   margin. `FLwd` and `FLvy` times are still estimates. Stage 2 measured `FLad` and
+   `FLwd` at 17.7 to 17.8 ms per call, the same as `FLrd`, and no `FLwd` returned
+   busy. A 14336-byte update of 1365 tasks should therefore take about 24 s; stage 3
+   measures it.
 6. `GAID` never completes in the normal sense. The updater treats `Success`, `Timeout`,
    and `I2CError` from the executor as "reset issued", then polls MODE until it reads
    APP. The TRM says an APP-mode controller enters Type-C Error Recovery and restarts
@@ -126,8 +131,9 @@ All four flash tasks make the controller ignore the I2Cc_IRQ pin until they comp
    5-second spacing only for I2Cr and I2Cw; nothing on pages 81 and 82 applies it to the
    flash tasks.
 
-Still unknown, each with a hardware check: whether `FLwd` honors a 4-byte length
-exactly (stage 2), whether a zero pointer sets BOOT_STATUS Region Invalid (stage 3),
+Verified in stage 2 on 2026-11-23: `FLwd` honors a 4-byte length exactly.
+
+Still unknown, each with a hardware check: whether a zero pointer sets BOOT_STATUS Region Invalid (stage 3),
 and how long the controller takes to return to APP after `GAID` (stage 3).
 
 ### Notes from the Batch 1 review (2026-11-22)
@@ -586,7 +592,9 @@ receives `r` over serial, so a monitor attached late still captures a full dump.
 - Gate: hardware stages 2, 3, and 4.
 
 Status, 2026-11-23: implemented and reviewed clean, including the step 2 read-back and
-`p2`; stages 2 to 4 not yet run, and no EEPROM write has been made.
+`p2`; stage 2 passed (results under Hardware validation); stages 3 and 4 not yet run.
+The only EEPROM writes so far are the pointer writes of stage 2, which left the EEPROM
+identical to the full-flash image.
 `src/TPS25751EepromUpdater.cpp` has 100% line coverage (432 of 432 lines) and the
 updater suite has 131 tests. Two review nits are carried into Batch 3:
 
@@ -697,6 +705,36 @@ Ordered from safe to destructive. Each stage states its recovery.
    wrote only the four bytes given.`, and it stops before the write when the DATA
    register holds nothing that could show a longer write. The full dump shows that
    nothing else changed.
+
+   Result, 2026-11-23, branch commit `8f599d5`, `examples/eeprom-update` built with the
+   F8091166 low-region image (14336 bytes, SHA-256 `60c6cdd8...add77772c`), Teensy 4.0:
+   passed. Which supply powered the board was not recorded.
+
+   | Step | Result |
+   |---|---|
+   | `p`, erase | `writeRegionPointer(High, 0)` returned Success; 0x0400 read `00 00 00 00`; bytes 0x0404 to 0x043F unchanged |
+   | `p`, restore | `writeRegionPointer(High, 0x4400)` returned Success; 0x0400 read `00 44 00 00`; all 64 bytes equal the bytes before the test |
+   | `p2`, DATA after `FLad`, before `FLwd` | `00 04 00 00 fe ff ff ff 80 06 00 00 80 31 00 00`, then 48 bytes of 0x00 |
+   | `p2`, positions that could show a longer write | 57 of 60, starting at position 4 (DATA 0xFE against 0xFF in the EEPROM) |
+   | `p2`, write | `writeData(00 44 00 00)` returned Success; 0x0400 read `00 44 00 00`; bytes 0x0404 to 0x043F unchanged |
+   | `p2`, verdict | `FLwd` wrote only the four bytes given |
+   | `r` after both tests | Both pointers valid, `FLvy` valid for both bundles, BOOT_FLAGS raw `18 00 F0 A2 C1` as in stage 1 |
+   | Dump after both tests | 1984 lines, 31744 bytes, identical to `..._F8091166_fullFlash.bin` and to the stage 1 dump |
+   | Task results | 3 `FLad` and 3 `FLwd`, all with return code 0x00; no busy result; 17.7 to 17.8 ms per call |
+
+   Verified by this stage: `FLad` and `FLwd` report 0x00 in the return code on success;
+   a 4-byte `FLwd` writes exactly four bytes; the pointer write, its read-back, and the
+   neighbor check work on the device; the pointer can be erased and restored.
+
+   The DATA printout also settles two points the documents leave open. `FLad` leaves
+   DATA bytes 4 to 63 as they were: bytes 4 to 15 still held the bytes of the preceding
+   `FLrd`. A 4-byte host write does not clear the rest of DATA. This confirms that the
+   blind spot of the neighbor check was real, because in `writeRegionPointer()` those
+   DATA bytes hold the neighbors' own values, and that it does not matter on this
+   controller, because `FLwd` takes only the bytes of the host's write.
+
+   Not shown by this stage: any failure code, a busy `FLwd`, the auto-increment of the
+   write address across chunks, and whether an `FLrd` moves the write address.
 3. Single-region update to the `F8091164` bundle, with timing recorded per task. Then
    `coldReset()`; VERSION must read 0xF8091164 and BOOT_STATUS must show the high region
    used. Record BOOT_STATUS with the low pointer erased, and the time to APP. Before the

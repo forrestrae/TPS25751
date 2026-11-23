@@ -29,6 +29,7 @@
 
 #include "CaptureStdout.h"
 #include "TPS25751Pdo.h"
+#include "fixtures/PdCapture_2026_11_23_apple_140w_tps25751.h"
 
 namespace {
 
@@ -52,6 +53,9 @@ bool validate(const uint32_t *words, uint8_t count, PdoRole role, PdoListRules r
     build(list, words, count, role);
     return validatePdoList(list, count, rules);
 }
+
+// The real capture of the same charger (test/fixtures/pd-captures/), see the wire tests.
+namespace cap = PdCapture_2026_11_23_apple_140w_tps25751;
 
 }  // namespace
 
@@ -385,6 +389,59 @@ void test_debug_print_sink_pdo1()
     TEST_ASSERT_NULL(strstr(out.c_str(), "Peak Current"));
 }
 
+// --- Wire: Source_Capabilities from the 2026-11-23 capture --------------------------
+//
+// Message header 0x41A1 (USB PD R3.3 Table 6.1, Message Header; usb-pd-docs does not
+// serve it): bits 4:0 = 1 Source_Capabilities, bit 5 = 1 DFP, bits 7:6 = 10b
+// Revision 3.x, bit 8 = 1 Source, bits 14:12 = 4 data objects, bit 15 = 0.
+// PDO fields by hand from Table 6.8 (PDO 1) and Table 6.10 (PDOs 2 to 4):
+//   0x0981912C: bits 31:30 00b Fixed; 29 DRP 0; 28 USB Suspend 0; 27 Unconstrained 1;
+//               26 USB Comm 0; 25 DRD 0; 24 Unchunked 1; 23 EPR 1; 21:20 Peak 00b;
+//               19:10 = 100 (5000 mV, 50 mV units); 9:0 = 300 (3000 mA, 10 mA units)
+//   0x0002D12C: Fixed; 29:22 0; 21:20 00b; 19:10 = 180 (9000 mV); 9:0 = 300 (3000 mA)
+//   0x0004B12C: Fixed; 29:22 0; 21:20 00b; 19:10 = 300 (15000 mV); 9:0 = 300 (3000 mA)
+//   0x000641D6: Fixed; 29:22 0; 21:20 00b; 19:10 = 400 (20000 mV); 9:0 = 470 (4700 mA)
+
+void test_wire_source_capabilities_header()
+{
+    TEST_ASSERT_TRUE(cap::kHasSourceCapabilities);
+    TEST_ASSERT_EQUAL_HEX16(0x41A1, cap::kSourceCapabilitiesHeader);
+    TEST_ASSERT_EQUAL_UINT8(1, cap::kSourceCapabilitiesHeader & 0x1F);         // Source_Capabilities
+    TEST_ASSERT_EQUAL_UINT8(1, (cap::kSourceCapabilitiesHeader >> 5) & 0x1);   // DFP
+    TEST_ASSERT_EQUAL_UINT8(1, (cap::kSourceCapabilitiesHeader >> 8) & 0x1);   // Source
+    TEST_ASSERT_EQUAL_UINT8(4, (cap::kSourceCapabilitiesHeader >> 12) & 0x7);  // data objects
+    TEST_ASSERT_EQUAL_size_t(4, cap::kSourceCapabilitiesPdoCount);
+}
+
+void test_wire_source_capabilities_match_the_bench_words()
+{
+    // The wire carries the words read from 0x30 on the bench (kRx140W), bit for bit.
+    TEST_ASSERT_EQUAL_HEX32_ARRAY(kRx140W, cap::kSourceCapabilitiesPdos, 4);
+}
+
+void test_wire_source_capabilities_decode_per_tables_6_8_and_6_10()
+{
+    const uint16_t mV[4] = {5000, 9000, 15000, 20000};
+    const uint16_t mA[4] = {3000, 3000, 3000, 4700};
+    for (uint8_t i = 0; i < 4; i++) {
+        const TPS25751Pdo p = src(cap::kSourceCapabilitiesPdos[i], i + 1);
+        TEST_ASSERT_TRUE(PdoKind::Fixed == p.kind());
+        TEST_ASSERT_EQUAL_UINT16(mV[i], p.fixedVoltage_mV());
+        TEST_ASSERT_EQUAL_UINT16(mA[i], p.fixedCurrent_mA());
+        TEST_ASSERT_TRUE(PdoPeakCurrent::IoC == p.peakCurrent());
+        TEST_ASSERT_TRUE(p.isValidForReceiver());
+    }
+    const TPS25751Pdo first = src(cap::kSourceCapabilitiesPdos[0], 1);
+    TEST_ASSERT_FALSE(first.dualRolePower());             // bit 29
+    TEST_ASSERT_FALSE(first.usbSuspendSupported());       // bit 28
+    TEST_ASSERT_TRUE(first.unconstrainedPower());         // bit 27
+    TEST_ASSERT_FALSE(first.usbCommunicationsCapable());  // bit 26
+    TEST_ASSERT_FALSE(first.dualRoleData());              // bit 25
+    TEST_ASSERT_TRUE(first.unchunkedExtendedMessages());  // bit 24
+    TEST_ASSERT_TRUE(first.eprCapable());                 // bit 23
+    TEST_ASSERT_TRUE(validate(cap::kSourceCapabilitiesPdos, 4, PdoRole::Source, PdoListRules::ReceivedSource));
+}
+
 int main(int, char **)
 {
     UNITY_BEGIN();
@@ -412,5 +469,8 @@ int main(int, char **)
     RUN_TEST(test_debug_print_shows_flags_only_for_pdo1);
     RUN_TEST(test_debug_print_avs_and_unexpected_kinds);
     RUN_TEST(test_debug_print_sink_pdo1);
+    RUN_TEST(test_wire_source_capabilities_header);
+    RUN_TEST(test_wire_source_capabilities_match_the_bench_words);
+    RUN_TEST(test_wire_source_capabilities_decode_per_tables_6_8_and_6_10);
     return UNITY_END();
 }

@@ -25,6 +25,7 @@
 #include "TPS25751ReceivedSourceCaps.h"
 #include "TPS25751RegisterAddress.h"
 #include "CaptureStdout.h"
+#include "fixtures/PdCapture_2026_11_23_apple_140w_tps25751.h"
 
 namespace {
 
@@ -81,6 +82,9 @@ bool semOk(const Caps &c)
 {
     return TPS25751ReceivedSourceCaps(c.buf, CAPS_SIZE).isSemanticallyValid();
 }
+
+// The real capture of the 140 W charger (test/fixtures/pd-captures/).
+namespace cap = PdCapture_2026_11_23_apple_140w_tps25751;
 
 }  // namespace
 
@@ -482,6 +486,49 @@ void test_pps_power_limited_flag()
     TEST_ASSERT_FALSE(TPS25751ReceivedSourceCaps(other.buf, CAPS_SIZE).pdo(1).ppsPowerLimited());
 }
 
+// --- Capture bundle 2026-11-23-apple-140w-tps25751 ----------------------------------
+//
+// 0x30 built from the bundle's register bytes must decode to the Source_Capabilities
+// words on the wire, bit for bit. Field values by hand from USB PD R3.3 Table 6.8 (PDO
+// 1) and Table 6.10 (PDOs 2 to 4): 5 V, 9 V, 15 V, and 20 V (bits 19:10 = 100, 180,
+// 300, 400 in 50 mV units), at 3 A, 3 A, 3 A, and 4.7 A (bits 9:0 = 300, 300, 300, 470
+// in 10 mA units); PDO 1 bits 27, 24, and 23 set (Unconstrained, Unchunked, EPR).
+
+void test_capture_register_bytes_decode_to_the_wire_pdos()
+{
+    TEST_ASSERT_EQUAL_size_t(CAPS_SIZE, cap::kRegister0x30Length);
+    TPS25751ReceivedSourceCaps reg(cap::kRegister0x30, cap::kRegister0x30Length);
+
+    TEST_ASSERT_EQUAL_UINT8(cap::kSourceCapabilitiesPdoCount, reg.pdoCount());
+    for (uint8_t i = 0; i < cap::kSourceCapabilitiesPdoCount; i++) {
+        TEST_ASSERT_EQUAL_HEX32(cap::kSourceCapabilitiesPdos[i], reg.getPDO(i));
+        TEST_ASSERT_EQUAL_HEX32(cap::kSourceCapabilitiesPdos[i], reg.pdo(i).raw());
+        TEST_ASSERT_EQUAL_UINT8(i + 1, reg.pdo(i).position());
+    }
+    TEST_ASSERT_EQUAL_HEX32(0, reg.getPDO(4));  // slots 5 to 7 empty
+    TEST_ASSERT_TRUE(reg.isSemanticallyValid());
+}
+
+void test_capture_register_pdo_fields_per_tables_6_8_and_6_10()
+{
+    TPS25751ReceivedSourceCaps reg(cap::kRegister0x30, cap::kRegister0x30Length);
+    const uint16_t mV[4] = {5000, 9000, 15000, 20000};
+    const uint16_t mA[4] = {3000, 3000, 3000, 4700};
+    for (uint8_t i = 0; i < 4; i++) {
+        TEST_ASSERT_EQUAL(PDOType::FixedSupply, reg.pdo(i).type());
+        TEST_ASSERT_EQUAL_UINT16(mV[i], reg.pdo(i).fixedVoltage_mV());
+        TEST_ASSERT_EQUAL_UINT16(mA[i], reg.pdo(i).fixedCurrent_mA());
+        TEST_ASSERT_EQUAL_UINT8(0, reg.pdo(i).rawPeakCurrent());
+    }
+    TEST_ASSERT_TRUE(reg.pdo(0).unconstrainedPower());
+    TEST_ASSERT_TRUE(reg.pdo(0).unchunkedExtendedMessages());
+    TEST_ASSERT_TRUE(reg.pdo(0).eprCapable());
+    TEST_ASSERT_FALSE(reg.pdo(0).dualRolePower());
+    TEST_ASSERT_FALSE(reg.pdo(0).usbSuspendSupported());
+    TEST_ASSERT_FALSE(reg.pdo(0).usbCommunicationsCapable());
+    TEST_ASSERT_FALSE(reg.pdo(0).dualRoleData());
+}
+
 int main(int, char **)
 {
     UNITY_BEGIN();
@@ -516,5 +563,7 @@ int main(int, char **)
     RUN_TEST(test_semantic_pps_zero_current_and_zero_min);
     RUN_TEST(test_semantic_invalid_apdo_type_rejected);
     RUN_TEST(test_pps_power_limited_flag);
+    RUN_TEST(test_capture_register_bytes_decode_to_the_wire_pdos);
+    RUN_TEST(test_capture_register_pdo_fields_per_tables_6_8_and_6_10);
     return UNITY_END();
 }

@@ -19,6 +19,7 @@
 #include "TPS25751Register.h"
 #include "TPS25751RegisterAddress.h"
 #include "CaptureStdout.h"
+#include "fixtures/PdCapture_2026_11_23_apple_140w_tps25751.h"
 
 namespace {
 
@@ -39,6 +40,9 @@ TPS25751ReceivedSOPIdentity make(uint8_t byte0, const uint32_t *vdos, unsigned n
     for (unsigned i = 0; i < n; i++) putVdo(buf, i, vdos[i]);
     return TPS25751ReceivedSOPIdentity(buf);
 }
+
+// The real capture of the 140 W charger (test/fixtures/pd-captures/).
+namespace cap = PdCapture_2026_11_23_apple_140w_tps25751;
 
 }  // namespace
 
@@ -415,6 +419,101 @@ void test_copy_and_move()
 
 // --- Runner ----------------------------------------------------------------------
 
+// --- Wire: Discover Identity ACKs from the 2026-11-23 capture ----------------------
+//
+// The capture holds two ACKs and neither one is a 0x48 check: the board's own ACK on
+// SOP (0x48 holds the identity the board receives from its partner, and the charger
+// sent none), and the cable's ACK on SOP' (0x48 holds SOP only). The tests feed the
+// wire VDOs through the 0x48 decoders, in the layout 0x48 would hold them, to check
+// those decoders against real Discover Identity responses.
+//
+// Message and VDM headers by hand, USB PD R3.3 Table 6.1 (Message Header) and Table
+// 6.33 (Structured VDM Header); usb-pd-docs serves neither:
+//   SOP  0x428F: bits 4:0 = 15 Vendor_Defined, bit 5 = 0 UFP, bits 7:6 = 10b Rev 3.x,
+//        bit 8 = 0 Sink, bits 14:12 = 4 objects.
+//   SOP' 0x514F: bits 4:0 = 15, bits 7:6 = 01b Rev 2.0, bit 8 = 1 Cable Plug,
+//        bits 14:12 = 5 objects.
+//   VDM  0xFF00A041 (SOP) and 0xFF008041 (SOP'): SVID 0xFF00, bit 15 = 1 structured,
+//        bits 7:6 = 01b ACK, bits 4:0 = 1 Discover Identity; bits 14:13 = 01b (SVDM
+//        2.x) on SOP, 00b (SVDM 1.0) on SOP'.
+
+void test_wire_board_identity_ack_headers()
+{
+    TEST_ASSERT_EQUAL_HEX16(0x428F, cap::kIdentityAckSopSinkUfpHeader);
+    TEST_ASSERT_EQUAL_UINT8(15, cap::kIdentityAckSopSinkUfpHeader & 0x1F);
+    TEST_ASSERT_EQUAL_UINT8(0, (cap::kIdentityAckSopSinkUfpHeader >> 5) & 0x1);  // UFP
+    TEST_ASSERT_EQUAL_UINT8(0, (cap::kIdentityAckSopSinkUfpHeader >> 8) & 0x1);  // Sink
+    TEST_ASSERT_EQUAL_HEX32(0xFF00A041, cap::kIdentityAckSopSinkUfpVdmHeader);
+    TEST_ASSERT_EQUAL_UINT8(1, (cap::kIdentityAckSopSinkUfpVdmHeader >> 6) & 0x3);  // ACK
+    TEST_ASSERT_EQUAL_UINT8(1, cap::kIdentityAckSopSinkUfpVdmHeader & 0x1F);        // Discover Identity
+    TEST_ASSERT_EQUAL_size_t(3, cap::kIdentityAckSopSinkUfpVdoCount);
+}
+
+// The board's own ACK, VDOs by hand:
+//   ID Header 0x00400451 (Table 6.34): bit 31 Host 0, bit 30 Device 0, bits 29:27 UFP
+//     000b Not a UFP, bit 26 Alternate Modes 0, bits 25:23 DFP 000b Not a DFP, bits
+//     22:21 Connector 10b USB Type-C Receptacle, bits 15:0 USB Vendor ID 0x0451 (TI)
+//   Cert Stat 0x00000000 (Table 6.38): XID 0
+//   Product 0x00000911 (Table 6.39): USB Product ID 0x0000, bcdDevice 0x0911
+void test_wire_board_identity_ack_decodes_per_tables_6_34_6_38_6_39()
+{
+    const uint8_t byte0 = static_cast<uint8_t>((1 << 6) | cap::kIdentityAckSopSinkUfpVdoCount);  // ACK
+    SOP reg = make(byte0, cap::kIdentityAckSopSinkUfpVdos, cap::kIdentityAckSopSinkUfpVdoCount);
+
+    TEST_ASSERT_TRUE(reg.responseType() == RT::Ack);
+    TEST_ASSERT_EQUAL_UINT8(3, reg.numberValidVdos());
+    TEST_ASSERT_EQUAL_HEX32(0x00400451, reg.idHeaderVdo());
+    TEST_ASSERT_FALSE(reg.usbHostCapable());
+    TEST_ASSERT_FALSE(reg.usbDeviceCapable());
+    TEST_ASSERT_TRUE(reg.productTypeUfp() == SOP::ProductTypeUfp::NotUfp);
+    TEST_ASSERT_FALSE(reg.alternateModesSupported());
+    TEST_ASSERT_TRUE(reg.productTypeDfp() == SOP::ProductTypeDfp::NotDfp);
+    TEST_ASSERT_TRUE(reg.connectorType() == SOP::ConnectorType::TypeCReceptacle);
+    TEST_ASSERT_EQUAL_HEX16(0x0451, reg.usbVendorId());
+    TEST_ASSERT_EQUAL_HEX32(0x00000000, reg.xid());
+    TEST_ASSERT_EQUAL_HEX16(0x0000, reg.usbProductId());
+    TEST_ASSERT_EQUAL_HEX16(0x0911, reg.bcdDevice());
+    TEST_ASSERT_TRUE(reg.isSemanticallyValid());
+}
+
+void test_wire_cable_identity_ack_headers()
+{
+    TEST_ASSERT_EQUAL_HEX16(0x514F, cap::kIdentityAckSopPrimeCablePlugHeader);
+    TEST_ASSERT_EQUAL_UINT8(15, cap::kIdentityAckSopPrimeCablePlugHeader & 0x1F);
+    TEST_ASSERT_EQUAL_UINT8(1, (cap::kIdentityAckSopPrimeCablePlugHeader >> 8) & 0x1);  // Cable Plug
+    TEST_ASSERT_EQUAL_HEX32(0xFF008041, cap::kIdentityAckSopPrimeCablePlugVdmHeader);
+    TEST_ASSERT_EQUAL_UINT8(0, (cap::kIdentityAckSopPrimeCablePlugVdmHeader >> 13) & 0x3);  // SVDM 1.0
+    TEST_ASSERT_EQUAL_size_t(4, cap::kIdentityAckSopPrimeCablePlugVdoCount);
+}
+
+// The cable's ACK on SOP'. Table 6.34 gives bits 29:27 SOP' values (Cable Plug/VPD)
+// that differ from the SOP (UFP) values productTypeUfp() names, so only the raw code is
+// checked; the USB Vendor ID, Cert Stat, and Product VDO read the same on SOP and SOP'.
+// The fourth VDO, 0x21082052, is the Passive Cable VDO, which usb-pd-docs does not serve
+// and the library does not decode. By hand:
+//   ID Header 0x1C0020C2 (Table 6.34): bits 31:30 Host 0, Device 0; bits 29:27 011b
+//     Passive Cable (SOP'); bit 26 = 1 Alternate Modes Supported; bits 25:23 000b
+//     (reserved on SOP'); bits 22:21 00b Deprecated, unknown connector type; bits 15:0
+//     USB Vendor ID 0x20C2
+//   Cert Stat 0x000000BA (Table 6.38): XID 0xBA
+//   Product 0x00050310 (Table 6.39): USB Product ID 0x0005, bcdDevice 0x0310
+void test_wire_cable_identity_ack_shared_fields()
+{
+    SOP reg = make((1 << 6) | 3, cap::kIdentityAckSopPrimeCablePlugVdos, 3);
+
+    TEST_ASSERT_FALSE(reg.usbHostCapable());
+    TEST_ASSERT_FALSE(reg.usbDeviceCapable());
+    TEST_ASSERT_EQUAL_UINT8(3, reg.rawProductTypeUfp());  // Passive Cable on SOP'
+    TEST_ASSERT_TRUE(reg.alternateModesSupported());
+    TEST_ASSERT_EQUAL_UINT8(0, reg.rawProductTypeDfp());
+    TEST_ASSERT_EQUAL_UINT8(0, reg.rawConnectorType());
+    TEST_ASSERT_EQUAL_HEX16(0x20C2, reg.usbVendorId());
+    TEST_ASSERT_EQUAL_HEX32(0x000000BA, reg.xid());
+    TEST_ASSERT_EQUAL_HEX16(0x0005, reg.usbProductId());
+    TEST_ASSERT_EQUAL_HEX16(0x0310, reg.bcdDevice());
+    TEST_ASSERT_EQUAL_HEX32(0x21082052, cap::kIdentityAckSopPrimeCablePlugVdos[3]);
+}
+
 int main(int, char **)
 {
     UNITY_BEGIN();
@@ -451,6 +550,10 @@ int main(int, char **)
     RUN_TEST(test_debug_print_typed_decode_skipped_without_ack);
 
     RUN_TEST(test_copy_and_move);
+    RUN_TEST(test_wire_board_identity_ack_headers);
+    RUN_TEST(test_wire_board_identity_ack_decodes_per_tables_6_34_6_38_6_39);
+    RUN_TEST(test_wire_cable_identity_ack_headers);
+    RUN_TEST(test_wire_cable_identity_ack_shared_fields);
 
     return UNITY_END();
 }

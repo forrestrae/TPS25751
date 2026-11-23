@@ -26,6 +26,7 @@
 #include "TPS25751Register.h"
 #include "TPS25751RegisterAddress.h"
 #include "CaptureStdout.h"
+#include "fixtures/PdCapture_2026_11_23_apple_140w_tps25751.h"
 
 namespace {
 
@@ -77,6 +78,9 @@ bool contains(const std::string &haystack, const char *needle)
 {
     return haystack.find(needle) != std::string::npos;
 }
+
+// The real capture of the 140 W charger (test/fixtures/pd-captures/).
+namespace cap = PdCapture_2026_11_23_apple_140w_tps25751;
 
 }  // namespace
 
@@ -286,6 +290,44 @@ void test_short_buffer_returns_zero_requested_rdo()
     TEST_ASSERT_FALSE(reg.isSemanticallyValid());  // wrong size
 }
 
+// --- Capture bundle 2026-11-23-apple-140w-tps25751 ----------------------------------
+//
+// 0x35 built from the bundle's register bytes: bits 31:0 equal the Request RDO on the
+// wire, 0x4184B12C. By hand from USB PD R3.3 Table 6.19 (the requested PDO 4 is Fixed,
+// so the Fixed and Variable RDO applies): Object Position 4 (bits 31:28), No USB
+// Suspend (bit 24), Unchunked (bit 23), Operating Current 300 (bits 19:10, 3000 mA in
+// 10 mA units), and the deprecated Maximum Operating Current copy 300 (bits 9:0). The
+// board is sinking, so bits 127:96 read the same word (see BOARD_SINKING).
+
+void test_capture_own_rdo_is_the_wire_request()
+{
+    TEST_ASSERT_EQUAL_size_t(RDO_SIZE, cap::kRegister0x35Length);
+    TPS25751ActiveRDOContract reg(cap::kRegister0x35, cap::kRegister0x35Length);
+
+    TEST_ASSERT_EQUAL_HEX32(cap::kRequestRdo, reg.rawOwnRdo());
+    TEST_ASSERT_EQUAL_HEX32(cap::kRequestRdo, reg.rawRequestedRdo());
+    TEST_ASSERT_TRUE(reg.hasActiveContract());
+    TEST_ASSERT_TRUE(reg.isSemanticallyValid());
+}
+
+void test_capture_own_rdo_fields_per_table_6_19()
+{
+    TPS25751ActiveRDOContract reg(cap::kRegister0x35, cap::kRegister0x35Length);
+    const RdoKind kind = rdoKindFor(cap::kSourceCapabilitiesPdos[reg.ownRdo().objectPosition() - 1]);
+    TEST_ASSERT_TRUE(RdoKind::FixedVariable == kind);
+
+    const TPS25751Rdo own = reg.ownRdo(kind);
+    TEST_ASSERT_EQUAL_UINT8(4, own.objectPosition());
+    TEST_ASSERT_FALSE(own.giveback());
+    TEST_ASSERT_FALSE(own.capabilityMismatch());
+    TEST_ASSERT_FALSE(own.usbCommunicationsCapable());
+    TEST_ASSERT_TRUE(own.noUsbSuspend());
+    TEST_ASSERT_TRUE(own.unchunkedExtendedMessages());
+    TEST_ASSERT_FALSE(own.eprCapable());
+    TEST_ASSERT_EQUAL_UINT16(3000, own.operatingCurrent_mA());
+    TEST_ASSERT_EQUAL_UINT16(3000, own.maximumOperatingCurrent_mA());
+}
+
 int main(int, char **)
 {
     UNITY_BEGIN();
@@ -307,6 +349,8 @@ int main(int, char **)
     RUN_TEST(test_debug_print_with_kinds_decodes_each_rdo);
     RUN_TEST(test_debug_print_pps_own_rdo_with_kind);
     RUN_TEST(test_short_buffer_returns_zero_requested_rdo);
+    RUN_TEST(test_capture_own_rdo_is_the_wire_request);
+    RUN_TEST(test_capture_own_rdo_fields_per_table_6_19);
 
     return UNITY_END();
 }

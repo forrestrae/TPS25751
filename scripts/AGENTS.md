@@ -38,7 +38,8 @@ order:
    notice while that directory does not exist. It fails if `uv` is missing or the run
    leaves untracked files there.
 4. `pio test -e native`.
-5. `pio run -e example-read-registers`.
+5. `pio run -e example-read-registers -e example-pd-bench`. CI lists its own steps in
+   `publish.yml` and still builds only the first.
 
 Because the gate comes from `main`, a branch that changes `verify_gate.py` is still
 checked by the old gate; the change applies to later branches once it is pushed. The

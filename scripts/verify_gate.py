@@ -14,7 +14,8 @@ Checks, in order:
   2. no merge commits on the branch (rebase instead)
   3. version fields in library.json / library.properties unchanged from main
   4. script unit tests, PD capture fixtures, PD capture fixture tests, bench
-     server tests, native unit tests, example build
+     server tests, native unit tests, example build (example-read-registers
+     and example-pd-bench)
 
 Three steps run only once their target exists, and until then print a notice and
 are skipped: the PD capture fixture check (test/support/pd_capture_fixture.py),
@@ -57,7 +58,9 @@ GATES = [
     Gate("bench server tests", ["uv", "run", "--locked", "pytest"],
          cwd="tools/pd-bench", requires="tools/pd-bench", no_untracked="tools/pd-bench"),
     Gate("native unit tests", ["pio", "test", "-e", "native"]),
-    Gate("example build", ["pio", "run", "-e", "example-read-registers"]),
+    # One pio invocation builds both: the register example every change must
+    # keep building, and the bench console with its dual USB serial build.
+    Gate("example build", ["pio", "run", "-e", "example-read-registers", "-e", "example-pd-bench"]),
 ]
 
 

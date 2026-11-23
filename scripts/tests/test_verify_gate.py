@@ -16,6 +16,7 @@ import verify_gate as vg
 FIXTURE_CHECK = [sys.executable, "test/support/pd_capture_fixture.py", "--check"]
 FIXTURE_TESTS = [sys.executable, "-m", "unittest", "discover", "-s", "test/support", "-p", "test_*.py", "-q"]
 BENCH_TESTS = ["uv", "run", "--locked", "pytest"]
+EXAMPLE_BUILD = ["pio", "run", "-e", "example-read-registers", "-e", "example-pd-bench"]
 
 
 class FakeRun:
@@ -68,6 +69,23 @@ class VerifyGateStepTests(unittest.TestCase):
             "script unit tests", "PD capture fixtures", "PD capture fixture tests",
             "bench server tests", "native unit tests", "example build",
         ])
+
+    def test_example_build_covers_the_register_example_and_the_bench_console(self):
+        build = next(g for g in vg.GATES if g.name == "example build")
+        self.assertEqual(build.cmd, EXAMPLE_BUILD)
+        self.assertEqual(build.cwd, ".")
+        self.assertIsNone(build.requires)  # both environments exist on every branch based on main
+
+        run = FakeRun()
+        code, _, _ = self.gate(run)
+        self.assertEqual(code, 0)
+        self.assertEqual(run.calls[-1], (EXAMPLE_BUILD, self.root))  # the last step
+
+    def test_a_failing_example_build_fails_the_gate(self):
+        run = FakeRun(codes={" ".join(EXAMPLE_BUILD): 1})
+        code, _, err = self.gate(run)
+        self.assertEqual(code, 1)
+        self.assertIn("verify: FAILED: example build", err)
 
     def test_bench_tests_use_the_lock_file_as_is(self):
         bench = next(g for g in vg.GATES if g.name == "bench server tests")

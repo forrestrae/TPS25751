@@ -7,10 +7,13 @@
  * RECEIVED_SINK_CAPABILITIES is 53 bytes: byte 0 bits 2:0 hold the
  * number of valid PDOs, and PDO n sits at byte 1 + (n-1)*4, little-endian.
  *
- * This suite covers the APDO subtype handling added after a bench read on
- * 2026-11-18 found an Augmented PDO with bits 29:28 = 10b (not the SPR PPS
- * subtype 00b) in TRANSMIT_SOURCE_CAPABILITIES. A partner that advertises such
- * an APDO lands in this register the same way.
+ * PDOs decode through pdo(i), a TPS25751Pdo in its position and role (Sink), and
+ * the register validates with validatePdoList() and PdoListRules::ReceivedSink
+ * (USB PD R3.3). The suite also covers the APDO subtype handling added after a
+ * bench read on 2026-11-18 found an Augmented PDO with bits 29:28 = 10b (not the
+ * SPR PPS subtype 00b) in TRANSMIT_SOURCE_CAPABILITIES; a partner that advertises
+ * such an APDO lands in this register the same way. Sent by a Sink, APDO type 10b
+ * is the deprecated SPR AVS Sink APDO: identified, not decoded, and not an error.
  */
 
 #include <unity.h>
@@ -36,15 +39,16 @@ constexpr uint8_t FIXED_AND_APDO_SUBTYPE_2[CAPS_SIZE] = {
     0xF4, 0xB1, 0x04, 0xE0,
 };
 
-// Two PDOs: Fixed 5 V / 3 A, then an SPR PPS APDO 3.3-21 V / 3 A (0xC1A4213C).
+// Two PDOs: Fixed 5 V / 3 A, then an SPR PPS Sink APDO 5-21 V / 3 A (0xC1A4323C).
+// A Sink PPS APDO's voltages run from 5 to 21 V (Table 6.14).
 constexpr uint8_t FIXED_AND_SPR_PPS[CAPS_SIZE] = {
     0x02,
     0x2C, 0x91, 0x01, 0x00,
-    0x3C, 0x21, 0xA4, 0xC1,
+    0x3C, 0x32, 0xA4, 0xC1,
 };
 
-// Same as FIXED_AND_SPR_PPS with min (bits 15:8) and max (bits 24:17) swapped
-// so that min > max: min 21 V, max 3.3 V.
+// Same as FIXED_AND_SPR_PPS with min (bits 15:8) and max (bits 24:17) swapped:
+// min 21 V, max 3.3 V. The 3.3 V maximum is below the 5 V floor of Table 6.14.
 constexpr uint8_t FIXED_AND_BAD_SPR_PPS[CAPS_SIZE] = {
     0x02,
     0x2C, 0x91, 0x01, 0x00,
@@ -98,12 +102,12 @@ void test_non_pps_apdo_reports_subtype_and_no_pps_fields()
 {
     TPS25751ReceivedSinkCaps reg(FIXED_AND_APDO_SUBTYPE_2, CAPS_SIZE);
 
-    TEST_ASSERT_EQUAL(PDOType::Augmented, reg.getPDOType(1));
-    TEST_ASSERT_EQUAL_UINT8(2, reg.getAPDOSubtype(1));
-    TEST_ASSERT_FALSE(reg.isSprPpsPDO(1));
-    TEST_ASSERT_EQUAL_UINT16(0, reg.getPPSMaxVoltage_mV(1));
-    TEST_ASSERT_EQUAL_UINT16(0, reg.getPPSMinVoltage_mV(1));
-    TEST_ASSERT_EQUAL_UINT16(0, reg.getPPSMaxCurrent_mA(1));
+    TEST_ASSERT_EQUAL(PDOType::Augmented, reg.pdo(1).type());
+    TEST_ASSERT_EQUAL_UINT8(2, reg.pdo(1).apdoType());
+    TEST_ASSERT_FALSE(reg.pdo(1).kind() == PdoKind::SprPps);
+    TEST_ASSERT_EQUAL_UINT16(0, reg.pdo(1).ppsMaxVoltage_mV());
+    TEST_ASSERT_EQUAL_UINT16(0, reg.pdo(1).ppsMinVoltage_mV());
+    TEST_ASSERT_EQUAL_UINT16(0, reg.pdo(1).ppsCurrent_mA());
 }
 
 void test_non_pps_apdo_is_semantically_valid()
@@ -113,23 +117,47 @@ void test_non_pps_apdo_is_semantically_valid()
     TEST_ASSERT_TRUE(reg.isSemanticallyValid());
 }
 
+void test_deprecated_spr_avs_sink_apdo_is_identified_and_valid()
+{
+    TPS25751ReceivedSinkCaps reg(FIXED_AND_APDO_SUBTYPE_2, CAPS_SIZE);
+
+    TEST_ASSERT_EQUAL(PdoKind::SprAvs, reg.pdo(1).kind());
+    TEST_ASSERT_TRUE(reg.pdo(1).role() == PdoRole::Sink);
+    // Not decoded: the Source AVS fields read 0 for a Sink APDO.
+    TEST_ASSERT_EQUAL_UINT16(0, reg.pdo(1).avsCurrent15V_mA());
+    TEST_ASSERT_EQUAL_UINT32(0xE004B1F4u, reg.pdo(1).raw());
+    TEST_ASSERT_TRUE(reg.isSemanticallyValid());
+}
+
+void test_pdo_position_role_and_out_of_range()
+{
+    Caps c(2, {FIXED_5V_3A, (180u << 10) | 250u});
+    TPS25751ReceivedSinkCaps reg(c.buf, CAPS_SIZE);
+
+    TEST_ASSERT_EQUAL_UINT8(1, reg.pdo(0).position());
+    TEST_ASSERT_EQUAL_UINT8(2, reg.pdo(1).position());
+    TEST_ASSERT_TRUE(reg.pdo(0).role() == PdoRole::Sink);
+    TEST_ASSERT_EQUAL_UINT32(0, reg.pdo(7).raw());
+    TEST_ASSERT_EQUAL_UINT8(TPS25751Pdo::kUnknownPosition, reg.pdo(7).position());
+}
+
 void test_spr_pps_apdo_is_decoded()
 {
     TPS25751ReceivedSinkCaps reg(FIXED_AND_SPR_PPS, CAPS_SIZE);
 
-    TEST_ASSERT_TRUE(reg.isSprPpsPDO(1));
-    TEST_ASSERT_EQUAL_UINT8(0, reg.getAPDOSubtype(1));
-    TEST_ASSERT_EQUAL_UINT16(21000, reg.getPPSMaxVoltage_mV(1));
-    TEST_ASSERT_EQUAL_UINT16(3300, reg.getPPSMinVoltage_mV(1));
-    TEST_ASSERT_EQUAL_UINT16(3000, reg.getPPSMaxCurrent_mA(1));
+    TEST_ASSERT_EQUAL(PdoKind::SprPps, reg.pdo(1).kind());
+    TEST_ASSERT_EQUAL_UINT8(0, reg.pdo(1).apdoType());
+    TEST_ASSERT_EQUAL_UINT16(21000, reg.pdo(1).ppsMaxVoltage_mV());
+    TEST_ASSERT_EQUAL_UINT16(5000, reg.pdo(1).ppsMinVoltage_mV());
+    TEST_ASSERT_EQUAL_UINT16(3000, reg.pdo(1).ppsCurrent_mA());
     TEST_ASSERT_TRUE(reg.isSemanticallyValid());
 }
 
-void test_spr_pps_min_above_max_is_invalid()
+void test_spr_pps_voltage_below_5v_is_invalid()
 {
     TPS25751ReceivedSinkCaps reg(FIXED_AND_BAD_SPR_PPS, CAPS_SIZE);
 
-    TEST_ASSERT_TRUE(reg.isSprPpsPDO(1));
+    TEST_ASSERT_EQUAL(PdoKind::SprPps, reg.pdo(1).kind());
     TEST_ASSERT_FALSE(reg.isSemanticallyValid());
 }
 
@@ -184,10 +212,10 @@ void test_pdo_type_decodes_bits_31_30()
     Caps c(4, {FIXED_5V_3A, 0x40000000u, 0x80000000u, 0xC0000000u});
     TPS25751ReceivedSinkCaps reg(c.buf, CAPS_SIZE);
 
-    TEST_ASSERT_EQUAL(PDOType::FixedSupply, reg.getPDOType(0));
-    TEST_ASSERT_EQUAL(PDOType::Battery, reg.getPDOType(1));
-    TEST_ASSERT_EQUAL(PDOType::VariableSupply, reg.getPDOType(2));
-    TEST_ASSERT_EQUAL(PDOType::Augmented, reg.getPDOType(3));
+    TEST_ASSERT_EQUAL(PDOType::FixedSupply, reg.pdo(0).type());
+    TEST_ASSERT_EQUAL(PDOType::Battery, reg.pdo(1).type());
+    TEST_ASSERT_EQUAL(PDOType::VariableSupply, reg.pdo(2).type());
+    TEST_ASSERT_EQUAL(PDOType::Augmented, reg.pdo(3).type());
 }
 
 void test_stale_count_with_zero_pdo1_means_no_caps()
@@ -205,31 +233,32 @@ void test_stale_count_with_zero_pdo1_means_no_caps()
 
 void test_fixed_supply_fields_decode()
 {
-    // 9 V / 2.5 A, DRP, Higher Capability, Unconstrained, USB Comm, DRD,
-    // Fast Role Swap current field = 2 (bits 24:23 = 10b).
-    const uint32_t pdo = (1u << 29) | (1u << 28) | (1u << 27) | (1u << 26) |
-                         (1u << 25) | (2u << 23) | (180u << 10) | 250u;
-    Caps c(2, {FIXED_5V_3A, pdo});
+    // PDO 1: 5 V / 3 A, DRP, Higher Capability, Unconstrained, USB Comm, DRD,
+    // Fast Role Swap current field = 2 (bits 24:23 = 10b). PDO 2: 9 V / 2.5 A with
+    // the same bits set, which are reserved there (Table 6.10) and read false.
+    const uint32_t flagBits = (1u << 29) | (1u << 28) | (1u << 27) | (1u << 26) |
+                              (1u << 25) | (2u << 23);
+    Caps c(2, {FIXED_5V_3A | flagBits, flagBits | (180u << 10) | 250u});
     TPS25751ReceivedSinkCaps reg(c.buf, CAPS_SIZE);
 
-    TEST_ASSERT_EQUAL_UINT16(9000, reg.getFixedVoltage_mV(1));
-    TEST_ASSERT_EQUAL_UINT16(2500, reg.getFixedMaxCurrent_mA(1));
-    TEST_ASSERT_TRUE(reg.getFixedDualRolePower(1));
-    TEST_ASSERT_TRUE(reg.getFixedHigherCapability(1));
-    TEST_ASSERT_TRUE(reg.getFixedUnconstrainedPower(1));
-    TEST_ASSERT_TRUE(reg.getFixedUSBCommCapable(1));
-    TEST_ASSERT_TRUE(reg.getFixedDualRoleData(1));
-    TEST_ASSERT_EQUAL_UINT8(2, reg.getFixedFastRoleSwapCurrent(1));
+    TEST_ASSERT_EQUAL_UINT16(5000, reg.pdo(0).fixedVoltage_mV());
+    TEST_ASSERT_EQUAL_UINT16(3000, reg.pdo(0).fixedCurrent_mA());
+    TEST_ASSERT_TRUE(reg.pdo(0).dualRolePower());
+    TEST_ASSERT_TRUE(reg.pdo(0).higherCapability());
+    TEST_ASSERT_TRUE(reg.pdo(0).unconstrainedPower());
+    TEST_ASSERT_TRUE(reg.pdo(0).usbCommunicationsCapable());
+    TEST_ASSERT_TRUE(reg.pdo(0).dualRoleData());
+    TEST_ASSERT_EQUAL_UINT8(2, reg.pdo(0).rawFastRoleSwapCurrent());
+    TEST_ASSERT_EQUAL(FastRoleSwapCurrent::Current1_5A, reg.pdo(0).fastRoleSwapCurrent());
 
-    // PDO 1 has none of the flags set.
-    TEST_ASSERT_EQUAL_UINT16(5000, reg.getFixedVoltage_mV(0));
-    TEST_ASSERT_EQUAL_UINT16(3000, reg.getFixedMaxCurrent_mA(0));
-    TEST_ASSERT_FALSE(reg.getFixedDualRolePower(0));
-    TEST_ASSERT_FALSE(reg.getFixedHigherCapability(0));
-    TEST_ASSERT_FALSE(reg.getFixedUnconstrainedPower(0));
-    TEST_ASSERT_FALSE(reg.getFixedUSBCommCapable(0));
-    TEST_ASSERT_FALSE(reg.getFixedDualRoleData(0));
-    TEST_ASSERT_EQUAL_UINT8(0, reg.getFixedFastRoleSwapCurrent(0));
+    TEST_ASSERT_EQUAL_UINT16(9000, reg.pdo(1).fixedVoltage_mV());
+    TEST_ASSERT_EQUAL_UINT16(2500, reg.pdo(1).fixedCurrent_mA());
+    TEST_ASSERT_FALSE(reg.pdo(1).dualRolePower());
+    TEST_ASSERT_FALSE(reg.pdo(1).higherCapability());
+    TEST_ASSERT_FALSE(reg.pdo(1).unconstrainedPower());
+    TEST_ASSERT_FALSE(reg.pdo(1).usbCommunicationsCapable());
+    TEST_ASSERT_FALSE(reg.pdo(1).dualRoleData());
+    TEST_ASSERT_EQUAL_UINT8(0, reg.pdo(1).rawFastRoleSwapCurrent());
 }
 
 void test_fast_role_swap_current_keeps_every_code()
@@ -239,7 +268,7 @@ void test_fast_role_swap_current_keeps_every_code()
         const uint32_t pdo = (code << 23) | (100u << 10) | 300u;
         Caps c(1, {pdo});
         TPS25751ReceivedSinkCaps reg(c.buf, CAPS_SIZE);
-        TEST_ASSERT_EQUAL_UINT8(code, reg.getFixedFastRoleSwapCurrent(0));
+        TEST_ASSERT_EQUAL_UINT8(code, reg.pdo(0).rawFastRoleSwapCurrent());
     }
 }
 
@@ -252,9 +281,9 @@ void test_battery_fields_decode()
     Caps c(2, {FIXED_5V_3A, pdo});
     TPS25751ReceivedSinkCaps reg(c.buf, CAPS_SIZE);
 
-    TEST_ASSERT_EQUAL_UINT16(20000, reg.getBatteryMaxVoltage_mV(1));
-    TEST_ASSERT_EQUAL_UINT16(5000, reg.getBatteryMinVoltage_mV(1));
-    TEST_ASSERT_EQUAL_UINT32(60000, reg.getBatteryMaxPower_mW(1));
+    TEST_ASSERT_EQUAL_UINT16(20000, reg.pdo(1).batteryMaxVoltage_mV());
+    TEST_ASSERT_EQUAL_UINT16(5000, reg.pdo(1).batteryMinVoltage_mV());
+    TEST_ASSERT_EQUAL_UINT32(60000, reg.pdo(1).batteryPower_mW());
 }
 
 void test_variable_fields_decode()
@@ -264,9 +293,9 @@ void test_variable_fields_decode()
     Caps c(2, {FIXED_5V_3A, pdo});
     TPS25751ReceivedSinkCaps reg(c.buf, CAPS_SIZE);
 
-    TEST_ASSERT_EQUAL_UINT16(12000, reg.getVariableMaxVoltage_mV(1));
-    TEST_ASSERT_EQUAL_UINT16(5000, reg.getVariableMinVoltage_mV(1));
-    TEST_ASSERT_EQUAL_UINT16(1500, reg.getVariableMaxCurrent_mA(1));
+    TEST_ASSERT_EQUAL_UINT16(12000, reg.pdo(1).variableMaxVoltage_mV());
+    TEST_ASSERT_EQUAL_UINT16(5000, reg.pdo(1).variableMinVoltage_mV());
+    TEST_ASSERT_EQUAL_UINT16(1500, reg.pdo(1).variableCurrent_mA());
 }
 
 // --- debugPrint ---------------------------------------------------------------
@@ -287,7 +316,7 @@ void test_debug_print_all_pdo_types()
                            (1u << 25) | (2u << 23) | (100u << 10) | 300u;
     const uint32_t battery = (1u << 30) | (400u << 20) | (100u << 10) | 240u;
     const uint32_t variable = (2u << 30) | (240u << 20) | (100u << 10) | 150u;
-    Caps c(5, {fixed, battery, variable, 0xC1A4213Cu, 0xE004B1F4u});
+    Caps c(5, {fixed, battery, variable, 0xC1A4323Cu, 0xE004B1F4u});
     TPS25751ReceivedSinkCaps reg(c.buf, CAPS_SIZE);
     const std::string out = captureDebugPrint(reg);
 
@@ -295,21 +324,23 @@ void test_debug_print_all_pdo_types()
     TEST_ASSERT_TRUE(contains(out, "--- PDO 1 ---"));
     TEST_ASSERT_TRUE(contains(out, "Type: Fixed Supply"));
     TEST_ASSERT_TRUE(contains(out, "Voltage: 5000 mV"));
-    TEST_ASSERT_TRUE(contains(out, "Max Current: 3000 mA"));
-    TEST_ASSERT_TRUE(contains(out, "Dual Role Power: Yes"));
+    TEST_ASSERT_TRUE(contains(out, "Operational Current: 3000 mA"));
+    TEST_ASSERT_TRUE(contains(out, "Dual-Role Power: Yes"));
     TEST_ASSERT_TRUE(contains(out, "Higher Capability: Yes"));
     TEST_ASSERT_TRUE(contains(out, "Unconstrained Power: Yes"));
-    TEST_ASSERT_TRUE(contains(out, "USB Comm Capable: Yes"));
-    TEST_ASSERT_TRUE(contains(out, "Dual Role Data: Yes"));
-    TEST_ASSERT_TRUE(contains(out, "Fast Role Swap Current: 2"));
+    TEST_ASSERT_TRUE(contains(out, "USB Communications Capable: Yes"));
+    TEST_ASSERT_TRUE(contains(out, "Dual-Role Data: Yes"));
+    TEST_ASSERT_TRUE(contains(out, "Fast Role Swap Current: "));
+    TEST_ASSERT_TRUE(contains(out, "(2)"));
     TEST_ASSERT_TRUE(contains(out, "Type: Battery"));
-    TEST_ASSERT_TRUE(contains(out, "Max Power: 60000 mW"));
+    TEST_ASSERT_TRUE(contains(out, "Operational Power: 60000 mW"));
     TEST_ASSERT_TRUE(contains(out, "Type: Variable Supply"));
-    TEST_ASSERT_TRUE(contains(out, "Max Current: 1500 mA"));
-    TEST_ASSERT_TRUE(contains(out, "Type: Augmented (PPS)"));
+    TEST_ASSERT_TRUE(contains(out, "Operational Current: 1500 mA"));
+    TEST_ASSERT_TRUE(contains(out, "Type: SPR PPS APDO"));
     TEST_ASSERT_TRUE(contains(out, "Max Voltage: 21000 mV"));
-    TEST_ASSERT_TRUE(contains(out, "Min Voltage: 3300 mV"));
-    TEST_ASSERT_TRUE(contains(out, "Augmented, APDO subtype 2 (not SPR PPS; not decoded)"));
+    TEST_ASSERT_TRUE(contains(out, "Min Voltage: 5000 mV"));
+    TEST_ASSERT_TRUE(contains(out, "Type: SPR AVS APDO"));
+    TEST_ASSERT_TRUE(contains(out, "Deprecated SPR AVS Sink APDO, not decoded: 0xE004B1F4"));
 }
 
 void test_debug_print_fixed_flags_clear_print_no()
@@ -318,11 +349,11 @@ void test_debug_print_fixed_flags_clear_print_no()
     TPS25751ReceivedSinkCaps reg(c.buf, CAPS_SIZE);
     const std::string out = captureDebugPrint(reg);
 
-    TEST_ASSERT_TRUE(contains(out, "Dual Role Power: No"));
+    TEST_ASSERT_TRUE(contains(out, "Dual-Role Power: No"));
     TEST_ASSERT_TRUE(contains(out, "Higher Capability: No"));
     TEST_ASSERT_TRUE(contains(out, "Unconstrained Power: No"));
-    TEST_ASSERT_TRUE(contains(out, "USB Comm Capable: No"));
-    TEST_ASSERT_TRUE(contains(out, "Dual Role Data: No"));
+    TEST_ASSERT_TRUE(contains(out, "USB Communications Capable: No"));
+    TEST_ASSERT_TRUE(contains(out, "Dual-Role Data: No"));
 }
 
 // --- Semantic validation ------------------------------------------------------
@@ -331,7 +362,7 @@ void test_semantic_valid_mixed_caps()
 {
     const uint32_t battery = (1u << 30) | (400u << 20) | (100u << 10) | 240u;
     const uint32_t variable = (2u << 30) | (240u << 20) | (100u << 10) | 150u;
-    Caps c(4, {FIXED_5V_3A, battery, variable, 0xC1A4213Cu});
+    Caps c(4, {FIXED_5V_3A, battery, variable, 0xC1A4323Cu});
 
     TEST_ASSERT_TRUE(semOk(c));
 }
@@ -349,38 +380,48 @@ void test_semantic_rejects_all_ones_and_wrong_size()
 void test_semantic_fixed_rules()
 {
     TEST_ASSERT_FALSE(semOk(Caps(2, {FIXED_5V_3A, 300u})));          // zero voltage
-    TEST_ASSERT_FALSE(semOk(Caps(2, {FIXED_5V_3A, 180u << 10})));    // zero current
+    // Zero operational current is valid (Tables 6.9, 6.10 allow 0); the old rule rejected it.
+    TEST_ASSERT_TRUE(semOk(Caps(2, {FIXED_5V_3A, 180u << 10})));
+    TEST_ASSERT_FALSE(semOk(Caps(2, {FIXED_5V_3A, (180u << 10) | 501u})));  // above 5 A
 
-    // PDO 1 must be near 5 V: 4.75 V and 5.25 V accepted, 4.7 V, 5.3 V and 9 V rejected.
-    TEST_ASSERT_TRUE(semOk(Caps(1, {(95u << 10) | 300u})));
-    TEST_ASSERT_TRUE(semOk(Caps(1, {(105u << 10) | 300u})));
-    TEST_ASSERT_FALSE(semOk(Caps(1, {(94u << 10) | 300u})));
-    TEST_ASSERT_FALSE(semOk(Caps(1, {(106u << 10) | 300u})));
+    // PDO 1 must be exactly 5 V; the old 4.75 to 5.25 V band is gone.
+    TEST_ASSERT_TRUE(semOk(Caps(1, {(100u << 10) | 300u})));
+    TEST_ASSERT_FALSE(semOk(Caps(1, {(95u << 10) | 300u})));
+    TEST_ASSERT_FALSE(semOk(Caps(1, {(105u << 10) | 300u})));
     TEST_ASSERT_FALSE(semOk(Caps(1, {(180u << 10) | 300u})));
 }
 
 void test_semantic_battery_rules()
 {
     const uint32_t b = (1u << 30);
-    TEST_ASSERT_FALSE(semOk(Caps(2, {FIXED_5V_3A, b | (100u << 20) | (400u << 10) | 240u})));  // min > max
+    TEST_ASSERT_TRUE(semOk(Caps(2, {FIXED_5V_3A, b | (100u << 20) | (400u << 10) | 240u})));   // min > max: valid
     TEST_ASSERT_FALSE(semOk(Caps(2, {FIXED_5V_3A, b | (400u << 20) | 240u})));                  // zero min
     TEST_ASSERT_FALSE(semOk(Caps(2, {FIXED_5V_3A, b | (100u << 10) | 240u})));                  // zero max
-    TEST_ASSERT_FALSE(semOk(Caps(2, {FIXED_5V_3A, b | (400u << 20) | (100u << 10)})));          // zero power
+    TEST_ASSERT_TRUE(semOk(Caps(2, {FIXED_5V_3A, b | (400u << 20) | (100u << 10)})));           // zero power: valid
+    TEST_ASSERT_FALSE(semOk(Caps(2, {FIXED_5V_3A, b | (400u << 20) | (100u << 10) | 401u})));   // above 100 W
 }
 
 void test_semantic_variable_rules()
 {
     const uint32_t v = (2u << 30);
-    TEST_ASSERT_FALSE(semOk(Caps(2, {FIXED_5V_3A, v | (100u << 20) | (240u << 10) | 150u})));  // min > max
+    TEST_ASSERT_TRUE(semOk(Caps(2, {FIXED_5V_3A, v | (100u << 20) | (240u << 10) | 150u})));   // min > max: valid
     TEST_ASSERT_FALSE(semOk(Caps(2, {FIXED_5V_3A, v | (240u << 20) | 150u})));                  // zero min
     TEST_ASSERT_FALSE(semOk(Caps(2, {FIXED_5V_3A, v | (100u << 10) | 150u})));                  // zero max
-    TEST_ASSERT_FALSE(semOk(Caps(2, {FIXED_5V_3A, v | (240u << 20) | (100u << 10)})));          // zero current
+    TEST_ASSERT_TRUE(semOk(Caps(2, {FIXED_5V_3A, v | (240u << 20) | (100u << 10)})));           // zero current: valid
+    TEST_ASSERT_FALSE(semOk(Caps(2, {FIXED_5V_3A, v | (240u << 20) | (100u << 10) | 501u})));   // above 5 A
 }
 
-void test_semantic_pps_zero_current_and_zero_min()
+void test_semantic_pps_sink_voltage_range()
 {
-    TEST_ASSERT_FALSE(semOk(Caps(2, {FIXED_5V_3A, 0xC1A42100u})));  // 3.3-21 V, 0 A
+    TEST_ASSERT_TRUE(semOk(Caps(2, {FIXED_5V_3A, 0xC1A43200u})));   // 5-21 V, 0 A: valid
+    TEST_ASSERT_FALSE(semOk(Caps(2, {FIXED_5V_3A, 0xC1A4213Cu})));  // 3.3 V minimum is below 5 V
     TEST_ASSERT_FALSE(semOk(Caps(2, {FIXED_5V_3A, 0xC1A4003Cu})));  // zero min voltage
+    TEST_ASSERT_FALSE(semOk(Caps(2, {FIXED_5V_3A, 0xC1B4323Cu})));  // max 22 V is above 21 V
+}
+
+void test_semantic_invalid_apdo_type_rejected()
+{
+    TEST_ASSERT_FALSE(semOk(Caps(2, {FIXED_5V_3A, 0xF0000000u})));  // APDO type 11b
 }
 
 int main(int, char **)
@@ -389,8 +430,10 @@ int main(int, char **)
     RUN_TEST(test_default_constructor_allocates_zeroed_buffer);
     RUN_TEST(test_non_pps_apdo_reports_subtype_and_no_pps_fields);
     RUN_TEST(test_non_pps_apdo_is_semantically_valid);
+    RUN_TEST(test_deprecated_spr_avs_sink_apdo_is_identified_and_valid);
+    RUN_TEST(test_pdo_position_role_and_out_of_range);
     RUN_TEST(test_spr_pps_apdo_is_decoded);
-    RUN_TEST(test_spr_pps_min_above_max_is_invalid);
+    RUN_TEST(test_spr_pps_voltage_below_5v_is_invalid);
     RUN_TEST(test_data_and_reginfo_constructors);
     RUN_TEST(test_get_pdo_little_endian_and_slot_offsets);
     RUN_TEST(test_get_pdo_out_of_range_index_returns_zero);
@@ -409,6 +452,7 @@ int main(int, char **)
     RUN_TEST(test_semantic_fixed_rules);
     RUN_TEST(test_semantic_battery_rules);
     RUN_TEST(test_semantic_variable_rules);
-    RUN_TEST(test_semantic_pps_zero_current_and_zero_min);
+    RUN_TEST(test_semantic_pps_sink_voltage_range);
+    RUN_TEST(test_semantic_invalid_apdo_type_rejected);
     return UNITY_END();
 }

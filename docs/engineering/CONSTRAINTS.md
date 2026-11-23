@@ -780,8 +780,10 @@ register failed `isSemanticallyValid()`. USB PD R3.3 Table 6.7 defines the subty
 Source APDO (Table 6.15): Peak Current 00b, Maximum Current 15V 300 (3.0 A), and
 Maximum Current 20V 500 (5.0 A), all in range. The `usb-pd-docs` MCP server serves
 the PDO, APDO, and RDO tables (6.6 to 6.22) since `device-register-mcp-server`
-c4cca8f and c000cdf (2026-11-20), but the library still decodes only the SPR PPS
-APDO. Every PDO class (`TPS25751ActivePDOContract`,
+c4cca8f and c000cdf (2026-11-20). Since 2026-11-22 the library decodes every PDO
+through `TPS25751Pdo` (ADR-013): SPR PPS for a Source and a Sink, and the SPR AVS
+Source APDO; EPR AVS and the deprecated SPR AVS Sink APDO are named and kept raw.
+The paragraph below describes the PPS-only decode that came before. Every PDO class (`TPS25751ActivePDOContract`,
 `TPS25751Received{Source,Sink}Caps`, `TPS25751Transmit{Source,Sink}Caps`)
 therefore exposes the subtype (`apdoSubtype()` / `getAPDOSubtype()`) and
 `isSprPps()` / `isSprPpsPDO()`. The PPS accessors return 0 (or false) for any
@@ -792,34 +794,41 @@ helpers `apdoSubtype(pdo)` and `isSprPpsApdo(pdo)` live in
 
 ### PDO Parsing Strategy
 
-**Type detection:**
-```cpp
-uint8_t pdoType = (pdo >> 30) & 0x03;
+Decode a PDO word through `TPS25751Pdo` (ADR-013), never with ad hoc shifts in a
+register class. Build it with the word, its 1-based position, and the role of its
+sender; `kind()` combines the PDO type (bits 31:30, Table 6.6) and the APDO type (bits
+29:28, Table 6.7):
 
-switch (pdoType) {
-    case 0b00:  // Fixed Supply
-        return parseFixedSupplyPDO(pdo);
-    case 0b01:  // Battery
-        return parseBatteryPDO(pdo);
-    case 0b10:  // Variable Supply
-        return parseVariablePDO(pdo);
-    case 0b11:  // Augmented (PPS)
-        return parseAugmentedPDO(pdo);
+```cpp
+TPS25751Pdo p = sourceCaps.pdo(i);        // position i + 1, PdoRole::Source
+switch (p.kind()) {
+    case PdoKind::Fixed:    p.fixedVoltage_mV(); p.peakCurrent(); break;  // flags only when i == 0
+    case PdoKind::Battery:  p.batteryPower_mW(); break;
+    case PdoKind::Variable: p.variableCurrent_mA(); break;
+    case PdoKind::SprPps:   p.ppsMaxVoltage_mV(); break;
+    case PdoKind::SprAvs:   p.avsCurrent15V_mA(); break;
+    default: break;  // EprAvs and InvalidApdo: raw() only
 }
 ```
 
 ### RDO (Request Data Object) Structure
 
+Bits 31:22 are common to every RDO (USB PD R3.3 Tables 6.19 to 6.22); the rest
+depends on the PDO at the Object Position, so decode through
+`TPS25751Rdo(word, rdoKindFor(pdo))`:
+
 ```
-Bits 31-28: Object Position (which PDO from 1-7)
-Bit  27:    Give Back Flag
+Bits 31-28: Object Position (which PDO, 1-7)
+Bit  27:    Giveback (deprecated, ignore)
 Bit  26:    Capability Mismatch
 Bit  25:    USB Communications Capable
 Bit  24:    No USB Suspend
 Bit  23:    Unchunked Extended Messages Supported
-Bits 22-20: Reserved
-Bits 19-10: Operating Current/Power (units depend on PDO type)
-Bits 9-0:   Max/Min Operating Current/Power
+Bit  22:    EPR Capable (the TRM marks it reserved in 0x35)
+Fixed/Variable: bits 19-10 Operating Current (10 mA), bits 9-0 deprecated copy
+Battery:        bits 19-10 Operating Power (250 mW), bits 9-0 deprecated copy
+PPS:            bits 20-9 Output Voltage (20 mV), bits 6-0 Operating Current (50 mA)
+AVS:            bits 20-9 Output Voltage (25 mV, bits 10-9 = 00b), bits 6-0 Operating Current (50 mA)
 ```
 
 ### PDO/RDO Array Handling
@@ -885,10 +894,9 @@ first registers with a PDO *encode* path (`TPS25751TransmitSourceCaps` /
 - **The Sink Fixed PDO differs from the Source Fixed PDO** (bit 28 = Higher
   Capability not USB Suspend; bits 24:23 = Fast-Role-Swap current, a 2-bit
   field; no Unchunked bit). Model that 2-bit field as `uint8_t`, not `bool`.
-  *(Follow-up: the shipped read-only `TPS25751ReceivedSinkCaps::getFixedFastRoleSwapCurrent()`
-  returns `bool` and silently truncates values 2/3 to 1 — a latent decode bug
-  the Batch-D gate surfaced. Left unchanged in Batch D to keep the batch scoped
-  to the TRANSMIT registers; worth a dedicated follow-up fix.)*
+  The read-only `TPS25751ReceivedSinkCaps::getFixedFastRoleSwapCurrent()` returned
+  `bool` and truncated codes 2 and 3 to 1 until 6627be1 (2026-11-19). Since ADR-013
+  every capability class reads it as `pdo(0).fastRoleSwapCurrent()`, a 2-bit enum.
 
 ### USB PD Specification Structures (Batch L)
 
@@ -944,9 +952,10 @@ from memory. Points that are easy to get wrong:
 - PDOs and RDOs (cross-check against `usb-pd-docs` on 2026-11-22). The PDO field
   layouts the classes decode match Tables 6.8 to 6.13. Three points the tables add:
   - Bits 29:22 of a Fixed PDO above 5 V are Device Flags, reserved and populated only
-    in PDO 1 (Table 6.10). The `getFixed*()` flag getters of the capability classes
-    and the `fixed*()` flag accessors of 0x34 read those bits from any PDO, so for any
-    PDO but the first they return reserved bits, not the port's flags.
+    in PDO 1 (Table 6.10). `TPS25751Pdo` therefore decodes the flags only at position
+    1 and returns false elsewhere, and 0x34 takes them from First PDO Control Bits
+    through `firstPdoControl()`. Until 2026-11-22 the flag getters read those bits
+    from any PDO.
   - 0x34 bits 41:32 (First PDO Control Bits) are bits 29:20 of PDO 1, Dual-Role Power
     through Peak Current (Table 6.8). The TRM does not say so. Hardware confirms it
     with two chargers: on 2026-11-19 0x34 read 0x098 there while PDO 1 of 0x30 was
@@ -957,14 +966,28 @@ from memory. Points that are easy to get wrong:
   - 0x35 bits 31:0 follow the Fixed and Variable RDO (Table 6.19), which is TI's
     layout. In a Battery RDO (Table 6.20) bits 19:10 are Operating Power in 250 mW
     units, and in a PPS or AVS RDO (Tables 6.21, 6.22) bits 20:9 are Output Voltage and
-    bits 6:0 Operating Current in 50 mA units, so `operatingCurrent_mA()` holds only for
-    a Fixed or Variable contract. TRM reserved bit 22 is EPR Capable in every RDO.
+    bits 6:0 Operating Current in 50 mA units. TRM reserved bit 22 is EPR Capable in
+    every RDO. 0x35 therefore hands out `TPS25751Rdo` objects decoded by the kind of
+    the requested PDO; its old accessors read every RDO as Fixed/Variable, so a 9 V
+    3 A PPS request read as 2250 mA.
     On hardware, with the board sinking, 0x35 RequestedRDO (bits 127:96) read the
     same word as bits 31:0 with both chargers (0x4184B12C, then 0x4104B12C), although
     the TRM describes it as the RDO a partner sends while this device is source.
-  The validation rules of 0x30 to 0x33 differ from the tables in places (zero currents
-  allowed by the tables are rejected, upper limits are not checked, and PDO 1 is not
-  required to be a Fixed PDO); see the follow-up section of the rev B plan.
+  Validation of 0x30 to 0x34 follows the tables through `validatePdoList()` and
+  `TPS25751Pdo::isValidForReceiver()`. Received lists (0x30, 0x31, and 0x34's
+  active PDO) reject only what the tables tell a receiver to treat as invalid: a
+  Fixed or Variable current above 500, a Battery power above 400, a PPS current above
+  100, a Source PPS voltage outside 110/160/210 and 33/50 (Table 6.13), a Sink PPS
+  voltage outside 50 to 210 (Table 6.14), an SPR AVS current above 500, APDO type
+  11b, and a zero voltage; zero currents and powers are valid. Every list also
+  requires PDO 1 to be a Fixed PDO at exactly 5 V. Transmit lists (0x32, 0x33) add
+  the sender rules: the order Fixed, Battery, Variable, SPR AVS, PPS (page 130); no
+  EPR AVS or invalid APDO; in 0x32, a Variable PDO's minimum voltage at least 80% of
+  its maximum (Table 6.12) and SPR AVS currents equal to the 15 V and 20 V Fixed PDOs'
+  (Table 6.15); in 0x33, no SPR AVS APDO (page 137). The old per-type rules (nonzero
+  current, a 4750 to 5250 mV PDO 1, minimum voltage at most maximum) are gone; the
+  tables do not tell a receiver to reject a minimum above the maximum. The board's
+  0x30, 0x32, and 0x33 values pass every rule.
 
 ### USB PD Specification Reference
 
@@ -1272,6 +1295,7 @@ void foo() {
 | 1.13 | 2026-11-19 | Claude Code | USB PD cross-check against the linked `tps25751-docs` output: 0x77 byte 14 is the EPR Source PDP Rating, 0x78 is SIDO1 and SIDO2, and the Specification block (USB PD Specification Structures section) |
 | 1.14 | 2026-11-19 | Claude Code | TX_SOURCE_INFO (0x78) semantic validation checks the USB PD R3.3 Table 6.29 and 6.30 rules: DPS Port requires both Port Type bits Managed, and the 1 W Port Maximum PDP equals the 0.5 W value rounded down (USB PD Specification Structures and Read/Write Registers sections) |
 | 1.15 | 2026-11-22 | Claude Code | PDO, APDO, and RDO cross-check against `usb-pd-docs` (device-register-mcp-server 696c854): the 0x32 subtype 10b APDO is an SPR AVS Source APDO, 0x34 First PDO Control Bits are PDO 1 bits 29:20 (confirmed on hardware), fixed-PDO flags are reserved outside PDO 1, 0x35 decodes as a Fixed or Variable RDO only, and the 0x48 Pad Object (USB PD Specification Structures section) |
+| 1.16 | 2026-11-22 | Claude Code | PDOs and RDOs decode through `TPS25751Pdo` and `TPS25751Rdo` (ADR-013): fixed-PDO flags only for PDO 1, SPR AVS Source decode, RDOs by kind, and validation of 0x30 to 0x34 per USB PD R3.3 (USB PD Specification Structures and PDO Parsing Strategy sections) |
 
 ---
 

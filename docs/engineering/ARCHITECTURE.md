@@ -1,6 +1,6 @@
 # TPS25751 Library - System Architecture
 
-**Last Updated:** 2026-11-19
+**Last Updated:** 2026-11-22
 **Status:** Active
 
 ---
@@ -1328,6 +1328,43 @@ has, and every new long register would have added another.
   words from `_raw[]` by hand. They are correct and were left as they are; they could move
   to `extractBits32()` and `setBits()` in a later cleanup.
 
+
+### ADR-013: USB PD Objects as Value Types
+**Status:** Accepted
+**Date:** 2026-11-22
+**Context:** Registers 0x30 to 0x35 carry USB PD PDO and RDO words. Each class decoded
+them with its own getters (`getFixedVoltage_mV(i)`, `fixedUnconstrainedPower()`,
+`operatingCurrent_mA()`, and so on), so five copies of the PDO decode drifted apart and
+shared the same faults: fixed-PDO flags read from any position although Table 6.10
+reserves them outside PDO 1, no decode of the SPR AVS APDO the board itself
+advertises, every RDO read as Fixed/Variable whatever the contract, and per-class
+validation rules that disagreed with the specification.
+**Decision:**
+- One value type per object: `TPS25751Pdo` (a PDO word, its 1-based position, and the
+  role of its sender) and `TPS25751Rdo` (an RDO word and its `RdoKind`). Both decode
+  from USB PD R3.3 V1.0 tables served by `usb-pd-docs`, return 0 or false for a field
+  that does not apply, and print themselves.
+- The register classes hand them out: `pdo(i)` in 0x30 to 0x33, `activePdo()` and
+  `firstPdoControl()` in 0x34, `ownRdo(kind)` and `requestedRdo(kind)` in 0x35. The
+  per-class field getters are removed.
+- An RDO's kind is not in the word. The caller derives it with `rdoKindFor(pdo)` from
+  the PDO at the RDO's Object Position, and 0x35 offers a `debugPrint()` overload that
+  takes both kinds.
+- `validatePdoList()` validates a whole Capabilities list once, with the received or
+  transmit rule set, so a list rule (PDO 1 is vSafe5V, the PDO order, AVS currents
+  matching the Fixed PDOs) has one implementation.
+**Consequences:**
+- A breaking API change in 3.0.0: the per-class PDO and RDO getters are gone, and
+  0x34's raw accessors are renamed `rawActivePdo()` and `rawFirstPdoControlBits()`.
+- Decoding a new PDO or RDO layout, or changing a rule, is a change to one file and
+  one suite (`test_TPS25751Pdo`, `test_TPS25751Rdo`).
+- 0x30 to 0x34 validation follows USB PD R3.3 (received lists reject only what a
+  receiver must; transmit lists also enforce the sender rules), which accepts some
+  values the old rules rejected (zero currents) and rejects some they accepted (a PDO
+  1 at 4.9 V, an over-range current).
+- 0x35 cannot decode its typed fields alone; its single-argument `debugPrint()` prints
+  the raw words and common fields with a note that the typed fields need the PDO type.
+
 ---
 
 ## Revision History
@@ -1341,6 +1378,7 @@ has, and every new long register would have added another.
 | 1.4 | 2026-06-26 | Claude Code | Added dual-transport downstream devices (ADR-010): optional direct-I2C constructor on TPS25751DownstreamDevice / BQ25798::Device |
 | 1.5 | 2026-07-02 | Claude Code | BQ25798 driver split out to the sibling lib/BQ25798 repo; ADR-008/009/010 retained as the downstream-driver extension-point contract, BQ25798-specific walkthrough moved with the driver |
 | 1.6 | 2026-11-19 | Claude Code | Added ADR-012: 16-bit bit positions in the register base class; moved ADR-010's Consequences back under ADR-010 |
+| 1.7 | 2026-11-22 | Claude Code | Added ADR-013: USB PD PDO and RDO words decode through the TPS25751Pdo and TPS25751Rdo value types |
 
 ---
 

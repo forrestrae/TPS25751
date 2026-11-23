@@ -520,6 +520,48 @@ EepromUpdateStatus TPS25751EepromUpdater::updateBothRegions(const uint8_t* image
 }
 
 // ---------------------------------------------------------------------------
+// Reset
+// ---------------------------------------------------------------------------
+
+EepromUpdateStatus TPS25751EepromUpdater::coldReset(uint32_t waitForAppMs)
+{
+    _lastStep = EepromUpdateStep::Reset;
+
+    const TPS25751TaskResult result = _exec.executeCommand(
+        CMD_GAID, nullptr, 0, nullptr, 0, GAID_CMD_TIMEOUT_MS);
+
+    // GAID never completes in the normal sense (TRM Table 4-3). Success, Timeout,
+    // and I2CError all mean the reset was issued: COMMAND reads 0 after the
+    // reboot, and the controller can NAK while it reboots. Only "!CMD" means the
+    // controller did not take the task.
+    if (result.status == TPS25751TaskStatus::Rejected) {
+        TPS_DEBUG_ERROR(DEBUG_CAT_TASK, "EEPROM: GAID rejected");
+        return EepromUpdateStatus::CommandRejected;
+    }
+
+    const uint32_t start = _exec.nowMs();
+    _exec.delayMs(GAID_SETTLE_MS);
+
+    TPS25751Mode mode;
+    for (;;) {
+        // A failed read is expected while the controller reboots.
+        if (_exec.readMode(mode) && mode.isApplicationMode()) {
+            _lastStep = EepromUpdateStep::Done;
+            TPS_DEBUG_INFO(DEBUG_CAT_TASK, "EEPROM: MODE reads APP %lu ms after GAID returned",
+                           static_cast<unsigned long>(_exec.nowMs() - start));
+            return EepromUpdateStatus::Success;
+        }
+        // Unsigned subtraction keeps the elapsed time right across a clock wrap.
+        if (static_cast<uint32_t>(_exec.nowMs() - start) >= waitForAppMs) {
+            TPS_DEBUG_ERROR(DEBUG_CAT_TASK, "EEPROM: MODE did not read APP within %lu ms of GAID",
+                            static_cast<unsigned long>(waitForAppMs));
+            return EepromUpdateStatus::ResetTimeout;
+        }
+        _exec.delayMs(GAID_MODE_POLL_MS);
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Read-back
 // ---------------------------------------------------------------------------
 
@@ -664,6 +706,7 @@ const char* TPS25751EepromUpdater::toString(EepromUpdateStep step)
         case EepromUpdateStep::CompareBundle:   return "CompareBundle";
         case EepromUpdateStep::RestorePointer:  return "RestorePointer";
         case EepromUpdateStep::EraseOldPointer: return "EraseOldPointer";
+        case EepromUpdateStep::Reset:           return "Reset";
         case EepromUpdateStep::Done:            return "Done";
         default:                                return "Unknown";
     }

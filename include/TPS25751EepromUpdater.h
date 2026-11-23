@@ -18,11 +18,12 @@
  *   the bytes that follow the pointer;
  * - the update flows of SLVAFL1 Figure 2-3: updateRegion(),
  *   updateInactiveRegion(), and updateBothRegions();
- * - read-back with compareRegion() and dump(), and pure image checks.
+ * - read-back with compareRegion() and dump(), and pure image checks;
+ * - coldReset(), which issues GAID and waits for APP.
  *
  * Calls that change the EEPROM: setWriteAddress() followed by writeData(),
- * writeRegionPointer(), and the three update flows. Every other call only
- * reads.
+ * writeRegionPointer(), and the three update flows. coldReset() restarts the
+ * controller and disconnects the port. Every other call only reads.
  *
  * EEPROM layout (SLVAFL1 Figures 2-1 and 2-6, and the source code on page 10):
  *
@@ -54,6 +55,9 @@
  * TPS25751EepromUpdater updater(exec);
  *
  * EepromUpdateStatus s = updater.updateInactiveRegion(image, imageLength);
+ * if (s == EepromUpdateStatus::Success) {
+ *     s = updater.coldReset();  // the port disconnects while the controller restarts
+ * }
  * if (s != EepromUpdateStatus::Success) {
  *     Serial.println(TPS25751EepromUpdater::toString(s));
  *     Serial.println(TPS25751EepromUpdater::toString(updater.lastStep()));
@@ -61,8 +65,8 @@
  * @endcode
  *
  * @see TI SLVAFL1, "TPS25751 and TPS26750 EEPROM Update Over I2C", October 2024
- * @see TI TPS25751 Technical Reference Manual SLVUCR8B, Table 4-1 (p. 61)
- *      and Tables 4-19 to 4-22 (pp. 81-82)
+ * @see TI TPS25751 Technical Reference Manual SLVUCR8B, Table 4-1 (p. 61),
+ *      Table 4-3 (p. 62), and Tables 4-19 to 4-22 (pp. 81-82)
  */
 
 #include <Arduino.h>
@@ -71,7 +75,7 @@
 #include "TPS25751CommandExecutor.h"
 
 // ---------------------------------------------------------------------------
-// Task codes and timing (TRM SLVUCR8B pages 81 and 82)
+// Task codes and timing (TRM SLVUCR8B pages 62, 81, and 82)
 // ---------------------------------------------------------------------------
 
 /// 4CC task code: read 16 bytes of the external EEPROM (TRM Table 4-19).
@@ -85,6 +89,9 @@ constexpr TPS25751FourCC CMD_FLWD = TPS25751FourCC::of("FLwd");
 
 /// 4CC task code: validate the bundle header at an address (TRM Table 4-22).
 constexpr TPS25751FourCC CMD_FLVY = TPS25751FourCC::of("FLvy");
+
+/// 4CC task code: cold reset request (TRM Table 4-3).
+constexpr TPS25751FourCC CMD_GAID = TPS25751FourCC::of("GAID");
 
 /// COMMAND-poll timeout (ms) for FLrd. Hardware stage 1 measured 17.7 ms per
 /// call (1984 calls, default I2C clock, 2026-11-22).
@@ -103,11 +110,25 @@ constexpr uint32_t FLWD_CMD_TIMEOUT_MS = 200;
 /// in hardware stage 1 (2026-11-22); its duration was not recorded.
 constexpr uint32_t FLVY_CMD_TIMEOUT_MS = 1000;
 
+/// COMMAND-poll timeout (ms) for GAID. The task never completes in the normal
+/// sense: an APP-mode controller enters Type-C Error Recovery and restarts
+/// after a typical 1-second delay (TRM Table 4-3). The poll has to outlast that
+/// delay so that it ends on the restart (a NAK, or COMMAND reading 0 after the
+/// reboot) and not while MODE still reads APP from before the restart. Three
+/// times the typical delay; not yet measured on hardware.
+constexpr uint32_t GAID_CMD_TIMEOUT_MS = 3000;
+
 /// Delay (ms) before a bundle chunk whose FLwd reported busy (0xFF) is retried.
 constexpr uint32_t FLWD_BUSY_RETRY_DELAY_MS = 10;
 
 /// Retries of one bundle chunk whose FLwd keeps reporting busy (0xFF).
 constexpr uint8_t FLWD_BUSY_RETRIES = 3;
+
+/// coldReset(): delay (ms) between GAID and the first MODE read.
+constexpr uint32_t GAID_SETTLE_MS = 100;
+
+/// coldReset(): interval (ms) between MODE reads while waiting for APP.
+constexpr uint32_t GAID_MODE_POLL_MS = 50;
 
 // ---------------------------------------------------------------------------
 // Types
@@ -153,7 +174,7 @@ enum class EepromUpdateStatus : uint8_t {
 };
 
 /**
- * @brief The step an update was in when it returned
+ * @brief The step an update or reset was in when it returned
  *
  * lastStep() returns this. It tells a caller which row of the state table in
  * updateRegion() applies when a call returns an executor failure
@@ -164,7 +185,7 @@ enum class EepromUpdateStatus : uint8_t {
  * @see SLVAFL1 Figure 2-3
  */
 enum class EepromUpdateStep : uint8_t {
-    None,             ///< No update has run on this object
+    None,             ///< No update or reset has run on this object
     Preflight,        ///< Region selection or the pre-flight checks; this call has issued no write
     ErasePointer,     ///< Step 1: writing the target region's pointer to 0
     WriteBundle,      ///< Step 2: FLad to the bundle start, then the FLwd chunks
@@ -172,7 +193,8 @@ enum class EepromUpdateStep : uint8_t {
     CompareBundle,    ///< Step 3: FLrd compare of the written region with the image
     RestorePointer,   ///< Step 3: writing the target pointer to the bundle start
     EraseOldPointer,  ///< Step 4: writing the other region's pointer to 0
-    Done              ///< The most recent update completed
+    Reset,            ///< coldReset(): GAID issued, or MODE being polled
+    Done              ///< The most recent update or reset completed
 };
 
 /**
@@ -702,6 +724,50 @@ public:
      */
     EepromUpdateStatus dump(uint32_t addr, size_t length, Stream& out);
 
+    // --- Reset ---------------------------------------------------------------
+
+    /**
+     * @brief Restart the controller with GAID and wait for APP mode
+     *
+     * Kept apart from the update calls so that the application chooses when
+     * the port disconnects: an APP-mode controller enters Type-C Error
+     * Recovery and restarts after a typical 1-second delay (TRM Table 4-3).
+     *
+     * GAID never completes in the normal sense, because the processor
+     * restarts. The executor result is read as follows:
+     * - Success (COMMAND read 0, as it does after the reboot), Timeout, and
+     *   I2CError (the controller can NAK while it reboots) all count as "reset
+     *   issued".
+     * - Rejected ("!CMD") returns CommandRejected at once; no reset happened.
+     *
+     * After a reset was issued the call waits GAID_SETTLE_MS, then reads MODE
+     * every GAID_MODE_POLL_MS until it reads APP or @p waitForAppMs has
+     * passed since the GAID task returned. MODE read failures during the wait
+     * are expected and ignored. At least one MODE read is always made. The
+     * time is taken from the executor's clock and is safe across its wrap.
+     *
+     * Two limits follow from that reading. An I2C failure that kept GAID from
+     * reaching the controller looks the same as a NAK during the reboot. And
+     * a MODE read that returns APP before the controller has restarted counts
+     * as "back in APP"; GAID_CMD_TIMEOUT_MS is chosen to outlast the delay
+     * before the restart, but that timing has not been measured on hardware.
+     * So confirm the restart after a Success: read VERSION (0x0F) and
+     * BOOT_FLAGS (0x2D), which show the bundle and the region that booted.
+     *
+     * The call does not change the EEPROM. It sets lastStep() to Reset, and to
+     * Done on Success.
+     *
+     * @param waitForAppMs Longest wait for MODE to read APP, from the return of
+     *                     the GAID task (default 5000 ms). The call can block
+     *                     for up to GAID_CMD_TIMEOUT_MS more while GAID is
+     *                     polled.
+     * @return Success when MODE read APP; ResetTimeout when it did not in
+     *         time; CommandRejected when the controller rejected GAID
+     * @see TRM SLVUCR8B Table 4-3, p. 62
+     * @see SLVAFL1 Figure 2-2
+     */
+    EepromUpdateStatus coldReset(uint32_t waitForAppMs = 5000);
+
     // --- Progress and state ----------------------------------------------------
 
     /**
@@ -714,12 +780,12 @@ public:
     void setProgressCallback(EepromProgressCallback callback, void* ctx = nullptr);
 
     /**
-     * @brief The step the most recent update was in when it returned
+     * @brief The step the most recent update or reset was in when it returned
      *
-     * Set by updateRegion(), updateInactiveRegion(), and updateBothRegions();
-     * the primitives, writeRegionPointer(), compareRegion(), and dump() leave
-     * it unchanged. After a failure it names the step that failed. Inside a
-     * progress callback it names the phase that is reporting.
+     * Set by updateRegion(), updateInactiveRegion(), updateBothRegions(), and
+     * coldReset(); the primitives, writeRegionPointer(), compareRegion(), and
+     * dump() leave it unchanged. After a failure it names the step that
+     * failed. Inside a progress callback it names the phase that is reporting.
      *
      * @return The step, None before the first flow, Done after a completed one
      * @see updateRegion() for the EEPROM state each step leaves

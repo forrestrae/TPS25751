@@ -72,7 +72,7 @@ std::unique_ptr<TPS25751Register> TPS25751RegisterFactoryImpl::createRegister(TP
             return createPortConfigRegister();
         case TPS25751Registers::Address::PORT_CONTROL:
             return createPortControlRegister();
-        case TPS25751Registers::Address::BOOT_STATUS:
+        case TPS25751Registers::Address::BOOT_FLAGS:
             return createBootFlagsRegister();
         case TPS25751Registers::Address::RECEIVED_SOURCE_CAPABILITIES:
             return createReceivedSourceCapsRegister();
@@ -162,7 +162,7 @@ std::unique_ptr<TPS25751Register> TPS25751RegisterFactoryImpl::createRegister(TP
             return createPortConfigRegister(data, length);
         case TPS25751Registers::Address::PORT_CONTROL:
             return createPortControlRegister(data, length);
-        case TPS25751Registers::Address::BOOT_STATUS:
+        case TPS25751Registers::Address::BOOT_FLAGS:
             return createBootFlagsRegister(data, length);
         case TPS25751Registers::Address::RECEIVED_SOURCE_CAPABILITIES:
             return createReceivedSourceCapsRegister(data, length);
@@ -247,7 +247,7 @@ std::unique_ptr<TPS25751Register> TPS25751RegisterFactoryImpl::createRegister(co
             return std::make_unique<TPS25751PortConfig>(regInfo);
         case TPS25751Registers::Address::PORT_CONTROL:
             return std::make_unique<TPS25751PortControl>(regInfo);
-        case TPS25751Registers::Address::BOOT_STATUS:
+        case TPS25751Registers::Address::BOOT_FLAGS:
             return std::make_unique<TPS25751BootFlags>(regInfo);
         case TPS25751Registers::Address::RECEIVED_SOURCE_CAPABILITIES:
             return std::make_unique<TPS25751ReceivedSourceCaps>(regInfo);

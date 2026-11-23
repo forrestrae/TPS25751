@@ -400,7 +400,7 @@ Wire.setClock(400000);  // 400 kHz
 
 ### Read-Only Registers (R)
 
-**Examples:** STATUS, MODE, BOOT_STATUS, RECEIVED_SOURCE_CAPABILITIES, IO_CONFIG
+**Examples:** STATUS, MODE, BOOT_FLAGS, RECEIVED_SOURCE_CAPABILITIES, IO_CONFIG
 
 **Characteristics:**
 - Can only be read

@@ -99,7 +99,7 @@ bool TPS25751BootFlags::isSemanticallyValid() const {
     if (!isValid() || !hasValidData()) return false;
     
     // Check register size matches expected
-    constexpr size_t expectedSize = TPS25751Registers::Registers::BOOT_STATUS.size;
+    constexpr size_t expectedSize = TPS25751Registers::Registers::BOOT_FLAGS.size;
     if (!isValidSize(expectedSize)) return false;
     
     // Validate logical consistency of boot flags

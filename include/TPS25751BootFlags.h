@@ -17,8 +17,8 @@ enum class PatchConfigSource {
 class TPS25751BootFlags : public TPS25751Register
 {
 public:
-    explicit TPS25751BootFlags() : TPS25751Register(TPS25751Registers::Registers::BOOT_STATUS.size) {};
-    explicit TPS25751BootFlags(const uint8_t *data) : TPS25751Register(data, TPS25751Registers::Registers::BOOT_STATUS.size) {};
+    explicit TPS25751BootFlags() : TPS25751Register(TPS25751Registers::Registers::BOOT_FLAGS.size) {};
+    explicit TPS25751BootFlags(const uint8_t *data) : TPS25751Register(data, TPS25751Registers::Registers::BOOT_FLAGS.size) {};
     TPS25751BootFlags(const uint8_t *data, const size_t len) : TPS25751Register(data, len) {};
     explicit TPS25751BootFlags(TPS25751Registers::RegisterInfo regInfo) : TPS25751Register(regInfo.size) {};
 

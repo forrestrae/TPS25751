@@ -622,6 +622,16 @@ public:
      * that timed out may still have run, which is why those pointer states
      * are "uncertain".
      *
+     * One limit of this sequence: step 2 trusts the controller's write
+     * address. Once the FLad to the bundle start has returned 0, the chunks
+     * are sent with no read-back until the compare of step 3. A controller
+     * that returned 0 and still held another address would write the whole
+     * image there. FLvy or the compare then fails the call, but only after
+     * the bytes have landed, and they can land on the other region's bundle
+     * or pointer; the table above does not hold in that case, and no region
+     * may boot. No TI document describes such a failure. The sequence is the
+     * one SLVAFL1 Figure 2-3 gives.
+     *
      * The call blocks for the whole update. Stage 1 measured 17.7 ms per FLrd,
      * so the compare alone takes about 16 s for a 14336-byte image. An
      * application with a watchdog services it from the progress callback.

@@ -173,12 +173,12 @@ enum class EepromUpdateStatus : uint8_t {
     PointerEraseFailed,       ///< Update step 1: the target pointer could not be written to 0
     SetAddressFailed,         ///< FLad reported a failure in its task return code (TRM Table 4-20; Table 4-1 puts the standard TaskResult in bits 3:0)
     WriteFailed,              ///< FLwd returned a code other than written (0x00) or busy (0xFF)
-    FlashBusy,                ///< FLwd reported busy (0xFF), in an update still busy after the retries
+    FlashBusy,                ///< FLwd reported busy (0xFF): for a bundle chunk, still busy after the retries; for a pointer or AppConfigOffset word, at once, since those writes are not retried
     VerifyFailed,             ///< FLvy reported the bundle not valid (0x01) or an unknown code
-    CompareMismatch,          ///< compareRegion(): the EEPROM differs from the image. writeRegionPointer(): the word read back differs from the value written. An update: the compare of step 3, or the first chunks did not read back at the bundle start in step 2
+    CompareMismatch,          ///< compareRegion(): the EEPROM differs from the image. writeRegionPointer(), and the AppConfigOffset write of programBlank(): the word read back differs from the value written. An update: the compare of step 3, or the first chunks did not read back at the bundle start in step 2
     PointerRestoreFailed,     ///< Update step 3: the target pointer could not be written to the bundle start
     OldPointerEraseFailed,    ///< Update step 4: the old region pointer could not be written to 0
-    PointerNeighborsChanged,  ///< Bytes 4 to 15 after a pointer changed during a pointer write; or the 16 bytes at the target pointer changed while the first chunks of an update were written; or those bytes already held the start of the image before the bundle write
+    PointerNeighborsChanged,  ///< Bytes 4 to 15 after a pointer, or after an AppConfigOffset word in programBlank(), changed during its write; or the 16 bytes at the target pointer changed while the first chunks of an update were written; or those bytes already held the start of the image before the bundle write
     ResetTimeout,             ///< The controller did not return to APP after GAID
     CommandRejected,          ///< The executor reported "!CMD" (task code not recognized)
     CommandTimeout,           ///< The executor saw neither clear nor "!CMD" before the timeout
@@ -805,8 +805,10 @@ public:
      * 3. checkImage() accepts the image for the smaller of the two region
      *    capacities (BadImageHeader, BadImageLength).
      * 4. Neither region pointer equals its bundle start (EepromNotBlank), so
-     *    the call cannot overwrite an EEPROM that boots. Both pointers are
-     *    read, Low first; a read failure returns its status.
+     *    the call cannot overwrite an EEPROM with a valid pointer. That is
+     *    as far as the check tells whether the EEPROM boots: it reads the two
+     *    pointer words only, not the bundles or the AppConfigOffset words.
+     *    Both pointers are read, Low first; a read failure returns its status.
      *
      * Then, for the Low region and then the High region:
      *

@@ -84,9 +84,13 @@ All four flash tasks make the controller ignore the I2Cc_IRQ pin until they comp
    default EEPROM page size it uses is 32 bytes, and it recommends 32-byte chunks. This
    reconciles the app note's table (64) with its flow chart and summary (32). Both
    bundle start addresses are multiples of 32, so no chunk crosses a 32-byte page, nor
-   the 24LC256's 64-byte page (from the Microchip datasheet as I recall it; confirm in
-   Batch 1). A final short chunk is sent at its true length. Teensy 4 `Wire` buffers 136
-   bytes (`WireIMXRT.h`), so the DATA write fits in one transaction.
+   the 24LC256's 64-byte page. The Microchip datasheet for the 24AA256/24LC256/24FC256
+   (DS21203P, 2007; checked in Batch 1) gives a 64-byte page write buffer and a 5 ms
+   maximum write cycle time (TWC, byte or page write, Table 1-2 parameter 17), and its
+   Write-Protection note says a page write that crosses a physical page boundary wraps
+   to the start of the same page and overwrites it. Later revisions are numbered
+   DS20001203. A final short chunk is sent at its true length. Teensy 4 `Wire` buffers
+   136 bytes (`WireIMXRT.h`), so the DATA write fits in one transaction.
 2. Result offsets. `executeCommand()` strips the I2C length byte and copies DATA from
    byte 0. The app note's sample reads `outdata[1]` because its buffer keeps the length
    byte. In library terms: `FLad`, `FLwd`, and `FLvy` report their result in

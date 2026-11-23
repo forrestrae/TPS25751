@@ -638,6 +638,63 @@ updater suite has 131 tests. Two review nits are carried into Batch 3:
   `[env:native]`.
 - Gate: hardware stage 5.
 
+Status, 2026-11-23: implemented; the review found no blocker and its findings are
+fixed; a re-review and stage 5 are pending, and `programBlank()` has not run on
+hardware. `src/TPS25751EepromUpdater.cpp` has 100% line coverage (487 of 487 lines) and
+the updater suite has 146 tests. The example gained `l` (a PBM load while MODE reads
+PTCH; it loads the controller's RAM only) and `pb` (`programBlank()`); `r` now prints
+both AppConfigOffset words.
+
+Notes from the Batch 3 review, 2026-11-23. The reviewer read the app note in full and
+TRM pages 33, 60 to 62, and 79 to 82, and found no contradiction with this plan. Open
+points, none decided:
+
+1. Step order of `programBlank()`. The programBlank section orders each pass as
+   pointer, AppConfigOffset word, bundle. The last write before the bundle `FLad` is
+   then at the AppConfigOffset word, not at the pointer, so the pointer-row check of
+   step 2 looks in the wrong place for chunks misplaced by an `FLad` that reports
+   success without taking effect. The reviewer swept a no-effect `FLad` at each of the
+   10 `FLad` calls against the fake, from three start states, with and without an
+   `FLrd` that moves the write address. A bad outcome is a valid pointer over a damaged
+   region.
+
+   | Order | `FLad` without effect | Also an `FLrd` that moves the write address |
+   |---|---|---|
+   | As planned: pointer, word, bundle, per pass | No bad outcome | 6 bad runs, 3 returning Success |
+   | Word, pointer, bundle, per pass | 3 bad runs, 2 returning Success: the High pointer erase follows the write at 0x07FC, so four zero bytes land on the Low Header_ID at 0x0800 | 3 further bad runs |
+   | Both words first (Low, then High), then each pass as steps 1 to 3 of `updateRegion()` | No bad outcome | No bad outcome |
+
+   Costs of writing both words first: a failure writing the High word ends the call
+   before Low is bootable, and each word's read-back is one pass older when its pointer
+   is written, which one more `FLrd` before the pointer write closes. On a blank
+   EEPROM, where stage 5 starts, every single-fault case is detected in either order.
+   Neither hypothetical fault has been seen in stages 1 to 4. Stage 5 verifies the
+   exact task sequence, so the order is best settled before it.
+2. A dead end under the planned order. A stop in the first tasks of the High pass
+   leaves the Low pointer valid and the High AppConfigOffset word still 0xFFFFFFFF on
+   an erased part. `pb` then refuses because a pointer is valid, and `u` and `b` do not
+   write that word, so no example command reaches the full-flash layout. That the
+   controller does not boot High in that state is inferred from the app note (page 2),
+   not observed. Writing both words first removes the state. The example now prints
+   both words and warns against `u` and `b` while one is not 0.
+3. The AppConfigOffset pre-flight of `updateRegion()` (decision 6 of 2026-11-23) was
+   deferred because both words are 0 on this board. Point 2 is a state on this board
+   where they are not.
+4. `coldReset()` requiring an observed I2C failure before it accepts APP (see the
+   coldReset section).
+5. How stage 5 reaches an EEPROM with no valid pointer: `minipro` after a teardown, as
+   written, or an example command that writes both pointers to 0. The command tests a
+   corrupt EEPROM, not a blank one, and would ship in the example.
+6. The app note (page 13) says the PBM-then-flash recovery needs a host that can run
+   while the controller sits in PTCH; a system that needs the sink path before it can
+   boot must select a suitable dead-battery configuration through ADCINx. The board
+   under test runs from its pack, so this does not affect the stages.
+
+Stage 5 should also read 0x03C0 to 0x03FF and 0x07C0 to 0x07FF in its dump. The two
+AppConfigOffset writes are the first `FLwd` calls that start in the middle of a page,
+and an over-long write there would wrap to the start of the 24LC256 page, outside the
+16 bytes the read-back covers.
+
 ## Tests
 
 `test/test_native/test_TPS25751EepromUpdater`, built on `FakeCommandExecutor`. Target:

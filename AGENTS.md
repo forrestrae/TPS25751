@@ -673,10 +673,14 @@ any later change to a hook needs approval again.
    only other accepted subjects are `Merge branch '<branch>'` and git's default
    `Revert "<subject>"`. One logical change per commit.
 3. When the branch is done, rebase it onto `main`, commit or stash everything (the tree
-   must be clean, untracked files included), and run `scripts/verify.py`. It lints the
-   branch name and every commit, refuses merge commits on the branch and hand-edited
-   version fields, then runs the script tests, `pio test -e native`, and
-   `pio run -e example-read-registers`. A pass records the branch tip as verified.
+   must be clean, untracked files included), and run `scripts/verify.py`. It checks the
+   branch name, the clean tree, and that the branch is based on `main`, then runs
+   `main`'s copy of `scripts/verify_gate.py`, which lints every commit, refuses merge
+   commits on the branch and hand-edited version fields, and runs the script tests,
+   `pio test -e native`, and `pio run -e example-read-registers`. A pass records the
+   branch tip as verified. Because the gate comes from `main`, a branch that changes
+   `verify_gate.py` is still checked by the old gate; the change applies to later
+   branches once it is pushed.
 4. Run `scripts/integrate.py <branch>` from the checkout that has `main`. It runs
    `git merge --no-ff <branch> -m "Merge branch '<branch>'"`, tags the tip
    `archive/<branch>`, and deletes the branch. Agents may run this step.
@@ -702,9 +706,12 @@ F never reached CI and the release shipped as v2.0.2.
 | Remote `main` is not rewritten or deleted | GitHub ruleset on `main`: block force push and deletion |
 
 Workflow tooling is maintained by the human: `.githooks/`, `scripts/workflow_common.py`,
-`gitguard.py`, `check_commits.py`, `release_level.py`, `verify.py`, `integrate.py`,
+`gitguard.py`, `verify.py` (the launcher and only stamp writer), `integrate.py`,
 `setup_hooks.sh`, `agent_guard.py`, `.claude/settings*.json`, `.codex/`, and
-`.github/workflows/publish.yml`. To let an agent change them, set `WORKFLOW_GUARD_OFF=1`
+`.github/workflows/publish.yml`. Agents may change the gate's checks in
+`scripts/verify_gate.py`, `check_commits.py`, and `release_level.py` on a topic branch
+like any other code: `verify.py` always runs `main`'s gate, and CI runs
+`release_level.py` only from a human-pushed `main`. To let an agent change them, set `WORKFLOW_GUARD_OFF=1`
 in the agent's environment for that session: for Claude Code, add
 `"env": { "WORKFLOW_GUARD_OFF": "1" }` to `.claude/settings.local.json` (not the shared
 `settings.json`) and remove it afterwards; for Codex, start it with the variable set.

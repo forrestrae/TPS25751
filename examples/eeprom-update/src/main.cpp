@@ -62,7 +62,11 @@
 //   Every line starts with a tag in brackets. A command ends with "[done] <cmd>"
 //   followed by "[ready] ...". After p, u, b, v, x, and the c commands a
 //   "[timing]" table gives, per 4CC task, the calls, total time, average, and
-//   maximum, measured around each executor call.
+//   maximum, measured around each executor call, then the calls the executor
+//   did not complete (not_success), the completed calls that returned a
+//   nonzero DATA byte 0 (rc_nonzero), and those that returned 0xFF (rc_0xFF).
+//   In the FLwd row rc_0xFF counts "flash is busy" results. In the FLrd row
+//   the byte is memory, not a return code.
 //
 //   The dump lines of r have the form "xxxxxxxx: xx xx ... xx", which xxd -r
 //   turns back into binary. The BEGIN and END marker lines are not neutral to
@@ -120,6 +124,14 @@ static const __FlashStringHelper* taskStatusName(TPS25751TaskStatus s)
  * Success, and the status of the latest call. The duration covers the whole
  * executeCommand() call: the DATA write, the COMMAND write, the COMMAND poll,
  * and the 64-byte DATA read.
+ *
+ * It also counts what the tasks themselves answered, for the calls the
+ * executor completed: how many returned a nonzero DATA byte 0, and how many
+ * returned 0xFF. For FLwd, 0xFF is "flash is busy" (TRM Table 4-21), which the
+ * updater retries and the library reports only at warning level, so this
+ * column is where a busy result shows in a run at error level. For FLad and
+ * FLvy the byte is the task's return code. For FLrd it is the first memory
+ * byte, not a code, so those two columns say nothing about success there.
  */
 class TimingExecutor final : public TPS25751CommandExecutor {
 public:
@@ -132,7 +144,7 @@ public:
         const uint32_t started = micros();
         const TPS25751TaskResult result =
             _inner.executeCommand(cmd, inData, inLen, outData, outLen, timeoutMs);
-        record(cmd, micros() - started, result.status);
+        record(cmd, micros() - started, result);
         return result;
     }
 
@@ -147,7 +159,7 @@ public:
     /// Print one line per task code seen since the last reset().
     void print(Stream& out) const
     {
-        out.println(F("[timing] task calls total_ms avg_us max_us not_success last_status"));
+        out.println(F("[timing] task calls total_ms avg_us max_us not_success rc_nonzero rc_0xFF last_status"));
         for (size_t i = 0; i < _count; ++i) {
             const Row& r = _rows[i];
             out.print(F("[timing] "));
@@ -163,6 +175,10 @@ public:
             out.print(' ');
             out.print(r.notSuccess);
             out.print(' ');
+            out.print(r.rcNonzero);
+            out.print(' ');
+            out.print(r.rcBusy);
+            out.print(' ');
             out.println(taskStatusName(r.lastStatus));
         }
         if (_count == 0) {
@@ -176,7 +192,9 @@ private:
         uint32_t calls;
         uint64_t totalUs;
         uint32_t maxUs;
-        uint32_t notSuccess;
+        uint32_t notSuccess;  ///< calls whose executor status was not Success
+        uint32_t rcNonzero;   ///< completed calls whose DATA byte 0 was not 0x00
+        uint32_t rcBusy;      ///< completed calls whose DATA byte 0 was 0xFF
         TPS25751TaskStatus lastStatus;
     };
 
@@ -186,7 +204,7 @@ private:
     Row _rows[kMaxRows];
     size_t _count = 0;
 
-    void record(TPS25751FourCC cmd, uint32_t durationUs, TPS25751TaskStatus status)
+    void record(TPS25751FourCC cmd, uint32_t durationUs, const TPS25751TaskResult& result)
     {
         Row* row = nullptr;
         for (size_t i = 0; i < _count; ++i) {
@@ -205,16 +223,25 @@ private:
             row->totalUs = 0;
             row->maxUs = 0;
             row->notSuccess = 0;
+            row->rcNonzero = 0;
+            row->rcBusy = 0;
         }
         row->calls++;
         row->totalUs += durationUs;
         if (durationUs > row->maxUs) {
             row->maxUs = durationUs;
         }
-        if (status != TPS25751TaskStatus::Success) {
-            row->notSuccess++;
+        if (result.status != TPS25751TaskStatus::Success) {
+            row->notSuccess++;  // returnCode is undefined for these
+        } else {
+            if (result.returnCode != 0x00) {
+                row->rcNonzero++;
+            }
+            if (result.returnCode == 0xFF) {
+                row->rcBusy++;
+            }
         }
-        row->lastStatus = status;
+        row->lastStatus = result.status;
     }
 };
 

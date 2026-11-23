@@ -103,7 +103,10 @@ All four flash tasks make the controller ignore the I2Cc_IRQ pin until they comp
 3. `FLvy` is not a full verification. The TRM says it completes after the header is
    checked. Whether it also checks the bundle CRC is unknown, so the updater compares
    the written region with the image through `FLrd` before it writes the pointer.
-   Hardware stage 3 measures what `FLvy` catches.
+   Hardware stage 3 measures what `FLvy` catches. Result, 2026-11-23: `FLvy` reported
+   a bundle with one inverted byte in its body (image offset 0x1BE5) as not valid, so
+   it checks more than the header. One byte at one offset is the whole sample, and the
+   compare stays on by default.
 4. Region selection uses the region pointers first and BOOT_STATUS second. BOOT_STATUS
    is latched at boot, so after an update without a reset it still describes the old
    layout. Following Figure 2-2 alone in that state would erase the only valid pointer.
@@ -118,11 +121,17 @@ All four flash tasks make the controller ignore the I2Cc_IRQ pin until they comp
    margin. `FLwd` and `FLvy` times are still estimates. Stage 2 measured `FLad` and
    `FLwd` at 17.7 to 17.8 ms per call, the same as `FLrd`, and no `FLwd` returned
    busy. A 14336-byte update of 1365 tasks should therefore take about 24 s; stage 3
-   measures it.
+   measures it. Stage 3 measured 25979 ms for a 14272-byte region and 52049 ms for
+   both 14336-byte regions, with no busy result in 1798 `FLwd` calls. A 32-byte `FLwd`
+   takes 20.7 ms, `FLrd` and `FLad` 17.7 ms, and `FLvy` 0.56 to 0.60 s, so the 200 ms
+   and 1000 ms timeouts hold.
 6. `GAID` never completes in the normal sense. The updater treats `Success`, `Timeout`,
    and `I2CError` from the executor as "reset issued", then polls MODE until it reads
    APP. The TRM says an APP-mode controller enters Type-C Error Recovery and restarts
    after about 1 s, so the wait defaults to 5 s. The port disconnects during the reset.
+   Stage 3 measured the sequence twice with the same result: COMMAND kept answering
+   for 1277 ms, then the controller stopped acknowledging and the executor returned
+   `I2CError`; MODE read APP again 1938 ms after `GAID` was issued.
 7. Sample-code defects not copied: step 3 of the app note ignores the executor result
    for `FLvy`, and the note says I2Cc where the host patch load uses I2Ct.
 8. Bus sharing. The updater is synchronous, so it cannot interleave with
@@ -133,8 +142,8 @@ All four flash tasks make the controller ignore the I2Cc_IRQ pin until they comp
 
 Verified in stage 2 on 2026-11-23: `FLwd` honors a 4-byte length exactly.
 
-Still unknown, each with a hardware check: whether a zero pointer sets BOOT_STATUS Region Invalid (stage 3),
-and how long the controller takes to return to APP after `GAID` (stage 3).
+Verified in stage 3 on 2026-11-23: a zero Low pointer sets Region 0 Invalid in
+BOOT_FLAGS at the next boot, and the controller returns to APP 1.94 s after `GAID`.
 
 ### Notes from the Batch 1 review (2026-11-22)
 
@@ -474,6 +483,16 @@ judges the reset by VERSION and BOOT_FLAGS changing and by the `GAID` row of the
 timing table, not by the returned status, and the rule is then set from that
 measurement.
 
+Measurement, stage 3, 2026-11-23, two resets with the same result. COMMAND kept
+reading nonzero for 1277 ms after `GAID`, then the controller stopped acknowledging
+I2C: the executor's COMMAND poll failed and returned `I2CError`, and the MODE read
+100 ms later was not acknowledged either. MODE read APP 1938 ms after `GAID`. On this
+board the restart is therefore visible as a failed I2C transaction, and the cases
+feared above, a `Timeout` with COMMAND never clearing and a `Success` before the
+restart, did not occur. Open: whether `coldReset()` should require an observed I2C
+failure, from the executor or from a MODE read, before it accepts APP, and return
+`ResetTimeout` otherwise.
+
 ### Status values and the state each leaves
 
 | `EepromUpdateStatus` | Raised by | EEPROM state afterwards |
@@ -592,9 +611,9 @@ receives `r` over serial, so a monitor attached late still captures a full dump.
 - Gate: hardware stages 2, 3, and 4.
 
 Status, 2026-11-23: implemented and reviewed clean, including the step 2 read-back and
-`p2`; stage 2 passed (results under Hardware validation); stages 3 and 4 not yet run.
-The only EEPROM writes so far are the pointer writes of stage 2, which left the EEPROM
-identical to the full-flash image.
+`p2`; stages 2 and 3 passed (results under Hardware validation); stage 4 not yet run.
+After stage 3 the EEPROM is identical to the F8091166 full-flash image and the
+controller runs that bundle from the Low region.
 `src/TPS25751EepromUpdater.cpp` has 100% line coverage (432 of 432 lines) and the
 updater suite has 131 tests. Two review nits are carried into Batch 3:
 
@@ -752,6 +771,39 @@ Ordered from safe to destructive. Each stage states its recovery.
    `load-patch-bundle` example followed by an update, or `write-flash.zsh` with the
    clip; "the untouched region" above is reachable only by one of those. Before stage
    3, check the SHA-256 that `bin_to_header.py` prints against the TI export.
+
+   Result, 2026-11-23, branch commit `e91707c`, Teensy 4.0: passed, and the board is
+   back in its starting state. Which supply powered the board was not recorded. Both
+   low-region binaries were first checked against TI's C exports of the same builds
+   and are equal (F8091164: 14272 bytes, SHA-256 `15019eac...6f81ec59`; F8091166:
+   14336 bytes, SHA-256 `60c6cdd8...add77772c`).
+
+   | Step | Result |
+   |---|---|
+   | `u` with F8091164 | Target High; Success in 25979 ms; Low pointer 0, High pointer valid |
+   | `u`, tasks | `FLrd` 908 at 17.7 ms; `FLad` 5 at 17.7 ms; `FLwd` 449 at 20.7 ms (maximum 20.8 ms); `FLvy` 1 at 599 ms; every return code 0x00; no busy result |
+   | `r` before any reset | Dump equals the stage 1 dump with exactly three changes: the Low pointer word 0, the High pointer word 0x4400, and the F8091164 bundle at 0x4400. No byte outside those ranges differs. The last 64 bytes of the old High bundle (0x7BC0 to 0x7BFF) remain, because the new bundle is 64 bytes shorter |
+   | State before the reset | VERSION 0xF8091166 and BOOT_FLAGS `18 00 F0 A2 C1`, both stale; `selectTargetRegion()` returned Low, following the pointers |
+   | `x` | `coldReset()` Success; `GAID` executor call ended with `I2CError` after 1277 ms; APP 1938 ms after `GAID` |
+   | After the reset | VERSION 0xF8091164; BOOT_FLAGS `78 00 F0 A2 C1`: Patch Config Source EEPROM Loaded, Region 0 Attempted 1, Region 1 Attempted 1, Region 0 Invalid 1, all other region flags 0 |
+   | `v` on Low, clean write | Image write Success in 9346 ms; `FLvy` valid; `compareRegion()` Success |
+   | `v`, one byte inverted | Image offset 0x1BE5 (EEPROM 0x23E5), 0x28 to 0xD7; `FLvy` returned not valid; `compareRegion()` returned `CompareMismatch` at offset 0x1BE5; Low pointer left at 0 |
+   | `b` with F8091166 | Low, then High; Success in 52049 ms; both pointers valid; `FLrd` 1818, `FLad` 9, `FLwd` 901, `FLvy` 2; no busy result |
+   | `r` after `b` | Dump identical to `..._F8091166_fullFlash.bin` (31744 bytes, SHA-256 `a3e549ca...3096fdaec3`) |
+   | `x` | `coldReset()` Success; `GAID` `I2CError` after 1277 ms; APP after 1938 ms; VERSION 0xF8091166; BOOT_FLAGS `18 00 F0 A2 C1`, as in stage 1 |
+
+   Verified by this stage: a full region update on the device, including the
+   auto-increment of the write address across 446 chunks and the read-back of step 2;
+   the controller boots the High region when the Low pointer is 0, and reports Region
+   0 Invalid; BOOT_FLAGS and VERSION stay stale until a reset, and pointer-first
+   selection gives the right target in that state; `FLvy` reports a corrupted body
+   byte; `updateBothRegions()` restores the full-flash layout; `GAID` restarts the
+   controller, which reloads the bundle from the EEPROM.
+
+   Not shown by this stage: a busy `FLwd`, any `FLad` or `FLwd` failure code, the exact
+   `FLvy` failure code (the example prints the status, not the byte), the effect of
+   the reset on the port and the PD contract, and whether an `FLrd` moves the write
+   address.
 4. Interrupted updates. Cut the update after each of the four steps (a debug hook in
    the example), power-cycle, and confirm the controller boots the region the status
    table predicts. Recovery: as stage 3.

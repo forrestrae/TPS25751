@@ -22,7 +22,7 @@
 namespace {
 
 using E = TPS25751BootFlags;
-constexpr size_t SZ = TPS25751Registers::Registers::BOOT_STATUS.size;  // 5
+constexpr size_t SZ = TPS25751Registers::Registers::BOOT_FLAGS.size;  // 5
 
 void pack(uint8_t *buf, unsigned pos, unsigned len, uint32_t value)
 {
@@ -62,7 +62,7 @@ void test_constructors()
     TEST_ASSERT_TRUE(def.isValid());
     TEST_ASSERT_EQUAL_size_t(SZ, def.size());
 
-    E info(TPS25751Registers::Registers::BOOT_STATUS);
+    E info(TPS25751Registers::Registers::BOOT_FLAGS);
     TEST_ASSERT_EQUAL_size_t(SZ, info.size());
 
     const uint8_t d[SZ] = {0x04, 0, 0, 0, 0x2A};

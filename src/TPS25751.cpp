@@ -117,7 +117,7 @@ bool TPS25751::readPortControl(TPS25751PortControl &portControl) const
 
 bool TPS25751::readBootFlags(TPS25751BootFlags &bootFlags) const
 {
-    return readRegister(TPS25751Registers::Registers::BOOT_STATUS, bootFlags);
+    return readRegister(TPS25751Registers::Registers::BOOT_FLAGS, bootFlags);
 }
 
 bool TPS25751::readReceivedSourceCaps(TPS25751ReceivedSourceCaps &sourceCaps) const
@@ -535,7 +535,7 @@ std::unique_ptr<TPS25751PortControl> TPS25751::readPortControlRegister(bool vali
 }
 
 std::unique_ptr<TPS25751BootFlags> TPS25751::readBootFlagsRegister(bool validate) const {
-    auto reg = readAndValidateRegisterByAddress(TPS25751Registers::Address::BOOT_STATUS, validate);
+    auto reg = readAndValidateRegisterByAddress(TPS25751Registers::Address::BOOT_FLAGS, validate);
     if (!reg) return nullptr;
     
     if (reg) {

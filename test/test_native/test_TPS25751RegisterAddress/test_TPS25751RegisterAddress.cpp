@@ -48,7 +48,7 @@ const Entry kAll[] = {
     {Address::GLOBAL_SYSTEM_CONFIGURATION, 0x27, 14},
     {Address::PORT_CONFIGURATION, 0x28, 17},
     {Address::PORT_CONTROL, 0x29, 4},
-    {Address::BOOT_STATUS, 0x2D, 5},
+    {Address::BOOT_FLAGS, 0x2D, 5},
     {Address::RECEIVED_SOURCE_CAPABILITIES, 0x30, 53},
     {Address::RECEIVED_SINK_CAPABILITIES, 0x31, 53},
     {Address::TRANSMIT_SOURCE_CAPABILITIES, 0x32, 63},
@@ -132,6 +132,22 @@ void test_unknown_address_has_no_info()
     TEST_ASSERT_EQUAL_UINT8(0, TPS25751Registers::getRegisterSize(unknown));
 }
 
+// BOOT_STATUS was the library's name for 0x2D before it adopted the TRM's
+// BOOT_FLAGS; the deprecated aliases must keep resolving to the same register.
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
+void test_deprecated_boot_status_aliases_boot_flags()
+{
+    TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Address::BOOT_FLAGS),
+                            static_cast<uint8_t>(Address::BOOT_STATUS));
+    TEST_ASSERT_TRUE(TPS25751Registers::Registers::BOOT_STATUS.address == Address::BOOT_FLAGS);
+    TEST_ASSERT_EQUAL_UINT8(TPS25751Registers::Registers::BOOT_FLAGS.size,
+                            TPS25751Registers::Registers::BOOT_STATUS.size);
+    TEST_ASSERT_EQUAL_PTR(&TPS25751Registers::Registers::BOOT_FLAGS,
+                          TPS25751Registers::getRegisterInfo(Address::BOOT_STATUS));
+}
+#pragma GCC diagnostic pop
+
 int main(int, char **)
 {
     UNITY_BEGIN();
@@ -142,6 +158,7 @@ int main(int, char **)
     RUN_TEST(test_every_address_has_register_info);
     RUN_TEST(test_customer_use_has_register_info);
     RUN_TEST(test_unknown_address_has_no_info);
+    RUN_TEST(test_deprecated_boot_status_aliases_boot_flags);
 
     return UNITY_END();
 }

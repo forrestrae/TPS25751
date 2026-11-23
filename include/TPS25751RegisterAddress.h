@@ -31,7 +31,10 @@ enum class Address : uint8_t {
     GLOBAL_SYSTEM_CONFIGURATION = 0x27,
     PORT_CONFIGURATION = 0x28,
     PORT_CONTROL = 0x29,
-    BOOT_STATUS = 0x2D,
+    /// Boot Flags (SLVUCR8B Rev. B, p.33). TI short name BOOT_FLAGS.
+    BOOT_FLAGS = 0x2D,
+    /// @deprecated The library's former name for BOOT_FLAGS. Use Address::BOOT_FLAGS.
+    BOOT_STATUS [[deprecated("SLVUCR8B Rev. B p.33 names 0x2D BOOT_FLAGS; use Address::BOOT_FLAGS")]] = 0x2D,
     RECEIVED_SOURCE_CAPABILITIES = 0x30,
     RECEIVED_SINK_CAPABILITIES = 0x31,
     TRANSMIT_SOURCE_CAPABILITIES = 0x32,
@@ -97,7 +100,10 @@ namespace Registers {
     constexpr RegisterInfo GLOBAL_SYSTEM_CONFIGURATION{Address::GLOBAL_SYSTEM_CONFIGURATION, 14};
     constexpr RegisterInfo PORT_CONFIGURATION{Address::PORT_CONFIGURATION, 17};
     constexpr RegisterInfo PORT_CONTROL{Address::PORT_CONTROL, 4};
-    constexpr RegisterInfo BOOT_STATUS{Address::BOOT_STATUS, 5};
+    constexpr RegisterInfo BOOT_FLAGS{Address::BOOT_FLAGS, 5};
+    /// @deprecated The library's former name for BOOT_FLAGS. Use Registers::BOOT_FLAGS.
+    [[deprecated("SLVUCR8B Rev. B p.33 names 0x2D BOOT_FLAGS; use Registers::BOOT_FLAGS")]]
+    constexpr RegisterInfo BOOT_STATUS{Address::BOOT_FLAGS, 5};
     constexpr RegisterInfo RECEIVED_SOURCE_CAPABILITIES{Address::RECEIVED_SOURCE_CAPABILITIES, 53};
     constexpr RegisterInfo RECEIVED_SINK_CAPABILITIES{Address::RECEIVED_SINK_CAPABILITIES, 53};
     constexpr RegisterInfo TRANSMIT_SOURCE_CAPABILITIES{Address::TRANSMIT_SOURCE_CAPABILITIES, 63};
@@ -143,7 +149,7 @@ constexpr uint8_t getRegisterSize(Address addr) {
         case Address::GLOBAL_SYSTEM_CONFIGURATION: return Registers::GLOBAL_SYSTEM_CONFIGURATION.size;
         case Address::PORT_CONFIGURATION: return Registers::PORT_CONFIGURATION.size;
         case Address::PORT_CONTROL: return Registers::PORT_CONTROL.size;
-        case Address::BOOT_STATUS: return Registers::BOOT_STATUS.size;
+        case Address::BOOT_FLAGS: return Registers::BOOT_FLAGS.size;
         case Address::RECEIVED_SOURCE_CAPABILITIES: return Registers::RECEIVED_SOURCE_CAPABILITIES.size;
         case Address::RECEIVED_SINK_CAPABILITIES: return Registers::RECEIVED_SINK_CAPABILITIES.size;
         case Address::TRANSMIT_SOURCE_CAPABILITIES: return Registers::TRANSMIT_SOURCE_CAPABILITIES.size;
@@ -191,7 +197,7 @@ inline const RegisterInfo* getRegisterInfo(Address addr) {
         case Address::GLOBAL_SYSTEM_CONFIGURATION: return &Registers::GLOBAL_SYSTEM_CONFIGURATION;
         case Address::PORT_CONFIGURATION: return &Registers::PORT_CONFIGURATION;
         case Address::PORT_CONTROL: return &Registers::PORT_CONTROL;
-        case Address::BOOT_STATUS: return &Registers::BOOT_STATUS;
+        case Address::BOOT_FLAGS: return &Registers::BOOT_FLAGS;
         case Address::RECEIVED_SOURCE_CAPABILITIES: return &Registers::RECEIVED_SOURCE_CAPABILITIES;
         case Address::RECEIVED_SINK_CAPABILITIES: return &Registers::RECEIVED_SINK_CAPABILITIES;
         case Address::TRANSMIT_SOURCE_CAPABILITIES: return &Registers::TRANSMIT_SOURCE_CAPABILITIES;

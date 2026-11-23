@@ -100,7 +100,7 @@ const Entry kAll[] = {
     {Address::GLOBAL_SYSTEM_CONFIGURATION, make<TPS25751GlobalSystemConfig>},
     {Address::PORT_CONFIGURATION, make<TPS25751PortConfig>},
     {Address::PORT_CONTROL, make<TPS25751PortControl>},
-    {Address::BOOT_STATUS, make<TPS25751BootFlags>},
+    {Address::BOOT_FLAGS, make<TPS25751BootFlags>},
     {Address::RECEIVED_SOURCE_CAPABILITIES, make<TPS25751ReceivedSourceCaps>},
     {Address::RECEIVED_SINK_CAPABILITIES, make<TPS25751ReceivedSinkCaps>},
     {Address::TRANSMIT_SOURCE_CAPABILITIES, make<TPS25751TransmitSourceCaps>},

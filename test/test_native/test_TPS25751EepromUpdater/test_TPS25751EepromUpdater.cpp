@@ -309,6 +309,21 @@ void test_select_both_valid_region0_eeprom_error_targets_low()
     TEST_ASSERT_EQUAL(EepromRegion::Low, target);
 }
 
+void test_select_both_valid_both_region0_flags_targets_low()
+{
+    // Row 1 with region0Invalid and region0EepromError both set.
+    FakeCommandExecutor fake;
+    loadFullFlash(fake, makeBundle());
+    fake.setBootBit(FakeCommandExecutor::kBitRegion0Invalid, true);
+    fake.setBootBit(FakeCommandExecutor::kBitRegion0EepromError, true);
+    TPS25751EepromUpdater u(fake);
+
+    EepromRegion target = EepromRegion::High;
+    TEST_ASSERT_EQUAL(EepromUpdateStatus::Success, u.selectTargetRegion(target));
+    TEST_ASSERT_EQUAL(EepromRegion::Low, target);
+    TEST_ASSERT_EQUAL_size_t(1, fake.bootFlagsReads);
+}
+
 void test_select_region1_flags_do_not_affect_row_1()
 {
     FakeCommandExecutor fake;
@@ -519,6 +534,30 @@ void test_compare_region_executor_failure_midway()
     TEST_ASSERT_EQUAL_size_t(6, fake.calls.size());
 }
 
+void test_compare_region_high_with_larger_eeprom()
+{
+    // A 64 KB part gives the high region 0xBC00 bytes, so an image longer than
+    // the default 0x3C00 is compared, and the new limit is enforced.
+    const std::vector<uint8_t> image = makeBundle(0x8000);
+    FakeCommandExecutor fake(65536);
+    fake.writeBytes(HIGH_START, image.data(), image.size());
+    TPS25751EepromUpdater u(fake, 65536);
+
+    TEST_ASSERT_EQUAL(EepromUpdateStatus::Success,
+                      u.compareRegion(EepromRegion::High, image.data(), image.size()));
+    TEST_ASSERT_EQUAL_size_t(0x8000 / 16, fake.calls.size());
+    assertPayload(fake.calls.back(), "FLrd", {0xF0, 0xC3, 0x00, 0x00}, 200);
+
+    const std::vector<uint8_t> tooBig = makeBundle(0xBC01);
+    fake.calls.clear();
+    TEST_ASSERT_EQUAL(EepromUpdateStatus::BadImageLength,
+                      u.compareRegion(EepromRegion::High, tooBig.data(), tooBig.size()));
+    TEST_ASSERT_EQUAL_size_t(0, fake.calls.size());
+    // The low region's capacity does not grow with the part.
+    TEST_ASSERT_EQUAL(EepromUpdateStatus::BadImageLength,
+                      u.compareRegion(EepromRegion::Low, image.data(), 0x3C01));
+}
+
 // --- dump -------------------------------------------------------------------
 
 void test_dump_formats_lines_for_xxd()
@@ -549,6 +588,26 @@ void test_dump_prints_absolute_addresses()
         "000043f0: ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff\n"
         "00004400: 01 00 e0 ac 1f 26 2d 34 3b 42 49 50 57 5e 65 6c\n",
         out.c_str());
+}
+
+void test_dump_unaligned_start_with_short_tail()
+{
+    // 21 bytes from 0x0805: one full line at 0x0805 and a 5-byte tail at 0x0815.
+    // Bundle bytes are (i * 7 + 3) mod 256 for offsets below 0x100.
+    FakeCommandExecutor fake;
+    loadFullFlash(fake, makeBundle());
+    TPS25751EepromUpdater u(fake);
+
+    EepromUpdateStatus s = EepromUpdateStatus::I2cError;
+    const std::string out = captureStdout([&] { s = u.dump(0x0805, 21, Serial); });
+    TEST_ASSERT_EQUAL(EepromUpdateStatus::Success, s);
+    TEST_ASSERT_EQUAL_STRING(
+        "00000805: 26 2d 34 3b 42 49 50 57 5e 65 6c 73 7a 81 88 8f\n"
+        "00000815: 96 9d a4 ab b2\n",
+        out.c_str());
+    TEST_ASSERT_EQUAL_size_t(2, fake.calls.size());
+    assertPayload(fake.calls[0], "FLrd", {0x05, 0x08, 0x00, 0x00}, 200);
+    assertPayload(fake.calls[1], "FLrd", {0x15, 0x08, 0x00, 0x00}, 200);
 }
 
 void test_dump_zero_length_prints_nothing()
@@ -830,6 +889,7 @@ int main(int, char **)
     RUN_TEST(test_select_both_valid_healthy_low_targets_high);
     RUN_TEST(test_select_both_valid_region0_invalid_targets_low);
     RUN_TEST(test_select_both_valid_region0_eeprom_error_targets_low);
+    RUN_TEST(test_select_both_valid_both_region0_flags_targets_low);
     RUN_TEST(test_select_region1_flags_do_not_affect_row_1);
     RUN_TEST(test_select_low_valid_high_not_valid_targets_high);
     RUN_TEST(test_select_low_not_valid_high_valid_targets_low);
@@ -843,9 +903,11 @@ int main(int, char **)
     RUN_TEST(test_compare_region_length_not_multiple_of_16);
     RUN_TEST(test_compare_region_rejects_bad_arguments);
     RUN_TEST(test_compare_region_executor_failure_midway);
+    RUN_TEST(test_compare_region_high_with_larger_eeprom);
 
     RUN_TEST(test_dump_formats_lines_for_xxd);
     RUN_TEST(test_dump_prints_absolute_addresses);
+    RUN_TEST(test_dump_unaligned_start_with_short_tail);
     RUN_TEST(test_dump_zero_length_prints_nothing);
     RUN_TEST(test_dump_stops_at_first_failure);
     RUN_TEST(test_dump_full_image_round_trips);

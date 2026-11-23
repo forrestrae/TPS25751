@@ -3,8 +3,9 @@
 Status: approved 2026-11-22 (draft 2, with your answers to the ten open questions
 recorded under "Decisions recorded" at the end). Phase 0 complete 2026-11-22: the plan
 (`docs/km003c-toolset-plan`) and `chore/drop-cursor-vscode` are integrated, with the Codex
-row in `AGENTS.md` marked planned until Phase 8. Next: Phase 1, the hardware spike. No
-repository has been created.
+row in `AGENTS.md` marked planned until Phase 8. Phase 1 complete 2026-11-22: S0 to S4
+ran (S5 was not needed); the results and the decisions they fix are under "Phase 1
+results" at the end. Next: Phase 2, the fork. No repository has been created.
 
 Correction found in Phase 0, affecting Phase 5: since `ci/verify-launcher`, `verify.py`
 is a launcher that runs `main`'s copy of `scripts/verify_gate.py`, and agents may edit
@@ -959,3 +960,55 @@ both into the `lib/TPS25751-km003c` worktree, and Phase 0 commits them there on
 Also untracked in the main checkout, and not part of this plan:
 `docs/plans/feature/eeprom-update-planning-prompt.md`. It stays where it is. It does not
 affect the worktree, since untracked files are not shared between worktrees.
+
+## Phase 1 results
+
+Run on 2026-11-22 from a scratch clone of `fejesd/mcp-powerz-km003c` at `4b26a6c`, with
+`uv` choosing Python 3.14.2 on arm64. Meter serial `053893`: firmware 2.0.0 (dated
+2025.2.20), hardware 2.3. Charger: Apple 140 W; sink: the TPS25751 board on battery.
+Three cold attaches (S2 to S4). The scratch clone, `spike.py`, and the raw captures
+were not kept.
+
+### Decisions fixed
+
+| Plan item | Decision | Evidence |
+|---|---|---|
+| Phase 3 item 1, backend | Order as planned: `KM003C_LIBUSB` (alias `KM003C_LIBUSB_DLL`), then `libusb_package`, then the system library. On this Mac `libusb_package` is enough. | S0: `libusb_package` loads its arm64 libusb and finds the meter; no override needed. |
+| Phase 3 item 2, enable | Firmware 2.0.0 captures without EnablePdMonitor. Keep the planned fallback: enable at `start_pd`, treat Reject as non-fatal and log it, disable at `stop_pd`. A Reject also means "already enabled". | S2 captured all 16 messages after an accepted DisablePdMonitor. S1: a second enable returns Reject (`06`). |
+| Phase 3 item 2, persistence | Enable on every `start_pd`; the monitor does not survive a release. | S1: after Disconnect, release, reclaim, and Connect, enable returns Accept again. |
+| Phase 3 item 3, poll interval | Default 50 ms (the fork's current value), overridable with `KM003C_PD_POLL_MS`. 15 ms is not needed. | S4 at 1000 ms lost nothing: one poll returned the whole 16-message burst in a 142-byte payload. |
+| Phase 3 item 4, release | Match the Disconnect reply by packet type, not by TID. | S1: the meter answers Disconnect with `03 11 00 00`, TID fixed at 0x11, so the fork's TID match waits out its 2 s timeout on every release (10 cycles: 2024 to 2250 ms; claim plus Connect 3 to 17 ms). |
+| Phase 3 item 5, busy error | Map a claim failure with errno 19 on an enumerated meter to `DeviceBusyError`, and name the holder from `ioreg -l -w0`, property `UsbExclusiveOwner`, which reads for example `"pid 46945, python3.14"`. | S1: the second claim raised `USBError(19, 'No such device (it may have been disconnected)')`, which misstates the cause. |
+| Phase 4, connection events | Keep the raw code in `conn` records; the fork's `parse_pd` discards it. Expect a bounce on attach. | S2 to S4: codes are the legacy 0x11 and 0x12 on firmware 2.0.0. S2 and S3 each showed connect, disconnect, connect within about 310 ms; S4 showed one connect. |
+| Phase 6, port discovery | Plan on `TPS25751_BENCH_PORT` or the serial number; do not rely on an interface number. | S0: `pyserial` reports `interface=None` on macOS for both the meter and the Teensy. |
+
+### Added to Phase 3: recovery from a lagging meter
+
+On the first hardware run of the session, every reply arrived one request late: each
+read returned the reply to the previous request, a drain read returned nothing, and the
+fork's hardware tests failed 4 of 4 with "cannot connect: no reply". Clearing the halt on
+both endpoints did not help; a USB device reset (`dev.reset()` in pyusb) did, and the
+fault did not recur in the rest of the session. The cause is unknown. Phase 3 should
+detect it (Connect times out while a reply with another TID arrives), reset once, and
+retry, with a unit test on the fake transport. This is a small addition to item 4, not a
+design change.
+
+### Reference capture
+
+S2, S3, and S4 recorded the same sequence, with the same wire bytes and MessageIDs, no
+MessageID gaps per SOP and sender, and a GoodCRC after every message:
+
+| t (ms, S3) | SOP | Message | Wire bytes |
+|---|---|---|---|
+| 14637552 | SOP' | Discover Identity REQ, source to cable | `8f10 01a000ff` |
+| 14637555 | SOP' | Discover Identity ACK from the cable | `4f51 418000ff c220001c ba000000 10030500 52200821` |
+| 14637557 | SOP | Source_Capabilities | `a141 2c918109 2cd10200 2cb10400 d6410600` |
+| 14637562 | SOP | Request, RDO 0x4184B12C | `8210 2cb18441` |
+| 14637564 | SOP | Accept | `a303` |
+| 14637780 | SOP | PS_RDY, 216 ms after Accept | `a605` |
+| 14640805 | SOP | Discover Identity REQ from the charger | `af17 01a000ff` |
+| 14640811 | SOP | Discover Identity ACK from the board, VID 0x0451 | `8f42 41a000ff 51044000 00000000 11090000` |
+
+The SOP messages match the table in the notes byte for byte. S3 sustained 54 polls per
+second at 15 ms and S2 18 per second at 50 ms. The charger sends its own Discover
+Identity 3.0 s after PS_RDY, which supports the planned `settle_ms` for `stop_on=identity`.

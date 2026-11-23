@@ -77,6 +77,34 @@ Phase 4 corrections and facts, for later phases:
   cannot read.
 - `settle_ms` and `status_interval_ms` run on meter time; `timeout_s` runs on host time.
 
+Phase 5 complete 2026-11-23: `build/verify-pd-bench-checks` and `test/pd-capture-fixtures`
+are integrated after an independent review. The first bundle,
+`test/fixtures/pd-captures/2026-11-23-apple-140w-tps25751/`, holds the real Phase 4
+cold-attach capture (meter firmware 2.0.0) instead of the hand-converted table the Phase 5
+section describes; its `registers.json` (format `tps25751-registers` v1) is synthesized
+from the bench words in the tests and says so in `provenance.json`. Native tests pass
+1148 of 1148. Next: Phase 6.
+
+Phase 5 facts, for later phases:
+- `verify_gate.py` now runs, in order: script tests, the fixture `--check`, the
+  generator's own tests, `uv run --locked pytest` in `tools/pd-bench/` (skipped until
+  that directory exists, then failing on untracked files there), native tests, and the
+  example build. Phase 6 must declare pytest in `[dependency-groups] dev` in
+  `tools/pd-bench/pyproject.toml` and commit `tools/pd-bench/uv.lock`.
+- CI does not run `verify_gate.py`: `.github/workflows/publish.yml` lists its own steps,
+  so each new gate step needs a matching human edit there. `AGENTS.md` says CI re-runs
+  the gate; the human decides how to reconcile that.
+- `registers.json` lists each register's address, its length byte as read from the
+  controller, and lowercase hex data without the length byte. Phase 6's `SNAP` must emit
+  it with the length byte as read.
+- The generator's final contract follows the fork's `final_contract()`: PS_RDY after the
+  Accept, Soft_Reset abandoning a negotiation, retransmissions ignored, EPR handled.
+- In this bundle 0x35 bits 31:0 and 127:96 hold the same word, so its tests cannot catch
+  an own/requested swap; the Phase 7 source-role bundle covers that.
+- The cable answers Discover Identity with a PD 2.0 header and SVDM version 1.0, so its
+  connector type reads 00b. Phase 7's SOP' report should expect it.
+- `captures/` and `tools/pd-bench/.venv/` are now in this library's `.gitignore`.
+
 Correction found in Phase 0, affecting Phase 5: since `ci/verify-launcher`, `verify.py`
 is a launcher that runs `main`'s copy of `scripts/verify_gate.py`, and agents may edit
 `verify_gate.py` on a topic branch. The two Phase 5 checks therefore go into

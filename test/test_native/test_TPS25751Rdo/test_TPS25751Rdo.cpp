@@ -24,6 +24,9 @@
 
 #include "CaptureStdout.h"
 #include "TPS25751Rdo.h"
+#include "fixtures/PdCapture_2026_11_23_apple_140w_tps25751.h"
+
+namespace cap = PdCapture_2026_11_23_apple_140w_tps25751;
 
 void setUp() {}
 void tearDown() {}
@@ -146,6 +149,43 @@ void test_debug_print_per_kind()
     TEST_ASSERT_EQUAL_STRING("AVS", toString(RdoKind::Avs));
 }
 
+// --- Wire: the Request from the 2026-11-23 capture ---------------------------------
+//
+// Message header 0x1082 (USB PD R3.3 Table 6.1, not served by usb-pd-docs): bits 4:0 =
+// 2 Request, bit 5 = 0 UFP, bits 7:6 = 10b Revision 3.x, bit 8 = 0 Sink, bits 14:12 = 1
+// data object. RDO 0x4184B12C by hand from Table 6.19 (Fixed and Variable RDO; the
+// requested PDO 4 is Fixed): bits 31:28 = 4 Object Position; 27 Giveback 0; 26
+// Capability Mismatch 0; 25 USB Communications Capable 0; 24 No USB Suspend 1;
+// 23 Unchunked 1; 22 EPR Capable 0; 21:20 reserved 00b; 19:10 = 300 Operating Current
+// (3000 mA, 10 mA units); 9:0 = 300 Maximum Operating Current (deprecated copy).
+
+void test_wire_request_header()
+{
+    TEST_ASSERT_TRUE(cap::kHasContract);  // Accept, then PS_RDY, after this Request
+    TEST_ASSERT_FALSE(cap::kRequestEpr);
+    TEST_ASSERT_EQUAL_HEX16(0x1082, cap::kRequestHeader);
+}
+
+void test_wire_request_rdo_decodes_per_table_6_19()
+{
+    TEST_ASSERT_EQUAL_HEX32(0x4184B12C, cap::kRequestRdo);
+    // Object Position 4 names the fourth wire PDO, Fixed 20 V, so the RDO is Fixed/Variable.
+    const RdoKind kind = rdoKindFor(cap::kSourceCapabilitiesPdos[4 - 1]);
+    TEST_ASSERT_TRUE(RdoKind::FixedVariable == kind);
+
+    const TPS25751Rdo r(cap::kRequestRdo, kind);
+    TEST_ASSERT_EQUAL_UINT8(4, r.objectPosition());
+    TEST_ASSERT_FALSE(r.giveback());
+    TEST_ASSERT_FALSE(r.capabilityMismatch());
+    TEST_ASSERT_FALSE(r.usbCommunicationsCapable());
+    TEST_ASSERT_TRUE(r.noUsbSuspend());
+    TEST_ASSERT_TRUE(r.unchunkedExtendedMessages());
+    TEST_ASSERT_FALSE(r.eprCapable());
+    TEST_ASSERT_EQUAL_UINT16(3000, r.operatingCurrent_mA());
+    TEST_ASSERT_EQUAL_UINT16(3000, r.maximumOperatingCurrent_mA());
+    TEST_ASSERT_TRUE(r.deprecatedCopyMatches());
+}
+
 int main(int, char **)
 {
     UNITY_BEGIN();
@@ -158,5 +198,7 @@ int main(int, char **)
     RUN_TEST(test_unknown_kind_decodes_only_common_fields);
     RUN_TEST(test_deprecated_copy_mismatch);
     RUN_TEST(test_debug_print_per_kind);
+    RUN_TEST(test_wire_request_header);
+    RUN_TEST(test_wire_request_rdo_decodes_per_table_6_19);
     return UNITY_END();
 }

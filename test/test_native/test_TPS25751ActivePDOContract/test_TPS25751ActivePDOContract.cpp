@@ -24,6 +24,7 @@
 #include "TPS25751Register.h"
 #include "TPS25751RegisterAddress.h"
 #include "CaptureStdout.h"
+#include "fixtures/PdCapture_2026_11_23_apple_140w_tps25751.h"
 
 namespace {
 
@@ -69,6 +70,9 @@ bool contains(const std::string &haystack, const char *needle)
 {
     return haystack.find(needle) != std::string::npos;
 }
+
+// The real capture of the 140 W charger (test/fixtures/pd-captures/).
+namespace cap = PdCapture_2026_11_23_apple_140w_tps25751;
 
 }  // namespace
 
@@ -300,6 +304,49 @@ void test_debug_print_spr_avs_path()
     TEST_ASSERT_FALSE(contains(out, "Min Voltage"));
 }
 
+// --- Capture bundle 2026-11-23-apple-140w-tps25751 ----------------------------------
+//
+// 0x34 built from the bundle's register bytes against the wire:
+// - Bits 31:0 equal the wire PDO that the Request's Object Position names. RDO
+//   0x4184B12C bits 31:28 = 4 (USB PD R3.3 Table 6.19), so PDO 4, 0x000641D6: Fixed
+//   (bits 31:30 00b), 20 V (bits 19:10 = 400), 4.7 A (bits 9:0 = 470), Table 6.10.
+// - Bits 41:32 equal bits 29:20 of wire PDO 1, 0x0981912C: 0x098, which is bit 27
+//   Unconstrained Power, bit 24 Unchunked, bit 23 EPR Capable, Peak Current 00b
+//   (Table 6.8). The TRM does not state this mapping (AGENTS.md, ACTIVE_PDO_CONTRACT).
+
+void test_capture_active_pdo_is_the_requested_wire_pdo()
+{
+    TEST_ASSERT_EQUAL_size_t(PDO_SIZE, cap::kRegister0x34Length);
+    TPS25751ActivePDOContract reg(cap::kRegister0x34, cap::kRegister0x34Length);
+
+    TEST_ASSERT_EQUAL_UINT32(4, cap::kRequestRdo >> 28);  // Object Position, by hand
+    TEST_ASSERT_EQUAL_HEX32(cap::kSourceCapabilitiesPdos[4 - 1], reg.rawActivePdo());
+    TEST_ASSERT_TRUE(reg.hasActiveContract());
+
+    const TPS25751Pdo active = reg.activePdo();
+    TEST_ASSERT_EQUAL(PDOType::FixedSupply, active.type());
+    TEST_ASSERT_EQUAL_UINT16(20000, active.fixedVoltage_mV());
+    TEST_ASSERT_EQUAL_UINT16(4700, active.fixedCurrent_mA());
+    TEST_ASSERT_TRUE(reg.isSemanticallyValid());
+}
+
+void test_capture_first_pdo_control_bits_are_wire_pdo1_bits_29_20()
+{
+    TPS25751ActivePDOContract reg(cap::kRegister0x34, cap::kRegister0x34Length);
+
+    TEST_ASSERT_EQUAL_HEX16((cap::kSourceCapabilitiesPdos[0] >> 20) & 0x3FF, reg.rawFirstPdoControlBits());
+    TEST_ASSERT_EQUAL_HEX16(0x098, reg.rawFirstPdoControlBits());
+    const TPS25751Pdo first = reg.firstPdoControl();
+    TEST_ASSERT_FALSE(first.dualRolePower());             // PDO 1 bit 29
+    TEST_ASSERT_FALSE(first.usbSuspendSupported());       // bit 28
+    TEST_ASSERT_TRUE(first.unconstrainedPower());         // bit 27
+    TEST_ASSERT_FALSE(first.usbCommunicationsCapable());  // bit 26
+    TEST_ASSERT_FALSE(first.dualRoleData());              // bit 25
+    TEST_ASSERT_TRUE(first.unchunkedExtendedMessages());  // bit 24
+    TEST_ASSERT_TRUE(first.eprCapable());                 // bit 23
+    TEST_ASSERT_EQUAL(PdoPeakCurrent::IoC, first.peakCurrent());  // bits 21:20
+}
+
 int main(int, char **)
 {
     UNITY_BEGIN();
@@ -322,6 +369,8 @@ int main(int, char **)
     RUN_TEST(test_debug_print_pps_path);
     RUN_TEST(test_spr_avs_active_pdo_decodes_and_is_valid);
     RUN_TEST(test_debug_print_spr_avs_path);
+    RUN_TEST(test_capture_active_pdo_is_the_requested_wire_pdo);
+    RUN_TEST(test_capture_first_pdo_control_bits_are_wire_pdo1_bits_29_20);
 
     return UNITY_END();
 }

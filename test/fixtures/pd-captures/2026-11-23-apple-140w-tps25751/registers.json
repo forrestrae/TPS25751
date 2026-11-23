@@ -1,0 +1,25 @@
+{
+  "format": "tps25751-registers",
+  "version": 1,
+  "read_utc": null,
+  "registers": [
+    {
+      "address": "0x30",
+      "name": "RECEIVED_SOURCE_CAPABILITIES",
+      "length": 53,
+      "data": "042c9181092cd102002cb10400d6410600000000000000000000000000000000000000000000000000000000000000000000000000"
+    },
+    {
+      "address": "0x34",
+      "name": "ACTIVE_PDO_CONTRACT",
+      "length": 6,
+      "data": "d64106009800"
+    },
+    {
+      "address": "0x35",
+      "name": "ACTIVE_RDO_CONTRACT",
+      "length": 16,
+      "data": "2cb1844100000000000000002cb18441"
+    }
+  ]
+}

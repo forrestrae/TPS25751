@@ -1,0 +1,68 @@
+{
+  "format": "tps25751-pd-capture-provenance",
+  "version": 1,
+  "bundle": "2026-11-23-apple-140w-tps25751",
+  "summary": "Cold attach of an Apple 140 W charger to the TPS25751 test board as sink. The capture is real; registers.json is synthesized from bench words in the native tests.",
+  "setup": {
+    "source": "Apple 140 W USB-C power adapter",
+    "sink": "TPS25751 test board on its battery, configured from its EEPROM",
+    "cable": "Not recorded. Its SOP' Discover Identity ACK in capture.jsonl reports USB Vendor ID 0x20C2, Product ID 0x0005, bcdDevice 0x0310, Passive Cable.",
+    "stimulus": "Cold attach by hand, following the Phase 1 cold-attach steps",
+    "operator": "Library maintainer (cold attach); recorded by the km003c fork's Phase 4 cold-attach hardware test"
+  },
+  "capture": {
+    "file": "capture.jsonl",
+    "real": true,
+    "format": "km003c-capture",
+    "format_version": 1,
+    "started_utc": "2026-11-23T14:38:34.098Z",
+    "stopped_utc": "2026-11-23T14:39:05.668Z",
+    "stop_reason": "contract",
+    "command": "km003c-capture record --stop-on contract --settle-ms 4000",
+    "meter": {
+      "model": "KM003C",
+      "serial": "053893",
+      "fw_version": "2.0.0",
+      "hw_version": "2.3"
+    },
+    "copied_from": {
+      "repository": "lib/km003c-mcp (fork https://github.com/forrestrae/mcp-powerz-km003c)",
+      "path": "tests/fixtures/cold_attach_fw2.0.0.jsonl",
+      "commit": "1bee8d99736051955ed971cda7ecd6659cea4d7b",
+      "read_at": "main 085b3a837df7ed2b8677f7e3c9cb1a7e8641b2da",
+      "git_blob": "62de5297fa27dfd762dd044a0c3933ff6799574e",
+      "modified": false
+    },
+    "notes": [
+      "The header's provenance field is null and its label is \"phase4 cold attach\"; this file supplies the provenance.",
+      "The SOP messages match the Phase 1 reference capture of 2026-11-22 byte for byte, including the board's own Discover Identity ACK (VID 0x0451) 3 s after PS_RDY.",
+      "No Discover Identity ACK from the charger is on the wire, so this bundle cannot check RECEIVED_SOP_IDENTITY (0x48)."
+    ]
+  },
+  "registers": {
+    "file": "registers.json",
+    "synthesized": true,
+    "read_from_board_at_capture": false,
+    "registers_synthesized_from": [
+      "test/test_native/test_TPS25751Pdo/test_TPS25751Pdo.cpp",
+      "test/test_native/test_TPS25751ActivePDOContract/test_TPS25751ActivePDOContract.cpp",
+      "test/test_native/test_TPS25751ActiveRDOContract/test_TPS25751ActiveRDOContract.cpp"
+    ],
+    "included": {
+      "0x30": "kRx140W in test_TPS25751Pdo.cpp (bench read 2026-11-22 with this charger): Number Valid PDOs 4 and PDOs 1 to 4. Bytes 17 to 52 (PDOs 5 to 7 and reserved bits 423:232) are zero, the TRM reset value; the bench words do not record them.",
+      "0x34": "CHARGER_140W in test_TPS25751ActivePDOContract.cpp, as read from the board: active PDO 0x000641D6 and First PDO Control Bits 0x098.",
+      "0x35": "BOARD_SINKING in test_TPS25751ActiveRDOContract.cpp: 0x4184B12C in bits 31:0 and bits 127:96, reserved bits 95:32 zero, the way two chargers read on hardware."
+    },
+    "length_bytes": "Each length is the register size in the library's RegisterInfo (TRM SLVUCR8B), not a length byte read from the controller.",
+    "omitted": [
+      {"address": "0x1A", "name": "STATUS", "reason": "No bench word for this attach is recorded in the tests."},
+      {"address": "0x31", "name": "RECEIVED_SINK_CAPABILITIES", "reason": "No bench word for this attach is recorded in the tests."},
+      {"address": "0x32", "name": "TRANSMIT_SOURCE_CAPABILITIES", "reason": "The tests record the board's EEPROM words, but not the register's byte 0 and Power Path bytes, so the 63 bytes would be partly invented."},
+      {"address": "0x33", "name": "TRANSMIT_SINK_CAPABILITIES", "reason": "The tests record the PDO words but not a full register read, so byte 0 would be invented."},
+      {"address": "0x37", "name": "AUTONEGOTIATE_SINK", "reason": "No bench read is recorded in the tests."},
+      {"address": "0x48", "name": "RECEIVED_SOP_IDENTITY_DATA_OBJECT", "reason": "The charger's identity is not on the wire, and no bench read is recorded."},
+      {"address": "0x6A", "name": "ADC_RESULTS", "reason": "No bench read for this attach is recorded in the tests."}
+    ],
+    "replaced_by": "Phase 7 of docs/plans/km003c-pd-analyzer-toolset.md replaces this bundle with one whose registers.json comes from the bench console's SNAP command."
+  }
+}

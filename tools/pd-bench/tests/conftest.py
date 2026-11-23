@@ -1,4 +1,5 @@
 import pytest
+import serial
 
 from fakes import CONSOLE_PORT, LOG_PORT, FakeClock, FakeConsole, FakeProcesses, FakeSerialFactory, dual_serial_ports
 from tps25751_pd_bench.server import BenchService, build_tools
@@ -33,7 +34,19 @@ def bench() -> Bench:
 
 
 @pytest.fixture(autouse=True)
-def no_bench_environment(monkeypatch):
-    """Keep a developer's own TPS25751_BENCH_* settings out of the tests."""
-    for name in ("TPS25751_BENCH_PORT", "TPS25751_BENCH_SERIAL", "TPS25751_BENCH_LOG"):
+def no_real_serial_port(monkeypatch, tmp_path):
+    """Make it impossible for a test to reach hardware.
+
+    Every test wires its service to fakes. Should one ever build a service with
+    the real defaults, two things stop it: the environment names a port that does
+    not exist, which also switches discovery off, and opening any real pyserial
+    port raises. A developer's own TPS25751_BENCH_* settings are removed.
+    """
+    for name in ("TPS25751_BENCH_SERIAL", "TPS25751_BENCH_LOG"):
         monkeypatch.delenv(name, raising=False)
+    monkeypatch.setenv("TPS25751_BENCH_PORT", str(tmp_path / "no-such-port"))
+
+    def refuse(self):
+        raise serial.SerialException(f"a test tried to open the real serial port {self.port}")
+
+    monkeypatch.setattr(serial.Serial, "open", refuse)

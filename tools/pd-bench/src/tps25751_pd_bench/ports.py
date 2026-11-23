@@ -32,6 +32,14 @@ LSOF_TIMEOUT_S = 5.0
 
 
 @dataclass(frozen=True)
+class OwnerCheck:
+    """What ``lsof`` reports about a port."""
+
+    holders: tuple[str, ...] = ()    # other processes, as "pid 123 (command line)"
+    unavailable: str | None = None   # why the check could not run; None if it ran
+
+
+@dataclass(frozen=True)
 class PortCandidate:
     device: str
     pid: int | None = None
@@ -120,12 +128,14 @@ def _command_line(pid: int, run: Callable[..., object]) -> str | None:
 
 
 def port_holders(device: str, *, run: Callable[..., object] = subprocess.run,
-                 own_pid: int | None = None) -> list[str]:
+                 own_pid: int | None = None) -> OwnerCheck:
     """Other processes that have ``device`` open, as ``pid 123 (command line)``.
 
     pyserial's exclusive open is an advisory ``flock`` that a serial monitor does
     not take, so ``lsof`` is what tells that another program is reading the port.
-    Without ``lsof`` the list is empty and the exclusive open is the only guard.
+    When ``lsof`` is missing, cannot start, or times out, the result says so in
+    ``unavailable`` instead of looking like a free port. The exclusive open is
+    then the only guard, and the server reports that with the tool result.
     """
     own_pid = os.getpid() if own_pid is None else own_pid
     holders: dict[int, str] = {}
@@ -133,8 +143,12 @@ def port_holders(device: str, *, run: Callable[..., object] = subprocess.run,
         try:
             result = run(["lsof", "-F", "pc", "--", name], capture_output=True, text=True,
                          timeout=LSOF_TIMEOUT_S)
-        except (OSError, subprocess.SubprocessError):
-            return []
+        except FileNotFoundError:
+            return OwnerCheck(unavailable="lsof is not installed")
+        except subprocess.TimeoutExpired:
+            return OwnerCheck(unavailable=f"lsof did not finish within {LSOF_TIMEOUT_S:g} s")
+        except (OSError, subprocess.SubprocessError) as exc:
+            return OwnerCheck(unavailable=f"lsof could not run: {exc}")
         pid = None
         for field in (getattr(result, "stdout", "") or "").splitlines():
             if field.startswith("p") and field[1:].isdigit():
@@ -145,4 +159,4 @@ def port_holders(device: str, *, run: Callable[..., object] = subprocess.run,
     for pid, command in sorted(holders.items()):
         full = _command_line(pid, run)
         described.append(f"pid {pid} ({full or command})")
-    return described
+    return OwnerCheck(holders=tuple(described))

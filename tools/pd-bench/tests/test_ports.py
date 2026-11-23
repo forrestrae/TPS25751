@@ -84,14 +84,16 @@ def test_candidate_description():
 def test_holders_are_named_with_their_command_line():
     processes = FakeProcesses()
     processes.holders[CONSOLE_PORT] = [(4321, "python3.1", "python3 -m platformio device monitor")]
-    holders = ports.port_holders(CONSOLE_PORT, run=processes, own_pid=1)
-    assert holders == ["pid 4321 (python3 -m platformio device monitor)"]
+    check = ports.port_holders(CONSOLE_PORT, run=processes, own_pid=1)
+    assert check.holders == ("pid 4321 (python3 -m platformio device monitor)",)
+    assert check.unavailable is None
 
 
 def test_own_process_is_not_a_holder():
     processes = FakeProcesses()
     processes.holders[CONSOLE_PORT] = [(77, "python3.1", "tps25751-pd-bench")]
-    assert ports.port_holders(CONSOLE_PORT, run=processes, own_pid=77) == []
+    check = ports.port_holders(CONSOLE_PORT, run=processes, own_pid=77)
+    assert check.holders == () and check.unavailable is None
 
 
 def test_macos_dial_in_twin_counts_as_the_same_port():
@@ -99,7 +101,7 @@ def test_macos_dial_in_twin_counts_as_the_same_port():
     processes = FakeProcesses()
     twin = CONSOLE_PORT.replace("/dev/cu.", "/dev/tty.")
     processes.holders[twin] = [(55, "screen", "screen " + twin)]
-    assert ports.port_holders(CONSOLE_PORT, run=processes, own_pid=1) == [f"pid 55 (screen {twin})"]
+    assert ports.port_holders(CONSOLE_PORT, run=processes, own_pid=1).holders == (f"pid 55 (screen {twin})",)
     assert [call[-1] for call in processes.calls if call[0] == "lsof"] == [CONSOLE_PORT, twin]
 
     # And the other way round; a Linux name has no twin.
@@ -117,11 +119,24 @@ def test_holder_falls_back_to_the_short_name_when_ps_knows_nothing():
             return SimpleNamespace(stdout="p4321\ncminicom\n", returncode=0)
         raise OSError("ps is not available")
 
-    assert ports.port_holders("/dev/ttyACM0", run=run, own_pid=1) == ["pid 4321 (minicom)"]
+    assert ports.port_holders("/dev/ttyACM0", run=run, own_pid=1).holders == ("pid 4321 (minicom)",)
 
 
-def test_without_lsof_no_holder_is_reported():
+def test_a_check_that_cannot_run_says_so():
+    # A missing or hanging lsof must not look like "nobody holds the port".
     processes = FakeProcesses()
-    processes.lsof_missing = True
     processes.holders[CONSOLE_PORT] = [(4321, "python3.1", "pio device monitor")]
-    assert ports.port_holders(CONSOLE_PORT, run=processes, own_pid=1) == []
+
+    processes.lsof_missing = True
+    check = ports.port_holders(CONSOLE_PORT, run=processes, own_pid=1)
+    assert check.holders == () and check.unavailable == "lsof is not installed"
+
+    processes.lsof_missing, processes.lsof_hangs = False, True
+    check = ports.port_holders(CONSOLE_PORT, run=processes, own_pid=1)
+    assert check.unavailable == "lsof did not finish within 5 s"
+
+    def denied(args, **kwargs):
+        raise PermissionError("permission denied")
+
+    check = ports.port_holders(CONSOLE_PORT, run=denied, own_pid=1)
+    assert check.unavailable == "lsof could not run: permission denied"

@@ -8,6 +8,7 @@ in for ``serial.Serial``, ``FakeProcesses`` for ``lsof`` and ``ps``, and
 
 from __future__ import annotations
 
+import subprocess
 from types import SimpleNamespace
 
 import serial
@@ -89,6 +90,7 @@ class FakeConsole:
         self.script: dict[str, list] = {}    # request text -> replies, used in order
         self.noise: list[str] = []           # lines put before every reply line
         self.on_write = None                 # called with (address, bytes) after a WR
+        self.model_aneg = True               # CMD ANeg moves 0x34 and 0x35 the way 0x37 asks
         self.decoders = {0x1A: ["=== Status Register (0x1A) ===", "  Plug Present: Yes", ""]}
 
     # ----- replies -----
@@ -97,9 +99,39 @@ class FakeConsole:
         return [
             f"proto={self.proto} lib=3.1.0 build=Nov_23_2026_10:11:12 uptime_ms=123456",
             f"mode={self.mode} version=f8091166 role={self.role} plug={int(self.plug)}",
-            f"patch_bundle={int(self.patch_bundle)} patch_source={self.patch_source} swaps=0",
+            f"patch_bundle={int(self.patch_bundle)} patch_pending={int(self.patch_pending)} "
+            f"patch_source={self.patch_source} swaps=0",
             "OK",
         ]
+
+    @property
+    def patch_pending(self) -> bool:
+        return self.patch_bundle and self.mode == "PTCH"
+
+    def run_aneg(self) -> None:
+        """Re-evaluate 0x37 like the controller: take the highest Fixed PDO the voltage window allows.
+
+        Bit 5 clear means the host set the maximum (bits 41:32, 50 mV); bit 4 clear
+        means the host set the minimum (bits 51:42). 0x34 gets the chosen PDO and
+        0x35 its Object Position in bits 31:28 of both RDO words.
+        """
+        autoneg = int.from_bytes(self.registers[0x37], "little")
+        maximum = ((autoneg >> 32) & 0x3FF) * 50 if not (autoneg >> 5) & 1 else 1_000_000
+        minimum = ((autoneg >> 42) & 0x3FF) * 50 if not (autoneg >> 4) & 1 else 0
+        caps = self.registers[0x30]
+        best = None
+        for index in range(caps[0] & 0x07):
+            pdo = int.from_bytes(caps[1 + 4 * index:5 + 4 * index], "little")
+            voltage = ((pdo >> 10) & 0x3FF) * 50
+            if (pdo >> 30) == 0 and minimum <= voltage <= maximum and (best is None or voltage > best[0]):
+                best = (voltage, pdo, index + 1)
+        if best is None:
+            return  # nothing fits: the contract stays
+        _, pdo, position = best
+        self.registers[0x34] = pdo.to_bytes(4, "little") + self.registers[0x34][4:]
+        rdo = (int.from_bytes(self.registers[0x35][:4], "little") & 0x0FFFFFFF) | (position << 28)
+        word = rdo.to_bytes(4, "little")
+        self.registers[0x35] = word + self.registers[0x35][4:12] + word
 
     def register_line(self, address: int) -> str:
         data = self.registers[address]
@@ -142,6 +174,8 @@ class FakeConsole:
         if command == "CMD":
             if words[1] in ("PBMs", "I2Cw"):
                 return ["ERR REFUSED task is not on the allowlist"]
+            if words[1] == "ANeg" and self.model_aneg:
+                self.run_aneg()
             return [f"task={words[1]} status=success rc=0x00", "data=" + "00" * 64, "OK"]
         if command == "RESTART":
             task = "GAID" if words[1] == "cold" else "Gaid"
@@ -173,11 +207,13 @@ class FakeSerial:
         self._clock = clock
         self._factory = factory
         self._rx = bytearray(factory.pending.pop(port, b""))
+        self._late: list[tuple[float, bytes]] = []  # (time it becomes readable, bytes)
         self._tx = b""
         self.closed = False
 
     @property
     def in_waiting(self) -> int:
+        self._deliver()
         return len(self._rx)
 
     def write(self, data: bytes) -> int:
@@ -190,13 +226,20 @@ class FakeSerial:
             if self._console is None:
                 continue  # the log port: firmware never reads it
             for reply in self._console.handle(line.decode("ascii")):
-                self._rx += reply.encode("utf-8") + self._factory.line_ending
+                self._late.append((self._clock.now + self._factory.delay_s,
+                                   reply.encode("utf-8") + self._factory.line_ending))
+        self._deliver()
         return len(data)
+
+    def _deliver(self) -> None:
+        while self._late and self._late[0][0] <= self._clock.now:
+            self._rx += self._late.pop(0)[1]
 
     def flush(self) -> None:
         pass
 
     def read(self, size: int = 1) -> bytes:
+        self._deliver()
         if not self._rx:
             self._clock.sleep(self.kwargs.get("timeout") or 0.05)
             return b""
@@ -225,6 +268,7 @@ class FakeSerialFactory:
         self.chunk = 0                       # deliver at most this many bytes per read; 0 = all
         self.line_ending = b"\r\n"           # the Teensy core's println()
         self.write_error = False
+        self.delay_s = 0.0                   # how long the console stays silent before a reply
 
     def __call__(self, port: str, **kwargs) -> FakeSerial:
         if port not in self.consoles:
@@ -258,12 +302,15 @@ class FakeProcesses:
         self.holders: dict[str, list[tuple[int, str, str]]] = {}  # device -> (pid, name, command line)
         self.calls: list[list[str]] = []
         self.lsof_missing = False
+        self.lsof_hangs = False
 
     def __call__(self, args, **kwargs):
         self.calls.append(list(args))
         if args[0] == "lsof":
             if self.lsof_missing:
                 raise FileNotFoundError("lsof")
+            if self.lsof_hangs:
+                raise subprocess.TimeoutExpired(args, kwargs.get("timeout", 5))
             fields = "".join(f"p{pid}\nc{name}\n" for pid, name, _ in self.holders.get(args[-1], []))
             return SimpleNamespace(stdout=fields, returncode=0 if fields else 1)
         if args[0] == "ps":

@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import os
+from dataclasses import dataclass
 from pathlib import Path
 
 # TRM SLVUCR8B register names, as test/fixtures/pd-captures uses them.
@@ -131,6 +132,18 @@ def _set_bits(data: bytes, position: int, width: int, value: int) -> bytes:
     return word.to_bytes(len(data), "little")
 
 
+def fixed_pdo_power_mw(pdo: int) -> int | None:
+    """Power a Fixed Supply PDO offers in mW, or None for another PDO type.
+
+    Voltage times the Maximum Current in bits 9:0, 10 mA units (USB PD R3.3
+    Table 6.9).
+    """
+    voltage = fixed_pdo_voltage_mv(pdo)
+    if voltage is None:
+        return None
+    return voltage * (pdo & 0x3FF) * 10 // 1000
+
+
 def fixed_pdo_voltage_mv(pdo: int) -> int | None:
     """Voltage of a Fixed Supply PDO in mV, or None for another PDO type.
 
@@ -154,19 +167,79 @@ def active_pdo(data: bytes) -> int:
     return int.from_bytes(data[:4], "little")
 
 
+def own_rdo(data: bytes) -> int:
+    """The RDO this device sent as Sink, bits 31:0 of ACTIVE_RDO_CONTRACT (0x35)."""
+    return int.from_bytes(data[:4], "little")
+
+
 # AUTONEGOTIATE_SINK (0x37), SLVUCR8B p.40.
-AUTO_COMPUTE_SINK_MAX_VOLTAGE_BIT = 5   # 0 = provided by host, 1 = computed by the controller
-AUTO_NEG_MAX_VOLTAGE_SHIFT = 32         # bits 41:32, 50 mV per LSB
-AUTO_NEG_MAX_VOLTAGE_BITS = 10
+NO_CAPABILITY_MISMATCH_BIT = 3               # 1 = the Capability Mismatch bit is never set
+AUTO_COMPUTE_SINK_MIN_VOLTAGE_BIT = 4        # 0 = provided by host, 1 = computed by the controller
+AUTO_COMPUTE_SINK_MAX_VOLTAGE_BIT = 5        # 0 = provided by host, 1 = computed by the controller
+AUTO_DISABLE_SINK_UPON_CAP_MISMATCH_BIT = 6  # 1 = a capability mismatch disables the sink path
+AUTO_NEG_MAX_VOLTAGE_SHIFT = 32              # bits 41:32, 50 mV per LSB
+AUTO_NEG_MIN_VOLTAGE_SHIFT = 42              # bits 51:42, 50 mV per LSB
+CAP_MISMATCH_POWER_SHIFT = 52                # bits 61:52, 250 mW per LSB
+TEN_BITS = 10
+AUTO_NEG_MAX_VOLTAGE_BITS = TEN_BITS
+
+
+@dataclass(frozen=True)
+class AutoNegotiateSink:
+    """The fields of 0x37 that decide what ``aneg`` may do."""
+
+    max_voltage_computed: bool       # bit 5
+    max_voltage_mv: int              # bits 41:32, used when bit 5 is 0
+    min_voltage_computed: bool       # bit 4
+    min_voltage_mv: int              # bits 51:42, used when bit 4 is 0
+    no_capability_mismatch: bool     # bit 3
+    disable_sink_on_mismatch: bool   # bit 6
+    mismatch_power_mw: int           # bits 61:52
+
+    @property
+    def host_min_voltage_mv(self) -> int | None:
+        """The minimum voltage the host set, or None while the controller computes it."""
+        return None if self.min_voltage_computed else self.min_voltage_mv
+
+    def mismatch_disables_sink(self, pdo_power_mw: int) -> bool:
+        """Whether a contract on a PDO of this power would make the controller open the sink path.
+
+        "If the selected PDO offers less power than what is specified in this
+        register, then the PD controller will assert the Capability Mismatch bit
+        in its Request message unless NoCapabilityMismatch is set to 1", and with
+        bit 6 set a mismatch disables the sinking path (SLVUCR8B p.40).
+        """
+        return (self.disable_sink_on_mismatch and not self.no_capability_mismatch
+                and pdo_power_mw < self.mismatch_power_mw)
+
+
+def auto_negotiate_sink(data: bytes) -> AutoNegotiateSink:
+    return AutoNegotiateSink(
+        max_voltage_computed=bool(_bits(data, AUTO_COMPUTE_SINK_MAX_VOLTAGE_BIT, 1)),
+        max_voltage_mv=_bits(data, AUTO_NEG_MAX_VOLTAGE_SHIFT, TEN_BITS) * 50,
+        min_voltage_computed=bool(_bits(data, AUTO_COMPUTE_SINK_MIN_VOLTAGE_BIT, 1)),
+        min_voltage_mv=_bits(data, AUTO_NEG_MIN_VOLTAGE_SHIFT, TEN_BITS) * 50,
+        no_capability_mismatch=bool(_bits(data, NO_CAPABILITY_MISMATCH_BIT, 1)),
+        disable_sink_on_mismatch=bool(_bits(data, AUTO_DISABLE_SINK_UPON_CAP_MISMATCH_BIT, 1)),
+        mismatch_power_mw=_bits(data, CAP_MISMATCH_POWER_SHIFT, TEN_BITS) * 250,
+    )
 
 
 def auto_negotiate_max_voltage(data: bytes) -> tuple[bool, int]:
     """``(computed by the controller, host-provided maximum in mV)`` from 0x37."""
-    computed = bool(_bits(data, AUTO_COMPUTE_SINK_MAX_VOLTAGE_BIT, 1))
-    return computed, _bits(data, AUTO_NEG_MAX_VOLTAGE_SHIFT, AUTO_NEG_MAX_VOLTAGE_BITS) * 50
+    fields = auto_negotiate_sink(data)
+    return fields.max_voltage_computed, fields.max_voltage_mv
 
 
-def with_host_max_voltage(data: bytes, millivolts: int) -> bytes:
-    """0x37 with the maximum voltage provided by the host and set to ``millivolts``."""
+def with_host_max_voltage(data: bytes, millivolts: int, keep_sink_on_mismatch: bool = False) -> bytes:
+    """0x37 with the maximum voltage provided by the host and set to ``millivolts``.
+
+    With ``keep_sink_on_mismatch``, bit 6 is cleared as well, so a capability
+    mismatch on the temporary contract does not open the sink path. Every other
+    bit stays as read.
+    """
     changed = _set_bits(data, AUTO_COMPUTE_SINK_MAX_VOLTAGE_BIT, 1, 0)
-    return _set_bits(changed, AUTO_NEG_MAX_VOLTAGE_SHIFT, AUTO_NEG_MAX_VOLTAGE_BITS, millivolts // 50)
+    changed = _set_bits(changed, AUTO_NEG_MAX_VOLTAGE_SHIFT, TEN_BITS, millivolts // 50)
+    if keep_sink_on_mismatch:
+        changed = _set_bits(changed, AUTO_DISABLE_SINK_UPON_CAP_MISMATCH_BIT, 1, 0)
+    return changed

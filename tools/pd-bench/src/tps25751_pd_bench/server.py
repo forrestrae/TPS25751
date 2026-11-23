@@ -11,6 +11,9 @@ Environment:
 - ``TPS25751_BENCH_PORT``: the console's serial port; skips discovery.
 - ``TPS25751_BENCH_SERIAL``: the Teensy's USB serial number, when several are attached.
 - ``TPS25751_BENCH_LOG``: a file that receives all serial traffic, for ``tail -f``.
+
+``HELLO`` is sent again after a timeout, a port error, or a protocol error, and
+by ``bench_hello`` and ``bench_renegotiate`` on every call.
 """
 
 from __future__ import annotations
@@ -49,7 +52,7 @@ from .protocol import (
 )
 
 # Reply deadlines in seconds. Each is the console's own worst case plus margin.
-HELLO_TIMEOUT_S = 20.0     # includes a patch reload when MODE reads PTCH
+HELLO_TIMEOUT_S = 20.0     # the whole reply; the console only reads four registers for it
 READ_TIMEOUT_S = 3.0
 SNAPSHOT_TIMEOUT_S = 6.0
 WRITE_TIMEOUT_S = 4.0
@@ -57,7 +60,7 @@ TASK_TIMEOUT_S = 4.0       # the console waits up to 2 s for a PD message task
 GPPI_TIMEOUT_S = 8.0       # and up to 5 s for GPPI
 RESTART_TIMEOUT_S = 40.0   # 10 s for the restart, 3 s for PTCH readiness, then the patch load
 
-ANEG_SETTLE_S = 1.5        # lets the temporary contract reach PS_RDY before the restore
+ANEG_SETTLE_S = 1.5        # lets a contract reach PS_RDY before it is read back or changed again
 PORT_RESET_WATCH_S = 3.0   # how long port_reset watches STATUS for the disconnect
 PORT_RESET_POLL_S = 0.1
 
@@ -66,7 +69,8 @@ RENEGOTIATE_METHODS = {
             "VBUS stays at the contract voltage if the same PDO is chosen. Updates 0x30.",
     "aneg": "Sink only. Lowers the maximum voltage in 0x37 to the source's next lower Fixed PDO, "
             "runs ANeg, restores 0x37, and runs ANeg again: two Request, Accept, PS_RDY sequences "
-            "and two VBUS steps, with no Source_Capabilities.",
+            "and two VBUS steps, with no Source_Capabilities. stepped_down and restored_contract "
+            "say whether 0x34 followed.",
     "ssrc": "Source only. Runs SSrC: the board sends Source_Capabilities and the partner sends a "
             "Request.",
     "port_reset": "Either role. Rewrites 0x28 with its current value, which the TRM says "
@@ -109,13 +113,15 @@ def parse_hello(reply: Reply, port: str) -> dict:
         "role": tokens.get("role", "?"),
         "plug": flag("plug"),
         "patch_bundle": flag("patch_bundle"),
+        "patch_pending": flag("patch_pending"),
         "patch_source": tokens.get("patch_source", "?"),
         "swaps": flag("swaps"),
     }
-    if "patch_reload" in tokens:
-        hello["patch_reload"] = tokens["patch_reload"]
     if hello["mode"] == "?":
         hello["warning"] = "the console answers but the TPS25751 does not answer on I2C"
+    elif hello["patch_pending"]:
+        hello["warning"] = ("MODE is PTCH and the firmware holds a patch bundle. HELLO does not load "
+                            "it; bench_renegotiate('restart') does, and so does a reset of the Teensy")
     return hello
 
 
@@ -141,6 +147,7 @@ class BenchService:
         self.now_utc = now_utc
         self._port: str | None = None   # the port a HELLO confirmed as the console
         self._hello: dict | None = None
+        self.owner_check: str | None = None  # set when lsof could not check the port's owner
         self._lock = threading.Lock()   # one tool call owns the port at a time
 
     def forget(self) -> None:
@@ -174,11 +181,18 @@ class BenchService:
                                          comports=self._comports)
         silent: list[str] = []
         busy: list[str] = []
+        self.owner_check = None
         for candidate in candidates:
             # Another reader would take part of the console's replies, and a
             # probe would put a request into its session, so a held port is
             # never opened.
-            holders = port_holders(candidate.device, run=self._run)
+            check = port_holders(candidate.device, run=self._run)
+            if check.unavailable:
+                # Not the same as "no holder": say so with the result, and rely
+                # on the exclusive lock alone.
+                self.owner_check = (f"unavailable: {check.unavailable}; only the exclusive lock "
+                                    "guards the port, which a serial monitor does not take")
+            holders = check.holders
             if holders:
                 message = f"{candidate.device} is open in {', '.join(holders)}"
                 if candidate.designated:
@@ -213,7 +227,8 @@ class BenchService:
                 link.close()
                 if exc.answered:
                     raise
-                silent.append(f"{candidate.device} did not answer HELLO")
+                silent.append(f"{candidate.device} did not answer HELLO within "
+                              f"{FIRST_LINE_TIMEOUT_S:g} s")
                 continue
             except BaseException:
                 link.close()
@@ -224,8 +239,11 @@ class BenchService:
         self.forget()
         if busy and not silent:
             raise BenchBusyError("; ".join(busy) + ". Close that program and call again")
-        raise BenchPortError("no bench console answered: " + "; ".join(silent + busy)
-                             + ". Is examples/pd-bench flashed, and does the firmware call poll()?")
+        raise BenchPortError(
+            "no bench console answered: " + "; ".join(silent + busy)
+            + ". A console that stays silent this long is busy or still starting (after a reset its "
+              "begin() can load the patch for several seconds before it reads the port), or the "
+              "firmware has no console: is examples/pd-bench flashed, and does it call poll()?")
 
 
 # ---------------------------------------------------------------------------
@@ -291,32 +309,43 @@ def _restart_steps(reply: Reply) -> list[dict]:
 def build_tools(service: BenchService) -> SimpleNamespace:
     """The tool functions, bound to ``service``."""
 
+    def call(fn, args, kwargs) -> dict:
+        try:
+            return fn(*args, **kwargs)
+        except BenchCommandError as exc:
+            out = {"error": str(exc), "kind": type(exc).__name__, "code": exc.code}
+            if exc.reply.lines:
+                out["reply_lines"] = exc.reply.lines[-40:]
+            out.update(exc.reply.extras())
+            return out
+        except (BenchError, serial.SerialException, ValueError, OSError) as exc:
+            return {"error": str(exc), "kind": type(exc).__name__}
+
     def safe(fn):
         @functools.wraps(fn)
         def wrapper(*args, **kwargs):
-            try:
-                return fn(*args, **kwargs)
-            except BenchCommandError as exc:
-                out = {"error": str(exc), "kind": type(exc).__name__, "code": exc.code}
-                if exc.reply.lines:
-                    out["reply_lines"] = exc.reply.lines[-40:]
-                out.update(exc.reply.extras())
-                return out
-            except (BenchError, serial.SerialException, ValueError, OSError) as exc:
-                return {"error": str(exc), "kind": type(exc).__name__}
+            service.owner_check = None
+            result = call(fn, args, kwargs)
+            if service.owner_check:
+                # lsof could not say who has the port open; a silent "no
+                # holder" would overstate what was checked.
+                result["owner_check"] = service.owner_check
+            return result
         return wrapper
 
     @safe
     def bench_hello() -> dict:
         """Identify the bench console and the TPS25751 behind it.
 
-        Returns the serial port, protocol version, library version, firmware build
-        date, uptime in ms, MODE (APP, PTCH, BOOT, or ? when the controller does
-        not answer on I2C), VERSION (0x0F) as hex, the power role (sink or source)
-        and whether a plug is attached, whether a patch bundle is compiled in,
-        where the running configuration came from (eeprom, i2c, none), and whether
-        the firmware allows role swaps. If MODE read PTCH and a bundle is compiled
-        in, the console reloaded it and patch_reload reports the outcome.
+        Read-only: the console reads MODE, VERSION, STATUS, and BOOT_FLAGS and
+        changes nothing. Returns the serial port, protocol version, library
+        version, firmware build date, uptime in ms, MODE (APP, PTCH, BOOT, or ? when
+        the controller does not answer on I2C), VERSION (0x0F) as hex, the power
+        role (sink or source) and whether a plug is attached, whether a patch
+        bundle is compiled in, where the running configuration came from (eeprom,
+        i2c, none), and whether the firmware allows role swaps. patch_pending is
+        true when MODE reads PTCH and a bundle is compiled in: the controller
+        waits for the patch, which bench_renegotiate("restart") loads.
         """
         with service.session(fresh_hello=True) as session:
             return dict(session.hello)
@@ -450,6 +479,9 @@ def build_tools(service: BenchService) -> SimpleNamespace:
           restores 0x37, runs ANeg again. Two Requests, two VBUS steps, no
           Source_Capabilities. max_voltage_mv sets the temporary maximum; by
           default it is the source's next Fixed PDO below the contract voltage.
+          The result reports stepped_down and restored_contract from 0x34, and
+          cleared_bit6 when the temporary value also had to keep the sink path
+          closed against a capability mismatch.
         - ssrc (board is source): SSrC. The board sends Source_Capabilities.
         - port_reset: rewrites 0x28 with its current value. Disconnect and
           reconnect; VBUS drops.
@@ -538,33 +570,94 @@ def _check_method_fits(method: str, hello: dict) -> None:
                                 "(build example-pd-bench-patch)")
 
 
+def _contract(session: Session) -> dict:
+    """The active PDO (0x34) and the RDO this device sent (0x35), for a before and after comparison."""
+    pdo = registers.active_pdo(bytes.fromhex(_read(session, 0x34)["data"]))
+    rdo = registers.own_rdo(bytes.fromhex(_read(session, 0x35)["data"]))
+    return {"pdo": f"0x{pdo:08X}", "mv": registers.fixed_pdo_voltage_mv(pdo), "rdo": f"0x{rdo:08X}"}
+
+
+def _contract_or_error(session: Session) -> dict:
+    """Like ``_contract``, but a failed read becomes an entry in the result instead of an exception."""
+    try:
+        return _contract(session)
+    except (BenchError, serial.SerialException, OSError, ValueError) as exc:
+        return {"error": str(exc)}
+
+
 def _renegotiate_aneg(service: BenchService, session: Session, step, run_task,
                       max_voltage_mv: int | None, result: dict) -> None:
-    """Change 0x37, run ANeg, restore 0x37, run ANeg again. The restore always runs."""
+    """Change 0x37, run ANeg, restore 0x37, run ANeg again. The restore always runs.
+
+    Everything that could make the method pointless or harmful is checked from
+    the registers before the first write.
+    """
     original = _read(session, 0x37)
     original_bytes = bytes.fromhex(original["data"])
-    contract = registers.active_pdo(bytes.fromhex(_read(session, 0x34)["data"]))
-    contract_mv = registers.fixed_pdo_voltage_mv(contract)
+    fields = registers.auto_negotiate_sink(original_bytes)
+    before = _contract(session)
+    contract = int(before["pdo"], 16)
+    contract_mv = before["mv"]
     if contract_mv is None:
         raise BenchRefusedError(f"aneg handles a Fixed Supply contract only and the active PDO is "
-                                f"0x{contract:08X}; use gsrc")
+                                f"{before['pdo']}; use gsrc")
+
+    offered = registers.source_caps_pdos(bytes.fromhex(_read(session, 0x30)["data"]))
+    fixed = [(registers.fixed_pdo_voltage_mv(p), p) for p in offered
+             if registers.fixed_pdo_voltage_mv(p) is not None]
+    host_min_mv = fields.host_min_voltage_mv  # None while the controller computes the minimum
 
     if max_voltage_mv is None:
-        offered = registers.source_caps_pdos(bytes.fromhex(_read(session, 0x30)["data"]))
-        lower = sorted(v for v in (registers.fixed_pdo_voltage_mv(p) for p in offered)
-                       if v is not None and v < contract_mv)
+        lower = sorted(v for v, _ in fixed if v < contract_mv)
         if not lower:
             raise BenchRefusedError(f"the contract is at {contract_mv} mV and the source offers no "
                                     "lower Fixed PDO, so a lower maximum cannot change the request; "
                                     "use gsrc")
-        max_voltage_mv = lower[-1]
-    elif not 5000 <= max_voltage_mv < contract_mv or max_voltage_mv % 50:
-        raise BenchRefusedError(f"max_voltage_mv must be a multiple of 50 from 5000 to below the "
-                                f"contract's {contract_mv} mV")
+        reachable = [v for v in lower if host_min_mv is None or v >= host_min_mv]
+        if not reachable:
+            raise BenchRefusedError(
+                f"0x37 holds a host-provided minimum of {host_min_mv} mV (bit 4 is 0) and every "
+                f"Fixed PDO below the contract's {contract_mv} mV is under it, so no lower maximum "
+                "leaves a PDO to request; use gsrc")
+        max_voltage_mv = reachable[-1]
+    else:
+        if not 5000 <= max_voltage_mv < contract_mv or max_voltage_mv % 50:
+            raise BenchRefusedError(f"max_voltage_mv must be a multiple of 50 from 5000 to below the "
+                                    f"contract's {contract_mv} mV")
+        if host_min_mv is not None and host_min_mv > max_voltage_mv:
+            raise BenchRefusedError(
+                f"0x37 holds a host-provided minimum of {host_min_mv} mV (bit 4 is 0), above the "
+                f"temporary maximum of {max_voltage_mv} mV, so no PDO would fit and ANeg would "
+                "change nothing; give a max_voltage_mv of at least the minimum, or use gsrc")
 
-    changed = registers.with_host_max_voltage(original_bytes, max_voltage_mv).hex()
-    result.update(contract_mv=contract_mv, temporary_max_voltage_mv=max_voltage_mv,
-                  original_0x37=original["data"], temporary_0x37=changed)
+    # The PDO the controller should pick: the most powerful one inside the
+    # voltage window (SLVUCR8B p.40, Auto Neg RDO Priority). Only Fixed PDOs
+    # are considered here, which is the conservative reading for the check
+    # that follows.
+    window = [(registers.fixed_pdo_power_mw(p), v, p) for v, p in fixed
+              if v <= max_voltage_mv and (host_min_mv is None or v >= host_min_mv)]
+    expected_power_mw, expected_mv, expected_pdo = max(window) if window else (0, None, 0)
+
+    # With bit 6 set, a contract below the capability mismatch power makes the
+    # controller open the sink path. The temporary value then clears bit 6 too;
+    # the restore brings it back with every other bit.
+    clear_bit6 = fields.mismatch_disables_sink(expected_power_mw)
+    changed = registers.with_host_max_voltage(original_bytes, max_voltage_mv,
+                                              keep_sink_on_mismatch=clear_bit6).hex()
+    result.update(
+        contract_mv=contract_mv, temporary_max_voltage_mv=max_voltage_mv,
+        original_0x37=original["data"], temporary_0x37=changed,
+        original_contract=before,
+        expected_temporary_pdo=f"0x{expected_pdo:08X}" if window else None,
+        expected_temporary_power_mw=expected_power_mw if window else None,
+        cap_mismatch_power_mw=fields.mismatch_power_mw,
+        cleared_bit6=clear_bit6)
+    if clear_bit6:
+        result["cleared_bit6_reason"] = (
+            f"the temporary PDO offers {expected_power_mw} mW, below the capability mismatch power "
+            f"of {fields.mismatch_power_mw} mW in 0x37 bits 61:52, and bit 6 (Auto Disable Sink Upon "
+            "Capability Mismatch) is set, so the controller would have opened the sink path; bit 6 "
+            "is cleared in the temporary value and restored with the rest")
 
     # From the moment the temporary write is sent, 0x37 may hold the temporary
     # value, even if its reply is lost. The restore therefore runs on every path
@@ -574,11 +667,23 @@ def _renegotiate_aneg(service: BenchService, session: Session, step, run_task,
         step("WR 0x37 temporary", reply, match=_register_from(reply).get("match"))
         run_task(session, "ANeg")
         service.sleep(ANEG_SETTLE_S)
+
+        # Did the contract follow? ANeg sends a Request only when the
+        # re-evaluated RDO differs, so a contract that stayed means the change
+        # to 0x37 did not move the controller's choice.
+        after = _contract_or_error(session)
+        result["temporary_contract"] = after
+        if "error" in after:
+            result["stepped_down"] = None
+        else:
+            result["stepped_down"] = (after["pdo"] != before["pdo"] and after["mv"] is not None
+                                      and after["mv"] <= max_voltage_mv)
     finally:
-        _restore_0x37(session, step, run_task, original["data"], result)
+        _restore_0x37(service, session, step, run_task, original["data"], before, result)
 
 
-def _restore_0x37(session: Session, step, run_task, original_hex: str, result: dict) -> None:
+def _restore_0x37(service: BenchService, session: Session, step, run_task, original_hex: str,
+                  before: dict, result: dict) -> None:
     """Write 0x37 back and run ANeg, whatever happened before. Never raises past a failed restore."""
     restored = False
     failure = None
@@ -606,6 +711,13 @@ def _restore_0x37(session: Session, step, run_task, original_hex: str, result: d
         step("CMD ANeg", None, error=str(exc))
         result["second_aneg_error"] = (f"0x37 is restored, but the second ANeg failed ({exc}); the "
                                        "contract may still be the temporary one. Run gsrc")
+
+    # Report whether the original contract is back. A failed read is reported,
+    # not raised: the register is restored either way.
+    service.sleep(ANEG_SETTLE_S)
+    final = _contract_or_error(session)
+    result["final_contract"] = final
+    result["restored_contract"] = None if "error" in final else final["pdo"] == before["pdo"]
 
 
 def _renegotiate_port_reset(service: BenchService, session: Session, step, result: dict) -> None:

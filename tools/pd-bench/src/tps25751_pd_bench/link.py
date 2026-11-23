@@ -31,7 +31,13 @@ BAUD_RATE = 115200          # ignored by USB CDC, required by pyserial
 READ_TIMEOUT_S = 0.05       # one blocking read; the reply deadline is checked between reads
 WRITE_TIMEOUT_S = 2.0
 DRAIN_S = 0.05              # how long open() collects stale input
-FIRST_LINE_TIMEOUT_S = 1.5  # a console answers HELLO's first line without touching I2C
+
+# How long a console may stay silent before its port counts as "no console
+# here". Once it polls, the console answers HELLO within milliseconds. Right
+# after a reset it does not read the port while begin() runs: up to 3 s waiting
+# for PTCH readiness, then the patch load (PBMs up to 0.5 s, the burst about
+# 1 s, PBMc up to 5 s), about 9.5 s at the worst.
+FIRST_LINE_TIMEOUT_S = 10.0
 
 _request_ids = itertools.count(int.from_bytes(os.urandom(2), "big") % 9000 + 1000)
 

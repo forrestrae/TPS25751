@@ -169,8 +169,17 @@ def test_port_reset_tolerates_status_reads_that_fail(bench):
 
 # ----- aneg -----
 
-def expected_temporary(max_mv: int) -> str:
-    return registers.with_host_max_voltage(AUTONEG_RESET, max_mv).hex()
+READ_CONTRACT = ["RD 0x34", "RD 0x35"]
+PDO_15V, PDO_20V = "0x0004B12C", "0x000641D6"
+
+
+def expected_temporary(max_mv: int, clear_bit6: bool = False) -> str:
+    return registers.with_host_max_voltage(AUTONEG_RESET, max_mv, keep_sink_on_mismatch=clear_bit6).hex()
+
+
+def with_field(data: bytes, position: int, width: int, value: int) -> bytes:
+    """0x37 with one field changed, for building a starting value."""
+    return registers._set_bits(data, position, width, value)
 
 
 def test_aneg_changes_0x37_runs_aneg_restores_and_runs_aneg_again(bench):
@@ -180,9 +189,9 @@ def test_aneg_changes_0x37_runs_aneg_restores_and_runs_aneg_again(bench):
     assert result["contract_mv"] == 20000 and result["temporary_max_voltage_mv"] == 15000
     temporary = expected_temporary(15000)
     assert after_hello(bench) == [
-        "RD 0x37", "RD 0x34", "RD 0x30",
-        f"WR 0x37 {temporary}", "CMD ANeg",
-        f"WR 0x37 {ORIGINAL_0X37}", "CMD ANeg",
+        "RD 0x37", *READ_CONTRACT, "RD 0x30",              # everything is read before the first write
+        f"WR 0x37 {temporary}", "CMD ANeg", *READ_CONTRACT,
+        f"WR 0x37 {ORIGINAL_0X37}", "CMD ANeg", *READ_CONTRACT,
     ]
     assert [s["step"] for s in result["steps"]] == [
         "WR 0x37 temporary", "CMD ANeg", "WR 0x37 restore", "CMD ANeg"]
@@ -190,13 +199,68 @@ def test_aneg_changes_0x37_runs_aneg_restores_and_runs_aneg_again(bench):
     assert result["original_0x37"] == ORIGINAL_0X37 and result["temporary_0x37"] == temporary
     assert bench.console.registers[0x37] == AUTONEG_RESET
     assert "error" not in result
-    # The temporary contract had time to reach PS_RDY before the restore.
-    assert ANEG_SETTLE_S in bench.clock.sleeps
+    # Each contract had time to reach PS_RDY before it was read back.
+    assert bench.clock.sleeps.count(ANEG_SETTLE_S) == 2
+
+
+def test_aneg_reports_that_the_contract_stepped_down_and_came_back(bench):
+    result = bench.tools.bench_renegotiate("aneg")
+    assert result["original_contract"] == {"pdo": PDO_20V, "mv": 20000, "rdo": "0x4184B12C"}
+    # After the first ANeg, 0x34 holds the 15 V PDO and the RDO names object position 3.
+    assert result["stepped_down"] is True
+    assert result["temporary_contract"] == {"pdo": PDO_15V, "mv": 15000, "rdo": "0x3184B12C"}
+    assert result["expected_temporary_pdo"] == PDO_15V
+    assert result["expected_temporary_power_mw"] == 45000
+    # After the restore and the second ANeg, the 20 V contract is back.
+    assert result["restored_contract"] is True
+    assert result["final_contract"] == result["original_contract"]
+
+
+def test_aneg_reports_a_contract_that_did_not_move(bench):
+    # The controller keeps its contract whatever 0x37 says: the method ran and
+    # did nothing, and the result must say so without calling it an error.
+    bench.console.model_aneg = False
+    result = bench.tools.bench_renegotiate("aneg")
+    assert result["stepped_down"] is False
+    assert result["temporary_contract"]["pdo"] == PDO_20V
+    assert result["restored_contract"] is True and result["restored_0x37"] is True
+    assert "error" not in result
+
+
+def test_aneg_reports_a_contract_that_did_not_come_back(bench):
+    # The second ANeg succeeds as a task, but the contract stays at 15 V.
+    ok = ["task=ANeg status=success rc=0x00", "data=" + "00" * 64, "OK"]
+
+    def first(console):
+        console.run_aneg()
+        return ok
+
+    bench.console.script["CMD ANeg"] = [first, ok]
+    result = bench.tools.bench_renegotiate("aneg")
+    assert result["stepped_down"] is True
+    assert result["restored_0x37"] is True
+    assert result["restored_contract"] is False
+    assert result["final_contract"]["pdo"] == PDO_15V
+    assert "error" not in result
+
+
+def test_aneg_reports_a_readback_that_failed_without_failing(bench):
+    def read_ok(console):
+        return [console.register_line(0x34), "OK"]
+
+    # The read before the write works; the read after the first ANeg does not.
+    bench.console.script["RD 0x34"] = [read_ok, ["ERR I2C register read failed"]]
+    result = bench.tools.bench_renegotiate("aneg")
+    assert result["stepped_down"] is None
+    assert "I2C" in result["temporary_contract"]["error"]
+    # The method went on: 0x37 is restored and the contract is back.
+    assert result["restored_0x37"] is True and result["restored_contract"] is True
+    assert "error" not in result
 
 
 def test_aneg_changes_only_the_maximum_voltage_fields(bench):
-    bench.tools.bench_renegotiate("aneg")
-    temporary = bytes.fromhex(bench.requests[4].split()[2])
+    result = bench.tools.bench_renegotiate("aneg")
+    temporary = bytes.fromhex(bench.requests[5].split()[2])
     before = int.from_bytes(AUTONEG_RESET, "little")
     after = int.from_bytes(temporary, "little")
     # Bit 5 (Auto Compute Sink Max Voltage) cleared, bits 41:32 set to 15 V in 50 mV units.
@@ -206,6 +270,98 @@ def test_aneg_changes_only_the_maximum_voltage_fields(bench):
     assert (after >> 32) & 0x3FF == 300
     assert registers.auto_negotiate_max_voltage(AUTONEG_RESET) == (True, 20000)
     assert registers.auto_negotiate_max_voltage(temporary) == (False, 15000)
+    # The reset value's mismatch power is 0.5 W, far below the 45 W of the 15 V
+    # PDO, so bit 6 stays as it was.
+    assert result["cleared_bit6"] is False and "cleared_bit6_reason" not in result
+    assert result["cap_mismatch_power_mw"] == 500
+    assert (after >> 6) & 1 == 1
+
+
+def test_aneg_clears_bit_6_when_the_temporary_pdo_is_under_the_mismatch_power(bench):
+    # Capability mismatch power 60 W (240 x 250 mW in bits 61:52) with bit 6 set:
+    # the 15 V PDO offers 45 W, so the controller would open the sink path.
+    start = with_field(AUTONEG_RESET, 52, 10, 240)
+    bench.console.registers[0x37] = start
+    result = bench.tools.bench_renegotiate("aneg")
+
+    assert result["cleared_bit6"] is True
+    assert "45000 mW" in result["cleared_bit6_reason"] and "60000 mW" in result["cleared_bit6_reason"]
+    assert result["cap_mismatch_power_mw"] == 60000
+
+    temporary = bytes.fromhex(result["temporary_0x37"])
+    assert f"WR 0x37 {temporary.hex()}" in bench.requests
+    before = int.from_bytes(start, "little")
+    after = int.from_bytes(temporary, "little")
+    # Bit 6 is the only change besides the maximum voltage.
+    assert (after >> 6) & 1 == 0
+    assert (before ^ after) & ~((1 << 5) | (1 << 6) | (0x3FF << 32)) == 0
+    # The restore brings bit 6 back with every other bit.
+    assert result["restored_0x37"] is True
+    assert bench.console.registers[0x37] == start
+    assert (int.from_bytes(bench.console.registers[0x37], "little") >> 6) & 1 == 1
+
+
+def test_aneg_leaves_bit_6_alone_when_a_mismatch_cannot_open_the_sink_path(bench):
+    under_threshold = with_field(AUTONEG_RESET, 52, 10, 240)
+
+    # No Capability Mismatch (bit 3) set: the mismatch bit is never raised.
+    bench.console.registers[0x37] = with_field(under_threshold, 3, 1, 1)
+    assert bench.tools.bench_renegotiate("aneg")["cleared_bit6"] is False
+
+    # Bit 6 already clear: nothing to protect.
+    bench.console.registers[0x37] = with_field(under_threshold, 6, 1, 0)
+    result = bench.tools.bench_renegotiate("aneg")
+    assert result["cleared_bit6"] is False
+    assert (int.from_bytes(bytes.fromhex(result["temporary_0x37"]), "little") >> 6) & 1 == 0
+
+    # The threshold exactly at the PDO's power is not a mismatch.
+    bench.console.registers[0x37] = with_field(AUTONEG_RESET, 52, 10, 180)   # 45 W
+    assert bench.tools.bench_renegotiate("aneg")["cleared_bit6"] is False
+
+
+def test_mismatch_rule():
+    fields = registers.auto_negotiate_sink(with_field(AUTONEG_RESET, 52, 10, 240))
+    assert fields.disable_sink_on_mismatch and not fields.no_capability_mismatch
+    assert fields.mismatch_power_mw == 60000
+    assert fields.mismatch_disables_sink(45000) is True
+    assert fields.mismatch_disables_sink(60000) is False
+    assert fields.mismatch_disables_sink(94000) is False
+    assert registers.fixed_pdo_power_mw(0x0004B12C) == 45000    # 15 V x 3.00 A
+    assert registers.fixed_pdo_power_mw(0x000641D6) == 94000    # 20 V x 4.70 A
+    assert registers.fixed_pdo_power_mw(0xE004B1F4) is None
+
+
+def test_aneg_is_refused_when_a_host_minimum_leaves_no_lower_pdo(bench):
+    # Bit 4 clear with a host minimum of 18 V: every Fixed PDO below the 20 V
+    # contract is under it, so no lower maximum can change the request.
+    start = with_field(with_field(AUTONEG_RESET, 4, 1, 0), 42, 10, 360)
+    bench.console.registers[0x37] = start
+    result = bench.tools.bench_renegotiate("aneg")
+    assert result["kind"] == "BenchRefusedError"
+    assert "host-provided minimum of 18000 mV" in result["error"] and "bit 4" in result["error"]
+    assert changes_board(bench.requests) == []
+    assert bench.console.registers[0x37] == start
+
+
+def test_aneg_respects_a_host_minimum_when_it_picks_the_voltage(bench):
+    # Host minimum 9 V: 15 V is still the next lower PDO and is allowed.
+    bench.console.registers[0x37] = with_field(with_field(AUTONEG_RESET, 4, 1, 0), 42, 10, 180)
+    result = bench.tools.bench_renegotiate("aneg")
+    assert result["temporary_max_voltage_mv"] == 15000 and result["stepped_down"] is True
+
+    # A given maximum under the host minimum is refused before any write.
+    bench.requests.clear()
+    refused = bench.tools.bench_renegotiate("aneg", max_voltage_mv=5000)
+    assert refused["kind"] == "BenchRefusedError"
+    assert "above the temporary maximum of 5000 mV" in refused["error"]
+    assert changes_board(bench.requests) == []
+
+
+def test_a_computed_minimum_does_not_block_aneg(bench):
+    # Bit 4 set: the controller computes the minimum, and the field (here 18 V) is not used.
+    bench.console.registers[0x37] = with_field(AUTONEG_RESET, 42, 10, 360)
+    result = bench.tools.bench_renegotiate("aneg")
+    assert "error" not in result and result["temporary_max_voltage_mv"] == 15000
 
 
 def test_aneg_restores_0x37_when_the_first_aneg_fails(bench):
@@ -213,14 +369,16 @@ def test_aneg_restores_0x37_when_the_first_aneg_fails(bench):
     result = bench.tools.bench_renegotiate("aneg")
 
     requests = after_hello(bench)
-    assert requests[-4:] == [
+    assert requests[-6:] == [
         f"WR 0x37 {expected_temporary(15000)}", "CMD ANeg",   # the second step fails
         f"WR 0x37 {ORIGINAL_0X37}", "CMD ANeg",               # the restore and the second ANeg still run
+        *READ_CONTRACT,
     ]
     assert result["code"] == "TIMEOUT" and result["kind"] == "BenchCommandError"
     assert result["restored_0x37"] is True
     assert bench.console.registers[0x37] == AUTONEG_RESET
     assert [s["step"] for s in result["steps"]] == ["WR 0x37 temporary", "WR 0x37 restore", "CMD ANeg"]
+    assert "stepped_down" not in result and result["restored_contract"] is True
 
 
 def test_aneg_restores_0x37_when_the_first_aneg_never_answers(bench):
@@ -229,7 +387,7 @@ def test_aneg_restores_0x37_when_the_first_aneg_never_answers(bench):
     assert result["kind"] == "BenchTimeoutError"
     assert result["restored_0x37"] is True
     assert bench.console.registers[0x37] == AUTONEG_RESET
-    assert after_hello(bench)[-2:] == [f"WR 0x37 {ORIGINAL_0X37}", "CMD ANeg"]
+    assert after_hello(bench)[-4:] == [f"WR 0x37 {ORIGINAL_0X37}", "CMD ANeg", *READ_CONTRACT]
 
 
 def test_aneg_restores_0x37_when_the_reply_to_the_temporary_write_is_lost(bench):
@@ -256,6 +414,7 @@ def test_aneg_reports_a_restore_that_failed(bench):
     assert f'bench_write(0x37, "{ORIGINAL_0X37}")' in result["restore_error"]
     assert bench.requests.count(restore) == 2           # one retry
     assert bench.requests[-1] == restore                # no second ANeg on a register in doubt
+    assert "restored_contract" not in result
 
 
 def test_aneg_retries_the_restore_once(bench):
@@ -282,6 +441,8 @@ def test_aneg_reports_a_failed_second_aneg(bench):
     assert result["restored_0x37"] is True
     assert "second ANeg failed" in result["second_aneg_error"]
     assert result["steps"][-1]["step"] == "CMD ANeg" and "error" in result["steps"][-1]
+    # The contract is still read back afterwards.
+    assert result["restored_contract"] is True
 
 
 def test_aneg_is_refused_at_the_lowest_fixed_voltage(bench):
@@ -302,7 +463,13 @@ def test_aneg_with_a_given_maximum(bench):
     result = bench.tools.bench_renegotiate("aneg", max_voltage_mv=9000)
     assert result["temporary_max_voltage_mv"] == 9000
     assert f"WR 0x37 {expected_temporary(9000)}" in bench.requests
-    assert "RD 0x30" not in bench.requests              # the source's PDOs are not needed
+    # The 9 V PDO is the most powerful one at or under 9 V.
+    assert result["expected_temporary_pdo"] == "0x0002D12C"
+    assert result["temporary_contract"]["mv"] == 9000 and result["stepped_down"] is True
+
+    # A maximum between two PDOs selects the one below it.
+    between = bench.tools.bench_renegotiate("aneg", max_voltage_mv=12000)
+    assert between["expected_temporary_pdo"] == "0x0002D12C" and between["stepped_down"] is True
 
     for bad in (20000, 4950, 9010, 25000):
         refused = bench.tools.bench_renegotiate("aneg", max_voltage_mv=bad)

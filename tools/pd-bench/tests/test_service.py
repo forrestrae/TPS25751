@@ -1,7 +1,11 @@
 """Discovery, the single-owner rule, and the HELLO handshake, through the tools."""
 
-from fakes import CONSOLE_PORT, LOG_PORT, SILENT, FakeConsole
+import os
+
+from fakes import CONSOLE_PORT, LOG_PORT, SILENT, FakeConsole, FakeProcesses
 from conftest import Bench
+from tps25751_pd_bench.link import FIRST_LINE_TIMEOUT_S
+from tps25751_pd_bench.server import BenchService, build_tools
 
 
 def hello_count(bench) -> int:
@@ -105,7 +109,7 @@ def test_silent_console_port_falls_back_to_the_other_interface():
     assert result["port"] == LOG_PORT
     assert bench.factory.opened == [CONSOLE_PORT, LOG_PORT]
     # The probe of the silent port waited for the first line only, not the full HELLO time.
-    assert bench.clock.now - 1000 < 3
+    assert FIRST_LINE_TIMEOUT_S <= bench.clock.now - 1000 < FIRST_LINE_TIMEOUT_S + 1
 
     # The confirmed port is remembered.
     bench.tools.bench_read("0x34")
@@ -116,8 +120,71 @@ def test_no_console_answers(bench):
     bench.factory.consoles = {LOG_PORT: None, CONSOLE_PORT: None}
     result = bench.tools.bench_hello()
     assert result["kind"] == "BenchPortError"
-    assert f"{CONSOLE_PORT} did not answer HELLO" in result["error"]
-    assert f"{LOG_PORT} did not answer HELLO" in result["error"]
+    assert f"{CONSOLE_PORT} did not answer HELLO within 10 s" in result["error"]
+    assert f"{LOG_PORT} did not answer HELLO within 10 s" in result["error"]
+    # Silence is not proof of absence: the message names the other explanations.
+    assert "busy or still starting" in result["error"]
+
+
+def test_first_call_right_after_a_reset_waits_for_the_console(bench):
+    # After a reset the console's begin() can load the patch for several seconds
+    # before it reads the port. The first HELLO must outlast that.
+    bench.factory.delay_s = 5.0
+    result = bench.tools.bench_hello()
+    assert result.get("mode") == "APP", result
+    assert bench.factory.opened == [CONSOLE_PORT]       # no fallback to the log port
+    assert 5.0 <= bench.clock.now - 1000 < 6.0
+
+
+def test_a_console_silent_past_the_limit_is_reported_as_busy_or_starting(bench):
+    bench.factory.delay_s = FIRST_LINE_TIMEOUT_S + 2
+    result = bench.tools.bench_hello()
+    assert result["kind"] == "BenchPortError"
+    assert f"{CONSOLE_PORT} did not answer HELLO within 10 s" in result["error"]
+    assert "busy or still starting" in result["error"]
+    assert bench.factory.open_now == set()
+
+    # Once it answers in time, the next call works.
+    bench.factory.delay_s = 0.0
+    assert bench.tools.bench_hello()["mode"] == "APP"
+
+
+def test_owner_check_that_could_not_run_is_reported(bench):
+    # Without lsof the server cannot see a serial monitor on the port. The call
+    # still runs under the exclusive lock, and the result says what was not checked.
+    bench.processes.lsof_missing = True
+    result = bench.tools.bench_read("0x34")
+    assert result["data"] == "d64106009800"
+    assert result["owner_check"].startswith("unavailable: lsof is not installed")
+    assert "exclusive lock" in result["owner_check"]
+
+    bench.processes.lsof_missing, bench.processes.lsof_hangs = False, True
+    assert bench.tools.bench_hello()["owner_check"].startswith(
+        "unavailable: lsof did not finish within 5 s")
+    renegotiated = bench.tools.bench_renegotiate("gsrc")
+    assert renegotiated["owner_check"].startswith("unavailable:") and "error" not in renegotiated
+
+    # An error result carries it too.
+    failed = bench.tools.bench_read("0xEE")
+    assert failed["code"] == "I2C" and failed["owner_check"].startswith("unavailable:")
+
+    # When lsof works again, the note is gone.
+    bench.processes.lsof_hangs = False
+    assert "owner_check" not in bench.tools.bench_read("0x34")
+    assert "owner_check" not in bench.tools.bench_read("0x100")   # refused before any port work
+
+
+def test_a_service_with_real_defaults_cannot_reach_a_port():
+    # The safety net in conftest.py: the environment names a port that does not
+    # exist, so discovery never runs, and a real pyserial open is refused.
+    port = os.environ["TPS25751_BENCH_PORT"]
+    assert port.endswith("no-such-port") and not os.path.exists(port)
+
+    service = BenchService(run=FakeProcesses())
+    assert service.port_override == port
+    result = build_tools(service).bench_hello()
+    assert result["kind"] == "BenchPortError"
+    assert "no-such-port" in result["error"]
 
 
 def test_silent_console_and_busy_other_port(bench):

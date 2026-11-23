@@ -22,7 +22,8 @@ bench.poll();
 
 Flash the example from the library root. Use `example-pd-bench-patch` for a board
 without a configuration EEPROM; it compiles in the patch bundle of
-`examples/load-patch-bundle`, which the console reloads whenever MODE reads PTCH.
+`examples/load-patch-bundle`, which the console loads when MODE reads PTCH at start
+(`begin()`) and after a restart. `HELLO` never loads it.
 
 ```bash
 pio run -e example-pd-bench -t upload
@@ -62,12 +63,15 @@ The server speaks MCP over stdio. It needs Python 3.11 or later, `mcp` 2.x, and
 
 | Tool | Changes the board | What it does |
 |---|---|---|
-| `bench_hello` | No | Port, protocol and library version, build date, uptime, MODE, VERSION (0x0F), power role, plug presence, patch bundle, and configuration source. |
+| `bench_hello` | No | Port, protocol and library version, build date, uptime, MODE, VERSION (0x0F), power role, plug presence, patch bundle, and configuration source. Read-only: for a controller in PTCH mode it reports `mode: PTCH` and `patch_pending: true` and loads nothing. |
 | `bench_snapshot(path?)` | Clears INT_EVENT1 | Reads 0x03, 0x14, 0x1A, 0x26, 0x30 to 0x35, 0x37, 0x3F, 0x40, 0x42, 0x48, 0x69, and 0x6A in the `tps25751-registers` version 1 format, then clears the INT_EVENT1 bits it reported. With `path`, writes that document as `registers.json`. |
 | `bench_read(addr, decode=False)` | No | One register: the length byte as read and the data as hex. With `decode=True`, also the lines of the library's `debugPrint()`. |
 | `bench_task(code, data_hex?)` | Yes | Runs one 4CC task and returns its return code and the 64 DATA bytes. |
 | `bench_write(addr, hex)` | Yes | Writes the whole of 0x27, 0x28, 0x37, or 0x42 and returns the readback. |
 | `bench_renegotiate(method, max_voltage_mv?)` | Yes | Starts a negotiation and returns each step with UTC times. |
+
+A result carries `owner_check: unavailable: ...` when `lsof` is missing or did not
+finish, which means the server could not see whether another program has the port open.
 
 `bench_task`, `bench_write`, and `bench_renegotiate` can change the PD contract or drop
 VBUS. Agent configurations should ask for approval before each call to them.
@@ -86,16 +90,37 @@ VBUS. Agent configurations should ask for approval before each call to them.
 The call sends `HELLO` first and refuses a method that does not fit: `gsrc` and `aneg`
 need the sink role and a plug, `ssrc` the source role and a plug, and every method but
 the two restarts needs MODE to read APP. `restart_cold` is refused when the controller's
-configuration did not come from an EEPROM and the firmware has no patch bundle.
+configuration did not come from an EEPROM and the firmware has no patch bundle. A
+controller that `bench_hello` reports in PTCH mode with `patch_pending` is brought to APP
+by `restart`, which loads the bundle after the restart.
 
 `aneg` picks its temporary maximum from the registers: the highest Fixed PDO in 0x30
 below the voltage of the active PDO in 0x34. With the Apple 140 W charger at 20 V that
 is 15 V. `max_voltage_mv` overrides the choice. The method clears Auto Compute Sink Max
 Voltage (bit 5) and sets Auto Neg Max Voltage (bits 41:32, 50 mV per LSB), and leaves
-every other bit of 0x37 as read. Once the temporary write is sent, the restore runs on
-every path, including a failed or timed-out `ANeg`, and the result says whether 0x37
-reads back as the original. If the restore fails, the result carries the original bytes
-and the `bench_write` call that puts them back.
+every other bit of 0x37 as read, with one exception below. Once the temporary write is
+sent, the restore runs on every path, including a failed or timed-out `ANeg`, and the
+result says whether 0x37 reads back as the original. If the restore fails, the result
+carries the original bytes and the `bench_write` call that puts them back.
+
+Before the first write, `aneg` checks from the registers that the change is safe and
+can have an effect:
+
+- Sink path. With Auto Disable Sink Upon Capability Mismatch set (bit 6, reset value 1)
+  and No Capability Mismatch clear (bit 3), a contract on a PDO that offers less than the
+  capability mismatch power (bits 61:52, 250 mW per LSB) makes the controller open the
+  sink path. When the temporary PDO is under that power, the temporary value also clears
+  bit 6, and the result has `cleared_bit6: true` with the reason. The restore brings the
+  bit back.
+- Host minimum. When the host provides the minimum voltage (bit 4 is 0) and that minimum
+  (bits 51:42) is above the temporary maximum, no PDO fits and `ANeg` would do nothing,
+  so the call is refused with that reason.
+
+After each `ANeg` the method waits 1.5 s and reads 0x34 and 0x35. `stepped_down` says
+whether the contract moved to a PDO at or under the temporary maximum, and
+`restored_contract` whether the original PDO is active again at the end. Neither makes
+the call fail: `stepped_down: false` means the method ran and the controller kept its
+contract, so the capture holds no Request from it.
 
 ## How the server finds and shares the port
 
@@ -118,11 +143,21 @@ Each tool call owns the port for its own length:
    port another process holds.
 2. It opens the port with `exclusive=True`. That is an advisory lock a serial monitor
    does not take, which is why the `lsof` check comes first.
-3. It sends `HELLO` on the first call, and again after any failure, and refuses a
-   console that reports another protocol version.
+3. It sends `HELLO` on the first call, and again after a timeout, a port error, or a
+   protocol error, and refuses a console that reports another protocol version.
+   `bench_hello` and `bench_renegotiate` send it on every call. An `ERR` reply to a
+   command, or a busy port, does not cause a new `HELLO`.
 4. It runs the command and closes the port.
 
 Nothing holds the port between calls, so `pio run -t upload` works at any time.
+
+When `lsof` is missing or does not finish, step 1 cannot run. The call then proceeds
+under the exclusive lock alone and says so in its result as `owner_check`.
+
+The first `HELLO` waits up to 10 s for an answer. Right after a reset the console does
+not read the port while `begin()` runs, and on a board without an EEPROM that includes
+the patch load, about 9.5 s at the worst. A console that stays silent longer is reported
+as busy or still starting; call again.
 
 ## Protocol version 1
 
@@ -140,7 +175,7 @@ returns such lines under `log` and events under `events`. Reply text is space-se
 
 | Request | Reply lines before `OK` |
 |---|---|
-| `@1 HELLO` | `proto=1 lib=3.1.0 build=Nov_23_2026_10:11:12 uptime_ms=5000`, `mode=APP version=f8091166 role=sink plug=1`, `patch_bundle=0 patch_source=eeprom swaps=0` |
+| `@1 HELLO` | `proto=1 lib=3.1.0 build=Nov_23_2026_10:11:12 uptime_ms=5000`, `mode=APP version=f8091166 role=sink plug=1`, `patch_bundle=0 patch_pending=0 patch_source=eeprom swaps=0` |
 | `@2 RD 0x34` | `reg=0x34 len=6 data=d64106009800` |
 | `@3 DEC 0x1A` | The `RD` line, then `\| === Status Register (0x1A) ===` and the rest of the decode |
 | `@4 SNAP` | `uptime_ms=5000`, one `RD` line per register, `int_clear=ok` |

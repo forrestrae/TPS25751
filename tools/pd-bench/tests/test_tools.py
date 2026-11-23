@@ -26,6 +26,7 @@ def test_hello(bench):
         "role": "sink",
         "plug": True,
         "patch_bundle": False,
+        "patch_pending": False,
         "patch_source": "eeprom",
         "swaps": False,
     }
@@ -38,16 +39,30 @@ def test_hello_is_fresh_on_every_call(bench):
     assert bench.requests == ["HELLO", "HELLO"]
 
 
-def test_hello_reports_a_patch_reload_and_a_silent_controller(bench):
+def test_hello_reports_a_pending_patch_without_loading_it(bench):
+    # HELLO is read-only: a controller in PTCH mode is reported, not patched.
+    bench.console.mode = "PTCH"
+    bench.console.patch_bundle = True
+    result = bench.tools.bench_hello()
+    assert (result["mode"], result["patch_bundle"], result["patch_pending"]) == ("PTCH", True, True)
+    assert "bench_renegotiate('restart')" in result["warning"]
+    assert "patch_reload" not in result
+    assert bench.requests == ["HELLO"]
+
+    # Without a bundle nothing is pending.
+    bench.console.patch_bundle = False
+    result = bench.tools.bench_hello()
+    assert result["patch_pending"] is False and "warning" not in result
+
+
+def test_hello_reports_a_silent_controller(bench):
     bench.console.script["HELLO"] = [[
         "proto=1 lib=unknown build=Nov__3_2026_09:00:00 uptime_ms=900",
-        "patch_reload=Success",
         "mode=? version=? role=? plug=?",
-        "patch_bundle=1 patch_source=? swaps=1",
+        "patch_bundle=1 patch_pending=0 patch_source=? swaps=1",
         "OK",
     ]]
     result = bench.tools.bench_hello()
-    assert result["patch_reload"] == "Success"
     assert result["build"] == "Nov  3 2026 09:00:00"
     assert (result["mode"], result["role"], result["plug"]) == ("?", "?", None)
     assert (result["patch_bundle"], result["swaps"]) == (True, True)

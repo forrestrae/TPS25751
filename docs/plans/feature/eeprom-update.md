@@ -95,7 +95,9 @@ All four flash tasks make the controller ignore the I2Cc_IRQ pin until they comp
    byte 0. The app note's sample reads `outdata[1]` because its buffer keeps the length
    byte. In library terms: `FLad`, `FLwd`, and `FLvy` report their result in
    `TPS25751TaskResult::returnCode`, and `FLrd` data is `outData[0..15]`, with
-   `returnCode` meaningless. Documented by the TRM; confirmed in hardware stage 1.
+   `returnCode` meaningless. Documented by the TRM. Verified in hardware stage 1 on
+   2026-11-22 for `FLrd` (data from byte 0) and for `FLvy` reporting 0x00 on a valid
+   bundle. The `FLad` and `FLwd` codes and `FLvy` reporting 0x01 are not yet observed.
 3. `FLvy` is not a full verification. The TRM says it completes after the header is
    checked. Whether it also checks the bundle CRC is unknown, so the updater compares
    the written region with the image through `FLrd` before it writes the pointer.
@@ -108,7 +110,10 @@ All four flash tasks make the controller ignore the I2Cc_IRQ pin until they comp
    measured. `FLwd` returning 0xFF (busy) is retried up to three times after 10 ms, each
    retry preceded by a fresh `FLad` to the chunk's address. Estimate: 448 `FLwd` calls
    at 8 to 20 ms each is 4 to 9 s per region, and the 896 `FLrd` calls of the compare
-   add 7 to 18 s. Stage 3 replaces the estimate with a measurement.
+   add 7 to 18 s. Stage 3 replaces the estimate with a measurement. Stage 1 measured
+   `FLrd` at 17.7 ms per call (1984 calls in 35071 ms, default I2C clock), so the
+   compare of a 14336-byte region takes about 15.8 s, and the 200 ms timeout has ample
+   margin. `FLwd` and `FLvy` times are still estimates.
 6. `GAID` never completes in the normal sense. The updater treats `Success`, `Timeout`,
    and `I2CError` from the executor as "reset issued", then polls MODE until it reads
    APP. The TRM says an APP-mode controller enters Type-C Error Recovery and restarts
@@ -145,6 +150,10 @@ precise than the TRM. None changes Batch 1 code. The first needs a decision befo
    byte 0, are inferred from Table 4-20, from "Memory contents (little-endian)" in
    Table 4-19, and from the app note's source on page 12. Stage 1 settles both: the
    pointers must read 0x00000800 and 0x00004400, and the dump must equal the image.
+   Verified in stage 1 on 2026-11-22 for `FLrd`: both pointers read correctly and all
+   1984 reads returned the image's bytes in order. For `FLvy` the evidence is indirect:
+   it reported both bundles valid at little-endian 0x0800 and 0x4400, and a byte-swapped
+   address would lie far outside the 32 KB part.
 
 Other points recorded during Batch 1:
 
@@ -441,7 +450,8 @@ write the EEPROM (2 to 5) start only on my explicit go-ahead for that stage.
 - Confirm the 24LC256 page size and write time from the Microchip datasheet.
 - Gate: hardware stage 1.
 
-Status, 2026-11-22: implemented and reviewed; stage 1 not yet run. The native suite has
+Status, 2026-11-22: implemented, reviewed, and passed hardware stage 1 (results under
+Hardware validation). The native suite has
 49 tests and `src/TPS25751EepromUpdater.cpp` has 100% line coverage (162 of 162 lines).
 Two `platformio.ini` entries that Batch 3 lists landed here, because the Batch 1 tests
 and the stage 1 build need them: `+<TPS25751EepromUpdater.cpp>` in `[env:native]` and
@@ -512,6 +522,32 @@ Ordered from safe to destructive. Each stage states its recovery.
 1. Read-only. Read MODE, VERSION, and BOOT_STATUS; `FLrd` both pointers; dump 0x0000 to
    0x7C00 through `FLrd` and compare byte for byte with `..._fullFlash.bin`; run `FLvy`
    on both bundle starts. Confirms result offsets and the layout. No recovery needed.
+
+   Result, 2026-11-22, branch commit `143a663`, `examples/eeprom-update` on the Teensy
+   4.0, board on the 18650 pack: passed.
+
+   | Item | Reading |
+   |---|---|
+   | MODE | `APP ` |
+   | VERSION (0x0F) | 0xF8091166 |
+   | BOOT_FLAGS (0x2D) raw | `18 00 F0 A2 C1` |
+   | Patch Config Source | EEPROM Loaded |
+   | I2C EEPROM Present | 1 |
+   | Region 0 Attempted, Region 1 Attempted | 1, 0 |
+   | Region Invalid, EEPROM Error, CRC Fail (both regions), Patch Header Error | all 0 |
+   | Low pointer at 0x0000 | 0x00000800, valid |
+   | High pointer at 0x0400 | 0x00004400, valid |
+   | `selectTargetRegion()` | High |
+   | `FLvy` at 0x0800 and at 0x4400 | return code 0x00 (valid) for both |
+   | Dump 0x0000 to 0x7C00 | 1984 lines, 31744 bytes, identical to `..._F8091166_fullFlash.bin` (`cmp`, and SHA-256 `a3e549ca...3096fdaec3` for both) |
+   | Dump time | 35071 ms for 1984 `FLrd` calls, 17.7 ms per call |
+
+   Verified by this stage: the EEPROM layout on the board, `FLrd` data in DATA bytes 0
+   to 15, the little-endian `FLrd` address, `FLvy` reporting 0x00 in the return code for
+   a valid bundle, and the 200 ms `FLrd` timeout. Not shown by this stage: any `FLvy`
+   failure code, `FLrd` behaviour when the EEPROM does not answer (Table 4-19 has no
+   return code), and whether a BQ25798 interrupt was deferred while the flash tasks made
+   the controller ignore I2Cc_IRQ.
 2. First write: `writeRegionPointer(High, 0)` while the low pointer is valid, then
    restore it to 0x4400. Confirms that `FLwd` writes exactly four bytes (neighbor check)
    and the read-back. This is step 1 of the app note's own flow, so the controller

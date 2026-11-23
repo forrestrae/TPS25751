@@ -21,9 +21,9 @@ uint32_t TPS25751ReceivedSourceCaps::getPDO(uint8_t index) const {
     return pdo;
 }
 
-PDOType TPS25751ReceivedSourceCaps::getPDOType(uint8_t index) const {
-    uint32_t pdo = getPDO(index);
-    return static_cast<PDOType>((pdo >> 30) & 0x03);  // Bits 31:30
+TPS25751Pdo TPS25751ReceivedSourceCaps::pdo(uint8_t index) const {
+    if (index >= 7) return TPS25751Pdo(0, TPS25751Pdo::kUnknownPosition, PdoRole::Source);
+    return TPS25751Pdo(getPDO(index), index + 1, PdoRole::Source);
 }
 
 bool TPS25751ReceivedSourceCaps::hasSourceCaps() const {
@@ -36,101 +36,6 @@ bool TPS25751ReceivedSourceCaps::hasSourceCaps() const {
     // regardless of the count. This keeps the disconnected state from being
     // misread as six empty PDOs (which would fail semantic validation).
     return pdoCount() > 0 && getPDO(0) != 0;
-}
-
-// Helper method to extract bits from a specific PDO
-uint32_t TPS25751ReceivedSourceCaps::extractPDOBits(uint8_t index, uint8_t bitOffset, uint8_t bitCount) const {
-    uint32_t pdo = getPDO(index);
-    uint32_t mask = (1UL << bitCount) - 1;
-    return (pdo >> bitOffset) & mask;
-}
-
-// Fixed Supply PDO parsing (type 00)
-uint16_t TPS25751ReceivedSourceCaps::getFixedVoltage_mV(uint8_t index) const {
-    return extractPDOBits(index, 10, 10) * 50;  // Bits 19:10, 50mV units
-}
-
-uint16_t TPS25751ReceivedSourceCaps::getFixedMaxCurrent_mA(uint8_t index) const {
-    return extractPDOBits(index, 0, 10) * 10;  // Bits 9:0, 10mA units
-}
-
-bool TPS25751ReceivedSourceCaps::getFixedDualRolePower(uint8_t index) const {
-    return extractPDOBits(index, 29, 1);  // Bit 29
-}
-
-bool TPS25751ReceivedSourceCaps::getFixedUSBSuspendSupported(uint8_t index) const {
-    return extractPDOBits(index, 28, 1);  // Bit 28
-}
-
-bool TPS25751ReceivedSourceCaps::getFixedUnconstrainedPower(uint8_t index) const {
-    return extractPDOBits(index, 27, 1);  // Bit 27
-}
-
-bool TPS25751ReceivedSourceCaps::getFixedUSBCommCapable(uint8_t index) const {
-    return extractPDOBits(index, 26, 1);  // Bit 26
-}
-
-bool TPS25751ReceivedSourceCaps::getFixedDualRoleData(uint8_t index) const {
-    return extractPDOBits(index, 25, 1);  // Bit 25
-}
-
-bool TPS25751ReceivedSourceCaps::getFixedUnchunkedSupported(uint8_t index) const {
-    return extractPDOBits(index, 24, 1);  // Bit 24
-}
-
-// Battery PDO parsing (type 01)
-uint16_t TPS25751ReceivedSourceCaps::getBatteryMaxVoltage_mV(uint8_t index) const {
-    return extractPDOBits(index, 20, 10) * 50;  // Bits 29:20, 50mV units
-}
-
-uint16_t TPS25751ReceivedSourceCaps::getBatteryMinVoltage_mV(uint8_t index) const {
-    return extractPDOBits(index, 10, 10) * 50;  // Bits 19:10, 50mV units
-}
-
-uint32_t TPS25751ReceivedSourceCaps::getBatteryMaxPower_mW(uint8_t index) const {
-    return extractPDOBits(index, 0, 10) * 250;  // Bits 9:0, 250mW units
-}
-
-// Variable Supply PDO parsing (type 10)
-uint16_t TPS25751ReceivedSourceCaps::getVariableMaxVoltage_mV(uint8_t index) const {
-    return extractPDOBits(index, 20, 10) * 50;  // Bits 29:20, 50mV units
-}
-
-uint16_t TPS25751ReceivedSourceCaps::getVariableMinVoltage_mV(uint8_t index) const {
-    return extractPDOBits(index, 10, 10) * 50;  // Bits 19:10, 50mV units
-}
-
-uint16_t TPS25751ReceivedSourceCaps::getVariableMaxCurrent_mA(uint8_t index) const {
-    return extractPDOBits(index, 0, 10) * 10;  // Bits 9:0, 10mA units
-}
-
-// Augmented/PPS PDO parsing (type 11)
-uint8_t TPS25751ReceivedSourceCaps::getAPDOSubtype(uint8_t index) const {
-    return apdoSubtype(getPDO(index));
-}
-
-bool TPS25751ReceivedSourceCaps::isSprPpsPDO(uint8_t index) const {
-    return isSprPpsApdo(getPDO(index));
-}
-
-bool TPS25751ReceivedSourceCaps::getPPSPowerLimited(uint8_t index) const {
-    if (!isSprPpsPDO(index)) return false;
-    return extractPDOBits(index, 27, 1);  // Bit 27
-}
-
-uint16_t TPS25751ReceivedSourceCaps::getPPSMaxVoltage_mV(uint8_t index) const {
-    if (!isSprPpsPDO(index)) return 0;
-    return extractPDOBits(index, 17, 8) * 100;  // Bits 24:17, 100mV units
-}
-
-uint16_t TPS25751ReceivedSourceCaps::getPPSMinVoltage_mV(uint8_t index) const {
-    if (!isSprPpsPDO(index)) return 0;
-    return extractPDOBits(index, 8, 8) * 100;  // Bits 15:8, 100mV units
-}
-
-uint16_t TPS25751ReceivedSourceCaps::getPPSMaxCurrent_mA(uint8_t index) const {
-    if (!isSprPpsPDO(index)) return 0;
-    return extractPDOBits(index, 0, 7) * 50;  // Bits 6:0, 50mA units
 }
 
 void TPS25751ReceivedSourceCaps::debugPrint(Stream &s) const {
@@ -149,48 +54,7 @@ void TPS25751ReceivedSourceCaps::debugPrint(Stream &s) const {
         s.println();
         s.print(F("--- PDO ")); s.print(i + 1); s.println(F(" ---"));
 
-        PDOType type = getPDOType(i);
-        s.print(F("Type: "));
-        switch (type) {
-            case PDOType::FixedSupply:
-                s.println(F("Fixed Supply"));
-                s.print(F("  Voltage: ")); s.print(getFixedVoltage_mV(i)); s.println(F(" mV"));
-                s.print(F("  Max Current: ")); s.print(getFixedMaxCurrent_mA(i)); s.println(F(" mA"));
-                s.print(F("  Dual Role Power: ")); s.println(yesNo(getFixedDualRolePower(i)));
-                s.print(F("  USB Suspend Supported: ")); s.println(yesNo(getFixedUSBSuspendSupported(i)));
-                s.print(F("  Unconstrained Power: ")); s.println(yesNo(getFixedUnconstrainedPower(i)));
-                s.print(F("  USB Comm Capable: ")); s.println(yesNo(getFixedUSBCommCapable(i)));
-                s.print(F("  Dual Role Data: ")); s.println(yesNo(getFixedDualRoleData(i)));
-                s.print(F("  Unchunked Supported: ")); s.println(yesNo(getFixedUnchunkedSupported(i)));
-                break;
-
-            case PDOType::Battery:
-                s.println(F("Battery"));
-                s.print(F("  Max Voltage: ")); s.print(getBatteryMaxVoltage_mV(i)); s.println(F(" mV"));
-                s.print(F("  Min Voltage: ")); s.print(getBatteryMinVoltage_mV(i)); s.println(F(" mV"));
-                s.print(F("  Max Power: ")); s.print(getBatteryMaxPower_mW(i)); s.println(F(" mW"));
-                break;
-
-            case PDOType::VariableSupply:
-                s.println(F("Variable Supply"));
-                s.print(F("  Max Voltage: ")); s.print(getVariableMaxVoltage_mV(i)); s.println(F(" mV"));
-                s.print(F("  Min Voltage: ")); s.print(getVariableMinVoltage_mV(i)); s.println(F(" mV"));
-                s.print(F("  Max Current: ")); s.print(getVariableMaxCurrent_mA(i)); s.println(F(" mA"));
-                break;
-
-            case PDOType::Augmented:
-                if (!isSprPpsPDO(i)) {
-                    s.print(F("Augmented, APDO subtype ")); s.print(getAPDOSubtype(i));
-                    s.println(F(" (not SPR PPS; not decoded)"));
-                    break;
-                }
-                s.println(F("Augmented (PPS)"));
-                s.print(F("  Power Limited: ")); s.println(yesNo(getPPSPowerLimited(i)));
-                s.print(F("  Max Voltage: ")); s.print(getPPSMaxVoltage_mV(i)); s.println(F(" mV"));
-                s.print(F("  Min Voltage: ")); s.print(getPPSMinVoltage_mV(i)); s.println(F(" mV"));
-                s.print(F("  Max Current: ")); s.print(getPPSMaxCurrent_mA(i)); s.println(F(" mA"));
-                break;
-        }
+        pdo(i).debugPrint(s, "");
     }
 
     s.println();
@@ -211,69 +75,8 @@ bool TPS25751ReceivedSourceCaps::isSemanticallyValid() const {
     // If no source caps, that's valid
     if (!hasSourceCaps()) return true;
 
-    // Validate each PDO based on its type
-    for (uint8_t i = 0; i < count; i++) {
-        PDOType type = getPDOType(i);
-
-        switch (type) {
-            case PDOType::FixedSupply: {
-                // Fixed voltage should be non-zero
-                uint16_t voltage = getFixedVoltage_mV(i);
-                if (voltage == 0) return false;
-
-                // Max current should be non-zero
-                uint16_t current = getFixedMaxCurrent_mA(i);
-                if (current == 0) return false;
-
-                // USB PD requires PDO 1 to be the vSafe5V Fixed Supply object.
-                // Enforce that as a sanity check, but with a tolerance band
-                // rather than exact equality: sources may advertise a nominal
-                // 5 V that lands a step or two off 5000 mV, and rejecting the
-                // entire (otherwise decodable) register over that is too strict.
-                if (i == 0 && (voltage < 4750 || voltage > 5250)) return false;
-                break;
-            }
-
-            case PDOType::Battery: {
-                // Min voltage should be less than or equal to max voltage
-                uint16_t minV = getBatteryMinVoltage_mV(i);
-                uint16_t maxV = getBatteryMaxVoltage_mV(i);
-                if (minV > maxV || minV == 0 || maxV == 0) return false;
-
-                // Max power should be non-zero
-                uint32_t power = getBatteryMaxPower_mW(i);
-                if (power == 0) return false;
-                break;
-            }
-
-            case PDOType::VariableSupply: {
-                // Min voltage should be less than or equal to max voltage
-                uint16_t minV = getVariableMinVoltage_mV(i);
-                uint16_t maxV = getVariableMaxVoltage_mV(i);
-                if (minV > maxV || minV == 0 || maxV == 0) return false;
-
-                // Max current should be non-zero
-                uint16_t current = getVariableMaxCurrent_mA(i);
-                if (current == 0) return false;
-                break;
-            }
-
-            case PDOType::Augmented: {
-                // Only the SPR PPS APDO is decoded; another subtype is a valid PDO
-                // whose fields this library cannot check yet.
-                if (!isSprPpsPDO(i)) break;
-                // Min voltage should be less than or equal to max voltage
-                uint16_t minV = getPPSMinVoltage_mV(i);
-                uint16_t maxV = getPPSMaxVoltage_mV(i);
-                if (minV > maxV || minV == 0 || maxV == 0) return false;
-
-                // Max current should be non-zero
-                uint16_t current = getPPSMaxCurrent_mA(i);
-                if (current == 0) return false;
-                break;
-            }
-        }
-    }
-
-    return true;
+    // Validate the list against USB PD R3.3 (receiver rules, PDO 1 at 5 V)
+    TPS25751Pdo list[7];
+    for (uint8_t i = 0; i < count; i++) list[i] = pdo(i);
+    return validatePdoList(list, count, PdoListRules::ReceivedSource);
 }

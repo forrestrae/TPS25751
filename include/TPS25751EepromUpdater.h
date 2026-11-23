@@ -624,7 +624,7 @@ public:
      * | SetAddressFailed | Step 2, the FLad to the bundle start, the FLad after the read-back, or the FLad of a busy retry | Target pointer 0, region untouched or partly written. Other region boots (Figure 2-7) |
      * | WriteFailed, FlashBusy | Step 2, an FLwd chunk | Target region partly written, pointer 0. Other region boots |
      * | VerifyFailed | Step 3, FLvy | Target written but not valid, pointer 0. Other region boots (Figure 2-8) |
-     * | CompareMismatch | Step 2, the read-back of the first two chunks (lastStep() is WriteBundle) | Target pointer 0. The first chunks are not at the bundle start; where they went is unknown. Other region boots unless they landed on it (see below) |
+     * | CompareMismatch | Step 2, the read-back of the first two chunks (lastStep() is WriteBundle) | The first chunks are not at the bundle start; where they went is unknown. The target pointer read 0 after step 1 but is not judged on this path, and chunks that landed next to it can have overwritten it (see below). Other region boots unless the chunks landed on it |
      * | CompareMismatch | Step 3, the compare (lastStep() is CompareBundle) | Same as VerifyFailed |
      * | PointerRestoreFailed | Step 3, when its pointer write fails as for step 1 | Target holds the image, its pointer uncertain. Other region boots |
      * | OldPointerEraseFailed | Step 4, when its pointer write fails as for step 1 | Target holds the image and its pointer is valid. Other pointer uncertain, so both may be valid; the low region boots first (Figure 2-9) |
@@ -643,15 +643,30 @@ public:
      *
      * What the read-back in step 2 is for. The chunks go wherever the
      * controller's write address points, and SLVAFL1 Figure 2-3 sends all of
-     * them on the strength of one FLad. After step 1 that address sits just
-     * past the target's pointer word, so an FLad that returned 0 without
-     * taking effect would put the bundle there, across the other region's
-     * pointer or bundle. The read-back stops this after two chunks. Either
-     * the bytes are missing at the bundle start (CompareMismatch), or, when
-     * the region already held the same image, the 12 bytes after the pointer
-     * word have changed (PointerNeighborsChanged). At most 64 bytes are then
-     * misplaced, in the unused bytes after the target's pointer word, and the
-     * other region and its pointer are untouched.
+     * them on the strength of one FLad. An FLad that returned 0 without
+     * taking effect would leave the address where it was, and the bundle
+     * would go there. Where that is, no document says. The case the tests
+     * model is that it sits just past the target's pointer word. That holds
+     * only if the address advanced by the four bytes step 1 wrote and step
+     * 1's own read-back left it alone. In that case the bundle would run on
+     * from the pointer row across the other region's pointer or bundle, and
+     * the read-back stops it after two chunks: either the bytes are missing
+     * at the bundle start (CompareMismatch), or, when the region already held
+     * the same image, the pointer word or the 12 bytes after it have changed
+     * (PointerNeighborsChanged). In that modelled case the misplaced bytes
+     * are the 64 after the target's pointer word, in otherwise unused EEPROM,
+     * and the other region and its pointer are untouched. One qualification
+     * even there: the second chunk then starts 36 bytes into a 64-byte page
+     * of the 24LC256 and crosses the page end. Unless the controller splits
+     * the write, the bytes past the page end wrap onto the start of the page,
+     * which is the pointer word. The check tests the word, so the update
+     * still stops, but the target pointer may then no longer read 0.
+     *
+     * The reads are ordered for what follows them: the pointer row first, the
+     * bundle start last. The last FLrd before the second FLad is then inside
+     * the target region. If an FLrd moves the write address, which is not
+     * documented either way, and the second FLad does not take effect, the
+     * remaining chunks start near that last read and not at the pointer row.
      *
      * A stop of that kind leaves the first bytes of the image after the
      * target's pointer word. A second attempt would read them in step 1 and
@@ -663,8 +678,10 @@ public:
      * callback has had its done == 0 call by then and gets no other. The
      * EEPROM has to be dumped and repaired before another update.
      *
-     * What it does not prove. It checks the first two chunks only: a write
-     * address that goes wrong after the read-back is not seen before FLvy or
+     * What it does not prove. It checks the first two chunks only. The FLad
+     * that follows the read-back is not verified: nothing reads back a chunk
+     * sent after it until step 3. A write address that is wrong after the
+     * read-back, or goes wrong later, is therefore not seen before FLvy or
      * the compare of step 3, when the bytes have landed, and not at all when
      * the target already held the same image. When the target already held
      * the same image, two chunks misplaced anywhere other than just past its

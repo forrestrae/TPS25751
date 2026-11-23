@@ -42,10 +42,17 @@
  * safe: a region is written while its pointer is 0, and the pointer is
  * restored only after the written bundle has been checked.
  *
- * What hardware has shown so far (stage 1 of the plan, 2026-11-22, read-only):
- * FLrd returns its 16 bytes in DATA bytes 0 to 15, FLrd takes its address
- * least significant byte first, and FLvy reports 0x00 for a valid bundle. No
- * FLad or FLwd result, and no FLvy failure code, has been observed yet.
+ * What hardware has shown (stages 1 to 4 of the plan, 2026-11-22 and 23, one
+ * board with a 24LC256): FLrd returns its 16 bytes in DATA bytes 0 to 15 and
+ * takes its address least significant byte first; FLad and FLwd report 0x00
+ * on success; a 4-byte FLwd writes exactly four bytes; the write address
+ * advances across 446 chunks; FLvy reports 0x00 for a valid bundle and "not
+ * valid" for one with a corrupted body byte; updateRegion(),
+ * updateBothRegions(), and coldReset() work on the device, and after a cut
+ * at each step of an update the controller boots the region the state table
+ * predicts. Not observed: a busy FLwd, any FLad or FLwd failure code, and
+ * whether an FLrd moves the write address. programBlank() has not run on
+ * hardware; stage 5 covers it.
  *
  * Not a register class: it does not inherit TPS25751Register and is not in the
  * factory, in the manner of TPS25751PatchLoader (ADR-011). It depends on the
@@ -100,17 +107,19 @@ constexpr TPS25751FourCC CMD_GAID = TPS25751FourCC::of("GAID");
 /// call (1984 calls, default I2C clock, 2026-11-22).
 constexpr uint32_t FLRD_CMD_TIMEOUT_MS = 200;
 
-/// COMMAND-poll timeout (ms) for FLad. Not yet measured on hardware.
+/// COMMAND-poll timeout (ms) for FLad. Hardware stages 2 and 3 measured
+/// 17.7 ms per call (2026-11-23).
 constexpr uint32_t FLAD_CMD_TIMEOUT_MS = 200;
 
-/// COMMAND-poll timeout (ms) for FLwd. Not yet measured on hardware. The task
-/// completes when the data has been written (TRM Table 4-21); the 24LC256
-/// write cycle is at most 5 ms.
+/// COMMAND-poll timeout (ms) for FLwd. The task completes when the data has
+/// been written (TRM Table 4-21); the 24LC256 write cycle is at most 5 ms.
+/// Hardware stage 3 measured 20.7 ms for a 32-byte chunk, at most 20.8 ms
+/// over 449 calls (2026-11-23).
 constexpr uint32_t FLWD_CMD_TIMEOUT_MS = 200;
 
 /// COMMAND-poll timeout (ms) for FLvy. The task completes after the header is
-/// checked (TRM Table 4-22). It completed within this limit for both regions
-/// in hardware stage 1 (2026-11-22); its duration was not recorded.
+/// checked (TRM Table 4-22). Hardware stage 3 measured 0.56 to 0.60 s for a
+/// 14272- or 14336-byte bundle (2026-11-23).
 constexpr uint32_t FLVY_CMD_TIMEOUT_MS = 1000;
 
 /// COMMAND-poll timeout (ms) for GAID. The task never completes in the normal
@@ -118,7 +127,8 @@ constexpr uint32_t FLVY_CMD_TIMEOUT_MS = 1000;
 /// after a typical 1-second delay (TRM Table 4-3). The poll has to outlast that
 /// delay so that it ends on the restart (a NAK, or COMMAND reading 0 after the
 /// reboot) and not while MODE still reads APP from before the restart. Three
-/// times the typical delay; not yet measured on hardware.
+/// times the typical delay. Hardware stage 3 saw COMMAND answer for 1277 ms
+/// after GAID, then the controller stop acknowledging (2026-11-23).
 constexpr uint32_t GAID_CMD_TIMEOUT_MS = 3000;
 
 /// Delay (ms) before a bundle chunk whose FLwd reported busy (0xFF) is retried.
@@ -438,7 +448,8 @@ public:
      * while TaskResult is 0x0, so a success that set bits 7:4 would be
      * reported as SetAddressFailed. The comparison can therefore report a
      * failure that is not one; it cannot report a success that is not one.
-     * No FLad return code has been observed on hardware yet.
+     * Hardware stage 2 observed 0x00 for successful FLad calls; no failure
+     * code has been observed.
      *
      * FLad alone changes nothing in the EEPROM. The caller owns the range:
      * @p addr is not bounded against the EEPROM size, and what FLad returns
@@ -466,10 +477,11 @@ public:
      *
      * Table 4-21 gives FLwd two return codes of its own, 0x00 and 0xFF, and
      * does not refer to Table 4-1. Any other value is treated as a failure;
-     * no documented code produces it. No FLwd return code has been observed
-     * on hardware yet. Whether the controller writes exactly @p len bytes for
-     * a payload shorter than a page is not documented either; hardware stage 2
-     * of the plan checks it.
+     * no documented code produces it. Whether the controller writes exactly
+     * @p len bytes for a payload shorter than a page is not documented.
+     * Hardware stage 2 observed 0x00 for successful writes and showed that a
+     * 4-byte FLwd writes exactly four bytes, although DATA bytes 4 to 63 still
+     * held other data; no busy or failure code has been observed.
      *
      * A null @p data, a @p len of 0, and a @p len above kFlashWriteChunk
      * return BadImageLength without issuing a task. An FLwd with no payload
@@ -489,13 +501,16 @@ public:
      *
      * FLvy completes after the bundle header is checked; whether it also checks
      * the bundle CRC is not documented, so a Success here does not prove the
-     * bundle body is intact. Use compareRegion() for that.
+     * bundle body is intact. Use compareRegion() for that. Hardware stage 3
+     * (2026-11-23) found FLvy reporting a bundle with one inverted body byte,
+     * at image offset 0x1BE5, as not valid, so it checks more than the header.
+     * That one byte at one offset is the whole sample.
      *
      * The address goes out least significant byte first, as for readFlash().
      * The TRM does not state the order for FLvy. Hardware stage 1 supports it
      * indirectly (2026-11-22): FLvy reported 0x00 for the bundles at 0x0800 and
      * 0x4400, and either address byte-swapped lies far outside the 32 KB part.
-     * The not-valid code 0x01 has not been observed on hardware.
+     * Which nonzero code stage 3 saw was not recorded.
      *
      * @param addr EEPROM address of the bundle (normally bundleStart())
      * @return Success for return code 0x00; VerifyFailed for 0x01 or any other
@@ -536,7 +551,10 @@ public:
      * to 15 with what step 1 read: if the controller took extra bytes from
      * DATA, and DATA still held the step 1 read in those positions, it would
      * write the same values back. dump() over the surrounding range is the
-     * complete check.
+     * complete check. Hardware stage 2 showed both sides of that limit: FLad
+     * leaves DATA bytes 4 to 63 as the preceding FLrd left them, so the blind
+     * spot is real, and a 4-byte FLwd writes only its four bytes, so it does
+     * not matter on that controller.
      *
      * This call does no pre-flight. Writing 0 to the only valid pointer leaves
      * the EEPROM with no bootable region; updateRegion() guards against that,
@@ -697,8 +715,12 @@ public:
      * pointer word also go unseen; the FLad after the read-back then sends
      * the remaining chunks to the right place, so 64 bytes are misplaced. A
      * misplaced write that only repeats bytes an earlier one left after the
-     * pointer word changes nothing and is not seen either. In these cases the
-     * table above does not hold. No TI document describes a write address
+     * pointer word changes nothing, so the read-back cannot see it. The check
+     * before step 2 catches such a repeat only where it reads: when bytes 4 to
+     * 15 after the pointer hold the first 12 bytes of the image, the call stops
+     * before any task of step 2. Stray bytes at other offsets, past byte 15 of
+     * the pointer row or starting elsewhere within it, are not seen. In these
+     * cases the table above does not hold. No TI document describes a write address
      * that differs from the one FLad was given.
      *
      * The call blocks for the whole update. Stage 1 measured 17.7 ms per FLrd,
@@ -949,9 +971,13 @@ public:
      * reaching the controller looks the same as a NAK during the reboot. And
      * a MODE read that returns APP before the controller has restarted counts
      * as "back in APP"; GAID_CMD_TIMEOUT_MS is chosen to outlast the delay
-     * before the restart, but that timing has not been measured on hardware.
-     * So confirm the restart after a Success: read VERSION (0x0F) and
-     * BOOT_FLAGS (0x2D), which show the bundle and the region that booted.
+     * before the restart. Hardware stages 3 and 4 measured the same sequence
+     * every time: COMMAND answered for 1276 to 1277 ms after GAID, then the
+     * controller stopped acknowledging and the executor returned I2CError,
+     * and MODE read APP 1938 to 1939 ms after GAID. Neither limit occurred
+     * there, but the call does not require an observed I2C failure before it
+     * accepts APP. So confirm the restart after a Success: read VERSION (0x0F)
+     * and BOOT_FLAGS (0x2D), which show the bundle and the region that booted.
      *
      * The call does not change the EEPROM. It sets lastStep() to Reset, and to
      * Done on Success.

@@ -44,7 +44,9 @@
       "docs/specs",
       "platformio.ini",
       "scripts",
-      "test"
+      "test",
+      "tools",
+      "plugins"
     ]
   },
   "dependencies": [

@@ -411,10 +411,22 @@ EepromUpdateStatus TPS25751EepromUpdater::writeChunks(uint32_t base, const uint8
 EepromUpdateStatus TPS25751EepromUpdater::checkEarlyChunks(EepromRegion target, const uint8_t* image,
                                                            size_t written, const uint8_t* pointerRow)
 {
+    // Read order: the pointer row first, the bundle start last. The last FLrd
+    // before the second FLad is then inside the target region. Should an FLrd
+    // move the controller's write address and the second FLad not take effect,
+    // the remaining chunks would start near that last read, in the region being
+    // written, and not at the pointer row in front of the other region.
+    const uint32_t pointerAddr = regionPointerAddress(target);
+    uint8_t now[kFlashReadBytes];
+    EepromUpdateStatus s = readFlash(pointerAddr, now);
+    if (s != EepromUpdateStatus::Success) {
+        return s;
+    }
+
     // The first chunks must read back from the bundle start. A write address
     // that was not where FLad was told to put it shows here, unless the region
-    // already held the same bytes.
-    EepromUpdateStatus s = compareImage(target, image, written, nullptr, /*report=*/false);
+    // already held the same bytes. This result is judged first.
+    s = compareImage(target, image, written, nullptr, /*report=*/false);
     if (s != EepromUpdateStatus::Success) {
         if (s == EepromUpdateStatus::CompareMismatch) {
             TPS_DEBUG_ERROR(DEBUG_CAT_TASK,
@@ -425,17 +437,10 @@ EepromUpdateStatus TPS25751EepromUpdater::checkEarlyChunks(EepromRegion target, 
         return s;
     }
 
-    // The 16 bytes at the target pointer must be as step 1 left them. After
-    // step 1 the controller's write address sits just past the pointer word, so
-    // an FLad that reported success without taking effect puts the chunks
-    // there, and the check above cannot see that when the region already held
-    // the image.
-    const uint32_t pointerAddr = regionPointerAddress(target);
-    uint8_t now[kFlashReadBytes];
-    s = readFlash(pointerAddr, now);
-    if (s != EepromUpdateStatus::Success) {
-        return s;
-    }
+    // The 16 bytes at the target pointer must be as step 1 left them. If step 1
+    // left the controller's write address just past the pointer word, an FLad
+    // that reported success without taking effect puts the chunks there, and
+    // the check above cannot see that when the region already held the image.
     if (getLe32(now) != 0 || memcmp(now + 4, pointerRow + 4, kFlashReadBytes - 4) != 0) {
         TPS_DEBUG_ERROR(DEBUG_CAT_TASK,
                         "EEPROM: the 16 bytes at 0x%08lX changed while the first chunks were written; write stopped",

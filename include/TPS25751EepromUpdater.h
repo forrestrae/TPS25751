@@ -595,10 +595,11 @@ public:
      *    retried up to FLWD_BUSY_RETRIES times, each retry after
      *    FLWD_BUSY_RETRY_DELAY_MS and preceded by a fresh FLad to that chunk's
      *    address. After the first two chunks (kEarlyReadBackBytes, or the whole
-     *    image when it is shorter) the write pauses for a read-back: those
-     *    bytes are read at the bundle start with FLrd and compared with the
-     *    image, and the 16 bytes at the target pointer are read and compared
-     *    with what the read-back of step 1 saw. A fresh FLad to the next
+     *    image when it is shorter) the write pauses for a read-back, in this
+     *    order: FLrd of the 16 bytes at the target pointer, then FLrd of the
+     *    chunks at the bundle start. The chunks are compared with the image
+     *    first (CompareMismatch), then the 16 bytes with what the read-back of
+     *    step 1 saw (PointerNeighborsChanged). A fresh FLad to the next
      *    unwritten byte follows, then the remaining chunks.
      * 3. FLvy at bundleStart(@p target); then, when @p opt.compareAfterWrite is
      *    set, an FLrd compare of the region with the image; then
@@ -930,9 +931,10 @@ private:
     EepromUpdateStatus writeChunks(uint32_t base, const uint8_t* image, size_t from, size_t to,
                                    uint32_t total);
 
-    /// The early read-back of step 2: the first @p written image bytes read
-    /// back at the bundle start (CompareMismatch), and the 16 bytes at the
-    /// target pointer still equal to @p pointerRow (PointerNeighborsChanged).
+    /// The early read-back of step 2. Reads the 16 bytes at the target pointer,
+    /// then the first @p written image bytes at the bundle start. Judges the
+    /// bundle bytes first (CompareMismatch), then the 16 bytes against
+    /// @p pointerRow (PointerNeighborsChanged).
     EepromUpdateStatus checkEarlyChunks(EepromRegion target, const uint8_t* image, size_t written,
                                         const uint8_t* pointerRow);
 

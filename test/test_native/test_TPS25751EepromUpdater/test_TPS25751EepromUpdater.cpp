@@ -92,9 +92,9 @@ constexpr size_t SMALL_LEN = 100;  // three 32-byte chunks and one of 4; seven c
 // Call indices of updateRegion() for a SMALL_LEN image with the default
 // options, counted from the plan: one pre-flight read of the other pointer,
 // four tasks per pointer write, FLad plus the first two chunks, the read-back
-// (four reads at the bundle start and one of the target pointer), FLad plus the
-// two remaining chunks, FLvy, seven compare reads, then the pointer writes of
-// steps 3 and 4.
+// (one read of the target pointer, then four at the bundle start), FLad plus
+// the two remaining chunks, FLvy, seven compare reads, then the pointer writes
+// of steps 3 and 4.
 constexpr size_t IDX_PREFLIGHT_READ = 0;
 constexpr size_t IDX_STEP1_READ = 1;
 constexpr size_t IDX_STEP1_FLAD = 2;
@@ -102,8 +102,8 @@ constexpr size_t IDX_STEP1_FLWD = 3;
 constexpr size_t IDX_STEP1_READBACK = 4;
 constexpr size_t IDX_BUNDLE_FLAD = 5;
 constexpr size_t IDX_FIRST_CHUNK = 6;          // chunks 0 and 1 are calls 6 and 7
-constexpr size_t IDX_EARLY_READ = 8;           // calls 8 to 11
-constexpr size_t IDX_EARLY_POINTER_READ = 12;
+constexpr size_t IDX_EARLY_POINTER_READ = 8;
+constexpr size_t IDX_EARLY_READ = 9;           // calls 9 to 12
 constexpr size_t IDX_RESUME_FLAD = 13;
 constexpr size_t IDX_FLVY = 16;
 constexpr size_t IDX_FIRST_COMPARE = 17;
@@ -269,9 +269,10 @@ std::vector<Expect> expectedUpdate(EepromRegion target, const std::vector<uint8_
     std::vector<Expect> s;
     s.push_back(flrd(TPS25751EepromUpdater::regionPointerAddress(other)));  // pre-flight check 4
     expectPointerWrite(s, target, 0);                                       // step 1
-    // Step 2: FLad, the first two chunks, the read-back of those bytes at the
-    // bundle start and of the 16 bytes at the target pointer, then a fresh FLad
-    // to the next unwritten byte and the remaining chunks.
+    // Step 2: FLad, the first two chunks, the read of the 16 bytes at the target
+    // pointer, the read-back of the chunks at the bundle start (last, so that
+    // the last FLrd before the next FLad is inside the target region), then a
+    // fresh FLad to the next unwritten byte and the remaining chunks.
     const size_t early = image.size() < 64 ? image.size() : 64;
     const auto chunks = [&](size_t from, size_t to) {
         for (size_t off = from; off < to; off += 32) {
@@ -281,8 +282,8 @@ std::vector<Expect> expectedUpdate(EepromRegion target, const std::vector<uint8_
     };
     s.push_back(flad(start));
     chunks(0, early);
-    for (size_t off = 0; off < early; off += 16) s.push_back(flrd(start + static_cast<uint32_t>(off)));
     s.push_back(flrd(TPS25751EepromUpdater::regionPointerAddress(target)));
+    for (size_t off = 0; off < early; off += 16) s.push_back(flrd(start + static_cast<uint32_t>(off)));
     if (image.size() > early) {
         s.push_back(flad(start + static_cast<uint32_t>(early)));
         chunks(early, image.size());
@@ -1361,13 +1362,13 @@ void test_update_region_high_full_call_sequence()
     assertPayload(b.fake.calls[IDX_BUNDLE_FLAD], "FLad", {0x00, 0x44, 0x00, 0x00}, 200);
     TEST_ASSERT_EQUAL_size_t(32, b.fake.calls[chunkIndex(0)].in.size());
     TEST_ASSERT_EQUAL_size_t(32, b.fake.calls[chunkIndex(1)].in.size());
-    // The read-back after two chunks: 64 bytes at the bundle start, the 16
-    // bytes at the High pointer, then FLad to the next unwritten byte.
+    // The read-back after two chunks: the 16 bytes at the High pointer, then 64
+    // bytes at the bundle start, then FLad to the next unwritten byte.
+    assertPayload(b.fake.calls[IDX_EARLY_POINTER_READ], "FLrd", {0x00, 0x04, 0x00, 0x00}, 200);
     assertPayload(b.fake.calls[IDX_EARLY_READ], "FLrd", {0x00, 0x44, 0x00, 0x00}, 200);
     assertPayload(b.fake.calls[IDX_EARLY_READ + 1], "FLrd", {0x10, 0x44, 0x00, 0x00}, 200);
     assertPayload(b.fake.calls[IDX_EARLY_READ + 2], "FLrd", {0x20, 0x44, 0x00, 0x00}, 200);
     assertPayload(b.fake.calls[IDX_EARLY_READ + 3], "FLrd", {0x30, 0x44, 0x00, 0x00}, 200);
-    assertPayload(b.fake.calls[IDX_EARLY_POINTER_READ], "FLrd", {0x00, 0x04, 0x00, 0x00}, 200);
     assertPayload(b.fake.calls[IDX_RESUME_FLAD], "FLad", {0x40, 0x44, 0x00, 0x00}, 200);
     TEST_ASSERT_EQUAL_size_t(32, b.fake.calls[chunkIndex(2)].in.size());
     TEST_ASSERT_EQUAL_size_t(4, b.fake.calls[chunkIndex(3)].in.size());
@@ -1408,11 +1409,11 @@ void test_update_region_low_full_call_sequence()
     assertPayload(b.fake.calls[IDX_PREFLIGHT_READ], "FLrd", {0x00, 0x04, 0x00, 0x00}, 200);
     assertPayload(b.fake.calls[IDX_STEP1_FLAD], "FLad", {0x00, 0x00, 0x00, 0x00}, 200);
     assertPayload(b.fake.calls[IDX_BUNDLE_FLAD], "FLad", {0x00, 0x08, 0x00, 0x00}, 200);
+    assertPayload(b.fake.calls[IDX_EARLY_POINTER_READ], "FLrd", {0x00, 0x00, 0x00, 0x00}, 200);
     assertPayload(b.fake.calls[IDX_EARLY_READ], "FLrd", {0x00, 0x08, 0x00, 0x00}, 200);
     assertPayload(b.fake.calls[IDX_EARLY_READ + 1], "FLrd", {0x10, 0x08, 0x00, 0x00}, 200);
     assertPayload(b.fake.calls[IDX_EARLY_READ + 2], "FLrd", {0x20, 0x08, 0x00, 0x00}, 200);
     assertPayload(b.fake.calls[IDX_EARLY_READ + 3], "FLrd", {0x30, 0x08, 0x00, 0x00}, 200);
-    assertPayload(b.fake.calls[IDX_EARLY_POINTER_READ], "FLrd", {0x00, 0x00, 0x00, 0x00}, 200);
     assertPayload(b.fake.calls[IDX_RESUME_FLAD], "FLad", {0x40, 0x08, 0x00, 0x00}, 200);
     assertPayload(b.fake.calls[IDX_FLVY], "FLvy", {0x00, 0x08, 0x00, 0x00}, 1000);
     assertPayload(b.fake.calls[IDX_FIRST_COMPARE], "FLrd", {0x00, 0x08, 0x00, 0x00}, 200);
@@ -1488,7 +1489,9 @@ void test_update_region_short_final_chunk()
 void test_update_region_reads_back_the_first_two_chunks()
 {
     // Step 2 for both targets, call by call, from the FLad to the bundle start
-    // to the chunk after the read-back.
+    // to the chunk after the read-back. The pointer row is read first and the
+    // bundle start last, so the last FLrd before the second FLad is at bundle
+    // start + 48, inside the region being written.
     const struct {
         EepromRegion target;
         uint8_t startHi;    // high byte of the bundle start: 0x0800 or 0x4400
@@ -1509,11 +1512,11 @@ void test_update_region_reads_back_the_first_two_chunks()
         assertPayload(b.fake.calls[5], "FLad", {0x00, c.startHi, 0x00, 0x00}, 200);   // bundle start
         assertPayload(b.fake.calls[6], "FLwd", chunk(0, 32), 200);                    // chunk 0
         assertPayload(b.fake.calls[7], "FLwd", chunk(32, 32), 200);                   // chunk 1
-        assertPayload(b.fake.calls[8], "FLrd", {0x00, c.startHi, 0x00, 0x00}, 200);   // read back 64 bytes
-        assertPayload(b.fake.calls[9], "FLrd", {0x10, c.startHi, 0x00, 0x00}, 200);
-        assertPayload(b.fake.calls[10], "FLrd", {0x20, c.startHi, 0x00, 0x00}, 200);
-        assertPayload(b.fake.calls[11], "FLrd", {0x30, c.startHi, 0x00, 0x00}, 200);
-        assertPayload(b.fake.calls[12], "FLrd", {0x00, c.pointerHi, 0x00, 0x00}, 200); // the target pointer
+        assertPayload(b.fake.calls[8], "FLrd", {0x00, c.pointerHi, 0x00, 0x00}, 200); // the target pointer
+        assertPayload(b.fake.calls[9], "FLrd", {0x00, c.startHi, 0x00, 0x00}, 200);   // read back 64 bytes
+        assertPayload(b.fake.calls[10], "FLrd", {0x10, c.startHi, 0x00, 0x00}, 200);
+        assertPayload(b.fake.calls[11], "FLrd", {0x20, c.startHi, 0x00, 0x00}, 200);
+        assertPayload(b.fake.calls[12], "FLrd", {0x30, c.startHi, 0x00, 0x00}, 200);  // last read: in the region
         assertPayload(b.fake.calls[13], "FLad", {0x40, c.startHi, 0x00, 0x00}, 200);  // next unwritten byte
         assertPayload(b.fake.calls[14], "FLwd", chunk(64, 32), 200);                  // chunk 2
         assertPayload(b.fake.calls[15], "FLwd", chunk(96, 4), 200);                   // chunk 3
@@ -1528,8 +1531,9 @@ void test_update_region_read_back_of_a_short_image()
 {
     // The shortest image checkImage() accepts, 0x38 bytes: a 32-byte chunk and
     // a 24-byte chunk, which is the whole image. The read-back covers those 56
-    // bytes in four reads, the last comparing 8 bytes, and no second FLad
-    // follows because nothing is left to write. The old bundle is longer, so
+    // bytes in four reads, the last comparing 8 bytes, after the read of the
+    // target pointer, and no second FLad follows because nothing is left to
+    // write. The old bundle is longer, so
     // the bytes after the image show that nothing more was written.
     {
         Board b(BUNDLE_LEN);
@@ -1543,11 +1547,11 @@ void test_update_region_read_back_of_a_short_image()
         TEST_ASSERT_EQUAL_size_t(32, b.fake.calls[6].in.size());
         TEST_ASSERT_EQUAL_size_t(24, b.fake.calls[7].in.size());
         TEST_ASSERT_EQUAL_HEX8_ARRAY(&image[32], b.fake.calls[7].in.data(), 24);
-        assertPayload(b.fake.calls[8], "FLrd", {0x00, 0x44, 0x00, 0x00}, 200);
-        assertPayload(b.fake.calls[9], "FLrd", {0x10, 0x44, 0x00, 0x00}, 200);
-        assertPayload(b.fake.calls[10], "FLrd", {0x20, 0x44, 0x00, 0x00}, 200);
-        assertPayload(b.fake.calls[11], "FLrd", {0x30, 0x44, 0x00, 0x00}, 200);
-        assertPayload(b.fake.calls[12], "FLrd", {0x00, 0x04, 0x00, 0x00}, 200);
+        assertPayload(b.fake.calls[8], "FLrd", {0x00, 0x04, 0x00, 0x00}, 200);
+        assertPayload(b.fake.calls[9], "FLrd", {0x00, 0x44, 0x00, 0x00}, 200);
+        assertPayload(b.fake.calls[10], "FLrd", {0x10, 0x44, 0x00, 0x00}, 200);
+        assertPayload(b.fake.calls[11], "FLrd", {0x20, 0x44, 0x00, 0x00}, 200);
+        assertPayload(b.fake.calls[12], "FLrd", {0x30, 0x44, 0x00, 0x00}, 200);
         TEST_ASSERT_EQUAL_STRING("FLvy", b.fake.calls[13].cmd.c_str());
         TEST_ASSERT_EQUAL_size_t(1 + 3, b.fake.countOf("FLad"));
         TEST_ASSERT_EQUAL_size_t(2 + 3, b.fake.countOf("FLwd"));
@@ -1963,8 +1967,9 @@ void test_update_region_busy_first_chunk_is_retried_before_the_read_back()
     assertPayload(b.fake.calls[7], "FLad", {0x00, 0x44, 0x00, 0x00}, 200);        // fresh FLad
     assertPayload(b.fake.calls[8], "FLwd", chunk0, 200);                          // chunk 0 again
     TEST_ASSERT_EQUAL_size_t(32, b.fake.calls[9].in.size());                      // chunk 1
-    assertPayload(b.fake.calls[10], "FLrd", {0x00, 0x44, 0x00, 0x00}, 200);       // the read-back
-    assertPayload(b.fake.calls[14], "FLrd", {0x00, 0x04, 0x00, 0x00}, 200);
+    assertPayload(b.fake.calls[10], "FLrd", {0x00, 0x04, 0x00, 0x00}, 200);       // the pointer row
+    assertPayload(b.fake.calls[11], "FLrd", {0x00, 0x44, 0x00, 0x00}, 200);       // the read-back
+    assertPayload(b.fake.calls[14], "FLrd", {0x30, 0x44, 0x00, 0x00}, 200);
     assertPayload(b.fake.calls[15], "FLad", {0x40, 0x44, 0x00, 0x00}, 200);
     TEST_ASSERT_EQUAL_size_t(SMALL_UPDATE_CALLS + 2, b.fake.calls.size());
     TEST_ASSERT_EQUAL_size_t(1, b.fake.delays.size());
@@ -1996,8 +2001,8 @@ void test_update_region_busy_chunk_succeeds_on_third_retry()
         assertPayload(b.fake.calls[IDX_FIRST_CHUNK + 2 + 2 * i], "FLad", {0x20, 0x44, 0x00, 0x00}, 200);
     }
     // The read-back follows the retried chunk and still reads the bundle start.
-    assertPayload(b.fake.calls[IDX_EARLY_READ + 6], "FLrd", {0x00, 0x44, 0x00, 0x00}, 200);
     assertPayload(b.fake.calls[IDX_EARLY_POINTER_READ + 6], "FLrd", {0x00, 0x04, 0x00, 0x00}, 200);
+    assertPayload(b.fake.calls[IDX_EARLY_READ + 6], "FLrd", {0x00, 0x44, 0x00, 0x00}, 200);
     assertPayload(b.fake.calls[IDX_RESUME_FLAD + 6], "FLad", {0x40, 0x44, 0x00, 0x00}, 200);
     TEST_ASSERT_TRUE(regionHolds(b.fake, EepromRegion::High, b.newBundle));
     TEST_ASSERT_TRUE(pointerValid(b.fake, EepromRegion::High));
@@ -2066,7 +2071,7 @@ void test_update_region_read_back_mismatch_stops_the_write()
         ASSERT_STATUS(EepromUpdateStatus::CompareMismatch,
                       u.updateRegion(EepromRegion::High, b.newBundle.data(), b.newBundle.size()));
         ASSERT_STEP(EepromUpdateStep::WriteBundle, u.lastStep());
-        // Offset 40 is in the third read of the bundle start. The pointer read,
+        // Offset 40 is in the third read of the bundle start. The fourth read,
         // the second FLad, and every later chunk are not issued.
         TEST_ASSERT_EQUAL_size_t(IDX_EARLY_READ + 3, b.fake.calls.size());
         TEST_ASSERT_EQUAL_size_t(1 + 2, b.fake.countOf("FLwd"));
@@ -2100,7 +2105,9 @@ void test_update_region_pointer_area_change_stops_the_write()
     // Step 2, the read of the 16 bytes at the target pointer after the first
     // two chunks. They must be as the read-back of step 1 saw them: the word 0
     // and bytes 4 to 15 unchanged. PointerNeighborsChanged with lastStep()
-    // still WriteBundle, and no task after that read.
+    // still WriteBundle. The pointer row is read before the bundle start and
+    // judged after it, so the four reads of the bundle start are the last
+    // tasks issued.
     const struct {
         uint32_t offset;  // byte of the 16 that changes while a chunk is written
         uint8_t value;
@@ -2120,7 +2127,7 @@ void test_update_region_pointer_area_change_stops_the_write()
                               u.updateRegion(EepromRegion::High, b.newBundle.data(), b.newBundle.size()),
                               at("pointer byte", c.offset));
         ASSERT_STEP(EepromUpdateStep::WriteBundle, u.lastStep());
-        TEST_ASSERT_EQUAL_size_t(IDX_EARLY_POINTER_READ + 1, b.fake.calls.size());
+        TEST_ASSERT_EQUAL_size_t(IDX_EARLY_READ + 4, b.fake.calls.size());
         TEST_ASSERT_EQUAL_size_t(1 + 2, b.fake.countOf("FLwd"));
         TEST_ASSERT_EQUAL_size_t(1 + 1, b.fake.countOf("FLad"));
         TEST_ASSERT_EQUAL_size_t(0, b.fake.countOf("FLvy"));
@@ -2494,9 +2501,10 @@ void test_update_region_read_back_bounds_a_misplaced_bundle_write()
                 // The bundle start reads back as the image, because it held the
                 // image before. The 12 bytes after the pointer word give it away.
                 ASSERT_STATUS_MESSAGE(EepromUpdateStatus::PointerNeighborsChanged, s, where);
-                TEST_ASSERT_EQUAL_size_t_MESSAGE(IDX_EARLY_POINTER_READ + 1, b.fake.calls.size(), where);
+                TEST_ASSERT_EQUAL_size_t_MESSAGE(IDX_EARLY_READ + 4, b.fake.calls.size(), where);
             } else {
-                // The first 16 bytes at the bundle start are not the image.
+                // The first 16 bytes at the bundle start are not the image. The
+                // pointer row changed as well; the bundle mismatch is judged first.
                 ASSERT_STATUS_MESSAGE(EepromUpdateStatus::CompareMismatch, s, where);
                 TEST_ASSERT_EQUAL_size_t_MESSAGE(IDX_EARLY_READ + 1, b.fake.calls.size(), where);
             }

@@ -26,7 +26,7 @@ checks that turn inferred into verified.
 | Short name | Document | Where |
 |---|---|---|
 | App note | SLVAFL1, October 2024, "TPS25751 and TPS26750 EEPROM Update Over I2C" | `docs/TPS25751 and TPS26750 EEPROM Update Over I2C.pdf` |
-| TRM | SLVUCR8B, revised August 2026 | `docs/TPS25751 Technical Reference Manual - August 2026.pdf` |
+| TRM | SLVUCR8B, revised August 2026 | `../device-register-mcp-server/devices/tps25751/docs/TPS25751 Technical Reference Manual - August 2026.pdf`, in the sibling server repo, relative to this checkout or the worktree. Use this copy; the one in `docs/` is byte-identical (checked 2026-11-22) |
 | Datasheet | SLVSH93A | `docs/TPS25751 USB Type-C and USB PD Controller.pdf` |
 | Images | `4x18650-config-dual_TPS25751_F8091166_{lowRegion,fullFlash}.{bin,c}` and the `F8091164` build | `teensy_mic_sensor/PCB/eeprom/Dual Role/` |
 

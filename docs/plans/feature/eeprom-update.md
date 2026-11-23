@@ -585,10 +585,17 @@ receives `r` over serial, so a monitor attached late still captures a full dump.
   them. `scripts/` is not in the published package.
 - Gate: hardware stages 2, 3, and 4.
 
-Status, 2026-11-23: implemented; the review found no blocker and its findings are
-fixed; the delta review of the step 2 read-back and `p2` is in progress. No EEPROM
-write has been made. `src/TPS25751EepromUpdater.cpp` has 100% line coverage (429 of
-429 lines) and the updater suite has 127 tests.
+Status, 2026-11-23: implemented and reviewed clean, including the step 2 read-back and
+`p2`; stages 2 to 4 not yet run, and no EEPROM write has been made.
+`src/TPS25751EepromUpdater.cpp` has 100% line coverage (432 of 432 lines) and the
+updater suite has 131 tests. Two review nits are carried into Batch 3:
+
+- The `p2` pass line counts the DATA positions that could show a longer write but not
+  where they start. If `FLad` left DATA bytes 4 to 15 equal to the EEPROM bytes, a
+  16-byte write would pass. Until the line names the first such position, read the
+  DATA dump in the `p2` log and confirm that position 4 differs.
+- One sentence of the `updateRegion()` Doxygen limits paragraph predates the trace
+  check and should be limited to offsets that check does not read.
 
 ### Batch 3: blank programming and documentation
 

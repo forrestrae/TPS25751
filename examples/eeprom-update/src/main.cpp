@@ -548,20 +548,22 @@ static size_t discardPendingInput()
 }
 
 /// Asks for confirmation and waits for one line. Only the exact line "yes",
-/// typed after the prompt, confirms.
+/// sent after the prompt, confirms.
 ///
-/// Input that arrived before the prompt is discarded first. Without that, a
-/// "yes" queued behind a command, or typed during a long report, would confirm
-/// a write whose plan had not been printed yet.
+/// The prompt is printed and flushed first, and only then is the input that has
+/// already arrived discarded. So nothing received before the prompt went out
+/// can confirm: not a "yes" queued behind the command, not one typed during a
+/// long report, and not one that arrived while the plan was being printed.
 static bool confirm()
 {
+    Serial.println(F("[confirm] Type yes to proceed; anything else cancels."));
+    Serial.flush();
     const size_t dropped = discardPendingInput();
     if (dropped > 0) {
         Serial.print(F("[confirm] Discarded "));
         Serial.print(dropped);
         Serial.println(F(" byte(s) of input that arrived before this prompt."));
     }
-    Serial.println(F("[confirm] Type yes to proceed; anything else cancels."));
 
     char line[16];
     bool tooLong = false;

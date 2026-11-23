@@ -134,3 +134,91 @@ to publish a failing `main`.
   `v2.1.0`, publishes; ruleset accepts the bot's bump commit; `git pull` fast-forwards
   local `main` (allowed as origin-reachable).
 - `pio pkg pack` confirms `scripts/`, `.githooks/`, `.github/` stay out of the tarball.
+
+## Amendment: agents maintain the gate's checks
+
+Status: implemented 2026-11-22 on `ci/verify-launcher`. The launcher falls back to the
+branch's `verify_gate.py` only when `main` has none, which happens once, for the branch
+that introduces it.
+
+I recommend splitting `scripts/verify.py` into a small protected launcher and an
+unprotected gate script that the launcher always takes from `main`. Agents can then
+add or change checks on a topic branch like any other code, and a branch still cannot
+be verified by a gate it modified. The immediate need is the KM003C toolset plan
+(`km003c-pd-analyzer-toolset.md`), which adds two checks to the gate: the bench
+server's pytest suite and `pd_capture_fixture.py --check`.
+
+### Why the current guard is broader than it needs to be
+
+The implementation commit `6e3827f` put every workflow script on the agent guard's
+protected list. The design above only protected `.githooks/` and the stamp files;
+the commit message gives no reason for the wider list.
+
+The risk the list addresses is self-certification. `verify.py` is the only writer of
+`.git/verified-commits`, and the `reference-transaction` hook lets `main` move only to
+a merge whose second parent is in that file. An agent that can edit `verify.py` on its
+branch can remove a check, run the weakened script, stamp its own branch, and
+integrate it. CI repeats the gate, but only after the human pushes.
+
+Protecting the file prevents that, but it also means every new check needs the human
+or a `WORKFLOW_GUARD_OFF` session, which is why routine additions to the gate stall.
+
+### Mechanism
+
+1. Rename the current logic to `scripts/verify_gate.py`. It runs the checks and exits
+   0 or 1. It no longer writes the stamp.
+2. Replace `scripts/verify.py` with a launcher of about 30 lines that:
+   - keeps the existing preconditions: clean tree, not on `main`, branch based on the
+     current `main`;
+   - extracts `verify_gate.py` and `check_commits.py` from `main` with
+     `git show main:<path>` into a temporary directory, and runs that copy against the
+     branch's working tree;
+   - appends `HEAD` to `.git/verified-commits` only if the gate exits 0.
+3. Keep the launcher on the protected list. Remove `verify_gate.py`,
+   `check_commits.py`, and `release_level.py` from it.
+4. Keep `scripts/workflow_common.py` protected. `gitguard.py` imports it, and the
+   `reference-transaction` hook runs after a merge has updated the working tree, so an
+   edited copy arriving in a merge would judge that same merge.
+
+A change to the gate on a branch takes effect for later branches only after it reaches
+`main` through a human push. The branch that changes the gate is itself checked by the
+old gate.
+
+### What stays protected, and why
+
+| Path | Reason |
+| --- | --- |
+| `.githooks/`, `scripts/gitguard.py`, `scripts/workflow_common.py` | They decide whether `main` may move |
+| `scripts/verify.py` (launcher), `scripts/integrate.py` | The launcher writes the stamp; `integrate.py` performs the merge |
+| `scripts/agent_guard.py`, `scripts/setup_hooks.sh`, `.claude/settings*.json`, `.codex/` | They keep the guard and the hooks switched on |
+| `.github/workflows/publish.yml` | It gates publishing; changes reach CI only through a human push, but the file defines what CI checks |
+| Stamp files, `core.hooksPath`, `branch.main.mergeoptions`, `pull.ff` | Unchanged |
+
+### Residual risks
+
+- `check_commits.py` also runs as the `commit-msg` hook from the working tree, so an
+  agent could weaken it on a branch and commit nonconforming subjects there. The
+  launcher lints the branch with `main`'s copy, so such a branch fails verification.
+- An agent can still write a program that appends to `.git/verified-commits` without
+  naming the file in its command line. That risk exists today and this change does not
+  alter it. CI's independent gate remains the backstop.
+- A gate change that breaks the gate itself is caught only on the next branch. The
+  launcher should print which `main` commit the gate came from, so a failure points at
+  the right version.
+
+### Implementation and verification
+
+The change touches protected files, so the human makes it or runs one session with
+`WORKFLOW_GUARD_OFF=1` in `.claude/settings.local.json` and removes it afterwards. It
+goes on its own `ci/verify-launcher` branch, verified by the current `verify.py`.
+
+Verification, added to `scripts/tests`:
+
+- A branch that deletes the native-test step from `verify_gate.py` still runs the
+  native tests, because the launcher runs `main`'s copy.
+- A branch that adds a failing check to `verify_gate.py` still passes until that
+  change is on `main`, and the next branch then fails on it.
+- Running `scripts/verify_gate.py` directly never writes the stamp.
+- The agent guard allows an edit to `verify_gate.py` and denies one to `verify.py`.
+- AGENTS.md's Git Workflow section and enforcement table name the launcher and the gate
+  script.

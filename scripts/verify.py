@@ -1,39 +1,37 @@
 #!/usr/bin/env python3
-"""Run the full local gate on the current topic branch and stamp it verified.
+"""Run main's copy of the gate on the current topic branch and stamp it verified.
 
 Usage: scripts/verify.py
 
 Run from a topic branch that is rebased onto main, with a clean working tree
 (no modified, staged or untracked files), so the stamp describes exactly the
-content that was tested. Checks, in order:
+content that was tested.
 
-  1. branch name and every commit message in main..HEAD
-  2. no merge commits on the branch (rebase instead)
-  3. version fields in library.json / library.properties unchanged from main
-  4. script unit tests, native unit tests, example build
+The checks live in scripts/verify_gate.py, which agents may change on a topic
+branch. This launcher never runs the branch's copy: it extracts
+verify_gate.py and workflow_common.py from main into a temporary directory and
+runs those against the branch's working tree. A branch therefore cannot be
+verified by a gate it modified; a gate change applies to later branches once
+the human has pushed it to main.
 
 On success the HEAD commit is appended to <git-common-dir>/verified-commits,
 which is what lets the reference-transaction hook accept a --no-ff merge of
-this branch into main. This script is the only intended writer of that file.
+this branch into main. This launcher is the only intended writer of that file.
 """
 
 from __future__ import annotations
 
-import json
-import re
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 SCRIPTS = Path(__file__).resolve().parent
 sys.path.insert(0, str(SCRIPTS))
 import workflow_common as wc  # noqa: E402
 
-GATES = [
-    ("script unit tests", [sys.executable, "-m", "unittest", "discover", "-s", "scripts/tests", "-t", "scripts", "-q"]),
-    ("native unit tests", ["pio", "test", "-e", "native"]),
-    ("example build", ["pio", "run", "-e", "example-read-registers"]),
-]
+GATE = "scripts/verify_gate.py"
+GATE_SUPPORT = ("scripts/workflow_common.py",)
 
 
 def fail(message: str) -> int:
@@ -41,11 +39,19 @@ def fail(message: str) -> int:
     return 1
 
 
-def version_at(rev: str, root: Path) -> tuple[str, str]:
-    manifest = json.loads(wc.git("show", f"{rev}:library.json", cwd=root))
-    props = wc.git("show", f"{rev}:library.properties", cwd=root)
-    match = re.search(r"^version=(.*)$", props, re.M)
-    return manifest.get("version", ""), match.group(1).strip() if match else ""
+def extract_gate(root: Path, dest: Path) -> tuple[Path, str]:
+    """Write main's gate and its support modules into dest; return the gate path and its source."""
+    main_sha = wc.git("rev-parse", wc.MAIN_REF, cwd=root)
+    source = f"main {main_sha[:12]}"
+    if not wc.git_ok("cat-file", "-e", f"{main_sha}:{GATE}", cwd=root):
+        # Bootstrap only: the branch that introduces verify_gate.py has no copy on main to run.
+        source = "this branch (main has no verify_gate.py yet; bootstrap run)"
+        rev = "HEAD"
+    else:
+        rev = main_sha
+    for path in (GATE, *GATE_SUPPORT):
+        (dest / Path(path).name).write_text(wc.git("show", f"{rev}:{path}", cwd=root) + "\n")
+    return dest / Path(GATE).name, source
 
 
 def main() -> int:
@@ -67,27 +73,17 @@ def main() -> int:
         return fail("branch is not based on the current main; run: git rebase main")
     if head == wc.git("rev-parse", wc.MAIN_REF, cwd=root):
         return fail("branch has no commits beyond main")
-    if wc.git("rev-list", "--merges", f"{wc.MAIN_REF}..{head}", cwd=root):
-        return fail("branch contains merge commits; rebase it onto main instead")
 
-    errors = [
-        f"{sha[:12]}: {e}"
-        for sha, message in wc.commit_messages(f"{wc.MAIN_REF}..{head}", cwd=root)
-        if (e := wc.check_message(message))
-    ]
-    if errors:
-        return fail("commit messages:\n  " + "\n  ".join(errors))
-
-    if version_at(wc.MAIN_REF, root) != version_at(head, root):
-        return fail("version fields changed; versions are bumped only by CI on release")
-
-    for name, cmd in GATES:
-        print(f"verify: running {name}: {' '.join(cmd)}", flush=True)
-        if subprocess.run(cmd, cwd=root).returncode != 0:
-            return fail(name)
+    with tempfile.TemporaryDirectory(prefix="verify-gate-") as tmp:
+        gate, source = extract_gate(root, Path(tmp))
+        print(f"verify: gate from {source}", flush=True)
+        if subprocess.run([sys.executable, str(gate)], cwd=root).returncode != 0:
+            return fail(f"gate from {source}")
 
     if wc.git("status", "--porcelain", "--untracked-files=all", cwd=root):
         return fail("the gate modified tracked or untracked files; investigate before merging")
+    if wc.git("rev-parse", "HEAD", cwd=root) != head:
+        return fail("HEAD moved while the gate ran")
 
     wc.record_verified(head, cwd=root)
     print(f"verify: PASSED: {branch} at {head[:12]} is verified.")

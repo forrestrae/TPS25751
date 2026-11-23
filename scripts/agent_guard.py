@@ -38,8 +38,11 @@ PROTECTED_PATHS = (
     ".githooks/",
     "scripts/workflow_common.py",
     "scripts/gitguard.py",
-    "scripts/check_commits.py",
-    "scripts/release_level.py",
+    # verify.py is the launcher and the only stamp writer. The checks it runs live in
+    # verify_gate.py, which agents may edit: verify.py always runs main's copy of it.
+    # check_commits.py and release_level.py are unprotected for the same reason: the
+    # launcher lints with main's rules, and CI runs release_level.py only from a
+    # human-pushed main.
     "scripts/verify.py",
     "scripts/integrate.py",
     "scripts/setup_hooks.sh",

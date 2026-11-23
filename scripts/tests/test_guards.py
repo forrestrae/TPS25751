@@ -132,6 +132,12 @@ class ClaudeGuardBashTests(unittest.TestCase):
                   "scripts/integrate.py feat/x", "python3 scripts/release_level.py v1..HEAD"):
             self.allowed(c)
 
+    def test_gate_checks_editable(self):
+        for c in ("echo x >> scripts/verify_gate.py", "sed -i '' s/x/y/ scripts/check_commits.py",
+                  "echo x >> scripts/release_level.py"):
+            self.allowed(c)
+        self.denied("echo x >> scripts/verify.py")
+
     def test_ordinary_commands_allowed(self):
         for c in ("pio test -e native", "git status", "git merge --no-ff feat/x -m \"Merge branch 'feat/x'\"",
                   "git log --oneline | head", "ls -la"):

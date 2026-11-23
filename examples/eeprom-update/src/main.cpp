@@ -42,10 +42,14 @@
 //
 //   yes
 //
-// Any other line cancels the command with nothing written. Every one of them
-// is also refused while src/patch_bundle.h is the placeholder, because
-// TPS25751EepromUpdater::checkImage() rejects it. Generate the real header
-// with scripts/bin_to_header.py (see patch_bundle.h).
+// Any other line cancels the command with nothing written. The line counts
+// only when it is sent after the "[confirm]" prompt: input that arrived before
+// the prompt is discarded, so a "yes" queued behind a command cannot confirm
+// a plan nobody has read.
+//
+// Every command that writes is also refused while src/patch_bundle.h is the
+// placeholder, because TPS25751EepromUpdater::checkImage() rejects it.
+// Generate the real header with scripts/bin_to_header.py (see patch_bundle.h).
 //
 // c1 and c2 halt inside the progress callback and never return to the command
 // loop; power-cycle or reset the Teensy afterwards. Keep the board powered
@@ -458,11 +462,15 @@ static void runReport()
 // Serial input
 // ---------------------------------------------------------------------------
 
-/// Reads one line, blocking. CR, LF, and CRLF each end a line. A line longer
-/// than the buffer comes back empty with tooLong set.
-static void readLine(char* buf, size_t size, bool& tooLong)
+/// True after a CR ended a line: a LF that follows is the rest of that CRLF.
+static bool lastWasCr = false;
+
+/// Reads one line, blocking, and returns the number of characters in it. CR,
+/// LF, and CRLF each end a line. The count includes any NUL character the line
+/// held, so a caller that compares the text must compare the length as well. A
+/// line longer than the buffer comes back empty, with tooLong set.
+static size_t readLine(char* buf, size_t size, bool& tooLong)
 {
-    static bool lastWasCr = false;
     size_t n = 0;
     tooLong = false;
     for (;;) {
@@ -477,8 +485,11 @@ static void readLine(char* buf, size_t size, bool& tooLong)
         }
         lastWasCr = (c == '\r');
         if (c == '\r' || c == '\n') {
-            buf[tooLong ? 0 : n] = '\0';
-            return;
+            if (tooLong) {
+                n = 0;
+            }
+            buf[n] = '\0';
+            return n;
         }
         if (n + 1 < size) {
             buf[n++] = c;
@@ -488,14 +499,45 @@ static void readLine(char* buf, size_t size, bool& tooLong)
     }
 }
 
-/// Waits for one line. Only the exact line "yes" confirms.
+/// Throws away the serial input that has already arrived and returns the
+/// number of bytes dropped. The LF of the CRLF that ended the command line is
+/// dropped without being counted.
+static size_t discardPendingInput()
+{
+    size_t dropped = 0;
+    while (Serial.available() > 0) {
+        const char c = static_cast<char>(Serial.read());
+        if (c == '\n' && lastWasCr && dropped == 0) {
+            lastWasCr = false;
+            continue;
+        }
+        ++dropped;
+    }
+    return dropped;
+}
+
+/// Asks for confirmation and waits for one line. Only the exact line "yes",
+/// typed after the prompt, confirms.
+///
+/// Input that arrived before the prompt is discarded first. Without that, a
+/// "yes" queued behind a command, or typed during a long report, would confirm
+/// a write whose plan had not been printed yet.
 static bool confirm()
 {
+    const size_t dropped = discardPendingInput();
+    if (dropped > 0) {
+        Serial.print(F("[confirm] Discarded "));
+        Serial.print(dropped);
+        Serial.println(F(" byte(s) of input that arrived before this prompt."));
+    }
     Serial.println(F("[confirm] Type yes to proceed; anything else cancels."));
+
     char line[16];
     bool tooLong = false;
-    readLine(line, sizeof(line), tooLong);
-    if (!tooLong && strcmp(line, "yes") == 0) {
+    const size_t length = readLine(line, sizeof(line), tooLong);
+    // The length is compared too: "yes" followed by a NUL and more characters
+    // is not the line "yes".
+    if (!tooLong && length == 3 && memcmp(line, "yes", 3) == 0) {
         Serial.println(F("[confirm] Confirmed."));
         return true;
     }
@@ -1148,14 +1190,20 @@ void loop()
 {
     char line[16];
     bool tooLong = false;
-    readLine(line, sizeof(line), tooLong);
+    const size_t length = readLine(line, sizeof(line), tooLong);
     if (tooLong) {
         Serial.println(F("[error] Line too long"));
         printReady();
         return;
     }
-    if (line[0] == '\0') {
+    if (length == 0) {
         return;  // an empty line at the prompt is ignored
+    }
+    if (strlen(line) != length) {
+        // The line held a NUL character; no command does.
+        Serial.println(F("[error] Unknown command"));
+        printReady();
+        return;
     }
     runCommand(line);
 }

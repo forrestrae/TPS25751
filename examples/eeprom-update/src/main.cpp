@@ -29,8 +29,13 @@
 //        prints the 64 bytes at 0x0400 before, between, and after. Starts
 //        with both pointers valid. It also starts with the Low pointer valid
 //        and the High pointer 0, but only when a p earlier in the same run
-//        left it so (its restore failed) and no u, b, c, or v has been sent
-//        since. A High pointer that is 0 for any other reason needs u or b.
+//        left it so (its restore failed) and no p2, u, b, c, or v has been
+//        sent since. A High pointer that is 0 for any other reason needs u or b.
+//   p2   Pointer rewrite test: shows whether FLwd writes more than the bytes
+//        it is given, which p cannot. Loads DATA with the 16 bytes at 0x4400,
+//        writes the High pointer with the value it already holds, and reports
+//        whether any of the 60 bytes after it changed. Needs both pointers
+//        valid. Never changes the pointer's value and repairs nothing.
 //   u    updateInactiveRegion() with the embedded image.
 //   b    updateBothRegions() with the embedded image.
 //   c1   Update the inactive region and halt after step 1 of SLVAFL1
@@ -64,7 +69,7 @@
 //
 // OUTPUT
 //   Every line starts with a tag in brackets. A command ends with "[done] <cmd>"
-//   followed by "[ready] ...". After p, u, b, v, x, and the c commands a
+//   followed by "[ready] ...". After p, p2, u, b, v, x, and the c commands a
 //   "[timing]" table gives, per 4CC task, the calls, total time, average, and
 //   maximum, measured around each executor call, then the calls the executor
 //   did not complete (not_success), the completed calls that returned a
@@ -81,8 +86,8 @@
 //     xxd -r dump.txt > eeprom.bin
 //     cmp eeprom.bin <image>_fullFlash.bin
 //
-//   The pattern takes full 16-byte lines only. p and v print lines of the
-//   same form, so keep them out of the log used for the extraction.
+//   The pattern takes full 16-byte lines only. p, p2, and v print lines of
+//   the same form, so keep them out of the log used for the extraction.
 //
 //   The library's debug level is errors only. During x the executor reports
 //   I2C errors while the controller restarts; those lines are expected.
@@ -762,9 +767,10 @@ static bool readWindow(uint8_t* buf)
     return true;
 }
 
-static void printWindow(const __FlashStringHelper* label, const uint8_t* buf, bool ok)
+static void printWindow(const __FlashStringHelper* tag, const __FlashStringHelper* label,
+                        const uint8_t* buf, bool ok)
 {
-    Serial.print(F("[p] "));
+    Serial.print(tag);
     Serial.print(label);
     if (!ok) {
         Serial.println(F(": read failed"));
@@ -799,7 +805,7 @@ static void printPointerWrite(uint32_t value, EepromUpdateStatus s)
 
 /// True while the High pointer is 0 because a pointer test in this run left it
 /// so: its restore did not report Success, and no other command that writes
-/// has started since. False after a Teensy reset.
+/// (p2, u, b, c1 to c4, v) has started since. False after a Teensy reset.
 ///
 /// Only then may the pointer test start from a High pointer of 0. The test
 /// ends by making that pointer valid, and this example has no other way to
@@ -859,7 +865,7 @@ static void cmdPointerTest()
     uint8_t afterRestore[POINTER_WINDOW];
 
     const bool beforeOk = readWindow(before);
-    printWindow(F("Before"), before, beforeOk);
+    printWindow(F("[p] "), F("Before"), before, beforeOk);
     if (!beforeOk) {
         Serial.println(F("[p] Stopped before any write."));
         printTiming();
@@ -869,7 +875,7 @@ static void cmdPointerTest()
     const EepromUpdateStatus erase = updater.writeRegionPointer(EepromRegion::High, 0);
     printPointerWrite(0, erase);
     const bool eraseOk = readWindow(afterErase);
-    printWindow(F("After the erase"), afterErase, eraseOk);
+    printWindow(F("[p] "), F("After the erase"), afterErase, eraseOk);
     printNeighbors(F("erase"), before, beforeOk, afterErase, eraseOk);
     if (erase != EepromUpdateStatus::Success) {
         Serial.println(F("[p] The erase did not report Success; attempting the restore anyway."));
@@ -881,10 +887,10 @@ static void cmdPointerTest()
     // a High pointer of 0.
     pointerTestLeftHighErased = (restore != EepromUpdateStatus::Success);
     if (pointerTestLeftHighErased) {
-        Serial.println(F("[p] The restore did not report Success. Send p again to repeat it; u, b, c1 to c4, and v end that option."));
+        Serial.println(F("[p] The restore did not report Success. Send p again to repeat it; p2, u, b, c1 to c4, and v end that option."));
     }
     const bool restoreOk = readWindow(afterRestore);
-    printWindow(F("After the restore"), afterRestore, restoreOk);
+    printWindow(F("[p] "), F("After the restore"), afterRestore, restoreOk);
     printNeighbors(F("restore"), before, beforeOk, afterRestore, restoreOk);
     Serial.print(F("[p] All 64 bytes equal the bytes before the test"));
     if (startedErased) {
@@ -895,6 +901,177 @@ static void cmdPointerTest()
         Serial.println(memcmp(before, afterRestore, POINTER_WINDOW) == 0 ? F(": yes") : F(": NO"));
     }
 
+    printPointers();
+    printTiming();
+}
+
+// ---------------------------------------------------------------------------
+// p2: does FLwd write more than the bytes it is given?
+//
+// p cannot show this. The FLrd inside writeRegionPointer() leaves the bytes
+// after the pointer in DATA, so a controller that wrote more than the four
+// bytes given would write those bytes back with their own values. p2 loads
+// DATA with other bytes first, the start of the High bundle, and then writes
+// the High pointer with the value it already holds. The pointer never changes,
+// and any byte after it that changes came out of DATA.
+// ---------------------------------------------------------------------------
+
+/// Prints the 64-byte DATA register as the host reads it. Read only.
+static void printDataRegister()
+{
+    auto data = pd.readDataRegister(/*validate=*/false);
+    if (!data || data->size() < 64) {
+        Serial.println(F("[p2] DATA register before FLwd: read failed"));
+        return;
+    }
+    Serial.println(F("[p2] DATA register before FLwd:"));
+    for (size_t off = 0; off < 64; off += 16) {
+        char offset[5];
+        snprintf(offset, sizeof(offset), "%02X:", static_cast<unsigned>(off));
+        Serial.print(F("[p2] DATA+"));
+        Serial.print(offset);
+        for (size_t i = 0; i < 16; ++i) {
+            char byte[4];
+            snprintf(byte, sizeof(byte), " %02x", data->raw()[off + i]);
+            Serial.print(byte);
+        }
+        Serial.println();
+    }
+}
+
+static void printStatusLine(const __FlashStringHelper* what, EepromUpdateStatus s)
+{
+    Serial.print(F("[p2] "));
+    Serial.print(what);
+    Serial.print(F(": "));
+    Serial.println(TPS25751EepromUpdater::toString(s));
+}
+
+static void cmdPointerRewriteTest()
+{
+    pointerTestLeftHighErased = false;  // another writing command has started
+    if (!writeAllowed()) {
+        return;
+    }
+    const uint32_t highStart = TPS25751EepromUpdater::bundleStart(EepromRegion::High);
+    uint32_t low = 0;
+    uint32_t high = 0;
+    if (updater.readRegionPointer(EepromRegion::Low, low) != EepromUpdateStatus::Success ||
+        updater.readRegionPointer(EepromRegion::High, high) != EepromUpdateStatus::Success ||
+        low != TPS25751EepromUpdater::bundleStart(EepromRegion::Low) || high != highStart) {
+        Serial.println(F("[refused] p2 needs both region pointers valid. Nothing was written."));
+        printPointers();
+        return;
+    }
+
+    printPlan(F("p2: pointer rewrite test. Writes the High pointer with the value it already holds, 0x00004400"),
+              EepromRegion::High, false);
+    Serial.println(F("[plan] The pointer's value does not change. DATA is loaded with the 16 bytes at 0x00004400 first, so a write of more than four bytes would change the bytes after the pointer."));
+    if (!confirm()) {
+        return;
+    }
+
+    exec.reset();
+    uint8_t before[POINTER_WINDOW];
+    uint8_t after[POINTER_WINDOW];
+
+    // 1. The 64 bytes at the High pointer as they are.
+    const bool beforeOk = readWindow(before);
+    printWindow(F("[p2] "), F("Before"), before, beforeOk);
+    if (!beforeOk) {
+        Serial.println(F("[p2] Stopped before any write."));
+        printTiming();
+        return;
+    }
+
+    // 2. Load DATA. FLrd returns its 16 bytes in DATA bytes 0 to 15, and
+    //    nothing below overwrites bytes 4 to 15 before the FLwd. Those bytes
+    //    must differ from what already follows the pointer, or a write of
+    //    them would change nothing and the test would prove nothing.
+    uint8_t loaded[TPS25751EepromUpdater::kFlashReadBytes];
+    const EepromUpdateStatus load = updater.readFlash(highStart, loaded);
+    printStatusLine(F("readFlash(0x00004400)"), load);
+    if (load != EepromUpdateStatus::Success) {
+        Serial.println(F("[p2] Stopped before any write."));
+        printPointers();
+        printTiming();
+        return;
+    }
+    printRow(highStart, loaded);
+    bool allErased = true;
+    for (size_t i = 4; i < sizeof(loaded); ++i) {
+        if (loaded[i] != 0xFF) {
+            allErased = false;
+        }
+    }
+    if (allErased || memcmp(loaded + 4, before + 4, sizeof(loaded) - 4) == 0) {
+        Serial.println(F("[p2] Bytes 4 to 15 at 0x00004400 are all 0xFF, or equal the bytes at 0x0404 to 0x040F, so writing them would show nothing. The test cannot be conclusive. Stopped before any write."));
+        printPointers();
+        printTiming();
+        return;
+    }
+
+    // 3. Point the write address at the High pointer.
+    const EepromUpdateStatus addressed = updater.setWriteAddress(HIGH_POINTER);
+    printStatusLine(F("setWriteAddress(0x00000400)"), addressed);
+    if (addressed != EepromUpdateStatus::Success) {
+        Serial.println(F("[p2] FLad did not succeed, so FLwd was not attempted. Nothing was written."));
+        printPointers();
+        printTiming();
+        return;
+    }
+
+    // 4. What DATA holds now, which is what FLwd finds beyond its four bytes.
+    printDataRegister();
+
+    // 5. The pointer's own value, least significant byte first: 00 44 00 00.
+    const uint8_t word[4] = {
+        static_cast<uint8_t>(highStart & 0xFF),
+        static_cast<uint8_t>((highStart >> 8) & 0xFF),
+        static_cast<uint8_t>((highStart >> 16) & 0xFF),
+        static_cast<uint8_t>((highStart >> 24) & 0xFF),
+    };
+    const EepromUpdateStatus written = updater.writeData(word, sizeof(word));
+    printStatusLine(F("writeData(00 44 00 00)"), written);
+
+    // 6. The 64 bytes afterwards.
+    const bool afterOk = readWindow(after);
+    printWindow(F("[p2] "), F("After"), after, afterOk);
+
+    // 7. The verdict.
+    Serial.print(F("[p2] Bytes 0x0400 to 0x0403 read 00 44 00 00"));
+    if (!afterOk) {
+        Serial.println(F(": unknown (read failed)"));
+    } else {
+        Serial.println(memcmp(after, word, sizeof(word)) == 0 ? F(": yes") : F(": NO"));
+    }
+    Serial.print(F("[p2] Bytes 0x0404 to 0x043F equal the bytes before"));
+    if (!afterOk) {
+        Serial.println(F(": unknown (read failed)"));
+    } else if (memcmp(before + 4, after + 4, POINTER_WINDOW - 4) == 0) {
+        Serial.println(F(": yes"));
+    } else {
+        Serial.println(F(": NO"));
+        for (size_t i = 4; i < POINTER_WINDOW; ++i) {
+            if (before[i] == after[i]) {
+                continue;
+            }
+            Serial.print(F("[p2] Changed "));
+            printHex32(HIGH_POINTER + static_cast<uint32_t>(i));
+            Serial.print(F(": "));
+            printHex8(before[i]);
+            Serial.print(F(" -> "));
+            printHex8(after[i]);
+            Serial.println();
+        }
+        Serial.println(F("[p2] FLwd wrote more than the four bytes given."));
+    }
+    if (afterOk && memcmp(after, word, sizeof(word)) != 0) {
+        Serial.println(F("[p2] The High pointer no longer reads 0x00004400. Run u or b to rewrite the High region."));
+    }
+    Serial.println(F("[p2] No repair was attempted. Nothing further was written."));
+
+    // 8.
     printPointers();
     printTiming();
 }
@@ -1221,7 +1398,7 @@ static void cmdColdReset()
 
 static void printReady()
 {
-    Serial.println(F("[ready] Commands: r p u b x c1 c2 c3 c4 v"));
+    Serial.println(F("[ready] Commands: r p p2 u b x c1 c2 c3 c4 v"));
 }
 
 static void runCommand(const char* line)
@@ -1230,6 +1407,8 @@ static void runCommand(const char* line)
         runReport();
     } else if (strcmp(line, "p") == 0) {
         cmdPointerTest();
+    } else if (strcmp(line, "p2") == 0) {
+        cmdPointerRewriteTest();
     } else if (strcmp(line, "u") == 0) {
         cmdUpdate(/*both=*/false);
     } else if (strcmp(line, "b") == 0) {
@@ -1272,7 +1451,7 @@ void setup()
     updater.setProgressCallback(onProgress, nullptr);
 
     Serial.println(F("[setup] TPS25751 EEPROM update example"));
-    Serial.println(F("[setup] r reads. x restarts the controller. p u b c1 c2 c3 c4 v write the EEPROM, each after a typed yes."));
+    Serial.println(F("[setup] r reads. x restarts the controller. p p2 u b c1 c2 c3 c4 v write the EEPROM, each after a typed yes."));
     printImage();
     printStatus();
     printReady();

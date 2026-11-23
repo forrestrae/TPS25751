@@ -20,3 +20,10 @@ __pycache__/
 # macOS metadata
 .DS_Store
 **/.DS_Store
+
+# KM003C captures written by the meter server or km003c-capture; curated bundles live
+# under test/fixtures/pd-captures/
+captures/
+
+# Bench server virtual environment (uv)
+tools/pd-bench/.venv/

@@ -2065,35 +2065,106 @@ void test_update_region_executor_failure_at_every_call()
 
 void test_update_region_return_code_fault_at_every_call()
 {
-    // A wrong DATA byte 0 at each of the 26 calls: 0x01 (an error code, or a
+    // A wrong DATA byte 0 at every call of an update: 0x01 (an error code, or a
     // wrong first byte of a read), 0xFF (busy, or an erased byte), and 0x00
     // with the task not run (a write that reports success and writes nothing).
     // Whatever the status, a region must still boot; and Success must mean the
     // requested state. Some of these faults lead the fake into answers of its
     // own that the TRM does not describe (an FLwd after an FLad that did not
     // take). The assertions do not depend on which status results.
+    //
+    // The sweep runs at 100 bytes (26 calls) and at the real 14336 bytes (1359
+    // calls). The length matters: bytes that land in the wrong place stay in
+    // unused EEPROM for a short image and reach the other region for the real
+    // one.
+    //
+    // One case is left out: the FLad to the bundle start returning 0x00
+    // without taking effect. It does not keep a region bootable at the real
+    // length, and test_update_region_limit_step_2_trusts_the_write_address
+    // pins what it does instead.
     const uint8_t codes[] = {0x01, 0xFF, 0x00};
-    for (EepromRegion target : {EepromRegion::Low, EepromRegion::High}) {
-        const EepromRegion other = TPS25751EepromUpdater::otherRegion(target);
-        for (uint8_t rc : codes) {
-            for (size_t idx = 0; idx < SMALL_UPDATE_CALLS; ++idx) {
-                Board b;
-                b.fake.failCall(idx, Fault::returnCodeOnly(rc));
-                TPS25751EepromUpdater u(b.fake);
-                const char *where = at("call", idx, rc == 0x01 ? "rc 0x01" : rc == 0xFF ? "rc 0xFF" : "rc 0x00");
+    const size_t lengths[] = {SMALL_LEN, BUNDLE_LEN};
+    for (size_t length : lengths) {
+        const size_t callCount = stepsOf(length).size();
+        TEST_ASSERT_EQUAL_size_t(length == SMALL_LEN ? SMALL_UPDATE_CALLS : 1359, callCount);
+        for (EepromRegion target : {EepromRegion::Low, EepromRegion::High}) {
+            const EepromRegion other = TPS25751EepromUpdater::otherRegion(target);
+            for (uint8_t rc : codes) {
+                for (size_t idx = 0; idx < callCount; ++idx) {
+                    if (idx == IDX_BUNDLE_FLAD && rc == 0x00) continue;
 
-                const EepromUpdateStatus s = u.updateRegion(target, b.newBundle.data(), b.newBundle.size());
+                    Board b(length);
+                    b.fake.failCall(idx, Fault::returnCodeOnly(rc));
+                    TPS25751EepromUpdater u(b.fake);
+                    const char *where =
+                        at("call", idx, rc == 0x01 ? "rc 0x01" : rc == 0xFF ? "rc 0xFF" : "rc 0x00");
 
-                assertStillBoots(b, where);
-                if (s == EepromUpdateStatus::Success) {
-                    TEST_ASSERT_TRUE_MESSAGE(regionHolds(b.fake, target, b.newBundle), where);
-                    TEST_ASSERT_TRUE_MESSAGE(pointerValid(b.fake, target), where);
-                    TEST_ASSERT_EQUAL_HEX32_MESSAGE(0, pointerOf(b.fake, other), where);
-                    ASSERT_STEP_MESSAGE(EepromUpdateStep::Done, u.lastStep(), where);
-                } else {
-                    TEST_ASSERT_TRUE_MESSAGE(u.lastStep() != EepromUpdateStep::Done, where);
+                    const EepromUpdateStatus s = u.updateRegion(target, b.newBundle.data(), b.newBundle.size());
+
+                    assertStillBoots(b, where);
+                    if (s == EepromUpdateStatus::Success) {
+                        TEST_ASSERT_TRUE_MESSAGE(regionHolds(b.fake, target, b.newBundle), where);
+                        TEST_ASSERT_TRUE_MESSAGE(pointerValid(b.fake, target), where);
+                        TEST_ASSERT_EQUAL_HEX32_MESSAGE(0, pointerOf(b.fake, other), where);
+                        ASSERT_STEP_MESSAGE(EepromUpdateStep::Done, u.lastStep(), where);
+                    } else {
+                        TEST_ASSERT_TRUE_MESSAGE(u.lastStep() != EepromUpdateStep::Done, where);
+                    }
                 }
             }
+        }
+    }
+}
+
+void test_update_region_limit_step_2_trusts_the_write_address()
+{
+    // A stated limit of the planned sequence, pinned here so that it is not
+    // mistaken for covered. It is not behaviour to rely on.
+    //
+    // Step 2 sends the FLad to the bundle start and then every chunk, and reads
+    // nothing back until step 3. If the controller answered that FLad with 0x00
+    // and still held its previous write address, the image would go there. The
+    // fake models that case by writing at the stale address, which is the four
+    // bytes after the target pointer that step 1 just wrote (assumption, not in
+    // the TRM; no TI document describes an FLad that reports success without
+    // taking effect).
+    //
+    // The update does fail, at FLvy or at the compare, and it leaves the target
+    // pointer at 0. But the 14336 bytes have already landed on the other
+    // region, so the "other region boots" column of the status table does not
+    // hold. The plan fixes the sequence of SLVAFL1 Figure 2-3, so the updater
+    // does not add a read-back of the first chunk; the orchestrator has raised
+    // the limit with the user. updateRegion()'s Doxygen states it.
+    for (EepromRegion target : {EepromRegion::Low, EepromRegion::High}) {
+        Board b(BUNDLE_LEN);
+        b.fake.failCall(IDX_BUNDLE_FLAD, Fault::returnCodeOnly(0x00));
+        TPS25751EepromUpdater u(b.fake);
+
+        const EepromUpdateStatus s = u.updateRegion(target, b.newBundle.data(), b.newBundle.size());
+
+        // Which of the two it is depends on how the fake decides FLvy.
+        TEST_ASSERT_TRUE(s == EepromUpdateStatus::VerifyFailed || s == EepromUpdateStatus::CompareMismatch);
+        TEST_ASSERT_EQUAL_HEX32(0, pointerOf(b.fake, target));
+        // Every chunk went out before anything was read back.
+        TEST_ASSERT_EQUAL_size_t(1 + 448, b.fake.countOf("FLwd"));
+
+        // The whole image sits at the stale address.
+        const uint32_t stale = TPS25751EepromUpdater::regionPointerAddress(target) + 4;
+        TEST_ASSERT_EQUAL_HEX8_ARRAY(b.newBundle.data(), &b.fake.eeprom[stale], BUNDLE_LEN);
+
+        if (target == EepromRegion::Low) {
+            // 0x0004 to 0x3803 covers the High pointer at 0x0400: neither
+            // pointer is valid any more.
+            TEST_ASSERT_FALSE(pointerValid(b.fake, EepromRegion::Low));
+            TEST_ASSERT_FALSE(pointerValid(b.fake, EepromRegion::High));
+        } else {
+            // 0x0404 to 0x3C03 covers the Low bundle from 0x0800: the Low
+            // pointer is still valid and leads to a region that is neither
+            // bundle.
+            TEST_ASSERT_TRUE(pointerValid(b.fake, EepromRegion::Low));
+            TEST_ASSERT_FALSE(regionHolds(b.fake, EepromRegion::Low, b.oldBundle));
+            TEST_ASSERT_FALSE(regionHolds(b.fake, EepromRegion::Low, b.newBundle));
+            TEST_ASSERT_FALSE(pointerValid(b.fake, EepromRegion::High));
         }
     }
 }
@@ -3015,6 +3086,7 @@ int main(int, char **)
     RUN_TEST(test_update_region_neighbor_change_stops_the_update);
     RUN_TEST(test_update_region_executor_failure_at_every_call);
     RUN_TEST(test_update_region_return_code_fault_at_every_call);
+    RUN_TEST(test_update_region_limit_step_2_trusts_the_write_address);
     RUN_TEST(test_progress_callback_sequence);
     RUN_TEST(test_progress_callback_marks_the_step_boundaries);
     RUN_TEST(test_progress_callback_stops_at_a_failure);

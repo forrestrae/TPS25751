@@ -31,6 +31,11 @@
 //     FLad was issued since the last reset, or when the write would pass the
 //     end, is an assumption, not in the TRM: Table 4-21 documents only 0x00
 //     (written) and 0xFF (busy). 0xFF is produced only by an injected fault.
+//     The write address is whatever the last FLad or FLwd left behind. When a
+//     fault makes an FLad report success without taking effect, the next FLwd
+//     therefore writes at the stale address, straight after the bytes written
+//     before (assumption, not in the TRM, which does not say what the
+//     controller does when FLad fails or does not take).
 //   - FLvy: 0x00 valid, 0x01 not valid (Table 4-22). Deciding validity from the
 //     four Header_ID bytes alone (little-endian 0xACE00001) is an assumption,
 //     not in the TRM, which says only that the task completes after the header
@@ -63,6 +68,7 @@
 #include <cstring>
 #include <functional>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "TPS25751CommandExecutor.h"
@@ -228,13 +234,12 @@ public:
     {
         const std::string code(cmd.code, 4);
         const size_t index = calls.size();
-        const size_t nth = countOf4(code);
         now += msPerCommand;
 
         Call call{code, std::vector<uint8_t>(), outLen, timeoutMs, {TPS25751TaskStatus::Success, 0}};
         if (inData != nullptr && inLen > 0) call.in.assign(inData, inData + inLen);
 
-        const Fault *fault = findFault(code, index, nth);
+        const Fault *fault = findFault(code, index);
 
         TPS25751TaskResult result{TPS25751TaskStatus::Success, 0};
         if (fault != nullptr && fault->status != TPS25751TaskStatus::Success) {
@@ -247,7 +252,7 @@ public:
             if (fault->hook) fault->hook(*this);
             result = TPS25751TaskResult{fault->status, 0};
             call.result = result;
-            calls.push_back(call);
+            calls.push_back(std::move(call));
             return result;
         }
 
@@ -269,7 +274,7 @@ public:
             result = TPS25751TaskResult{status, 0};
         }
         call.result = result;
-        calls.push_back(call);
+        calls.push_back(std::move(call));
         return result;
     }
 
@@ -314,10 +319,25 @@ private:
         return n;
     }
 
-    const Fault *findFault(const std::string &code, size_t index, size_t nth) const
+    // The first rule that matches, in the order the rules were added. The
+    // per-code call number is counted only when a rule for this code exists:
+    // counting walks the whole log, which a sweep over thousands of updates
+    // cannot afford on every call.
+    const Fault *findFault(const std::string &code, size_t index) const
     {
+        bool counted = false;
+        size_t nth = 0;
         for (const Rule &r : _rules) {
-            if (r.cmd.empty() ? (r.n == index) : (r.cmd == code && r.n == nth)) return &r.fault;
+            if (r.cmd.empty()) {
+                if (r.n == index) return &r.fault;
+                continue;
+            }
+            if (r.cmd != code) continue;
+            if (!counted) {
+                nth = countOf4(code);
+                counted = true;
+            }
+            if (r.n == nth) return &r.fault;
         }
         return nullptr;
     }
@@ -362,7 +382,10 @@ private:
         if (code == "FLwd") {
             // Rejecting these with 0x03 is an assumption, not in the TRM: Table
             // 4-21 documents only 0x00 and 0xFF. Writing exactly inLen bytes is
-            // also an assumption until hardware stage 2.
+            // also an assumption until hardware stage 2. So is the address: the
+            // write goes wherever the last FLad or FLwd left writeAddress, even
+            // when a later FLad was faulted into having no effect (assumption,
+            // not in the TRM).
             if (!writeAddressSet || inLen > kDataSize || writeAddress + inLen > eeprom.size()) {
                 data[0] = kRcRejected;
                 return TPS25751TaskStatus::Success;

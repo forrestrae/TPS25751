@@ -1,6 +1,6 @@
 # TPS25751 Library - Testing Strategy
 
-**Last Updated:** 2026-11-19
+**Last Updated:** 2026-11-23
 **Status:** Active
 
 ---
@@ -562,6 +562,27 @@ constexpr uint8_t APPLE_87W_SOURCE_CAPS[] = {
 };
 ```
 
+### USB PD Capture Bundles
+
+`test/fixtures/pd-captures/` holds USB PD captures from a ChargerLAB KM003C, each
+paired with the TPS25751 registers that describe the same negotiation. Its
+`README.md` indexes the bundles and defines `registers.json`, the format the bench
+console's `SNAP` command emits. `test/support/pd_capture_fixture.py` turns each
+bundle into `test/support/native/fixtures/PdCapture_<bundle>.h`, which the suites
+include as `"fixtures/PdCapture_<bundle>.h"` through the native env's
+`-I test/support/native`. The headers are committed, so `pio test -e native` needs
+no Python.
+
+A test that uses a bundle builds the register class from the bundle's register
+bytes and checks that it decodes to the wire words. Write the expected field values
+by hand from the `usb-pd-docs` tables and cite the table, so the generator cannot
+hide a decode error. After changing a bundle, rerun the generator; `--check` fails
+while a header is stale:
+
+```bash
+python3 test/support/pd_capture_fixture.py --check
+```
+
 ---
 
 ## Continuous Testing
@@ -671,6 +692,7 @@ Tests are successful when:
 | 1.1 | 2026-07-06 | Claude Code | Batch 0: replaced aspirational unit-test sections with the real, working `pio test -e native` harness (Unity, native env, Arduino stubs in `test/support/native/`, seed suite for TPS25751Status); corrected fictional API in examples; marked coverage tooling as pending |
 | 1.2 | 2026-11-19 | Claude Code | The native build compiles every register class and the factory; factory and base-class suites; line coverage with `test/coverage.sh` and `[env:native-coverage]`, with the first per-file numbers |
 | 1.3 | 2026-11-19 | Claude Code | Second coverage measurement: 98% of lines, every file at 93% or more, and the kinds of line that remain unreachable |
+| 1.4 | 2026-11-23 | Claude Code | USB PD capture bundles and their generated headers |
 
 ---
 

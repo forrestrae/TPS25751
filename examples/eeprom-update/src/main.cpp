@@ -27,8 +27,10 @@
 // COMMANDS THAT WRITE THE EEPROM
 //   p    Pointer test: writes the High pointer to 0 and back to 0x4400, and
 //        prints the 64 bytes at 0x0400 before, between, and after. Starts
-//        with both pointers valid, or with the Low pointer valid and the High
-//        pointer 0, which is what a test whose restore failed leaves behind.
+//        with both pointers valid. It also starts with the Low pointer valid
+//        and the High pointer 0, but only when a p earlier in the same run
+//        left it so (its restore failed) and no u, b, c, or v has been sent
+//        since. A High pointer that is 0 for any other reason needs u or b.
 //   u    updateInactiveRegion() with the embedded image.
 //   b    updateBothRegions() with the embedded image.
 //   c1   Update the inactive region and halt after step 1 of SLVAFL1
@@ -795,49 +797,55 @@ static void printPointerWrite(uint32_t value, EepromUpdateStatus s)
     Serial.println(TPS25751EepromUpdater::toString(s));
 }
 
+/// True while the High pointer is 0 because a pointer test in this run left it
+/// so: its restore did not report Success, and no other command that writes
+/// has started since. False after a Teensy reset.
+///
+/// Only then may the pointer test start from a High pointer of 0. The test
+/// ends by making that pointer valid, and this example has no other way to
+/// validate a pointer without FLvy and the compare. A High pointer that is 0
+/// for another reason (v, c1, c2, a failed update) can stand in front of a
+/// region that is not a good bundle, and FLvy may check the header only, so
+/// from there the High region has to be rewritten with u or b.
+static bool pointerTestLeftHighErased = false;
+
 static void cmdPointerTest()
 {
     if (!writeAllowed()) {
         return;
     }
-    // Start states: both pointers valid, or the Low pointer valid and the High
-    // pointer 0. The second is what a test leaves when its restore fails, so
-    // the test can be run again to finish the restore. The Low pointer must be
-    // valid either way: the controller boots Low while the High pointer is 0.
+
+    // The Low pointer must be valid whatever the High pointer reads: the
+    // controller boots Low while the test holds the High pointer at 0.
     const uint32_t highStart = TPS25751EepromUpdater::bundleStart(EepromRegion::High);
     uint32_t low = 0;
     uint32_t high = 0;
     if (updater.readRegionPointer(EepromRegion::Low, low) != EepromUpdateStatus::Success ||
         updater.readRegionPointer(EepromRegion::High, high) != EepromUpdateStatus::Success ||
-        low != TPS25751EepromUpdater::bundleStart(EepromRegion::Low) ||
-        (high != highStart && high != 0)) {
-        Serial.println(F("[refused] The pointer test needs the Low pointer valid and the High pointer valid or 0. Nothing was written."));
+        low != TPS25751EepromUpdater::bundleStart(EepromRegion::Low)) {
+        Serial.println(F("[refused] The pointer test needs the Low pointer valid. Nothing was written."));
         printPointers();
         return;
     }
-    const bool startedErased = (high == 0);
 
-    // From a High pointer of 0 the test ends by making that pointer valid, so
-    // the region behind it has to hold a bundle. FLvy is the only check there
-    // is without knowing which image the region holds.
-    EepromUpdateStatus highVerify = EepromUpdateStatus::Success;
-    if (startedErased) {
-        highVerify = updater.verifyBundle(highStart);
-        if (highVerify != EepromUpdateStatus::Success) {
-            Serial.print(F("[refused] The High pointer is 0 and FLvy at 0x00004400 returned "));
-            Serial.print(TPS25751EepromUpdater::toString(highVerify));
-            Serial.println(F(". Run u or b instead. Nothing was written."));
-            printPointers();
-            return;
-        }
+    // Start states: both pointers valid, or the High pointer 0 because this
+    // run's own test left it so.
+    const bool startedErased = (high == 0);
+    if (startedErased && !pointerTestLeftHighErased) {
+        Serial.println(F("[refused] The High pointer is 0, and no pointer test in this run left it so. Run u or b to rewrite the High region. Nothing was written."));
+        printPointers();
+        return;
+    }
+    if (!startedErased && high != highStart) {
+        Serial.println(F("[refused] The High pointer is neither valid nor 0. Run u or b to rewrite the High region. Nothing was written."));
+        printPointers();
+        return;
     }
 
     printPlan(F("p: pointer test. Writes the High pointer to 0, then back to 0x00004400"),
               EepromRegion::High, false);
     if (startedErased) {
-        Serial.println(F("[plan] Start state: Low pointer valid, High pointer 0. The test ends with the High pointer valid."));
-        Serial.println(F("[plan] FLvy High bundle at 0x00004400: Success"));
-        Serial.println(F("[plan] Warning: the High region is not compared with any image. Use p from this state only after a p whose restore failed. After c1, c2, v, or a failed update, run u or b instead."));
+        Serial.println(F("[plan] Start state: Low pointer valid, High pointer 0, left by a pointer test in this run whose restore failed. The test ends with the High pointer valid."));
     } else {
         Serial.println(F("[plan] Start state: both pointers valid."));
     }
@@ -869,6 +877,12 @@ static void cmdPointerTest()
 
     const EepromUpdateStatus restore = updater.writeRegionPointer(EepromRegion::High, highStart);
     printPointerWrite(highStart, restore);
+    // Only a restore that did not report Success lets the next test start from
+    // a High pointer of 0.
+    pointerTestLeftHighErased = (restore != EepromUpdateStatus::Success);
+    if (pointerTestLeftHighErased) {
+        Serial.println(F("[p] The restore did not report Success. Send p again to repeat it; u, b, c1 to c4, and v end that option."));
+    }
     const bool restoreOk = readWindow(afterRestore);
     printWindow(F("After the restore"), afterRestore, restoreOk);
     printNeighbors(F("restore"), before, beforeOk, afterRestore, restoreOk);
@@ -891,6 +905,7 @@ static void cmdPointerTest()
 
 static void cmdUpdate(bool both)
 {
+    pointerTestLeftHighErased = false;  // another writing command has started
     if (!writeAllowed()) {
         return;
     }
@@ -924,6 +939,7 @@ static void cmdUpdate(bool both)
 
 static void cmdCut(uint8_t step)
 {
+    pointerTestLeftHighErased = false;  // another writing command has started
     if (!writeAllowed()) {
         return;
     }
@@ -1029,6 +1045,7 @@ static void finishExperiment(EepromRegion target, const __FlashStringHelper* not
 
 static void cmdVerifyExperiment()
 {
+    pointerTestLeftHighErased = false;  // another writing command has started
     if (!writeAllowed()) {
         return;
     }

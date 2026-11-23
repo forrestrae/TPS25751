@@ -14,7 +14,8 @@ concurrency:
 jobs:
   verify:
     # Same gate as scripts/verify.py, run independently of the scripts the
-    # pushed commits carry: commit lint, script tests, native tests, example build.
+    # pushed commits carry: commit lint, script tests, PD capture fixtures,
+    # bench server tests, native tests, example build.
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -37,6 +38,20 @@ jobs:
 
       - name: Script unit tests
         run: python3 -m unittest discover -s scripts/tests -t scripts
+
+      - name: PD capture fixtures
+        if: hashFiles('test/support/pd_capture_fixture.py') != ''
+        run: |
+          python3 test/support/pd_capture_fixture.py --check
+          python3 -m unittest discover -s test/support -p "test_*.py"
+
+      - uses: astral-sh/setup-uv@v6
+        if: hashFiles('tools/pd-bench/pyproject.toml') != ''
+
+      - name: Bench server tests
+        if: hashFiles('tools/pd-bench/pyproject.toml') != ''
+        working-directory: tools/pd-bench
+        run: uv run --locked pytest
 
       - name: Native unit tests
         run: pio test -e native

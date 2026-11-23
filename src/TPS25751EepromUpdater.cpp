@@ -1,5 +1,6 @@
 #include "TPS25751EepromUpdater.h"
 #include "TPS25751BootFlags.h"
+#include "TPS25751Mode.h"
 #include "TPS25751Debug.h"
 #include <stdio.h>
 #include <string.h>
@@ -56,6 +57,34 @@ uint32_t TPS25751EepromUpdater::getLe32(const uint8_t* in)
          | (static_cast<uint32_t>(in[3]) << 24);
 }
 
+EepromUpdateStatus TPS25751EepromUpdater::mapPointerWriteFailure(EepromUpdateStatus s,
+                                                                 EepromUpdateStatus stepFailure)
+{
+    switch (s) {
+        case EepromUpdateStatus::Success:
+        case EepromUpdateStatus::CommandRejected:
+        case EepromUpdateStatus::CommandTimeout:
+        case EepromUpdateStatus::I2cError:
+        case EepromUpdateStatus::PointerNeighborsChanged:
+            return s;
+        default:
+            return stepFailure;
+    }
+}
+
+void TPS25751EepromUpdater::reportProgress(uint32_t done, uint32_t total)
+{
+    if (_progress != nullptr) {
+        _progress(done, total, _progressCtx);
+    }
+}
+
+void TPS25751EepromUpdater::setProgressCallback(EepromProgressCallback callback, void* ctx)
+{
+    _progress = callback;
+    _progressCtx = ctx;
+}
+
 // ---------------------------------------------------------------------------
 // Task primitives
 // ---------------------------------------------------------------------------
@@ -110,6 +139,65 @@ EepromUpdateStatus TPS25751EepromUpdater::verifyBundle(uint32_t addr)
     return EepromUpdateStatus::Success;
 }
 
+EepromUpdateStatus TPS25751EepromUpdater::setWriteAddress(uint32_t addr)
+{
+    uint8_t payload[4];
+    putLe32(payload, addr);  // Table 4-20: "treated as 32-bit little-endian value"
+
+    const TPS25751TaskResult result = _exec.executeCommand(
+        CMD_FLAD, payload, sizeof(payload), nullptr, 0, FLAD_CMD_TIMEOUT_MS);
+
+    if (result.status != TPS25751TaskStatus::Success) {
+        TPS_DEBUG_ERROR(DEBUG_CAT_TASK, "EEPROM: FLad to 0x%08lX failed, executor status %u",
+                        static_cast<unsigned long>(addr), static_cast<unsigned>(result.status));
+        return mapTaskStatus(result.status);
+    }
+
+    // The whole return byte must be 0. Table 4-1 puts TaskResult in bits 3:0 and
+    // lets a task use bits 7:4 while TaskResult is 0x0, so this can report a
+    // false failure and never a false success.
+    if (result.returnCode != kTaskSuccess) {
+        TPS_DEBUG_ERROR(DEBUG_CAT_TASK, "EEPROM: FLad to 0x%08lX returned 0x%02X",
+                        static_cast<unsigned long>(addr), result.returnCode);
+        return EepromUpdateStatus::SetAddressFailed;
+    }
+
+    TPS_DEBUG_TRACE(DEBUG_CAT_TASK, "EEPROM: FLad to 0x%08lX", static_cast<unsigned long>(addr));
+    return EepromUpdateStatus::Success;
+}
+
+EepromUpdateStatus TPS25751EepromUpdater::writeData(const uint8_t* data, size_t len)
+{
+    // No task for a rejected argument: an FLwd with no payload would write
+    // whatever DATA still holds.
+    if (data == nullptr || len == 0 || len > kFlashWriteChunk) {
+        TPS_DEBUG_ERROR(DEBUG_CAT_TASK, "EEPROM: FLwd refused, bad argument (len=%u)",
+                        static_cast<unsigned>(len));
+        return EepromUpdateStatus::BadImageLength;
+    }
+
+    const TPS25751TaskResult result = _exec.executeCommand(
+        CMD_FLWD, data, len, nullptr, 0, FLWD_CMD_TIMEOUT_MS);
+
+    if (result.status != TPS25751TaskStatus::Success) {
+        TPS_DEBUG_ERROR(DEBUG_CAT_TASK, "EEPROM: FLwd of %u bytes failed, executor status %u",
+                        static_cast<unsigned>(len), static_cast<unsigned>(result.status));
+        return mapTaskStatus(result.status);
+    }
+
+    // Table 4-21 gives FLwd two codes of its own: 0x00 written, 0xFF busy. Any
+    // other value has no documented meaning and is treated as a failure.
+    if (result.returnCode == kWriteBusy) {
+        TPS_DEBUG_WARN(DEBUG_CAT_TASK, "EEPROM: FLwd reported flash busy (0xFF)");
+        return EepromUpdateStatus::FlashBusy;
+    }
+    if (result.returnCode != kWriteDone) {
+        TPS_DEBUG_ERROR(DEBUG_CAT_TASK, "EEPROM: FLwd returned 0x%02X", result.returnCode);
+        return EepromUpdateStatus::WriteFailed;
+    }
+    return EepromUpdateStatus::Success;
+}
+
 // ---------------------------------------------------------------------------
 // Region pointers and selection
 // ---------------------------------------------------------------------------
@@ -123,6 +211,57 @@ EepromUpdateStatus TPS25751EepromUpdater::readRegionPointer(EepromRegion r, uint
     }
     value = getLe32(bytes);
     return EepromUpdateStatus::Success;
+}
+
+EepromUpdateStatus TPS25751EepromUpdater::writeWordChecked(uint32_t addr, uint32_t value)
+{
+    // 1. Keep the 16 bytes at the address; bytes 4 to 15 must survive the write.
+    uint8_t before[kFlashReadBytes];
+    EepromUpdateStatus s = readFlash(addr, before);
+    if (s != EepromUpdateStatus::Success) {
+        return s;
+    }
+
+    // 2. Point the write address at the word.
+    s = setWriteAddress(addr);
+    if (s != EepromUpdateStatus::Success) {
+        return s;
+    }
+
+    // 3. Write the four bytes, least significant first. Busy is not retried here.
+    uint8_t word[4];
+    putLe32(word, value);
+    s = writeData(word, sizeof(word));
+    if (s != EepromUpdateStatus::Success) {
+        return s;
+    }
+
+    // 4. Read back. The neighbors are checked first: a write that reached past
+    //    the word matters more than a word that did not take.
+    uint8_t after[kFlashReadBytes];
+    s = readFlash(addr, after);
+    if (s != EepromUpdateStatus::Success) {
+        return s;
+    }
+    if (memcmp(before + sizeof(word), after + sizeof(word), kFlashReadBytes - sizeof(word)) != 0) {
+        TPS_DEBUG_ERROR(DEBUG_CAT_TASK,
+                        "EEPROM: bytes 4 to 15 after 0x%08lX changed during a 4-byte write",
+                        static_cast<unsigned long>(addr));
+        return EepromUpdateStatus::PointerNeighborsChanged;
+    }
+    if (getLe32(after) != value) {
+        TPS_DEBUG_ERROR(DEBUG_CAT_TASK, "EEPROM: word at 0x%08lX reads 0x%08lX, wrote 0x%08lX",
+                        static_cast<unsigned long>(addr),
+                        static_cast<unsigned long>(getLe32(after)),
+                        static_cast<unsigned long>(value));
+        return EepromUpdateStatus::CompareMismatch;
+    }
+    return EepromUpdateStatus::Success;
+}
+
+EepromUpdateStatus TPS25751EepromUpdater::writeRegionPointer(EepromRegion r, uint32_t value)
+{
+    return writeWordChecked(regionPointerAddress(r), value);
 }
 
 EepromUpdateStatus TPS25751EepromUpdater::selectTargetRegion(EepromRegion& target)
@@ -173,18 +312,238 @@ EepromUpdateStatus TPS25751EepromUpdater::selectTargetRegion(EepromRegion& targe
 }
 
 // ---------------------------------------------------------------------------
+// Update flows (SLVAFL1 Figure 2-3)
+// ---------------------------------------------------------------------------
+
+EepromUpdateStatus TPS25751EepromUpdater::preflight(EepromRegion target, const uint8_t* image,
+                                                    size_t length)
+{
+    // 1. SLVAFL1 describes the EEPROM update with the controller in APP mode.
+    TPS25751Mode mode;
+    if (!_exec.readMode(mode)) {
+        TPS_DEBUG_ERROR(DEBUG_CAT_TASK, "EEPROM: failed to read MODE");
+        return EepromUpdateStatus::I2cError;
+    }
+    if (!mode.isApplicationMode()) {
+        TPS_DEBUG_ERROR(DEBUG_CAT_TASK, "EEPROM: MODE is not APP; update refused");
+        return EepromUpdateStatus::NotInAppMode;
+    }
+
+    // 2. The controller found an EEPROM on I2Cc at boot.
+    TPS25751BootFlags flags;
+    if (!_exec.readBootFlags(flags)) {
+        TPS_DEBUG_ERROR(DEBUG_CAT_TASK, "EEPROM: failed to read BOOT_FLAGS");
+        return EepromUpdateStatus::I2cError;
+    }
+    if (!flags.i2cEepromPresent()) {
+        TPS_DEBUG_ERROR(DEBUG_CAT_TASK, "EEPROM: BOOT_FLAGS reports no I2C EEPROM; update refused");
+        return EepromUpdateStatus::NoEepromPresent;
+    }
+
+    // 3. The image is a bundle and fits the target region.
+    EepromUpdateStatus s = checkImage(image, length, regionCapacity(target));
+    if (s != EepromUpdateStatus::Success) {
+        TPS_DEBUG_ERROR(DEBUG_CAT_TASK, "EEPROM: image rejected (%s)", toString(s));
+        return s;
+    }
+
+    // 4. The region being kept must be bootable before the target pointer is
+    //    erased, or the erase would leave no valid pointer at all.
+    const EepromRegion other = otherRegion(target);
+    uint32_t otherPointer = 0;
+    s = readRegionPointer(other, otherPointer);
+    if (s != EepromUpdateStatus::Success) {
+        return s;
+    }
+    if (otherPointer != bundleStart(other)) {
+        TPS_DEBUG_ERROR(DEBUG_CAT_TASK,
+                        "EEPROM: %s pointer reads 0x%08lX, not its bundle start; update of %s refused",
+                        toString(other), static_cast<unsigned long>(otherPointer), toString(target));
+        return EepromUpdateStatus::NoBootableRegion;
+    }
+    return EepromUpdateStatus::Success;
+}
+
+EepromUpdateStatus TPS25751EepromUpdater::writeChunk(uint32_t addr, const uint8_t* data, size_t len)
+{
+    EepromUpdateStatus s = writeData(data, len);
+
+    // Busy: wait, set the address again, and send the same chunk. The fresh FLad
+    // makes the retry independent of whether the busy attempt moved the address.
+    for (uint8_t retry = 0; s == EepromUpdateStatus::FlashBusy && retry < FLWD_BUSY_RETRIES; ++retry) {
+        _exec.delayMs(FLWD_BUSY_RETRY_DELAY_MS);
+        const EepromUpdateStatus a = setWriteAddress(addr);
+        if (a != EepromUpdateStatus::Success) {
+            return a;
+        }
+        s = writeData(data, len);
+    }
+    return s;
+}
+
+EepromUpdateStatus TPS25751EepromUpdater::writeBundle(EepromRegion target, const uint8_t* image,
+                                                      size_t length)
+{
+    const uint32_t base = bundleStart(target);
+    const uint32_t total = static_cast<uint32_t>(length);
+
+    // Step 1 is complete and no task of step 2 has been issued yet.
+    reportProgress(0, total);
+
+    EepromUpdateStatus s = setWriteAddress(base);
+    if (s != EepromUpdateStatus::Success) {
+        return s;
+    }
+
+    // The write address advances after each successful FLwd (Table 4-21), so the
+    // chunks need no FLad between them. Both bundle starts are multiples of 32,
+    // so no chunk crosses a 32-byte page. The last chunk goes out at its true
+    // length.
+    size_t offset = 0;
+    while (offset < length) {
+        const size_t remaining = length - offset;
+        const size_t n = (remaining < kFlashWriteChunk) ? remaining : kFlashWriteChunk;
+        s = writeChunk(base + static_cast<uint32_t>(offset), image + offset, n);
+        if (s != EepromUpdateStatus::Success) {
+            TPS_DEBUG_ERROR(DEBUG_CAT_TASK, "EEPROM: bundle write stopped at image offset 0x%04lX (%s)",
+                            static_cast<unsigned long>(offset), toString(s));
+            return s;
+        }
+        offset += n;
+        reportProgress(static_cast<uint32_t>(offset), total);
+    }
+    return EepromUpdateStatus::Success;
+}
+
+EepromUpdateStatus TPS25751EepromUpdater::updateRegion(EepromRegion target, const uint8_t* image,
+                                                       size_t length, EepromUpdateOptions opt)
+{
+    const EepromRegion other = otherRegion(target);
+    const uint32_t start = bundleStart(target);
+    _lastTarget = target;
+
+    // Every failure below returns at once: nothing is written after it.
+
+    _lastStep = EepromUpdateStep::Preflight;
+    EepromUpdateStatus s = preflight(target, image, length);
+    if (s != EepromUpdateStatus::Success) {
+        return s;
+    }
+
+    // Step 1: erase the target pointer, so that the controller cannot load the
+    // region while it is being written.
+    _lastStep = EepromUpdateStep::ErasePointer;
+    s = mapPointerWriteFailure(writeRegionPointer(target, 0), EepromUpdateStatus::PointerEraseFailed);
+    if (s != EepromUpdateStatus::Success) {
+        return s;
+    }
+
+    // Step 2: write the bundle.
+    _lastStep = EepromUpdateStep::WriteBundle;
+    s = writeBundle(target, image, length);
+    if (s != EepromUpdateStatus::Success) {
+        return s;
+    }
+
+    // Step 3: FLvy, the compare, and only then the pointer. SLVAFL1's sample
+    // code ignores the executor result for FLvy; this does not.
+    _lastStep = EepromUpdateStep::VerifyBundle;
+    s = verifyBundle(start);
+    if (s != EepromUpdateStatus::Success) {
+        return s;
+    }
+
+    if (opt.compareAfterWrite) {
+        _lastStep = EepromUpdateStep::CompareBundle;
+        s = compareImage(target, image, length, nullptr, /*report=*/true);
+        if (s != EepromUpdateStatus::Success) {
+            return s;
+        }
+    }
+
+    _lastStep = EepromUpdateStep::RestorePointer;
+    s = mapPointerWriteFailure(writeRegionPointer(target, start), EepromUpdateStatus::PointerRestoreFailed);
+    if (s != EepromUpdateStatus::Success) {
+        return s;
+    }
+
+    // Step 4: erase the old pointer, so that the controller boots the new region.
+    if (opt.invalidateOldRegion) {
+        _lastStep = EepromUpdateStep::EraseOldPointer;
+        s = mapPointerWriteFailure(writeRegionPointer(other, 0), EepromUpdateStatus::OldPointerEraseFailed);
+        if (s != EepromUpdateStatus::Success) {
+            return s;
+        }
+    }
+
+    _lastStep = EepromUpdateStep::Done;
+    TPS_DEBUG_INFO(DEBUG_CAT_TASK, "EEPROM: %s region updated, %lu bytes",
+                   toString(target), static_cast<unsigned long>(length));
+    return EepromUpdateStatus::Success;
+}
+
+EepromUpdateStatus TPS25751EepromUpdater::updateInactiveRegion(const uint8_t* image, size_t length)
+{
+    _lastStep = EepromUpdateStep::Preflight;
+    EepromRegion target = EepromRegion::Low;
+    const EepromUpdateStatus s = selectTargetRegion(target);
+    if (s != EepromUpdateStatus::Success) {
+        return s;
+    }
+    return updateRegion(target, image, length);
+}
+
+EepromUpdateStatus TPS25751EepromUpdater::updateBothRegions(const uint8_t* image, size_t length)
+{
+    // The image must fit both regions before either is written, or the first
+    // pass could complete with an image the second region cannot hold.
+    _lastStep = EepromUpdateStep::Preflight;
+    const uint32_t lowCapacity = regionCapacity(EepromRegion::Low);
+    const uint32_t highCapacity = regionCapacity(EepromRegion::High);
+    EepromUpdateStatus s = checkImage(image, length,
+                                      (lowCapacity < highCapacity) ? lowCapacity : highCapacity);
+    if (s != EepromUpdateStatus::Success) {
+        return s;
+    }
+
+    s = updateInactiveRegion(image, length);
+    if (s != EepromUpdateStatus::Success) {
+        return s;
+    }
+
+    // Second pass: the region the first pass kept. Its pointer was erased by
+    // step 4 of the first pass, and the first target now boots, so pre-flight
+    // check 4 holds. Step 4 is skipped, which leaves both pointers valid.
+    EepromUpdateOptions second;
+    second.invalidateOldRegion = false;
+    return updateRegion(otherRegion(_lastTarget), image, length, second);
+}
+
+// ---------------------------------------------------------------------------
 // Read-back
 // ---------------------------------------------------------------------------
 
 EepromUpdateStatus TPS25751EepromUpdater::compareRegion(EepromRegion r, const uint8_t* image,
                                                         size_t length, uint32_t* firstMismatch)
 {
+    return compareImage(r, image, length, firstMismatch, /*report=*/false);
+}
+
+EepromUpdateStatus TPS25751EepromUpdater::compareImage(EepromRegion r, const uint8_t* image,
+                                                       size_t length, uint32_t* firstMismatch,
+                                                       bool report)
+{
     if (image == nullptr || length == 0 || length > regionCapacity(r)) {
         return EepromUpdateStatus::BadImageLength;
     }
 
     const uint32_t base = bundleStart(r);
+    const uint32_t total = static_cast<uint32_t>(length);
     uint8_t bytes[kFlashReadBytes];
+
+    if (report) {
+        reportProgress(0, total);
+    }
 
     for (size_t offset = 0; offset < length; offset += kFlashReadBytes) {
         const EepromUpdateStatus s = readFlash(base + static_cast<uint32_t>(offset), bytes);
@@ -203,6 +562,9 @@ EepromUpdateStatus TPS25751EepromUpdater::compareRegion(EepromRegion r, const ui
                 }
                 return EepromUpdateStatus::CompareMismatch;
             }
+        }
+        if (report) {
+            reportProgress(static_cast<uint32_t>(offset + n), total);
         }
     }
     return EepromUpdateStatus::Success;
@@ -289,4 +651,20 @@ const char* TPS25751EepromUpdater::toString(EepromUpdateStatus s)
 const char* TPS25751EepromUpdater::toString(EepromRegion r)
 {
     return (r == EepromRegion::Low) ? "Low" : "High";
+}
+
+const char* TPS25751EepromUpdater::toString(EepromUpdateStep step)
+{
+    switch (step) {
+        case EepromUpdateStep::None:            return "None";
+        case EepromUpdateStep::Preflight:       return "Preflight";
+        case EepromUpdateStep::ErasePointer:    return "ErasePointer";
+        case EepromUpdateStep::WriteBundle:     return "WriteBundle";
+        case EepromUpdateStep::VerifyBundle:    return "VerifyBundle";
+        case EepromUpdateStep::CompareBundle:   return "CompareBundle";
+        case EepromUpdateStep::RestorePointer:  return "RestorePointer";
+        case EepromUpdateStep::EraseOldPointer: return "EraseOldPointer";
+        case EepromUpdateStep::Done:            return "Done";
+        default:                                return "Unknown";
+    }
 }

@@ -2,7 +2,7 @@
 
 /**
  * @file TPS25751EepromUpdater.h
- * @brief Read-back and inspection of the TPS25751 configuration EEPROM over I2Ct
+ * @brief Update and read-back of the TPS25751 configuration EEPROM over I2Ct
  *
  * The TPS25751 boots its patch bundle from an external EEPROM on its I2Cc bus. A
  * host on I2Ct reaches that EEPROM through the flash 4CC tasks: FLrd reads, FLad
@@ -11,10 +11,18 @@
  * layout and the update flow, and its EEPROM Boot Flow section says the host
  * writes the EEPROM once MODE reads APP.
  *
- * This version provides the read-only part: the FLrd and FLvy primitives, region
- * pointer reads, target-region selection, comparison with an image, a hex dump,
- * and pure image checks. It issues no FLad, FLwd, or GAID, so it cannot change
- * the EEPROM or reset the controller.
+ * What the class provides:
+ * - the task primitives readFlash(), setWriteAddress(), writeData(), and
+ *   verifyBundle();
+ * - region pointer reads and writes, the write with a read-back and a check of
+ *   the bytes that follow the pointer;
+ * - the update flows of SLVAFL1 Figure 2-3: updateRegion(),
+ *   updateInactiveRegion(), and updateBothRegions();
+ * - read-back with compareRegion() and dump(), and pure image checks.
+ *
+ * Calls that change the EEPROM: setWriteAddress() followed by writeData(),
+ * writeRegionPointer(), and the three update flows. Every other call only
+ * reads.
  *
  * EEPROM layout (SLVAFL1 Figures 2-1 and 2-6, and the source code on page 10):
  *
@@ -24,7 +32,16 @@
  * | AppConfigOffset | 0x03FC     | 0x07FC      |
  * | Bundle start    | 0x0800     | 0x4400      |
  *
- * A region pointer is valid when it equals its region's bundle start.
+ * A region pointer is valid when it equals its region's bundle start. SLVAFL1
+ * (EEPROM Update Example) states that the controller does not attempt to load
+ * a region whose pointer has been erased to 0. That is what makes the update
+ * safe: a region is written while its pointer is 0, and the pointer is
+ * restored only after the written bundle has been checked.
+ *
+ * What hardware has shown so far (stage 1 of the plan, 2026-11-22, read-only):
+ * FLrd returns its 16 bytes in DATA bytes 0 to 15, FLrd takes its address
+ * least significant byte first, and FLvy reports 0x00 for a valid bundle. No
+ * FLad or FLwd result, and no FLvy failure code, has been observed yet.
  *
  * Not a register class: it does not inherit TPS25751Register and is not in the
  * factory, in the manner of TPS25751PatchLoader (ADR-011). It depends on the
@@ -35,14 +52,17 @@
  * TPS25751 pd;
  * TPS25751HostExecutor exec(pd);
  * TPS25751EepromUpdater updater(exec);
- * uint32_t low = 0;
- * if (updater.readRegionPointer(EepromRegion::Low, low) == EepromUpdateStatus::Success) {
- *     Serial.println(low, HEX);
+ *
+ * EepromUpdateStatus s = updater.updateInactiveRegion(image, imageLength);
+ * if (s != EepromUpdateStatus::Success) {
+ *     Serial.println(TPS25751EepromUpdater::toString(s));
+ *     Serial.println(TPS25751EepromUpdater::toString(updater.lastStep()));
  * }
  * @endcode
  *
  * @see TI SLVAFL1, "TPS25751 and TPS26750 EEPROM Update Over I2C", October 2024
- * @see TI TPS25751 Technical Reference Manual SLVUCR8B, Tables 4-19 to 4-22, pp. 81-82
+ * @see TI TPS25751 Technical Reference Manual SLVUCR8B, Table 4-1 (p. 61)
+ *      and Tables 4-19 to 4-22 (pp. 81-82)
  */
 
 #include <Arduino.h>
@@ -51,11 +71,17 @@
 #include "TPS25751CommandExecutor.h"
 
 // ---------------------------------------------------------------------------
-// Flash task codes and timeouts (TRM SLVUCR8B pages 81 and 82)
+// Task codes and timing (TRM SLVUCR8B pages 81 and 82)
 // ---------------------------------------------------------------------------
 
 /// 4CC task code: read 16 bytes of the external EEPROM (TRM Table 4-19).
 constexpr TPS25751FourCC CMD_FLRD = TPS25751FourCC::of("FLrd");
+
+/// 4CC task code: set the start address for the next EEPROM write (TRM Table 4-20).
+constexpr TPS25751FourCC CMD_FLAD = TPS25751FourCC::of("FLad");
+
+/// 4CC task code: write data at the write address, which then advances (TRM Table 4-21).
+constexpr TPS25751FourCC CMD_FLWD = TPS25751FourCC::of("FLwd");
 
 /// 4CC task code: validate the bundle header at an address (TRM Table 4-22).
 constexpr TPS25751FourCC CMD_FLVY = TPS25751FourCC::of("FLvy");
@@ -64,10 +90,24 @@ constexpr TPS25751FourCC CMD_FLVY = TPS25751FourCC::of("FLvy");
 /// call (1984 calls, default I2C clock, 2026-11-22).
 constexpr uint32_t FLRD_CMD_TIMEOUT_MS = 200;
 
+/// COMMAND-poll timeout (ms) for FLad. Not yet measured on hardware.
+constexpr uint32_t FLAD_CMD_TIMEOUT_MS = 200;
+
+/// COMMAND-poll timeout (ms) for FLwd. Not yet measured on hardware. The task
+/// completes when the data has been written (TRM Table 4-21); the 24LC256
+/// write cycle is at most 5 ms.
+constexpr uint32_t FLWD_CMD_TIMEOUT_MS = 200;
+
 /// COMMAND-poll timeout (ms) for FLvy. The task completes after the header is
 /// checked (TRM Table 4-22). It completed within this limit for both regions
 /// in hardware stage 1 (2026-11-22); its duration was not recorded.
 constexpr uint32_t FLVY_CMD_TIMEOUT_MS = 1000;
+
+/// Delay (ms) before a bundle chunk whose FLwd reported busy (0xFF) is retried.
+constexpr uint32_t FLWD_BUSY_RETRY_DELAY_MS = 10;
+
+/// Retries of one bundle chunk whose FLwd keeps reporting busy (0xFF).
+constexpr uint8_t FLWD_BUSY_RETRIES = 3;
 
 // ---------------------------------------------------------------------------
 // Types
@@ -84,26 +124,26 @@ enum class EepromRegion : uint8_t {
 /**
  * @brief Outcome of a TPS25751EepromUpdater call
  *
- * The full set is defined now so that the write flows can add to the
- * implementation without changing the API. The read-only calls raise only
- * Success, BadImageHeader, BadImageLength, NoBootableRegion, VerifyFailed,
- * CompareMismatch, CommandRejected, CommandTimeout, and I2cError.
+ * updateRegion() documents, for every value an update can return, the step
+ * that raises it and the state it leaves the EEPROM in. EepromNotBlank belongs
+ * to blank programming, which this version does not provide, so no call
+ * returns it yet.
  */
 enum class EepromUpdateStatus : uint8_t {
     Success,                  ///< The call completed as requested
     NotInAppMode,             ///< Pre-flight: MODE did not read APP
     NoEepromPresent,          ///< Pre-flight: BOOT_FLAGS (0x2D) did not report I2C EEPROM Present
     BadImageHeader,           ///< checkImage(): the image does not start with 0xACE00001
-    BadImageLength,           ///< checkImage(): the image is shorter than 0x38 bytes or longer than the region
-    NoBootableRegion,         ///< Neither region pointer equals its bundle start
+    BadImageLength,           ///< checkImage(): the image is shorter than 0x38 bytes or longer than the region. Also a null pointer or a length out of range passed to writeData() or compareRegion()
+    NoBootableRegion,         ///< Selection: neither region pointer equals its bundle start. Pre-flight: the pointer of the region being kept does not
     EepromNotBlank,           ///< Blank programming refused: a region pointer is valid
     PointerEraseFailed,       ///< Update step 1: the target pointer could not be written to 0
     SetAddressFailed,         ///< FLad reported a failure in its task return code (TRM Table 4-20; Table 4-1 puts the standard TaskResult in bits 3:0)
-    WriteFailed,              ///< FLwd returned an error other than busy
-    FlashBusy,                ///< FLwd still reported busy (0xFF) after the retries
+    WriteFailed,              ///< FLwd returned a code other than written (0x00) or busy (0xFF)
+    FlashBusy,                ///< FLwd reported busy (0xFF), in an update still busy after the retries
     VerifyFailed,             ///< FLvy reported the bundle not valid (0x01) or an unknown code
-    CompareMismatch,          ///< compareRegion(): the EEPROM differs from the image
-    PointerRestoreFailed,     ///< Update step 3: the target pointer could not be written
+    CompareMismatch,          ///< compareRegion(): the EEPROM differs from the image. writeRegionPointer(): the word read back differs from the value written
+    PointerRestoreFailed,     ///< Update step 3: the target pointer could not be written to the bundle start
     OldPointerEraseFailed,    ///< Update step 4: the old region pointer could not be written to 0
     PointerNeighborsChanged,  ///< Bytes 4 to 15 after a pointer changed during a pointer write
     ResetTimeout,             ///< The controller did not return to APP after GAID
@@ -112,18 +152,104 @@ enum class EepromUpdateStatus : uint8_t {
     I2cError                  ///< An I2C transaction or a register read failed
 };
 
+/**
+ * @brief The step an update was in when it returned
+ *
+ * lastStep() returns this. It tells a caller which row of the state table in
+ * updateRegion() applies when a call returns an executor failure
+ * (CommandRejected, CommandTimeout, or I2cError), and it tells a progress
+ * callback which phase is reporting.
+ *
+ * @see TPS25751EepromUpdater::lastStep()
+ * @see SLVAFL1 Figure 2-3
+ */
+enum class EepromUpdateStep : uint8_t {
+    None,             ///< No update has run on this object
+    Preflight,        ///< Region selection or the pre-flight checks; this call has issued no write
+    ErasePointer,     ///< Step 1: writing the target region's pointer to 0
+    WriteBundle,      ///< Step 2: FLad to the bundle start, then the FLwd chunks
+    VerifyBundle,     ///< Step 3: FLvy at the bundle start
+    CompareBundle,    ///< Step 3: FLrd compare of the written region with the image
+    RestorePointer,   ///< Step 3: writing the target pointer to the bundle start
+    EraseOldPointer,  ///< Step 4: writing the other region's pointer to 0
+    Done              ///< The most recent update completed
+};
+
+/**
+ * @brief Options for TPS25751EepromUpdater::updateRegion()
+ *
+ * The defaults give the full flow of SLVAFL1 Figure 2-3 with the added FLrd
+ * compare.
+ */
+struct EepromUpdateOptions {
+    /// Compare the written region with the image through FLrd before the
+    /// pointer is restored. FLvy completes after the header is checked (TRM
+    /// Table 4-22) and is not documented to check the bundle body, so turning
+    /// this off leaves the body unverified.
+    bool compareAfterWrite = true;
+
+    /// Run step 4 of SLVAFL1 Figure 2-3: write the other region's pointer to 0
+    /// after the target's pointer is restored. When false, both pointers are
+    /// valid at the end and the controller tries the low region first
+    /// (SLVAFL1 Figure 2-9).
+    bool invalidateOldRegion = true;
+};
+
+/**
+ * @brief Progress callback for the update flows
+ *
+ * Called synchronously from updateRegion(), and so from updateInactiveRegion()
+ * and updateBothRegions(), in two phases. TPS25751EepromUpdater::lastStep()
+ * tells them apart, and @p total is the image length in both.
+ *
+ * Write phase, lastStep() == EepromUpdateStep::WriteBundle:
+ * - once with @p done == 0, after step 1 has completed (the target pointer
+ *   has been read back as 0) and before any task of step 2 is issued;
+ * - then after every chunk whose FLwd reported success, with @p done the image
+ *   bytes written so far. The last call has @p done == @p total.
+ *
+ * Compare phase, lastStep() == EepromUpdateStep::CompareBundle, only when
+ * EepromUpdateOptions::compareAfterWrite is set:
+ * - once with @p done == 0 before the first FLrd;
+ * - then after every 16-byte read that matched the image, with @p done the
+ *   image bytes compared so far. The last call has @p done == @p total.
+ *
+ * A step that fails makes no further call, so a missing final call means the
+ * phase did not complete. updateBothRegions() runs both phases once per region.
+ *
+ * A callback that never returns stops the update where it stands: at
+ * @p done == 0 of the write phase the EEPROM is as step 1 left it (SLVAFL1
+ * Figure 2-7), and at @p done == @p total of the write phase as step 2 left it
+ * (Figure 2-8).
+ *
+ * The callback may call lastStep() and lastTarget(). A callback that returns
+ * must not call any other member of the updater and must not issue 4CC tasks
+ * through the same executor: the bundle write relies on the write address the
+ * controller holds between chunks. A callback that never returns has ended the
+ * update and is free to read the EEPROM.
+ *
+ * @param done  Image bytes written or compared so far in the current phase
+ * @param total Image length in bytes
+ * @param ctx   The pointer given to setProgressCallback()
+ */
+using EepromProgressCallback = void (*)(uint32_t done, uint32_t total, void* ctx);
+
 // ---------------------------------------------------------------------------
 // TPS25751EepromUpdater
 // ---------------------------------------------------------------------------
 
 /**
- * @brief Sequencer for the TPS25751 flash 4CC tasks (read-back subset)
+ * @brief Sequencer for the TPS25751 flash 4CC tasks
  *
  * Holds a reference to a TPS25751CommandExecutor and the EEPROM size. Every call
- * is synchronous. Use it with the controller in APP mode: SLVAFL1's EEPROM Boot
- * Flow section describes the EEPROM update in APP mode. The TRM task tables
- * (pages 81 and 82) state no mode requirement, and this class does not check
- * MODE.
+ * is synchronous and blocks until it finishes; a region update takes tens of
+ * seconds. Use it with the controller in APP mode: SLVAFL1's EEPROM Boot Flow
+ * section describes the EEPROM update in APP mode. The update flows check MODE
+ * before they write; the primitives do not.
+ *
+ * The application must not issue other 4CC tasks (for example I2Cr or I2Cw
+ * through TPS25751DownstreamDevice) from an interrupt or another task while an
+ * update runs: every task shares COMMAND and DATA.
  *
  * @note Not a register class. Does not inherit TPS25751Register. Does not
  *       register with TPS25751RegisterFactory.
@@ -132,6 +258,10 @@ class TPS25751EepromUpdater {
 public:
     /// Bytes FLrd returns per call (TRM Table 4-19, bits 127:0).
     static constexpr size_t kFlashReadBytes = 16;
+
+    /// Largest FLwd payload this class sends. The TRM accepts up to 64 bytes
+    /// and recommends 32, the default EEPROM page size the task uses (Table 4-21).
+    static constexpr size_t kFlashWriteChunk = 32;
 
     /// Header_ID at the start of every patch bundle, little-endian (SLVAFL1 section 2.1).
     static constexpr uint32_t kBundleHeaderId = 0xACE00001UL;
@@ -144,6 +274,16 @@ public:
 
     /// EEPROM size assumed when none is given: the board's 24LC256.
     static constexpr uint32_t kDefaultEepromSize = 32768;
+
+    /// Task return code this class requires from FLad: the whole byte is 0
+    /// (TRM Table 4-1, "Task completed successfully").
+    static constexpr uint8_t kTaskSuccess = 0x00;
+
+    /// FLwd return code for a successful write (TRM Table 4-21).
+    static constexpr uint8_t kWriteDone = 0x00;
+
+    /// FLwd return code for "Error, flash is busy" (TRM Table 4-21).
+    static constexpr uint8_t kWriteBusy = 0xFF;
 
     /// FLvy return code for a valid patch/configuration (TRM Table 4-22).
     static constexpr uint8_t kVerifyValid = 0x00;
@@ -198,6 +338,16 @@ public:
     }
 
     /**
+     * @brief The region that is not @p r
+     * @param r Region
+     * @return High for Low, Low for High
+     */
+    static constexpr EepromRegion otherRegion(EepromRegion r)
+    {
+        return r == EepromRegion::Low ? EepromRegion::High : EepromRegion::Low;
+    }
+
+    /**
      * @brief Bytes available for a bundle in a region
      *
      * Low runs from 0x0800 to the high bundle start; High runs from 0x4400 to the
@@ -240,6 +390,64 @@ public:
     EepromUpdateStatus readFlash(uint32_t addr, uint8_t out[kFlashReadBytes]);
 
     /**
+     * @brief Set the address of the next EEPROM write with FLad
+     *
+     * Sends the 4-byte address least significant byte first, as Table 4-20
+     * states ("treated as 32-bit little-endian value"), and requires the task
+     * return code to be 0.
+     *
+     * The whole return byte is compared with 0. Table 4-1 puts the standard
+     * TaskResult in bits 3:0 and lets a task use bits 7:4 for its own codes
+     * while TaskResult is 0x0, so a success that set bits 7:4 would be
+     * reported as SetAddressFailed. The comparison can therefore report a
+     * failure that is not one; it cannot report a success that is not one.
+     * No FLad return code has been observed on hardware yet.
+     *
+     * FLad alone changes nothing in the EEPROM. The caller owns the range:
+     * @p addr is not bounded against the EEPROM size, and what FLad returns
+     * for an address past the end of the part is undocumented.
+     *
+     * @param addr EEPROM address the next writeData() starts at
+     * @return Success for return code 0x00; SetAddressFailed for any other
+     *         code; CommandRejected, CommandTimeout, or I2cError from the executor
+     * @see TRM SLVUCR8B Table 4-20, p. 81, and Table 4-1, p. 61
+     */
+    EepromUpdateStatus setWriteAddress(uint32_t addr);
+
+    /**
+     * @brief Write up to 32 bytes at the write address with FLwd
+     *
+     * One FLwd task, with no retry. The controller writes at the address set
+     * by setWriteAddress() and advances that address after each successful
+     * write (TRM Table 4-21), so consecutive calls write consecutive bytes.
+     *
+     * The TRM accepts up to 64 bytes and recommends 32-byte chunks, the default
+     * EEPROM page size the task uses. This call accepts 1 to kFlashWriteChunk
+     * bytes. Keep each write inside one 32-byte page: the documents do not
+     * describe a write that crosses a page, and the 24LC256 wraps such a write
+     * within its own page. The update flows start page-aligned and never cross.
+     *
+     * Table 4-21 gives FLwd two return codes of its own, 0x00 and 0xFF, and
+     * does not refer to Table 4-1. Any other value is treated as a failure;
+     * no documented code produces it. No FLwd return code has been observed
+     * on hardware yet. Whether the controller writes exactly @p len bytes for
+     * a payload shorter than a page is not documented either; hardware stage 2
+     * of the plan checks it.
+     *
+     * A null @p data, a @p len of 0, and a @p len above kFlashWriteChunk
+     * return BadImageLength without issuing a task. An FLwd with no payload
+     * would write whatever DATA still holds.
+     *
+     * @param data Bytes to write; must not be nullptr
+     * @param len  Number of bytes, 1 to kFlashWriteChunk
+     * @return Success for return code 0x00; FlashBusy for 0xFF; WriteFailed
+     *         for any other code; BadImageLength for a rejected argument;
+     *         CommandRejected, CommandTimeout, or I2cError from the executor
+     * @see TRM SLVUCR8B Table 4-21, p. 82
+     */
+    EepromUpdateStatus writeData(const uint8_t* data, size_t len);
+
+    /**
      * @brief Run FLvy on the bundle at an address
      *
      * FLvy completes after the bundle header is checked; whether it also checks
@@ -271,6 +479,46 @@ public:
      */
     EepromUpdateStatus readRegionPointer(EepromRegion r, uint32_t& value);
 
+    /**
+     * @brief Write a region pointer word and confirm it
+     *
+     * Follows SLVAFL1 Figure 2-5 with one added check. Four tasks, in order:
+     *
+     * 1. FLrd the 16 bytes at the pointer address and keep bytes 4 to 15.
+     * 2. FLad to the pointer address; the return code must be 0.
+     * 3. FLwd the value as 4 bytes, least significant byte first; the return
+     *    code must be 0. A busy result (0xFF) is not retried here.
+     * 4. FLrd again. Bytes 4 to 15 must equal the bytes kept in step 1, and
+     *    bytes 0 to 3 must equal the value.
+     *
+     * The neighbor check in step 4 looks for a controller that writes more
+     * than the four bytes given, which the documents do not rule out. It is
+     * tested before the value, so a write that changed both reports
+     * PointerNeighborsChanged. The check has two limits. It reads 16 bytes, so
+     * a write that reached past byte 15 goes unseen. And it compares bytes 4
+     * to 15 with what step 1 read: if the controller took extra bytes from
+     * DATA, and DATA still held the step 1 read in those positions, it would
+     * write the same values back. dump() over the surrounding range is the
+     * complete check.
+     *
+     * This call does no pre-flight. Writing 0 to the only valid pointer leaves
+     * the EEPROM with no bootable region; updateRegion() guards against that,
+     * this call does not.
+     *
+     * State after a failure: a failure in step 1 or 2 has written nothing. A
+     * failure in step 3 or 4 leaves the pointer word uncertain until it is
+     * read again.
+     *
+     * @param r     Region whose pointer is written
+     * @param value Word to write: bundleStart(r) makes the pointer valid, 0 erases it
+     * @return Success; PointerNeighborsChanged when bytes 4 to 15 changed;
+     *         CompareMismatch when the word read back differs from @p value;
+     *         SetAddressFailed from step 2; WriteFailed or FlashBusy from step 3;
+     *         CommandRejected, CommandTimeout, or I2cError from the executor
+     * @see SLVAFL1 Figure 2-5 and the source code on page 12
+     */
+    EepromUpdateStatus writeRegionPointer(EepromRegion r, uint32_t value);
+
     // --- Flows ---------------------------------------------------------------
 
     /**
@@ -297,6 +545,120 @@ public:
      */
     EepromUpdateStatus selectTargetRegion(EepromRegion& target);
 
+    /**
+     * @brief Write a new bundle to one region and make it the region that boots
+     *
+     * Pre-flight, in this order, before any write. A failure here leaves the
+     * EEPROM unchanged:
+     *
+     * 1. MODE reads APP (NotInAppMode; I2cError if MODE cannot be read).
+     * 2. BOOT_FLAGS (0x2D) reports I2C EEPROM Present (NoEepromPresent;
+     *    I2cError if it cannot be read).
+     * 3. checkImage() accepts the image for regionCapacity(@p target)
+     *    (BadImageHeader, BadImageLength).
+     * 4. The other region's pointer equals its bundle start (NoBootableRegion).
+     *    Step 1 below is safe only when the region being kept is bootable.
+     *    Only the pointer is checked, not the bundle behind it.
+     *
+     * Then the four steps of SLVAFL1 Figure 2-3:
+     *
+     * 1. writeRegionPointer(@p target, 0).
+     * 2. FLad to bundleStart(@p target), then FLwd in 32-byte chunks, the last
+     *    chunk at its true length. A chunk whose FLwd reports busy (0xFF) is
+     *    retried up to FLWD_BUSY_RETRIES times, each retry after
+     *    FLWD_BUSY_RETRY_DELAY_MS and preceded by a fresh FLad to that chunk's
+     *    address.
+     * 3. FLvy at bundleStart(@p target); then, when @p opt.compareAfterWrite is
+     *    set, an FLrd compare of the region with the image; then
+     *    writeRegionPointer(@p target, bundleStart(@p target)).
+     * 4. When @p opt.invalidateOldRegion is set, writeRegionPointer(other, 0).
+     *
+     * The first failure ends the call. Nothing is written after it.
+     *
+     * What each status means, with "target" the region being written and
+     * "other" the region being kept:
+     *
+     * | Status | Raised by | EEPROM state afterwards |
+     * |---|---|---|
+     * | Success | The whole flow | Target holds the image and its pointer is valid. Other pointer is 0 when invalidateOldRegion is set, else unchanged |
+     * | NotInAppMode, NoEepromPresent, BadImageHeader, BadImageLength, NoBootableRegion | Pre-flight | Unchanged |
+     * | PointerEraseFailed | Step 1, when its pointer write fails with SetAddressFailed, WriteFailed, FlashBusy, or CompareMismatch | Target pointer uncertain, target region untouched. Other region still boots (SLVAFL1 Figure 2-6 or 2-7) |
+     * | SetAddressFailed | Step 2, the FLad to the bundle start or the FLad of a busy retry | Target pointer 0, region untouched or partly written. Other region boots (Figure 2-7) |
+     * | WriteFailed, FlashBusy | Step 2, an FLwd chunk | Target region partly written, pointer 0. Other region boots |
+     * | VerifyFailed | Step 3, FLvy | Target written but not valid, pointer 0. Other region boots (Figure 2-8) |
+     * | CompareMismatch | Step 3, the compare | Same as VerifyFailed |
+     * | PointerRestoreFailed | Step 3, when its pointer write fails as for step 1 | Target holds the image, its pointer uncertain. Other region boots |
+     * | OldPointerEraseFailed | Step 4, when its pointer write fails as for step 1 | Target holds the image and its pointer is valid. Other pointer uncertain, so both may be valid; the low region boots first (Figure 2-9) |
+     * | PointerNeighborsChanged | The neighbor check of the pointer write in step 1, 3, or 4 | Bytes 4 to 15 after that pointer changed. Stop and dump the EEPROM |
+     * | CommandRejected, CommandTimeout, I2cError | The executor, in any step | As the row of the step lastStep() names |
+     *
+     * For an executor failure, lastStep() gives the row: Preflight leaves the
+     * EEPROM unchanged; ErasePointer reads as PointerEraseFailed; WriteBundle
+     * as WriteFailed; VerifyBundle and CompareBundle as VerifyFailed, except
+     * that the region may in fact be valid; RestorePointer as
+     * PointerRestoreFailed; EraseOldPointer as OldPointerEraseFailed. A task
+     * that timed out may still have run, which is why those pointer states
+     * are "uncertain".
+     *
+     * The call blocks for the whole update. Stage 1 measured 17.7 ms per FLrd,
+     * so the compare alone takes about 16 s for a 14336-byte image. An
+     * application with a watchdog services it from the progress callback.
+     *
+     * @param target Region to write
+     * @param image  Bundle image (a low-region binary); must stay valid for the call
+     * @param length Image length in bytes
+     * @param opt    Options; the defaults compare after writing and erase the old pointer
+     * @return A status from the table above
+     * @see SLVAFL1 Figures 2-3 and 2-6 to 2-10
+     * @see setProgressCallback()
+     */
+    EepromUpdateStatus updateRegion(EepromRegion target, const uint8_t* image,
+                                    size_t length, EepromUpdateOptions opt = {});
+
+    /**
+     * @brief Update the region the controller should not boot from next
+     *
+     * selectTargetRegion() followed by updateRegion() with the default
+     * options. Selection runs first, so it issues FLrd before updateRegion()
+     * checks MODE. A selection failure writes nothing and leaves lastStep() at
+     * Preflight. After a completed call the updated region is the only one
+     * with a valid pointer, so the controller boots it at its next restart.
+     *
+     * @param image  Bundle image; must stay valid for the call
+     * @param length Image length in bytes
+     * @return NoBootableRegion or a read failure from selection, or the
+     *         updateRegion() status
+     * @see updateRegion() for every status and the state it leaves
+     * @see SLVAFL1 Figure 2-2
+     */
+    EepromUpdateStatus updateInactiveRegion(const uint8_t* image, size_t length);
+
+    /**
+     * @brief Bring both regions to the same bundle, with both pointers valid
+     *
+     * Runs updateInactiveRegion(), then updateRegion() on the other region
+     * with invalidateOldRegion false. The result is the full-image layout of
+     * SLVAFL1 Figure 2-6: the bundle in both regions and both pointers valid.
+     * The application note's flow, followed literally for the second pass,
+     * would always leave one pointer erased; keeping both valid is inferred
+     * from Figure 2-6, which the note presents as the normal initial state.
+     *
+     * Before any write the image is checked against the smaller of the two
+     * region capacities (BadImageHeader, BadImageLength), so the first pass
+     * cannot succeed with an image the second region cannot hold.
+     *
+     * The first failure ends the call. The states in updateRegion()'s table
+     * then apply to the pass that failed, and lastTarget() names that pass's
+     * target. A failure in the second pass leaves the first pass complete:
+     * its region holds the new bundle with a valid pointer, and boots.
+     *
+     * @param image  Bundle image; must stay valid for the call
+     * @param length Image length in bytes
+     * @return Success, or the first failure from either pass
+     * @see updateRegion() for every status and the state it leaves
+     */
+    EepromUpdateStatus updateBothRegions(const uint8_t* image, size_t length);
+
     // --- Read-back -----------------------------------------------------------
 
     /**
@@ -304,6 +666,8 @@ public:
      *
      * Reads @p length bytes from bundleStart(r) in 16-byte FLrd calls. A final
      * read shorter than 16 bytes compares only the bytes the image covers.
+     * This call does not invoke the progress callback; the compare inside
+     * updateRegion() does.
      *
      * @param r             Region
      * @param image         Image to compare against
@@ -337,6 +701,42 @@ public:
      * @return Success, or the first readFlash() failure
      */
     EepromUpdateStatus dump(uint32_t addr, size_t length, Stream& out);
+
+    // --- Progress and state ----------------------------------------------------
+
+    /**
+     * @brief Set or clear the progress callback of the update flows
+     *
+     * @param callback Function to call, or nullptr for none (the default)
+     * @param ctx      Passed back to @p callback unchanged; may be nullptr
+     * @see EepromProgressCallback for when it is called and with what
+     */
+    void setProgressCallback(EepromProgressCallback callback, void* ctx = nullptr);
+
+    /**
+     * @brief The step the most recent update was in when it returned
+     *
+     * Set by updateRegion(), updateInactiveRegion(), and updateBothRegions();
+     * the primitives, writeRegionPointer(), compareRegion(), and dump() leave
+     * it unchanged. After a failure it names the step that failed. Inside a
+     * progress callback it names the phase that is reporting.
+     *
+     * @return The step, None before the first flow, Done after a completed one
+     * @see updateRegion() for the EEPROM state each step leaves
+     */
+    EepromUpdateStep lastStep() const { return _lastStep; }
+
+    /**
+     * @brief The region the most recent updateRegion() pass wrote or meant to write
+     *
+     * Set when updateRegion() starts, whether called directly or through
+     * updateInactiveRegion() or updateBothRegions(). It is the "target" of the
+     * state table in updateRegion(). A selection failure in
+     * updateInactiveRegion() leaves the value of the pass before it.
+     *
+     * @return The region; Low before the first update
+     */
+    EepromRegion lastTarget() const { return _lastTarget; }
 
     // --- Pure helpers --------------------------------------------------------
 
@@ -380,9 +780,20 @@ public:
      */
     static const char* toString(EepromRegion r);
 
+    /**
+     * @brief Convert an EepromUpdateStep to a string
+     * @param step Step
+     * @return Pointer to a string literal; never nullptr
+     */
+    static const char* toString(EepromUpdateStep step);
+
 private:
     TPS25751CommandExecutor& _exec;
     uint32_t _eepromSize;
+    EepromProgressCallback _progress = nullptr;
+    void* _progressCtx = nullptr;
+    EepromUpdateStep _lastStep = EepromUpdateStep::None;
+    EepromRegion _lastTarget = EepromRegion::Low;
 
     /// Map a non-Success executor status to CommandRejected, CommandTimeout, or I2cError.
     static EepromUpdateStatus mapTaskStatus(TPS25751TaskStatus ts);
@@ -392,4 +803,29 @@ private:
 
     /// Read a little-endian 32-bit word from @p in[0..3].
     static uint32_t getLe32(const uint8_t* in);
+
+    /// Pass Success, the executor failures, and PointerNeighborsChanged
+    /// through; turn every other pointer-write failure into @p stepFailure.
+    static EepromUpdateStatus mapPointerWriteFailure(EepromUpdateStatus s,
+                                                     EepromUpdateStatus stepFailure);
+
+    /// The four tasks of writeRegionPointer() for the 4-byte word at @p addr.
+    EepromUpdateStatus writeWordChecked(uint32_t addr, uint32_t value);
+
+    /// The four pre-flight checks of updateRegion(); issues no write.
+    EepromUpdateStatus preflight(EepromRegion target, const uint8_t* image, size_t length);
+
+    /// Step 2 of updateRegion(): FLad, then the FLwd chunks, with progress calls.
+    EepromUpdateStatus writeBundle(EepromRegion target, const uint8_t* image, size_t length);
+
+    /// One bundle chunk at the current write address, with the busy retry;
+    /// @p addr is the chunk's EEPROM address, used by the fresh FLad of a retry.
+    EepromUpdateStatus writeChunk(uint32_t addr, const uint8_t* data, size_t len);
+
+    /// compareRegion(), with progress calls when @p report is set.
+    EepromUpdateStatus compareImage(EepromRegion r, const uint8_t* image, size_t length,
+                                    uint32_t* firstMismatch, bool report);
+
+    /// Invoke the progress callback, if one is set.
+    void reportProgress(uint32_t done, uint32_t total);
 };

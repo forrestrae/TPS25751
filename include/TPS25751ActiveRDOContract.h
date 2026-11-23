@@ -3,6 +3,7 @@
 
 #include "TPS25751Register.h"
 #include "TPS25751RegisterAddress.h"
+#include "TPS25751Rdo.h"
 
 /**
  * @brief TPS25751 Active RDO Contract Register (0x35)
@@ -11,19 +12,17 @@
  * USB PD contract, or all zeroes if no contract exists.
  *
  * Layout (SLVUCR8B (Rev. B, 2026-08), page 39):
- * - Bits 31:0    RDO of the active contract (decoded by the accessors below)
+ * - Bits 31:0    The RDO this device sent as a Sink (rawOwnRdo(), ownRdo())
  * - Bits 95:32   Reserved
- * - Bits 127:96  RequestedRDO: the RDO the port partner requested while the
- *                PD controller is the source (see requestedRDO())
+ * - Bits 127:96  RequestedRDO (rawRequestedRdo(), requestedRdo())
  *
- * The accessors decode bits 31:0 as a Fixed and Variable RDO (USB PD R3.3 Table
- * 6.19, page 142), which is the TRM's field layout. The RDO's format follows the
- * PDO at objectPosition() in the Source_Capabilities (0x30), so for other
- * contracts the lower fields mean something else: in a Battery RDO (Table 6.20)
- * bits 19:10 are Operating Power in 250 mW units, and in a PPS or AVS RDO (Tables
- * 6.21, 6.22) bits 20:9 are Output Voltage and bits 6:0 Operating Current in 50 mA
- * units. TRM reserved bit 22 is EPR Capable in every RDO. ACTIVE_PDO_CONTRACT
- * (0x34) pdoType() and apdoSubtype() tell which applies.
+ * An RDO's layout depends on the kind of PDO it requests, which the word does not
+ * say (USB PD R3.3 Tables 6.19 to 6.22), so the typed accessors take an RdoKind.
+ * For bits 31:0 the kind comes from the active PDO: rdoKindFor(activePdo()) of
+ * ACTIVE_PDO_CONTRACT (0x34). For bits 127:96 it comes from this device's own
+ * advertised PDO at that RDO's Object Position in TRANSMIT_SOURCE_CAPABILITIES (0x32):
+ * rdoKindFor(txSourceCaps.pdo(requestedRdo().objectPosition() - 1)). With RdoKind::Unknown
+ * only the common fields (Object Position and the flags) decode.
  *
  * Hardware reading (board sinking on a 20 V Fixed contract, two chargers,
  * 2026-11-19 and 2026-11-22): RequestedRDO read the same word as bits 31:0
@@ -42,67 +41,37 @@ public:
     TPS25751ActiveRDOContract(const uint8_t *data, const size_t len) : TPS25751Register(data, len) {}
     explicit TPS25751ActiveRDOContract(TPS25751Registers::RegisterInfo regInfo) : TPS25751Register(regInfo.size) {}
 
-    /**
-     * @brief Get object position (which PDO from 1-7)
-     * @return Object position (1-7)
-     */
-    uint8_t objectPosition() const;
+    /// @brief The RDO sent as Sink, bits 31:0, as read
+    uint32_t rawOwnRdo() const;
+
+    /// @brief The RequestedRDO, bits 127:96, as read; 0 if the buffer is too short
+    uint32_t rawRequestedRdo() const;
 
     /**
-     * @brief Get GiveBack flag
-     * @return true if GiveBack flag is set
-     */
-    bool giveBackFlag() const;
-
-    /**
-     * @brief Get capability mismatch flag (bit 26)
+     * @brief The RDO this device sent as a Sink (bits 31:0), decoded as @p kind
      *
-     * TRM: "Capabality Missmatch" (SLVUCR8B p.39; TI's spelling).
-     * @return true if capability mismatch detected
+     * The kind follows the active PDO: pass rdoKindFor(activePdo()) of 0x34.
      */
-    bool capabilityMismatch() const;
+    TPS25751Rdo ownRdo(RdoKind kind = RdoKind::Unknown) const;
 
     /**
-     * @brief Get USB communication capable flag
-     * @return true if USB communication capable
+     * @brief The RequestedRDO (bits 127:96), decoded as @p kind
+     *
+     * Per the TRM, the RDO a partner sent while this device is the Source, updated
+     * once the Accept message has been sent and tSrcTransition has expired (SLVUCR8B
+     * page 39). It means a partner's request only while STATUS (0x1A) reports the
+     * port role as Source. On hardware, with the board sinking, it read the same word
+     * as bits 31:0 with two chargers.
+     *
+     * The kind comes from this device's own advertised PDO at the RDO's Object
+     * Position in TRANSMIT_SOURCE_CAPABILITIES (0x32):
+     * rdoKindFor(txSourceCaps.pdo(requestedRdo().objectPosition() - 1)).
+     *
+     * TI names the deprecated field at bits 9:0 of a Fixed, Variable, or Battery RDO
+     * "Max Min Operation Current"; the specification calls it Maximum Operating
+     * Current (or Power), a copy of the operating value (maximumOperatingCurrent_mA()).
      */
-    bool usbCommCapable() const;
-
-    /**
-     * @brief Get No USB Suspend flag
-     * @return true if no USB suspend
-     */
-    bool noUSBSuspend() const;
-
-    /**
-     * @brief Get unchunked messages supported flag
-     * @return true if unchunked extended messages supported
-     */
-    bool unchunkedSupported() const;
-
-    /**
-     * @brief Get operating current/power
-     * @return Operating current in 10mA units (or power in 250mW units for Battery PDO)
-     */
-    uint16_t operatingCurrent() const;
-
-    /**
-     * @brief Get operating current in milliamps (assumes Fixed/Variable PDO)
-     * @return Operating current in mA
-     */
-    uint16_t operatingCurrent_mA() const;
-
-    /**
-     * @brief Get max/min operating current
-     * @return Max or min operating current in 10mA units (or power in 250mW units)
-     */
-    uint16_t maxMinCurrent() const;
-
-    /**
-     * @brief Get max/min operating current in milliamps (assumes Fixed/Variable PDO)
-     * @return Max/min current in mA
-     */
-    uint16_t maxMinCurrent_mA() const;
+    TPS25751Rdo requestedRdo(RdoKind kind = RdoKind::Unknown) const;
 
     /**
      * @brief Check if contract exists
@@ -110,22 +79,23 @@ public:
      */
     bool hasActiveContract() const;
 
-    /**
-     * @brief Get the RDO requested by the port partner (bits 127:96)
-     *
-     * Valid when the PD controller is acting as a source. Updated when a Source
-     * PDO has been negotiated (the Accept message has been transmitted and the
-     * tSrcTransition timer has expired). Source: SLVUCR8B (Rev. B, 2026-08),
-     * page 39.
-     *
-     * @return Raw 32-bit RequestedRDO word; 0 if the buffer is too short
-     */
-    uint32_t requestedRDO() const;
+    using TPS25751Register::debugPrint;
 
+    /// @brief Print both RDOs with their kind unknown (common fields only)
     void debugPrint(Stream &s = Serial) const override;
 
     /**
+     * @brief Print both RDOs, each decoded with its kind
+     * @param s             Output stream
+     * @param ownKind       Kind of bits 31:0, from rdoKindFor(activePdo()) of 0x34
+     * @param requestedKind Kind of bits 127:96, from the matching PDO in 0x32
+     */
+    void debugPrint(Stream &s, RdoKind ownKind, RdoKind requestedKind) const;
+
+    /**
      * @brief Validates active RDO contract register data semantically
+     *
+     * A nonzero RDO in bits 31:0 or 127:96 must have an Object Position of 1 to 7.
      * @return true if RDO contract data is logically consistent
      */
     bool isSemanticallyValid() const override;

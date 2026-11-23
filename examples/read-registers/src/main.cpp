@@ -5,6 +5,7 @@
 #include <TPS25751PowerPathStatus.h>
 #include <TPS25751BootFlags.h>
 #include <TPS25751PortConfig.h>
+#include <TPS25751Rdo.h>
 #include <TPS25751RegisterFactory.h>
 #include "TPS25751InterruptEvent.h"
 #include "TPS25751InterruptMask.h"
@@ -166,9 +167,26 @@ void print_contracts()
     else
         Serial.println(F("Failed to create/read Active PDO Contract register via factory"));
 
-    if (const auto rdoContract = pd.readActiveRDOContractRegister(true))
-        rdoContract->debugPrint();
-    else
+    if (const auto rdoContract = pd.readActiveRDOContractRegister(true)) {
+        // Bits 31:0 are the RDO sent as Sink; its kind follows the active PDO (0x34).
+        RdoKind ownKind = RdoKind::Unknown;
+        if (const auto pdoContract = pd.readActivePDOContractRegister(true))
+            ownKind = rdoKindFor(pdoContract->activePdo());
+
+        // Bits 127:96 are a partner's request only while this device is Source; its
+        // kind follows our advertised PDO at that Object Position (0x32).
+        RdoKind requestedKind = RdoKind::Unknown;
+        const uint8_t objectPosition = rdoContract->requestedRdo().objectPosition();
+        if (rdoContract->rawRequestedRdo() != 0 && objectPosition >= 1 && objectPosition <= 7) {
+            const auto statusReg = pd.readStatusRegister(true);
+            if (statusReg && statusReg->portRole() == PORT_SOURCE) {
+                if (const auto txSourceCaps = pd.readTransmitSourceCapsRegister(true))
+                    requestedKind = rdoKindFor(txSourceCaps->pdo(objectPosition - 1));
+            }
+        }
+
+        rdoContract->debugPrint(Serial, ownKind, requestedKind);
+    } else
         Serial.println(F("Failed to create/read Active RDO Contract register via factory"));
 }
 

@@ -370,8 +370,10 @@ design rationale.
 
 ### Flash tasks and EEPROM update
 
-The four flash tasks reach the external EEPROM (0x50 on I2Cc) only while MODE reads APP,
-and they do not share one result format. `TPS25751EepromUpdater` (ADR-014) applies the
+The four flash tasks reach the external EEPROM (0x50 on I2Cc), and they do not share one
+result format. SLVAFL1 (EEPROM Boot Flow, page 2) says the host can write the EEPROM once
+MODE reads APP; neither it nor the TRM says whether the tasks are refused in other modes,
+and they have not been tried outside APP. The updater checks MODE before it writes. `TPS25751EepromUpdater` (ADR-014) applies the
 rules below; code that issues the tasks directly must apply them itself. Sources: TRM
 SLVUCR8B Tables 4-1, 4-3, and 4-19 to 4-22 (pages 61, 62, 81, and 82), TI application
 note SLVAFL1, and the hardware stages recorded in
@@ -439,9 +441,22 @@ pointer was 0 and BOOT_FLAGS still read as at boot. Choose the target from the r
 pointers first and read BOOT_FLAGS only when both pointers are valid, as
 `selectTargetRegion()` does.
 
+#### AppConfigOffset words
+
 The controller looks for a region's Header_ID at the region start plus that region's
 AppConfigOffset word (0x03FC and 0x07FC; SLVAFL1 page 2). Both words are 0 in the board's
-image. `programBlank()` writes them to 0; `updateRegion()` neither reads nor writes them.
+image. `programBlank()` writes them to 0; `updateRegion()` neither reads nor writes them, so
+a region it writes behind a word that is not 0 is not where the controller looks.
+
+#### Recovery from PTCH
+
+When no region loads, the controller waits in PTCH for a patch over I2Ct. SLVAFL1
+(Recovering From EEPROM Failure, Figure 4-1, page 13) recovers by loading a patch with the
+PBM tasks (`TPS25751PatchLoader`, ADR-011) and then correcting the EEPROM with the flash
+tasks (`programBlank()` when no pointer is valid). The same page notes that this needs a
+host able to run and correct the EEPROM while the controller sits in PTCH, and that a
+system which needs the sink path before it can boot must select a suitable dead-battery
+configuration with the ADCINx pins; SafeMode does not apply there.
 
 #### DATA register behaviour
 
@@ -460,14 +475,15 @@ bytes after every task:
 
 | Item | Time |
 |---|---|
-| `FLrd`, `FLad` | 17.7 ms per call |
-| `FLwd`, 32 bytes | 20.7 ms, at most 20.8 ms; no busy result in 1798 calls |
+| `FLrd`, `FLad` | 17.7 ms per call (stages 1 to 3) |
+| `FLwd`, 4 bytes | 17.7 to 17.8 ms (stage 2, three calls) |
+| `FLwd`, 32 bytes | 20.7 ms average, 20.8 ms maximum over the 449 calls of the stage 3 single-region update |
 | `FLvy` | 0.56 to 0.60 s |
 | One region, 14272 bytes, with compare | 25979 ms |
 | Both regions, 14336 bytes each | 52049 ms |
 
-The library's timeouts (200 ms for `FLrd`, `FLad`, and `FLwd`, 1000 ms for `FLvy`) have
-ample margin. Most of each task's time is the 64-byte DATA read; an `outLen`-bounded read
+No `FLwd` returned busy in the 1798 calls of stage 3. The library's timeouts (200 ms for
+`FLrd`, `FLad`, and `FLwd`, 1000 ms for `FLvy`) have ample margin. Most of each task's time is the 64-byte DATA read; an `outLen`-bounded read
 in `executeCommand()` is the first optimization if the update must be faster.
 
 #### Cold reset
@@ -1428,6 +1444,7 @@ void foo() {
 | 1.15 | 2026-11-22 | Claude Code | PDO, APDO, and RDO cross-check against `usb-pd-docs` (device-register-mcp-server 696c854): the 0x32 subtype 10b APDO is an SPR AVS Source APDO, 0x34 First PDO Control Bits are PDO 1 bits 29:20 (confirmed on hardware), fixed-PDO flags are reserved outside PDO 1, 0x35 decodes as a Fixed or Variable RDO only, and the 0x48 Pad Object (USB PD Specification Structures section) |
 | 1.16 | 2026-11-22 | Claude Code | PDOs and RDOs decode through `TPS25751Pdo` and `TPS25751Rdo` (ADR-013): fixed-PDO flags only for PDO 1, SPR AVS Source decode, RDOs by kind, and validation of 0x30 to 0x34 per USB PD R3.3 (USB PD Specification Structures and PDO Parsing Strategy sections) |
 | 1.17 | 2026-11-23 | Claude Code | Flash tasks and EEPROM update section: result offsets, return-code compare, 32-byte chunks and the 24LC256 page, the `FLvy` limit, one-directional redundancy, the stale BOOT_FLAGS trap, DATA behaviour, timing, cold reset, and bus sharing, with the hardware results of stages 1 to 4 (ADR-014) |
+| 1.18 | 2026-11-23 | Claude Code | Flash tasks and EEPROM update section: what SLVAFL1 says about APP mode, AppConfigOffset words and recovery from PTCH (SLVAFL1 page 13) under their own headings, `FLwd` timing per run |
 
 ---
 

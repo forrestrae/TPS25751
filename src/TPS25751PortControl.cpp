@@ -70,24 +70,24 @@ void TPS25751PortControl::debugPrint(Stream &s) const {
     s.println(F("  Charger Detection:"));
     s.print(F("    Detect Enable: ")); s.println(toString(chargerDetectEnable()));
     s.print(F("    Advertise Enable: ")); s.println(toString(chargerAdvertiseEnable()));
-    s.print(F("    15k Resistor Present: ")); s.println(resistor15kPresent() ? F("Yes") : F("No"));
+    s.print(F("    15k Resistor Present: ")); s.println(yesNo(resistor15kPresent()));
     s.print(F("    DCD Enable: ")); s.println(dcdEnable() ? F("Enabled") : F("Disabled"));
     s.print(F("    Automatic ID Request: ")); s.println(automaticIdRequest() ? F("Enabled") : F("Disabled"));
 
     s.println(F("  Power Configuration:"));
     s.print(F("    Current Monitor: ")); s.println(enableCurrentMonitor() ? F("Enabled") : F("Disabled"));
-    s.print(F("    Unconstrained Power: ")); s.println(unconstrainedPower() ? F("Yes") : F("No"));
+    s.print(F("    Unconstrained Power: ")); s.println(yesNo(unconstrainedPower()));
 
     s.println(F("  Data Role Swap:"));
-    s.print(F("    Initiate to DFP: ")); s.println(initiateSwapToDFP() ? F("Yes") : F("No"));
+    s.print(F("    Initiate to DFP: ")); s.println(yesNo(initiateSwapToDFP()));
     s.print(F("    Process to DFP: ")); s.println(processSwapToDFP() ? F("Accept") : F("Reject"));
-    s.print(F("    Initiate to UFP: ")); s.println(initiateSwapToUFP() ? F("Yes") : F("No"));
+    s.print(F("    Initiate to UFP: ")); s.println(yesNo(initiateSwapToUFP()));
     s.print(F("    Process to UFP: ")); s.println(processSwapToUFP() ? F("Accept") : F("Reject"));
 
     s.println(F("  Power Role Swap:"));
-    s.print(F("    Initiate to Source: ")); s.println(initiateSwapToSource() ? F("Yes") : F("No"));
+    s.print(F("    Initiate to Source: ")); s.println(yesNo(initiateSwapToSource()));
     s.print(F("    Process to Source: ")); s.println(processSwapToSource() ? F("Accept") : F("Reject"));
-    s.print(F("    Initiate to Sink: ")); s.println(initiateSwapToSink() ? F("Yes") : F("No"));
+    s.print(F("    Initiate to Sink: ")); s.println(yesNo(initiateSwapToSink()));
     s.print(F("    Process to Sink: ")); s.println(processSwapToSink() ? F("Accept") : F("Reject"));
 
     s.print(F("Type-C Current: ")); s.println(toString(typeCCurrent()));

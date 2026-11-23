@@ -29,7 +29,7 @@ void TPS25751SleepControl::debugPrint(Stream &s) const {
     s.println(F("========================================"));
 
     s.print(F("Sleep Mode Allowed: "));
-    s.println(sleepModeAllowed() ? F("Yes") : F("No"));
+    s.println(yesNo(sleepModeAllowed()));
 
     s.print(F("Sleep Time: "));
     s.print(toString(sleepTime()));

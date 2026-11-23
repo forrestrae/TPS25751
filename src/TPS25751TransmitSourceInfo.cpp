@@ -202,7 +202,7 @@ void TPS25751TransmitSourceInfo::debugPrint(Stream &s) const
     s.println(F(")"));
 
     s.print(F("DPS Port (bit 62): "));
-    s.println(dpsPort() ? F("Yes") : F("No"));
+    s.println(yesNo(dpsPort()));
 
     printPdp(s, F("Port Maximum PDP"), F("0.5 W units"), rawPortMaximumPdp0p5W(), portMaximumPdp0p5W_mW());
     printPdp(s, F("Port Guaranteed PDP"), F("0.5 W units"), rawPortGuaranteedPdp0p5W(), portGuaranteedPdp0p5W_mW());

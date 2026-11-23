@@ -151,11 +151,11 @@ void TPS25751ReceivedSinkCaps::debugPrint(Stream &s) const {
                 s.println(F("Fixed Supply"));
                 s.print(F("  Voltage: ")); s.print(getFixedVoltage_mV(i)); s.println(F(" mV"));
                 s.print(F("  Max Current: ")); s.print(getFixedMaxCurrent_mA(i)); s.println(F(" mA"));
-                s.print(F("  Dual Role Power: ")); s.println(getFixedDualRolePower(i) ? F("Yes") : F("No"));
-                s.print(F("  Higher Capability: ")); s.println(getFixedHigherCapability(i) ? F("Yes") : F("No"));
-                s.print(F("  Unconstrained Power: ")); s.println(getFixedUnconstrainedPower(i) ? F("Yes") : F("No"));
-                s.print(F("  USB Comm Capable: ")); s.println(getFixedUSBCommCapable(i) ? F("Yes") : F("No"));
-                s.print(F("  Dual Role Data: ")); s.println(getFixedDualRoleData(i) ? F("Yes") : F("No"));
+                s.print(F("  Dual Role Power: ")); s.println(yesNo(getFixedDualRolePower(i)));
+                s.print(F("  Higher Capability: ")); s.println(yesNo(getFixedHigherCapability(i)));
+                s.print(F("  Unconstrained Power: ")); s.println(yesNo(getFixedUnconstrainedPower(i)));
+                s.print(F("  USB Comm Capable: ")); s.println(yesNo(getFixedUSBCommCapable(i)));
+                s.print(F("  Dual Role Data: ")); s.println(yesNo(getFixedDualRoleData(i)));
                 s.print(F("  Fast Role Swap Current: ")); s.println(getFixedFastRoleSwapCurrent(i));
                 break;
 

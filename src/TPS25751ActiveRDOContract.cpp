@@ -63,11 +63,11 @@ void TPS25751ActiveRDOContract::debugPrint(Stream &s) const {
     }
 
     s.print(F("  Object Position: ")); s.println(objectPosition());
-    s.print(F("  GiveBack Flag: ")); s.println(giveBackFlag() ? F("Yes") : F("No"));
-    s.print(F("  Capability Mismatch: ")); s.println(capabilityMismatch() ? F("Yes") : F("No"));
-    s.print(F("  USB Comm Capable: ")); s.println(usbCommCapable() ? F("Yes") : F("No"));
-    s.print(F("  No USB Suspend: ")); s.println(noUSBSuspend() ? F("Yes") : F("No"));
-    s.print(F("  Unchunked Supported: ")); s.println(unchunkedSupported() ? F("Yes") : F("No"));
+    s.print(F("  GiveBack Flag: ")); s.println(yesNo(giveBackFlag()));
+    s.print(F("  Capability Mismatch: ")); s.println(yesNo(capabilityMismatch()));
+    s.print(F("  USB Comm Capable: ")); s.println(yesNo(usbCommCapable()));
+    s.print(F("  No USB Suspend: ")); s.println(yesNo(noUSBSuspend()));
+    s.print(F("  Unchunked Supported: ")); s.println(yesNo(unchunkedSupported()));
     s.print(F("  Operating Current: ")); s.print(operatingCurrent_mA()); s.println(F(" mA"));
     s.print(F("  Max/Min Current: ")); s.print(maxMinCurrent_mA()); s.println(F(" mA"));
 

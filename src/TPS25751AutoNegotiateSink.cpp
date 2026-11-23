@@ -249,7 +249,7 @@ void TPS25751AutoNegotiateSink::debugPrint(Stream &s) const
     s.println(rdoPriorityPrefersLowerVoltage() ? F("Lower Voltage") : F("Higher Voltage"));
 
     s.print(F("No USB Suspend: "));
-    s.println(noUSBSuspend() ? F("Yes") : F("No"));
+    s.println(yesNo(noUSBSuspend()));
 
     s.print(F("Auto Compute Sink Min Power: "));
     s.println(autoComputeSinkMinPower() ? F("Computed by PD controller") : F("Provided by host"));
@@ -264,7 +264,7 @@ void TPS25751AutoNegotiateSink::debugPrint(Stream &s) const
     s.println(autoComputeSinkMaxVoltage() ? F("Computed by PD controller") : F("Provided by host"));
 
     s.print(F("Auto Disable Sink Upon Capability Mismatch: "));
-    s.println(autoDisableSinkUponCapabilityMismatch() ? F("Yes") : F("No"));
+    s.println(yesNo(autoDisableSinkUponCapabilityMismatch()));
 
     s.print(F("Auto Neg Max Current: "));
     s.print(autoNegMaxCurrent_mA());
@@ -297,7 +297,7 @@ void TPS25751AutoNegotiateSink::debugPrint(Stream &s) const
     s.println(F(")"));
 
     s.print(F("PPS Enable Sink Mode: "));
-    s.println(ppsEnableSinkMode() ? F("Yes") : F("No"));
+    s.println(yesNo(ppsEnableSinkMode()));
 
     s.print(F("PPS Request Interval: "));
     s.println(toString(ppsRequestInterval()));
@@ -306,10 +306,10 @@ void TPS25751AutoNegotiateSink::debugPrint(Stream &s) const
     s.println(ppsOperatingModeConstantVoltage() ? F("Constant Voltage (CV)") : F("Current Limit (CC)"));
 
     s.print(F("PPS Required Full Voltage Range: "));
-    s.println(ppsRequiredFullVoltageRange() ? F("Yes") : F("No"));
+    s.println(yesNo(ppsRequiredFullVoltageRange()));
 
     s.print(F("PPS Disable Sink Upon Non-APDO Contract: "));
-    s.println(ppsDisableSinkUponNonApdoContract() ? F("Yes") : F("No"));
+    s.println(yesNo(ppsDisableSinkUponNonApdoContract()));
 
     s.print(F("PPS Operating Current: "));
     s.print(ppsOperatingCurrent_mA());

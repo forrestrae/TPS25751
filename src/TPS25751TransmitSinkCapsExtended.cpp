@@ -4,21 +4,6 @@
 
 namespace {
 
-void printByteField(Stream &s, const __FlashStringHelper *label, uint8_t value)
-{
-    s.print(label);
-    s.print(F("0x"));
-    TPS25751Register::printHex(s, value, 2);
-    s.print(F(" ("));
-    s.print(value);
-    s.println(F(")"));
-}
-
-const __FlashStringHelper *yesNo(bool value)
-{
-    return value ? F("Yes") : F("No");
-}
-
 // Prints "<label>valid W" or "<label>invalid (raw)".
 void printPdp(Stream &s, const __FlashStringHelper *label, bool valid, uint8_t watts, uint8_t raw)
 {

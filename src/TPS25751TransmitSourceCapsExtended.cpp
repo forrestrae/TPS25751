@@ -2,25 +2,6 @@
 
 #include "TPS25751TransmitSourceCapsExtended.h"
 
-namespace {
-
-void printByteField(Stream &s, const __FlashStringHelper *label, uint8_t value)
-{
-    s.print(label);
-    s.print(F("0x"));
-    TPS25751Register::printHex(s, value, 2);
-    s.print(F(" ("));
-    s.print(value);
-    s.println(F(")"));
-}
-
-const __FlashStringHelper *yesNo(bool value)
-{
-    return value ? F("Yes") : F("No");
-}
-
-}  // namespace
-
 // --- Decode ---------------------------------------------------------------------
 
 uint8_t TPS25751TransmitSourceCapsExtended::voltageRegulation() const

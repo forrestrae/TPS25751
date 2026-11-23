@@ -40,6 +40,30 @@ public:
      */
     static void printHex(Stream& s, uint32_t value, uint8_t digits);
 
+    /**
+     * @brief Print "<label>0xHH (decimal)" and a newline for one byte field
+     *
+     * Debug helper shared by the register classes whose debugPrint() lists raw
+     * byte fields. The hex part always has two digits, for example
+     * "Load Step: 0x0A (10)".
+     *
+     * @param s     Output stream
+     * @param label Text printed before the value, including any trailing space
+     * @param value Byte to print
+     */
+    static void printByteField(Stream& s, const __FlashStringHelper* label, uint8_t value);
+
+    /**
+     * @brief Return F("Yes") for true and F("No") for false
+     *
+     * Debug helper for boolean fields in debugPrint() output. The result lives in
+     * flash and can be passed straight to Stream::print() or println().
+     *
+     * @param value Flag to describe
+     * @return "Yes" or "No"
+     */
+    static const __FlashStringHelper* yesNo(bool value);
+
 protected:
     uint8_t *_raw;
     size_t _len;

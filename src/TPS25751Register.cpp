@@ -397,3 +397,18 @@ void TPS25751Register::printHex(Stream &s, uint32_t value, uint8_t digits)
         s.print(static_cast<unsigned int>((value >> ((i - 1) * 4)) & 0xFu), HEX);
     }
 }
+
+void TPS25751Register::printByteField(Stream &s, const __FlashStringHelper *label, uint8_t value)
+{
+    s.print(label);
+    s.print(F("0x"));
+    printHex(s, value, 2);
+    s.print(F(" ("));
+    s.print(value);
+    s.println(F(")"));
+}
+
+const __FlashStringHelper *TPS25751Register::yesNo(bool value)
+{
+    return value ? F("Yes") : F("No");
+}

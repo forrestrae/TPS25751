@@ -155,16 +155,16 @@ void TPS25751IOConfig::debugPrint(Stream &s) const
     s.println(gpioEventPolarityMask(), HEX);
 
     s.print(F("GPIO0 Analog Input Enabled: "));
-    s.println(gpio0AnalogInputEnabled() ? F("Yes") : F("No"));
+    s.println(yesNo(gpio0AnalogInputEnabled()));
 
     s.print(F("GPIO2 Analog Input Enabled: "));
-    s.println(gpio2AnalogInputEnabled() ? F("Yes") : F("No"));
+    s.println(yesNo(gpio2AnalogInputEnabled()));
 
     s.print(F("GPIO4 Analog Input Control: "));
-    s.println(gpio4AnalogInputControl() ? F("Yes") : F("No"));
+    s.println(yesNo(gpio4AnalogInputControl()));
 
     s.print(F("GPIO5 Analog Input Control: "));
-    s.println(gpio5AnalogInputControl() ? F("Yes") : F("No"));
+    s.println(yesNo(gpio5AnalogInputControl()));
 
     s.println(F("GPIO Mapped Events:"));
     for (uint8_t gpio = 0; gpio <= kMaxGpioIndex; gpio++) {

@@ -143,12 +143,12 @@ void TPS25751ActivePDOContract::debugPrint(Stream &s) const {
             s.println(F("  Fixed Supply PDO:"));
             s.print(F("    Voltage: ")); s.print(fixedVoltage_mV()); s.println(F(" mV"));
             s.print(F("    Max Current: ")); s.print(fixedMaxCurrent_mA()); s.println(F(" mA"));
-            s.print(F("    Dual Role Power: ")); s.println(fixedDualRolePower() ? F("Yes") : F("No"));
-            s.print(F("    USB Suspend Supported: ")); s.println(fixedUSBSuspendSupported() ? F("Yes") : F("No"));
-            s.print(F("    Unconstrained Power: ")); s.println(fixedUnconstrainedPower() ? F("Yes") : F("No"));
-            s.print(F("    USB Comm Capable: ")); s.println(fixedUSBCommCapable() ? F("Yes") : F("No"));
-            s.print(F("    Dual Role Data: ")); s.println(fixedDualRoleData() ? F("Yes") : F("No"));
-            s.print(F("    Unchunked Supported: ")); s.println(fixedUnchunkedSupported() ? F("Yes") : F("No"));
+            s.print(F("    Dual Role Power: ")); s.println(yesNo(fixedDualRolePower()));
+            s.print(F("    USB Suspend Supported: ")); s.println(yesNo(fixedUSBSuspendSupported()));
+            s.print(F("    Unconstrained Power: ")); s.println(yesNo(fixedUnconstrainedPower()));
+            s.print(F("    USB Comm Capable: ")); s.println(yesNo(fixedUSBCommCapable()));
+            s.print(F("    Dual Role Data: ")); s.println(yesNo(fixedDualRoleData()));
+            s.print(F("    Unchunked Supported: ")); s.println(yesNo(fixedUnchunkedSupported()));
             break;
 
         case PDOType::Battery:
@@ -173,7 +173,7 @@ void TPS25751ActivePDOContract::debugPrint(Stream &s) const {
                 break;
             }
             s.println(F("  Augmented/PPS PDO:"));
-            s.print(F("    Power Limited: ")); s.println(ppsPowerLimited() ? F("Yes") : F("No"));
+            s.print(F("    Power Limited: ")); s.println(yesNo(ppsPowerLimited()));
             s.print(F("    Max Voltage: ")); s.print(ppsMaxVoltage_mV()); s.println(F(" mV"));
             s.print(F("    Min Voltage: ")); s.print(ppsMinVoltage_mV()); s.println(F(" mV"));
             s.print(F("    Max Current: ")); s.print(ppsMaxCurrent_mA()); s.println(F(" mA"));

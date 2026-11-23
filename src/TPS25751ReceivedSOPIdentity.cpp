@@ -107,15 +107,15 @@ void TPS25751ReceivedSOPIdentity::debugPrint(Stream &s) const
         s.print(F("ID Header: VID 0x"));
         printHex(s, usbVendorId(), 4);
         s.print(F(", Host: "));
-        s.print(usbHostCapable() ? F("Yes") : F("No"));
+        s.print(yesNo(usbHostCapable()));
         s.print(F(", Device: "));
-        s.print(usbDeviceCapable() ? F("Yes") : F("No"));
+        s.print(yesNo(usbDeviceCapable()));
         s.print(F(", UFP: "));
         s.print(toString(productTypeUfp()));
         s.print(F(", DFP: "));
         s.print(toString(productTypeDfp()));
         s.print(F(", Alt Modes: "));
-        s.print(alternateModesSupported() ? F("Yes") : F("No"));
+        s.print(yesNo(alternateModesSupported()));
         s.print(F(", Connector: "));
         s.println(toString(connectorType()));
 

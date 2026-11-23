@@ -49,6 +49,10 @@
 //   v    FLvy experiment: erases the inactive region's pointer, writes the
 //        image, corrupts one byte of it, and reports what FLvy and
 //        compareRegion() say. Leaves that pointer at 0; u or b repairs it.
+//        The image write makes the same checks as step 2 of an update: the
+//        bytes after the pointer before it starts, and a read-back after the
+//        first two chunks. A failed check stops it with nothing further
+//        written.
 //
 // Every command that writes first prints its plan (target region, image
 // version, current VERSION, both pointers) and then waits for the line
@@ -753,6 +757,12 @@ static void printUpdateResult(EepromUpdateStatus s, uint32_t elapsedMs)
     Serial.print(F("[update] Elapsed: "));
     Serial.print(elapsedMs);
     Serial.println(F(" ms"));
+    // A stop by one of the checks of step 2 means bytes may lie where they do
+    // not belong, or that an earlier attempt left some there.
+    if (updater.lastStep() == EepromUpdateStep::WriteBundle &&
+        (s == EepromUpdateStatus::CompareMismatch || s == EepromUpdateStatus::PointerNeighborsChanged)) {
+        Serial.println(F("[update] A check of step 2 stopped the write. Dump the EEPROM with r and find the misplaced bytes before any further write."));
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -1209,6 +1219,14 @@ static void cmdCut(uint8_t step)
 // v: FLvy experiment (hardware stage 3), built from the public primitives
 // ---------------------------------------------------------------------------
 
+static void printStep(const __FlashStringHelper* what, EepromUpdateStatus s)
+{
+    Serial.print(F("[v] "));
+    Serial.print(what);
+    Serial.print(F(": "));
+    Serial.println(TPS25751EepromUpdater::toString(s));
+}
+
 /// One chunk at the current write address, with the updater's busy rule.
 static EepromUpdateStatus writeChunkWithRetry(uint32_t addr, const uint8_t* data, size_t len)
 {
@@ -1224,46 +1242,118 @@ static EepromUpdateStatus writeChunkWithRetry(uint32_t addr, const uint8_t* data
     return s;
 }
 
-static EepromUpdateStatus writeImageWithPrimitives(EepromRegion target)
+/// Image bytes @p from to @p to as chunks at the current write address, with a
+/// progress line at each new 10%. @p written follows the bytes written so far.
+static EepromUpdateStatus writeImageChunks(EepromRegion target, size_t from, size_t to, size_t& written)
 {
     const uint32_t start = TPS25751EepromUpdater::bundleStart(target);
-    EepromUpdateStatus s = updater.setWriteAddress(start);
-    uint8_t decile = 0;
-    size_t offset = 0;
-    printProgressLine(target, F("write"), 0, IMAGE_SIZE);
-    while (s == EepromUpdateStatus::Success && offset < IMAGE_SIZE) {
-        const size_t remaining = IMAGE_SIZE - offset;
+    size_t offset = from;
+    while (offset < to) {
+        const size_t remaining = to - offset;
         const size_t n = (remaining < TPS25751EepromUpdater::kFlashWriteChunk)
                              ? remaining : TPS25751EepromUpdater::kFlashWriteChunk;
-        s = writeChunkWithRetry(start + offset, IMAGE + offset, n);
+        const uint8_t decileBefore = static_cast<uint8_t>((static_cast<uint64_t>(offset) * 10) / IMAGE_SIZE);
+        const EepromUpdateStatus s = writeChunkWithRetry(start + offset, IMAGE + offset, n);
         if (s != EepromUpdateStatus::Success) {
-            break;
+            return s;
         }
         offset += n;
-        const uint8_t now = static_cast<uint8_t>((static_cast<uint64_t>(offset) * 10) / IMAGE_SIZE);
-        if (now != decile) {
-            decile = now;
+        written = offset;
+        const uint8_t decileAfter = static_cast<uint8_t>((static_cast<uint64_t>(offset) * 10) / IMAGE_SIZE);
+        if (decileAfter != decileBefore) {
             printProgressLine(target, F("write"), offset, IMAGE_SIZE);
         }
     }
-    return s;
+    return EepromUpdateStatus::Success;
 }
 
-static void printStep(const __FlashStringHelper* what, EepromUpdateStatus s)
+/// Writes the image to the target region from the public primitives, with the
+/// sequence and the checks of step 2 of updateRegion(): the check on the bytes
+/// after the pointer before any task, FLad, two chunks, the read of the
+/// pointer row, the read-back at the bundle start, a fresh FLad, and the
+/// remaining chunks. Each check prints its result. After a failed check
+/// nothing further is written.
+///
+/// @p pointerRow is the 16 bytes at the target pointer as read after the
+/// erase. @p written receives the image bytes sent when the call returns.
+static EepromUpdateStatus writeImageWithPrimitives(EepromRegion target, const uint8_t* pointerRow,
+                                                   size_t& written)
 {
-    Serial.print(F("[v] "));
-    Serial.print(what);
-    Serial.print(F(": "));
-    Serial.println(TPS25751EepromUpdater::toString(s));
+    const uint32_t start = TPS25751EepromUpdater::bundleStart(target);
+    const uint32_t pointerAddr = TPS25751EepromUpdater::regionPointerAddress(target);
+    const size_t early = (IMAGE_SIZE < TPS25751EepromUpdater::kEarlyReadBackBytes)
+                             ? IMAGE_SIZE : TPS25751EepromUpdater::kEarlyReadBackBytes;
+    written = 0;
+
+    // Before any task: the trace of an earlier misplaced write.
+    if (memcmp(pointerRow + 4, IMAGE, 12) == 0) {
+        Serial.println(F("[v] Check before the write: FAILED. The 12 bytes after the pointer hold the start of the image, the trace of an earlier misplaced write. Dump and repair the EEPROM first."));
+        return EepromUpdateStatus::PointerNeighborsChanged;
+    }
+    Serial.println(F("[v] Check before the write: passed. The 12 bytes after the pointer are not the start of the image."));
+
+    printProgressLine(target, F("write"), 0, IMAGE_SIZE);
+    EepromUpdateStatus s = updater.setWriteAddress(start);
+    if (s != EepromUpdateStatus::Success) {
+        return s;
+    }
+    s = writeImageChunks(target, 0, early, written);
+    if (s != EepromUpdateStatus::Success) {
+        return s;
+    }
+
+    // The read-back: the pointer row first, the bundle start last, so that the
+    // last read before the next FLad is inside the region being written.
+    uint8_t now[TPS25751EepromUpdater::kFlashReadBytes];
+    s = updater.readFlash(pointerAddr, now);
+    if (s != EepromUpdateStatus::Success) {
+        printStep(F("Read of the pointer row after the first chunks"), s);
+        return s;
+    }
+    uint32_t mismatch = 0;
+    s = updater.compareRegion(target, IMAGE, early, &mismatch);
+    if (s == EepromUpdateStatus::CompareMismatch) {
+        Serial.print(F("[v] Check after the first chunks: FAILED. They do not read back at the bundle start; first difference at image offset "));
+        printHex32(mismatch);
+        Serial.println();
+        return s;
+    }
+    if (s != EepromUpdateStatus::Success) {
+        printStep(F("Read-back of the first chunks"), s);
+        return s;
+    }
+    const bool wordIsZero = (now[0] == 0 && now[1] == 0 && now[2] == 0 && now[3] == 0);
+    if (!wordIsZero || memcmp(now + 4, pointerRow + 4, sizeof(now) - 4) != 0) {
+        Serial.println(F("[v] Check after the first chunks: FAILED. The 16 bytes at the pointer changed while they were written."));
+        printRow(pointerAddr, now);
+        return EepromUpdateStatus::PointerNeighborsChanged;
+    }
+    Serial.println(F("[v] Check after the first chunks: passed. They read back at the bundle start, and the 16 bytes at the pointer are unchanged."));
+
+    if (early == IMAGE_SIZE) {
+        return EepromUpdateStatus::Success;
+    }
+    s = updater.setWriteAddress(start + static_cast<uint32_t>(early));
+    if (s != EepromUpdateStatus::Success) {
+        return s;
+    }
+    return writeImageChunks(target, early, IMAGE_SIZE, written);
 }
 
-static void finishExperiment(EepromRegion target, const __FlashStringHelper* note)
+/// Closes the experiment. @p checkFailed is set when the image write stopped on
+/// one of its checks: bytes may then lie where they do not belong, and an
+/// update is not the next step.
+static void finishExperiment(EepromRegion target, const __FlashStringHelper* note, bool checkFailed = false)
 {
     Serial.print(F("[v] "));
     Serial.println(note);
     Serial.print(F("[v] The "));
     Serial.print(TPS25751EepromUpdater::toString(target));
-    Serial.println(F(" pointer is left at 0, so that region cannot boot. Run u or b to repair it."));
+    if (checkFailed) {
+        Serial.println(F(" pointer is left at 0, so that region cannot boot. A check failed: dump the EEPROM with r and find the misplaced bytes before any further write."));
+    } else {
+        Serial.println(F(" pointer is left at 0, so that region cannot boot. Run u or b to repair it."));
+    }
     printPointers();
     printTiming();
 }
@@ -1314,15 +1404,31 @@ static void cmdVerifyExperiment()
         return;
     }
 
-    // 2. Write the image.
+    // The 16 bytes at the erased pointer: the reference for the checks the
+    // image write makes, as the read-back of step 1 is for updateRegion().
+    uint8_t pointerRow[TPS25751EepromUpdater::kFlashReadBytes];
+    s = updater.readFlash(TPS25751EepromUpdater::regionPointerAddress(target), pointerRow);
+    printStep(F("Read of the pointer row after the erase"), s);
+    if (s != EepromUpdateStatus::Success) {
+        finishExperiment(target, F("The pointer row could not be read; the experiment stops before the region is written."));
+        return;
+    }
+
+    // 2. Write the image, with the read-back after the first two chunks.
     const uint32_t started = millis();
-    s = writeImageWithPrimitives(target);
+    size_t written = 0;
+    s = writeImageWithPrimitives(target, pointerRow, written);
     printStep(F("Image write"), s);
     Serial.print(F("[v] Image write took "));
     Serial.print(millis() - started);
     Serial.println(F(" ms"));
     if (s != EepromUpdateStatus::Success) {
-        finishExperiment(target, F("The image write failed; the experiment stops here."));
+        Serial.print(F("[v] The image write stopped after "));
+        Serial.print(written);
+        Serial.println(F(" bytes. Nothing further was written."));
+        finishExperiment(target, F("The image write failed; the experiment stops here."),
+                         s == EepromUpdateStatus::CompareMismatch ||
+                             s == EepromUpdateStatus::PointerNeighborsChanged);
         return;
     }
 

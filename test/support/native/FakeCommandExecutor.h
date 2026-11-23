@@ -39,11 +39,15 @@
 //     rebootDurationMs of fake time, after which MODE reads modeAfterReset (the
 //     controller can NAK while rebooting, Table 4-3). It clears DATA, as the TRM
 //     says all CMDx and DATAx registers return to 0. Clearing the FLad write
-//     address is an assumption, not in the TRM.
+//     address is an assumption, not in the TRM. So is the timing: the reboot
+//     starts at once and the task completes at once, where Table 4-3 describes
+//     a typical 1-second Type-C Error Recovery delay before the restart and
+//     does not say what COMMAND and MODE read during it.
 //   - Any other code: COMMAND reads "!CMD" (Rejected).
 //   - MODE and BOOT_FLAGS register contents, with read failures on demand.
 //   - A fake clock: delayMs() advances it, and every executeCommand() advances
-//     it by msPerCommand.
+//     it by msPerCommand. It wraps like millis(), and the reboot window is
+//     measured by unsigned subtraction, so a test can start it near the wrap.
 //   - A log of every executeCommand() call (4CC, input payload, outLen,
 //     timeout, result).
 //
@@ -152,7 +156,7 @@ public:
 
     uint32_t rebootDurationMs = 1000;
     bool rebooting = false;
-    uint32_t rebootEndsAt = 0;
+    uint32_t rebootStartedAt = 0;
     size_t resetCount = 0;
 
     std::vector<Call> calls;
@@ -321,7 +325,7 @@ private:
     bool stillRebooting()
     {
         if (!rebooting) return false;
-        if (now < rebootEndsAt) return true;
+        if (static_cast<uint32_t>(now - rebootStartedAt) < rebootDurationMs) return true;
         rebooting = false;
         memcpy(mode, modeAfterReset, kModeSize);
         return false;
@@ -378,7 +382,7 @@ private:
             writeAddressSet = false;  // assumption, not in the TRM
             ++resetCount;
             rebooting = true;
-            rebootEndsAt = now + rebootDurationMs;
+            rebootStartedAt = now;
             return TPS25751TaskStatus::Success;
         }
         return TPS25751TaskStatus::Rejected;

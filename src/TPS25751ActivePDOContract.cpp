@@ -183,16 +183,6 @@ void TPS25751ActivePDOContract::debugPrint(Stream &s) const {
     s.println();
 }
 
-const char* toString(PDOType type) {
-    switch (type) {
-        case PDOType::FixedSupply: return "Fixed Supply";
-        case PDOType::Battery: return "Battery";
-        case PDOType::VariableSupply: return "Variable Supply";
-        case PDOType::Augmented: return "Augmented/PPS";
-        default: return "Unknown";
-    }
-}
-
 bool TPS25751ActivePDOContract::isSemanticallyValid() const {
     // Basic validity checks first
     if (!isValid() || !hasValidData()) return false;

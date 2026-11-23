@@ -3,46 +3,7 @@
 
 #include "TPS25751Register.h"
 #include "TPS25751RegisterAddress.h"
-
-/**
- * @brief PDO (Power Data Object) Type
- */
-enum class PDOType : uint8_t {
-    FixedSupply = 0b00,     ///< Fixed voltage supply
-    Battery = 0b01,         ///< Battery
-    VariableSupply = 0b10,  ///< Variable voltage supply
-    Augmented = 0b11        ///< Augmented PDO (APDO); see apdoSubtype()
-};
-
-/// APDO subtype (bits 29:28 of an Augmented PDO) of the SPR PPS APDO, the only
-/// subtype this library decodes.
-constexpr uint8_t kApdoSubtypeSprPps = 0b00;
-
-/**
- * @brief APDO subtype of a PDO word (bits 29:28)
- *
- * Meaningful only when bits 31:30 are 11b (PDOType::Augmented). Subtype 00b is
- * the SPR PPS APDO. USB PD R3.3 Table 6.7 defines 01b as EPR AVS and 10b as SPR
- * AVS (11b is invalid); this library does not decode those yet. A TPS25751 test
- * board's TRANSMIT_SOURCE_CAPABILITIES (0x32) carries a subtype 10b APDO, an SPR
- * AVS Source APDO (Table 6.15), observed on hardware on 2026-11-18.
- */
-inline uint8_t apdoSubtype(uint32_t pdo)
-{
-    return static_cast<uint8_t>((pdo >> 28) & 0x3);
-}
-
-/**
- * @brief True when a PDO word is an SPR PPS APDO (bits 31:30 = 11b, bits 29:28 = 00b)
- *
- * The PPS accessors of every PDO class decode only such PDOs; they return 0 for
- * an Augmented PDO of any other subtype, whose fields have a different layout.
- */
-inline bool isSprPpsApdo(uint32_t pdo)
-{
-    return ((pdo >> 30) & 0x3) == static_cast<uint32_t>(PDOType::Augmented) &&
-           apdoSubtype(pdo) == kApdoSubtypeSprPps;
-}
+#include "TPS25751Pdo.h"
 
 /**
  * @brief TPS25751 Active PDO Contract Register (0x34)
@@ -145,5 +106,3 @@ public:
     bool isSemanticallyValid() const override;
 };
 
-// String conversion helper
-const char* toString(PDOType type);

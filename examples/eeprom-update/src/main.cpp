@@ -13,8 +13,9 @@
 //
 // COMMANDS THAT ONLY READ
 //   r    Read-only report: MODE, VERSION, BOOT_FLAGS (0x2D), both region
-//        pointers, the region an update would target, FLvy for each region,
-//        and a hex dump of 0x0000 to 0x7C00. Issues FLrd and FLvy only.
+//        pointers, both AppConfigOffset words (0x03FC and 0x07FC, as
+//        "[offset]" lines), the region an update would target, FLvy for each
+//        region, and a hex dump of 0x0000 to 0x7C00. Issues FLrd and FLvy only.
 //        The same report without the dump is printed once at start-up.
 //
 // COMMAND THAT RESTARTS THE CONTROLLER (no EEPROM write)
@@ -65,7 +66,10 @@
 //        AppConfigOffset words, and the image in both regions, the layout of
 //        the full-flash binary. Only when MODE reads APP and no region pointer
 //        is valid, which is the state after l on a blank or corrupt EEPROM.
-//        Its plan adds both AppConfigOffset words.
+//        Its plan adds both AppConfigOffset words. When it refuses because a
+//        pointer is valid, and after a stop in its High pass, it prints both
+//        words: u and b do not write them, so do not run u or b while the
+//        word of the region they would write is not 0.
 //
 // RECOVERY OF AN EEPROM THAT DOES NOT BOOT (hardware stage 5)
 //   The controller comes up in PTCH. Send l, then pb, then x: the controller
@@ -425,6 +429,36 @@ static void printPointers()
     printPointer(EepromRegion::High);
 }
 
+/// One AppConfigOffset line. The controller looks for a region's Header_ID at
+/// the region start plus this word (SLVAFL1 Boot Process), so it must be 0.
+static void printAppConfigOffset(EepromRegion r)
+{
+    const uint32_t addr = TPS25751EepromUpdater::appConfigOffsetAddress(r);
+    Serial.print(F("[offset] "));
+    Serial.print(TPS25751EepromUpdater::toString(r));
+    Serial.print(F(" AppConfigOffset at "));
+    printHex32(addr);
+    Serial.print(F(" = "));
+
+    uint8_t row[TPS25751EepromUpdater::kFlashReadBytes];
+    const EepromUpdateStatus s = updater.readFlash(addr, row);
+    if (s != EepromUpdateStatus::Success) {
+        Serial.print(F("read failed: "));
+        Serial.println(TPS25751EepromUpdater::toString(s));
+        return;
+    }
+    const uint32_t value = static_cast<uint32_t>(row[0]) | (static_cast<uint32_t>(row[1]) << 8) |
+                           (static_cast<uint32_t>(row[2]) << 16) | (static_cast<uint32_t>(row[3]) << 24);
+    printHex32(value);
+    Serial.println(value == 0 ? F(" (0)") : F(" (not 0)"));
+}
+
+static void printAppConfigOffsets()
+{
+    printAppConfigOffset(EepromRegion::Low);
+    printAppConfigOffset(EepromRegion::High);
+}
+
 static void printTarget()
 {
     EepromRegion target = EepromRegion::Low;
@@ -521,6 +555,7 @@ static bool printStatus()
         return false;
     }
     printPointers();
+    printAppConfigOffsets();
     printTarget();
     printVerify(EepromRegion::Low);
     printVerify(EepromRegion::High);
@@ -1624,7 +1659,7 @@ static void cmdLoadPatch()
     Serial.print(F(" bytes, version "));
     printHex32(TPS25751EepromUpdater::imageVersion(IMAGE, IMAGE_SIZE));
     Serial.println();
-    Serial.println(F("[plan] This command loads the controller's RAM. It does not write the EEPROM; after a restart the controller boots from the EEPROM again."));
+    Serial.println(F("[plan] This command loads the controller's RAM. It does not write the EEPROM; after a restart the controller loads from the EEPROM again."));
     if (!confirm()) {
         return;
     }
@@ -1648,34 +1683,11 @@ static void cmdLoadPatch()
     }
 }
 
-/// One AppConfigOffset line. The controller looks for a region's Header_ID at
-/// the region start plus this word (SLVAFL1 Boot Process), so it must be 0.
-static void printAppConfigOffset(EepromRegion r)
+/// After a pb refusal or a failed pb: u and b never write an AppConfigOffset
+/// word, so a region they write behind a word that is not 0 would not load.
+static void printOffsetAdvice()
 {
-    const uint32_t addr = TPS25751EepromUpdater::appConfigOffsetAddress(r);
-    Serial.print(F("[offset] "));
-    Serial.print(TPS25751EepromUpdater::toString(r));
-    Serial.print(F(" AppConfigOffset at "));
-    printHex32(addr);
-    Serial.print(F(" = "));
-
-    uint8_t row[TPS25751EepromUpdater::kFlashReadBytes];
-    const EepromUpdateStatus s = updater.readFlash(addr, row);
-    if (s != EepromUpdateStatus::Success) {
-        Serial.print(F("read failed: "));
-        Serial.println(TPS25751EepromUpdater::toString(s));
-        return;
-    }
-    const uint32_t value = static_cast<uint32_t>(row[0]) | (static_cast<uint32_t>(row[1]) << 8) |
-                           (static_cast<uint32_t>(row[2]) << 16) | (static_cast<uint32_t>(row[3]) << 24);
-    printHex32(value);
-    Serial.println(value == 0 ? F(" (0)") : F(" (not 0)"));
-}
-
-static void printAppConfigOffsets()
-{
-    printAppConfigOffset(EepromRegion::Low);
-    printAppConfigOffset(EepromRegion::High);
+    Serial.println(F("[pb] Read [offset] High above. Do not run u or b while it, or the [offset] line of any region they would write, is not 0x00000000: u and b do not write that word, and no command of this example does."));
 }
 
 static void cmdProgramBlank()
@@ -1699,15 +1711,17 @@ static void cmdProgramBlank()
     }
     if (low == TPS25751EepromUpdater::bundleStart(EepromRegion::Low) ||
         high == TPS25751EepromUpdater::bundleStart(EepromRegion::High)) {
-        Serial.println(F("[refused] A region pointer is valid, so the EEPROM can boot. pb is only for an EEPROM with no valid pointer; inspect it with r and update it with u or b. Nothing was written."));
+        Serial.println(F("[refused] A region pointer is valid. pb is only for an EEPROM with no valid pointer. Nothing was written."));
         printPointers();
+        printAppConfigOffsets();
+        printOffsetAdvice();
         return;
     }
 
     printPlan(F("pb: programBlank() with the embedded image. Writes both pointers, both AppConfigOffset words, and the image in both regions"),
               EepromRegion::Low, true);
     printAppConfigOffsets();
-    Serial.println(F("[plan] On success the EEPROM holds the full-flash layout. A failure in the Low pass leaves no region that boots; a failure in the High pass leaves the Low region bootable."));
+    Serial.println(F("[plan] On success the EEPROM holds the full-flash layout. After a failure in the Low pass no pointer is valid unless the pointers printed afterwards say so. After a failure in the High pass the Low pass is complete: its pointer was written after the region passed FLvy and the compare."));
     if (!confirm()) {
         return;
     }
@@ -1733,9 +1747,15 @@ static void cmdProgramBlank()
         Serial.println(F("[pb] Bytes after an AppConfigOffset word changed during its write. Dump the EEPROM with r before any further write."));
     }
     if (updater.lastTarget() == EepromRegion::High) {
-        Serial.println(F("[pb] The Low pass completed: the Low region holds the image behind a valid pointer and boots. The High region does not."));
+        // Established: the Low pointer was written after FLvy and the compare.
+        // Not established: that nothing of the High pass reached the Low region.
+        Serial.println(F("[pb] The Low pass completed: the Low pointer was written after the Low region passed FLvy and the compare. The High pass did not complete."));
+        if (s == EepromUpdateStatus::PointerNeighborsChanged || updater.lastStep() == EepromUpdateStep::WriteBundle) {
+            Serial.println(F("[pb] This stop can mean bytes landed outside the High region, and the Low bundle starts at 0x0800, next to the High AppConfigOffset word. Check the Low region with r (compare the dump with the image) before relying on it."));
+        }
+        printOffsetAdvice();
     } else {
-        Serial.println(F("[pb] The Low pass did not complete. No region boots unless a pointer above reads valid. A restart now comes up in PTCH; l then pb recovers from there."));
+        Serial.println(F("[pb] The Low pass did not complete. Unless a pointer above reads valid, the controller has no region to load and comes up in PTCH at its next restart; l then pb recovers from there."));
     }
 }
 

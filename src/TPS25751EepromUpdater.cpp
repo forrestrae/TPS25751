@@ -67,8 +67,8 @@ EepromUpdateStatus TPS25751EepromUpdater::readFlash(uint32_t addr, uint8_t out[k
 
     // FLrd returns the 16 memory bytes from DATA byte 0; there is no return-code
     // byte (TRM Table 4-19), so result.returnCode is the first memory byte and is
-    // not interpreted. The address byte order and the data order are inferred;
-    // hardware stage 1 confirms them.
+    // not interpreted. The TRM does not state the address byte order or the data
+    // order for FLrd; hardware stage 1 verified both on 2026-11-22.
     uint8_t data[kFlashReadBytes];
     const TPS25751TaskResult result = _exec.executeCommand(
         CMD_FLRD, payload, sizeof(payload), data, sizeof(data), FLRD_CMD_TIMEOUT_MS);

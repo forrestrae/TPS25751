@@ -15,12 +15,13 @@
 //     0..inLen-1, the task writes its output, and outData is copied from DATA
 //     byte 0, as TPS25751::executeCommand() does. returnCode is always DATA[0].
 //   - Addresses are decoded from the 4 input bytes least significant byte
-//     first. Table 4-20 states this for FLad only; for FLrd and FLvy it is
-//     inferred from Table 4-20 and the struct cast in the SLVAFL1 source code.
+//     first. Table 4-20 states this for FLad only. Hardware stage 1 verified it
+//     for FLrd on 2026-11-22; for FLvy the same stage supports it indirectly
+//     (both bundles reported valid at 0x0800 and 0x4400).
 //   - FLrd: 16 bytes starting at the address, DATA byte 0 holding the byte at
 //     the address (Table 4-19 gives 16 bytes and no return-code byte; the byte
-//     order is inferred). Bytes past the end of the EEPROM read 0xFF
-//     (assumption, not in the TRM).
+//     order was verified in hardware stage 1). Bytes past the end of the EEPROM
+//     read 0xFF (assumption, not in the TRM).
 //   - FLad: loads the write-address register and returns 0x00 (Table 4-20 and
 //     the standard return codes of Table 4-1). An address at or past the end of
 //     the EEPROM returns 0x03 (assumption, not in the TRM).
@@ -337,7 +338,8 @@ private:
     TPS25751TaskStatus runTask(const std::string &code, const uint8_t *in, size_t inLen)
     {
         if (code == "FLrd") {
-            // Byte order inferred; 0xFF past the end is an assumption, not in the TRM.
+            // Byte order verified in hardware stage 1; 0xFF past the end is an
+            // assumption, not in the TRM.
             const uint32_t addr = le32(in, inLen);
             for (uint32_t i = 0; i < 16; ++i) data[i] = byteAt(addr + i);
             return TPS25751TaskStatus::Success;

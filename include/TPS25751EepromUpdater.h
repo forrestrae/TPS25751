@@ -60,11 +60,13 @@ constexpr TPS25751FourCC CMD_FLRD = TPS25751FourCC::of("FLrd");
 /// 4CC task code: validate the bundle header at an address (TRM Table 4-22).
 constexpr TPS25751FourCC CMD_FLVY = TPS25751FourCC::of("FLvy");
 
-/// COMMAND-poll timeout (ms) for FLrd.
+/// COMMAND-poll timeout (ms) for FLrd. Hardware stage 1 measured 17.7 ms per
+/// call (1984 calls, default I2C clock, 2026-11-22).
 constexpr uint32_t FLRD_CMD_TIMEOUT_MS = 200;
 
-/// COMMAND-poll timeout (ms) for FLvy. Not yet measured on hardware; the task
-/// completes after the header is checked (TRM Table 4-22).
+/// COMMAND-poll timeout (ms) for FLvy. The task completes after the header is
+/// checked (TRM Table 4-22). It completed within this limit for both regions
+/// in hardware stage 1 (2026-11-22); its duration was not recorded.
 constexpr uint32_t FLVY_CMD_TIMEOUT_MS = 1000;
 
 // ---------------------------------------------------------------------------
@@ -220,10 +222,11 @@ public:
      * bytes from DATA byte 0. FLrd has no return-code byte (TRM Table 4-19), so
      * the executor's returnCode is ignored. @p out is written only on Success.
      *
-     * Two details are inferred, not stated by the TRM, and hardware stage 1
-     * confirms them: the address byte order (Table 4-20 states little-endian
-     * for FLad only; the SLVAFL1 source code casts a uint32_t the same way for
-     * FLrd), and that DATA byte 0 holds the EEPROM byte at @p addr.
+     * The TRM states the address byte order for FLad only (Table 4-20) and does
+     * not say which DATA byte holds the byte at @p addr. Hardware stage 1
+     * verified both on 2026-11-22: the two region pointers read as 0x00000800
+     * and 0x00004400, and a dump of 0x0000 to 0x7C00 equalled the full-flash
+     * image byte for byte.
      *
      * The caller owns the range. The updater does not bound @p addr against
      * the EEPROM size, and what the controller returns past the end of the
@@ -241,8 +244,13 @@ public:
      *
      * FLvy completes after the bundle header is checked; whether it also checks
      * the bundle CRC is not documented, so a Success here does not prove the
-     * bundle body is intact. Use compareRegion() for that. The address goes
-     * out least significant byte first, inferred as for readFlash().
+     * bundle body is intact. Use compareRegion() for that.
+     *
+     * The address goes out least significant byte first, as for readFlash().
+     * The TRM does not state the order for FLvy. Hardware stage 1 supports it
+     * indirectly (2026-11-22): FLvy reported 0x00 for the bundles at 0x0800 and
+     * 0x4400, and either address byte-swapped lies far outside the 32 KB part.
+     * The not-valid code 0x01 has not been observed on hardware.
      *
      * @param addr EEPROM address of the bundle (normally bundleStart())
      * @return Success for return code 0x00; VerifyFailed for 0x01 or any other

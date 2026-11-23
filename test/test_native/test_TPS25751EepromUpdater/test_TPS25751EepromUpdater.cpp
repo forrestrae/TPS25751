@@ -9,7 +9,7 @@
  *   FLrd  in: 4-byte address   out: 16 bytes from DATA byte 0, no return code
  *   FLvy  in: 4-byte address   out: DATA byte 0, 0x00 valid, 0x01 not valid
  * Addresses go out least significant byte first: Table 4-20 states it for
- * FLad; for FLrd and FLvy it is inferred and hardware stage 1 confirms it.
+ * FLad, and hardware stage 1 verified it for FLrd on 2026-11-22.
  * Layout (SLVAFL1 Figure 2-6):
  * pointers at 0x0000 and 0x0400, bundles at 0x0800 and 0x4400.
  *

@@ -371,23 +371,42 @@ wrote, and at the real 14336-byte length it would overwrite the other region's b
 or pointer. No document suggests the controller does this; the Batch 2 review
 reproduced the outcome against the fake. Step 2 is now:
 
-1. `FLad` to the target bundle start, then the first two chunks.
-2. `FLrd` those bytes back and compare them with the image. A difference returns
-   `CompareMismatch`.
-3. `FLrd` the 16 bytes at the target's pointer address. The pointer word must still be
-   0 and bytes 4 to 15 must equal what step 1's read-back saw. A difference returns
-   `PointerNeighborsChanged`. This check exists because check 2 is blind when the
-   target already holds the same image.
-4. A fresh `FLad` to the next unwritten byte, then the remaining chunks. The documents
+1. Before any task: if bytes 4 to 15 of step 1's read-back equal the first 12 bytes of
+   the image, return `PointerNeighborsChanged`. Those bytes are the trace of an earlier
+   misplaced write, which would otherwise become the reference for check 5 and hide a
+   repeat of the same failure. The EEPROM must be dumped and repaired before another
+   update.
+2. `FLad` to the target bundle start, then the first two chunks.
+3. `FLrd` the 16 bytes at the target's pointer address.
+4. `FLrd` the first two chunks back and compare them with the image. A difference
+   returns `CompareMismatch`.
+5. The pointer row read in 3 must still hold a 0 word, and bytes 4 to 15 must equal
+   what step 1's read-back saw. A difference returns `PointerNeighborsChanged`. This
+   check exists because check 4 is blind when the target already holds the same image.
+6. A fresh `FLad` to the next unwritten byte, then the remaining chunks. The documents
    do not say whether `FLrd` disturbs the controller's write address, and the busy
    retry already uses the same pattern.
 
-This bounds a write address that is wrong from the start to the first two chunks, 64
-bytes in the unused area after the pointer word. Residual limits: a write address that
-goes wrong after the read-back is not seen before step 3, and step 3 checks only the
-target region; when the target already held the same image, two chunks misplaced
-anywhere other than just past its pointer word go unseen. A 14336-byte update with no
-retries issues 5 `FLad`, 451 `FLwd`, 908 `FLrd`, and 1 `FLvy`.
+The pointer row is read before the bundle start, so the last `FLrd` before the second
+`FLad` is inside the target region. If an `FLrd` moved the write address and the second
+`FLad` also failed silently, the rest of the bundle would then start inside the target
+region, not at a pointer word.
+
+For a write address that is wrong from the start, this bounds the damage to the first
+two chunks. In the modelled case, where step 1 left the write address four bytes past
+the pointer word, those are the 64 unused bytes after it. On a 24LC256 a 32-byte write
+that starts 36 bytes into a 64-byte page can wrap onto the pointer word unless the
+controller splits the write; check 5 tests the word, so the update still stops.
+Residual limits: the second `FLad` is not verified; a write address that goes wrong
+after the read-back is not seen before step 3, and step 3 checks only the target
+region; when the target already held the same image, two chunks misplaced anywhere
+other than the pointer row go unseen. Whether an `FLrd` moves the write address is
+unknown, and no hardware stage shows it. A 14336-byte update with no retries issues 5
+`FLad`, 451 `FLwd`, 908 `FLrd`, and 1 `FLvy`.
+
+A stop in step 2 with `CompareMismatch` or `PointerNeighborsChanged` is final for the
+hardware stages: dump the EEPROM and find the misplaced bytes before any further
+write. The example prints a line saying so, and its `v` command runs the same checks.
 
 The progress callback is called with `done == 0` after step 1 and before any step 2
 task, then after each successful chunk up to `done == total`, and in the same way
@@ -466,7 +485,7 @@ measurement.
 | `CompareMismatch` | `compareRegion()` in step 3; the read-back of the first two chunks in step 2 | Step 3: same as `VerifyFailed`. Step 2: at most two chunks written, pointer 0; other region boots |
 | `PointerRestoreFailed` | Step 3 pointer write | Target pointer uncertain; other region boots |
 | `OldPointerEraseFailed` | Step 4 | Both pointers may be valid; low boots first (Figure 2-9) |
-| `PointerNeighborsChanged` | Neighbor check of a pointer write; the pointer-area check in step 2 | Bytes 4 to 15 after a pointer changed; stop and dump. From step 2: the first chunks landed after the target's pointer word, pointer 0; other region boots |
+| `PointerNeighborsChanged` | Neighbor check of a pointer write; the two pointer-row checks in step 2 | Bytes 4 to 15 after a pointer changed; stop and dump. From step 2: the first chunks landed in the target's pointer row, or the trace of an earlier misplaced write was found there before any bundle write; other region boots |
 | `ResetTimeout` | `coldReset()` | Unchanged; controller did not return to APP |
 | `CommandRejected`, `CommandTimeout`, `I2cError` | Executor | Depends on the step; `lastStep()` reports it |
 
@@ -655,7 +674,10 @@ Ordered from safe to destructive. Each stage states its recovery.
    Procedure, set on 2026-11-23: run `p`, then `p2`, then `r`, and compare the dump
    with `..._F8091166_fullFlash.bin`. `p` shows the read-back and the erase and restore
    of the pointer. `p2` shows whether `FLwd` writes more than the four bytes given,
-   which `p` cannot show. The full dump shows that nothing else changed.
+   which `p` cannot show; its only passing result is the line `[p2] Verdict: FLwd
+   wrote only the four bytes given.`, and it stops before the write when the DATA
+   register holds nothing that could show a longer write. The full dump shows that
+   nothing else changed.
 3. Single-region update to the `F8091164` bundle, with timing recorded per task. Then
    `coldReset()`; VERSION must read 0xF8091164 and BOOT_STATUS must show the high region
    used. Record BOOT_STATUS with the low pointer erased, and the time to APP. Before the

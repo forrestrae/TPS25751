@@ -264,7 +264,7 @@ void test_fixed_supply_fields_decode()
 }
 
 // The 140 W charger: PDO 1 0x0981912C carries Unconstrained, Unchunked, and EPR
-// (bits 27, 24, 23); PDOs 2 to 4 are 15 V, 20 V, and 28 V / 5 A (EPR range).
+// (bits 27, 24, 23); PDOs 2 to 4 are 9 V / 3 A, 15 V / 3 A, and 20 V / 4.7 A.
 void test_charger_140w_fixture()
 {
     Caps c(4, {0x0981912Cu, 0x0002D12Cu, 0x0004B12Cu, 0x000641D6u});

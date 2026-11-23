@@ -611,9 +611,9 @@ receives `r` over serial, so a monitor attached late still captures a full dump.
 - Gate: hardware stages 2, 3, and 4.
 
 Status, 2026-11-23: implemented and reviewed clean, including the step 2 read-back and
-`p2`; stages 2 and 3 passed (results under Hardware validation); stage 4 not yet run.
-After stage 3 the EEPROM is identical to the F8091166 full-flash image and the
-controller runs that bundle from the Low region.
+`p2`; stages 2, 3, and 4 passed (results under Hardware validation), stage 4 with
+`GAID` resets in place of power cycles. After stage 4 the EEPROM is identical to the
+F8091166 full-flash image and the controller runs that bundle from the Low region.
 `src/TPS25751EepromUpdater.cpp` has 100% line coverage (432 of 432 lines) and the
 updater suite has 131 tests. Two review nits are carried into Batch 3:
 
@@ -807,6 +807,44 @@ Ordered from safe to destructive. Each stage states its recovery.
 4. Interrupted updates. Cut the update after each of the four steps (a debug hook in
    the example), power-cycle, and confirm the controller boots the region the status
    table predicts. Recovery: as stage 3.
+
+   Result, 2026-11-23, branch commit `55ed165`, Teensy 4.0: passed with one deviation
+   that I asked for. Each cut was followed by a `GAID` cold reset (`x`), not by a power
+   cycle, because a power cycle needs the stack apart while the pack is fitted. Which
+   supply powered the board was not recorded. The cuts used the F8091164 image on a
+   board that ran F8091166, so VERSION shows which bundle booted. Before each reset a
+   full `FLrd` dump was compared with the contents the cut should leave; all four were
+   equal, with no byte changed outside the expected ranges.
+
+   | Cut | EEPROM after the cut | After the reset |
+   |---|---|---|
+   | `c1`, after step 1 | High pointer 0; nothing else changed | VERSION 0xF8091166; BOOT_FLAGS `18 00 F0 A2 C1`; Low booted, High not attempted |
+   | `c2`, after step 2 | High pointer 0; F8091164 bundle written at 0x4400, not verified | VERSION 0xF8091166; BOOT_FLAGS `18 00 F0 A2 C1`; Low booted, High not attempted |
+   | `c3`, after step 3 | Both pointers valid; High holds F8091164, Low holds F8091166 | VERSION 0xF8091166; BOOT_FLAGS `18 00 F0 A2 C1`; Low booted first, High not attempted (Figure 2-9) |
+   | `c4`, after step 4 | Low pointer 0; High pointer valid over F8091164 | VERSION 0xF8091164; BOOT_FLAGS `78 00 F0 A2 C1`; Region 0 Invalid, High booted (Figure 2-10) |
+
+   `c1` and `c2` halt the sketch inside the progress callback; the Teensy was reset by
+   flashing the same build again, which does not reset the controller. `c3` took 25894
+   ms and `c4` 25966 ms, with no busy result. `c2` continued from the state `c1` left,
+   and `c3` from the state `c2` left, so each started with the target pointer already
+   0. `c4` wrote the image the region already held, which is the case the pointer-row
+   check of step 2 exists for; it passed.
+
+   Afterwards `b` with F8091166 succeeded in 52101 ms, a full dump was identical to
+   `..._F8091166_fullFlash.bin`, and after `x` VERSION read 0xF8091166 with BOOT_FLAGS
+   `18 00 F0 A2 C1`. Every reset of this stage showed the same sequence as stage 3: the
+   `GAID` executor call ended with `I2CError` after 1276 to 1277 ms, and MODE read APP
+   after 1938 to 1939 ms.
+
+   Verified by this stage: in each of the four states the status table names, the
+   controller boots the region the table predicts after a `GAID` restart, and the
+   EEPROM holds exactly what the table says.
+
+   Not shown by this stage: a boot after a loss of power from each state, and an
+   EEPROM write interrupted in the middle of a task. The cuts fall between tasks, and
+   a `GAID` restart keeps the supply up. The power-on boot path is the same code as far
+   as the documents say, and BOOT_FLAGS after a `GAID` restart of the full-flash layout
+   equals the value stage 1 read, but neither is a test of a power cycle.
 5. Blank programming. Erase the EEPROM with `minipro`, confirm PTCH mode, load the
    bundle with `TPS25751PatchLoader`, run `programBlank()`, `coldReset()`, and compare a
    dump with `..._fullFlash.bin`. Recovery: `write-flash.zsh`.

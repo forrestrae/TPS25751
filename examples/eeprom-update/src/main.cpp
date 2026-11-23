@@ -18,9 +18,11 @@
 //        The same report without the dump is printed once at start-up.
 //
 // COMMAND THAT RESTARTS THE CONTROLLER (no EEPROM write)
-//   x    coldReset(): issues GAID, waits for APP, then prints the time to APP,
-//        MODE, VERSION, and BOOT_FLAGS. The port disconnects during the
-//        restart. Runs at once, with no confirmation.
+//   x    Prints both region pointers, then coldReset(): issues GAID, waits for
+//        APP, and prints the time to APP, MODE, VERSION, and BOOT_FLAGS. The
+//        port disconnects during the restart. Runs at once when a pointer is
+//        valid. When neither is, the controller would come up in PTCH, so x
+//        warns and waits for the line "yes" first.
 //
 // COMMANDS THAT WRITE THE EEPROM
 //   p    Pointer test: writes the High pointer to 0 and back to 0x4400, and
@@ -1155,6 +1157,19 @@ static void cmdVerifyExperiment()
 
 static void cmdColdReset()
 {
+    // What the controller will find when it restarts. With no valid pointer it
+    // has no bundle to load and comes up in PTCH, where only a patch load over
+    // I2C or an external programmer brings it back, so that case asks first.
+    const bool lowValid = printPointer(EepromRegion::Low);
+    const bool highValid = printPointer(EepromRegion::High);
+    if (!lowValid && !highValid) {
+        Serial.println(F("[x] Warning: no region pointer read as valid. After this reset the controller finds no bundle to load and comes up in PTCH mode."));
+        if (!confirm()) {
+            Serial.println(F("[x] No reset was issued."));
+            return;
+        }
+    }
+
     Serial.println(F("[x] coldReset(): issuing GAID. The port disconnects while the controller restarts."));
     exec.reset();
     const uint32_t started = millis();

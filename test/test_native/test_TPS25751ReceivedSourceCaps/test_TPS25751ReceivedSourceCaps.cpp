@@ -19,10 +19,10 @@
 #include <cstring>
 #include <initializer_list>
 #include <string>
-#include <unistd.h>
 
 #include "TPS25751ReceivedSourceCaps.h"
 #include "TPS25751RegisterAddress.h"
+#include "CaptureStdout.h"
 
 namespace {
 
@@ -69,30 +69,6 @@ struct Caps {
 
 // Fixed 5 V / 3 A from the field layout: (100 << 10) | 300 = 0x0001912C.
 constexpr uint32_t FIXED_5V_3A = (100u << 10) | 300u;
-
-// Runs reg.debugPrint() against the stdout-backed native Stream stub and
-// returns what it printed.
-std::string captureDebugPrint(const TPS25751ReceivedSourceCaps &reg)
-{
-    fflush(stdout);
-    FILE *tmp = tmpfile();
-    const int saved = dup(fileno(stdout));
-    dup2(fileno(tmp), fileno(stdout));
-
-    reg.debugPrint();
-
-    fflush(stdout);
-    dup2(saved, fileno(stdout));
-    close(saved);
-
-    std::string out;
-    rewind(tmp);
-    char buf[256];
-    size_t n;
-    while ((n = fread(buf, 1, sizeof(buf), tmp)) > 0) out.append(buf, n);
-    fclose(tmp);
-    return out;
-}
 
 bool contains(const std::string &hay, const char *needle)
 {

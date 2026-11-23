@@ -22,11 +22,11 @@
 #include <unity.h>
 #include <cstdio>
 #include <string>
-#include <unistd.h>
 
 #include "TPS25751ActiveRDOContract.h"
 #include "TPS25751Register.h"
 #include "TPS25751RegisterAddress.h"
+#include "CaptureStdout.h"
 
 namespace {
 
@@ -59,30 +59,6 @@ constexpr uint8_t OBJPOS_ZERO[RDO_SIZE] = {0x64, 0x90, 0x01, 0x00};
 
 // Object Position 1 with both currents zero: invalid. Word 0x10000000.
 constexpr uint8_t ZERO_CURRENTS[RDO_SIZE] = {0x00, 0x00, 0x00, 0x10};
-
-// Runs reg.debugPrint() against the stdout-backed native Stream stub and
-// returns what it printed.
-std::string captureDebugPrint(const TPS25751ActiveRDOContract &reg)
-{
-    fflush(stdout);
-    FILE *tmp = tmpfile();
-    const int saved = dup(fileno(stdout));
-    dup2(fileno(tmp), fileno(stdout));
-
-    reg.debugPrint();
-
-    fflush(stdout);
-    dup2(saved, fileno(stdout));
-    close(saved);
-
-    std::string out;
-    rewind(tmp);
-    char buf[256];
-    size_t n;
-    while ((n = fread(buf, 1, sizeof(buf), tmp)) > 0) out.append(buf, n);
-    fclose(tmp);
-    return out;
-}
 
 bool contains(const std::string &haystack, const char *needle)
 {

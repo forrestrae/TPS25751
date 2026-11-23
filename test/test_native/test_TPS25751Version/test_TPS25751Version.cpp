@@ -14,11 +14,11 @@
 
 #include <cstdio>
 #include <string>
-#include <unistd.h>
 
 #include "TPS25751Version.h"
 #include "TPS25751Register.h"
 #include "TPS25751RegisterAddress.h"
+#include "CaptureStdout.h"
 
 namespace {
 
@@ -30,30 +30,6 @@ constexpr uint8_t SMALL_VERSION[VER_SIZE] = {0x03, 0x02, 0x01, 0x00};
 constexpr uint8_t HIGH_BYTE_VERSION[VER_SIZE] = {0x78, 0x56, 0x34, 0x12};
 constexpr uint8_t RESET_VALUE[VER_SIZE] = {0x00, 0x00, 0x00, 0x00};
 constexpr uint8_t ALL_ONES_DATA[VER_SIZE] = {0xFF, 0xFF, 0xFF, 0xFF};
-
-// Runs reg.debugPrint() against the stdout-backed native Stream stub and
-// returns what it printed.
-std::string captureDebugPrint(const TPS25751Version &reg)
-{
-    fflush(stdout);
-    FILE *tmp = tmpfile();
-    const int saved = dup(fileno(stdout));
-    dup2(fileno(tmp), fileno(stdout));
-
-    reg.debugPrint();
-
-    fflush(stdout);
-    dup2(saved, fileno(stdout));
-    close(saved);
-
-    std::string out;
-    rewind(tmp);
-    char buf[256];
-    size_t n;
-    while ((n = fread(buf, 1, sizeof(buf), tmp)) > 0) out.append(buf, n);
-    fclose(tmp);
-    return out;
-}
 
 }  // namespace
 

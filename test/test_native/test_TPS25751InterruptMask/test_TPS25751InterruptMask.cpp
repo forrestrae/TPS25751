@@ -22,11 +22,11 @@
 #include <unity.h>
 #include <cstdio>
 #include <string>
-#include <unistd.h>
 
 #include "TPS25751InterruptMask.h"
 #include "TPS25751Register.h"
 #include "TPS25751RegisterAddress.h"
+#include "CaptureStdout.h"
 
 namespace {
 
@@ -380,30 +380,6 @@ constexpr SourceCase kSources[] = {
 };
 
 constexpr size_t kNumSources = sizeof(kSources) / sizeof(kSources[0]);
-
-// Runs reg.debugPrint() against the stdout-backed native Stream stub and
-// returns what it printed.
-std::string captureDebugPrint(const TPS25751InterruptMask &reg)
-{
-    fflush(stdout);
-    FILE *tmp = tmpfile();
-    const int saved = dup(fileno(stdout));
-    dup2(fileno(tmp), fileno(stdout));
-
-    reg.debugPrint();
-
-    fflush(stdout);
-    dup2(saved, fileno(stdout));
-    close(saved);
-
-    std::string out;
-    rewind(tmp);
-    char buf[256];
-    size_t n;
-    while ((n = fread(buf, 1, sizeof(buf), tmp)) > 0) out.append(buf, n);
-    fclose(tmp);
-    return out;
-}
 
 bool contains(const std::string &haystack, const char *needle)
 {

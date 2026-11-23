@@ -23,8 +23,8 @@
 
 #include <cstdio>
 #include <string>
-#include <unistd.h>
 
+#include "CaptureStdout.h"
 #include "TPS25751Register.h"
 
 namespace {
@@ -50,24 +50,7 @@ enum class Small : uint8_t { A = 0, B = 1, C = 2, Invalid = 0xFF };
 // and returns what it printed.
 std::string capturePrintHex(uint32_t value, uint8_t digits)
 {
-    fflush(stdout);
-    FILE *tmp = tmpfile();
-    const int saved = dup(fileno(stdout));
-    dup2(fileno(tmp), fileno(stdout));
-
-    TPS25751Register::printHex(Serial, value, digits);
-
-    fflush(stdout);
-    dup2(saved, fileno(stdout));
-    close(saved);
-
-    std::string out;
-    rewind(tmp);
-    char buf[64];
-    size_t n;
-    while ((n = fread(buf, 1, sizeof(buf), tmp)) > 0) out.append(buf, n);
-    fclose(tmp);
-    return out;
+    return captureStdout([&] { TPS25751Register::printHex(Serial, value, digits); });
 }
 
 }  // namespace
@@ -317,24 +300,7 @@ public:
 
 std::string captureDump(const TPS25751Register &reg, const char *prefix)
 {
-    fflush(stdout);
-    FILE *tmp = tmpfile();
-    const int saved = dup(fileno(stdout));
-    dup2(fileno(tmp), fileno(stdout));
-
-    reg.debugDumpRaw(Serial, prefix);
-
-    fflush(stdout);
-    dup2(saved, fileno(stdout));
-    close(saved);
-
-    std::string out;
-    rewind(tmp);
-    char buf[256];
-    size_t n;
-    while ((n = fread(buf, 1, sizeof(buf), tmp)) > 0) out.append(buf, n);
-    fclose(tmp);
-    return out;
+    return captureStdout([&] { reg.debugDumpRaw(Serial, prefix); });
 }
 
 }  // namespace

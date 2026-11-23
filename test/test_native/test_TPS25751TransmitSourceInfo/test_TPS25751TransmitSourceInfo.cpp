@@ -30,11 +30,11 @@
 
 #include <cstdio>
 #include <string>
-#include <unistd.h>
 
 #include "TPS25751Register.h"
 #include "TPS25751RegisterAddress.h"
 #include "TPS25751TransmitSourceInfo.h"
+#include "CaptureStdout.h"
 
 namespace {
 
@@ -91,28 +91,6 @@ Info resetWithBit(uint8_t bit)
 uint64_t fieldMask(uint8_t pos, uint8_t len)
 {
     return ((len >= 64) ? ~0ULL : ((1ULL << len) - 1)) << pos;
-}
-
-std::string captureDebugPrint(const Info &reg)
-{
-    fflush(stdout);
-    FILE *tmp = tmpfile();
-    const int saved = dup(fileno(stdout));
-    dup2(fileno(tmp), fileno(stdout));
-
-    reg.debugPrint();
-
-    fflush(stdout);
-    dup2(saved, fileno(stdout));
-    close(saved);
-
-    std::string out;
-    rewind(tmp);
-    char buf[256];
-    size_t n;
-    while ((n = fread(buf, 1, sizeof(buf), tmp)) > 0) out.append(buf, n);
-    fclose(tmp);
-    return out;
 }
 
 // One row per raw setter: field position and width, and the setter itself.

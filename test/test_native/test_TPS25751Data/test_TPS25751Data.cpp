@@ -13,11 +13,11 @@
 
 #include <cstdio>
 #include <string>
-#include <unistd.h>
 
 #include "TPS25751Data.h"
 #include "TPS25751Register.h"
 #include "TPS25751RegisterAddress.h"
+#include "CaptureStdout.h"
 
 namespace {
 
@@ -27,28 +27,6 @@ constexpr size_t DATA_SIZE = TPS25751Registers::Registers::DATA.size;  // 64
 void fillRamp(uint8_t *buf)
 {
     for (size_t i = 0; i < DATA_SIZE; i++) buf[i] = static_cast<uint8_t>(i + 1);
-}
-
-std::string captureDebugPrint(const TPS25751Data &reg)
-{
-    fflush(stdout);
-    FILE *tmp = tmpfile();
-    const int saved = dup(fileno(stdout));
-    dup2(fileno(tmp), fileno(stdout));
-
-    reg.debugPrint();
-
-    fflush(stdout);
-    dup2(saved, fileno(stdout));
-    close(saved);
-
-    std::string out;
-    rewind(tmp);
-    char buf[256];
-    size_t n;
-    while ((n = fread(buf, 1, sizeof(buf), tmp)) > 0) out.append(buf, n);
-    fclose(tmp);
-    return out;
 }
 
 bool contains(const std::string &s, const char *needle)

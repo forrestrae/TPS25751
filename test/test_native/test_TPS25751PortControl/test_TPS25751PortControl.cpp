@@ -21,13 +21,13 @@
  */
 
 #include <unity.h>
-#include <unistd.h>
 #include <string>
 #include <cstdio>
 
 #include "TPS25751PortControl.h"
 #include "TPS25751Register.h"
 #include "TPS25751RegisterAddress.h"
+#include "CaptureStdout.h"
 
 namespace {
 
@@ -272,30 +272,6 @@ constexpr size_t kNumFlags = sizeof(kFlags) / sizeof(kFlags[0]);
 void packBit(uint8_t (&buf)[PORT_CONTROL_SIZE], uint8_t bit)
 {
     buf[bit / 8] = static_cast<uint8_t>(buf[bit / 8] | (1u << (bit % 8)));
-}
-
-// Runs reg.debugPrint() against the stdout-backed native Stream stub and
-// returns what it printed.
-std::string captureDebugPrint(const TPS25751PortControl &reg)
-{
-    fflush(stdout);
-    FILE *tmp = tmpfile();
-    const int saved = dup(fileno(stdout));
-    dup2(fileno(tmp), fileno(stdout));
-
-    reg.debugPrint();
-
-    fflush(stdout);
-    dup2(saved, fileno(stdout));
-    close(saved);
-
-    std::string out;
-    rewind(tmp);
-    char buf[256];
-    size_t n;
-    while ((n = fread(buf, 1, sizeof(buf), tmp)) > 0) out.append(buf, n);
-    fclose(tmp);
-    return out;
 }
 
 bool contains(const std::string &haystack, const char *needle)

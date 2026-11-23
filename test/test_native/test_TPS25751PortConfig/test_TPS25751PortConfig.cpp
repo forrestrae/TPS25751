@@ -25,11 +25,11 @@
 
 #include <cstdio>
 #include <string>
-#include <unistd.h>
 
 #include "TPS25751PortConfig.h"
 #include "TPS25751Register.h"
 #include "TPS25751RegisterAddress.h"
+#include "CaptureStdout.h"
 
 // Defined in TPS25751PortConfig.cpp but not declared in its header.
 const char* toString(TypeCSupportOptions opt);
@@ -39,30 +39,6 @@ const char* toString(OVP_PP5V val);
 const char* toString(VbusUVPTripHV val);
 
 namespace {
-
-// Runs reg.debugPrint() against the stdout-backed native Stream stub and
-// returns what it printed.
-std::string captureDebugPrint(const TPS25751PortConfig &reg)
-{
-    fflush(stdout);
-    FILE *tmp = tmpfile();
-    const int saved = dup(fileno(stdout));
-    dup2(fileno(tmp), fileno(stdout));
-
-    reg.debugPrint();
-
-    fflush(stdout);
-    dup2(saved, fileno(stdout));
-    close(saved);
-
-    std::string out;
-    rewind(tmp);
-    char buf[256];
-    size_t n;
-    while ((n = fread(buf, 1, sizeof(buf), tmp)) > 0) out.append(buf, n);
-    fclose(tmp);
-    return out;
-}
 
 bool contains(const std::string &hay, const char *needle)
 {

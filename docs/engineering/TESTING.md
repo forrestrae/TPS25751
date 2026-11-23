@@ -115,9 +115,9 @@ PlatformIO defines **`PIO_UNIT_TESTING`** during test builds;
 `test_TPS25751Register` covers those helpers, including fields past bit 255
 (ADR-012).
 
-To compare `debugPrint()` output, redirect stdout around the call; several
-suites define a `captureDebugPrint()` helper that does this with `dup2()` and a
-`tmpfile()`.
+To compare printed output, include `CaptureStdout.h` from `test/support/native/`.
+`captureDebugPrint(reg)` returns what a register's `debugPrint()` printed, and
+`captureStdout(fn)` returns what any callable printed.
 
 ### Test Structure
 

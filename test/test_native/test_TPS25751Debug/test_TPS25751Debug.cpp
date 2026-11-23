@@ -21,8 +21,8 @@
 #include <cstdio>
 #include <cstring>
 #include <string>
-#include <unistd.h>
 
+#include "CaptureStdout.h"
 #include "TPS25751Debug.h"
 
 // Defined in TPS25751Debug.cpp but not declared in the public header.
@@ -32,30 +32,6 @@ const char *getCategoryString(uint8_t category);
 }  // namespace TPS25751Debug
 
 namespace {
-
-// Runs fn with stdout redirected to a temp file and returns what it wrote.
-template <typename Fn>
-std::string captureStdout(Fn fn)
-{
-    fflush(stdout);
-    FILE *tmp = tmpfile();
-    const int saved = dup(fileno(stdout));
-    dup2(fileno(tmp), fileno(stdout));
-
-    fn();
-
-    fflush(stdout);
-    dup2(saved, fileno(stdout));
-    close(saved);
-
-    std::string out;
-    rewind(tmp);
-    char buf[512];
-    size_t n;
-    while ((n = fread(buf, 1, sizeof(buf), tmp)) > 0) out.append(buf, n);
-    fclose(tmp);
-    return out;
-}
 
 bool contains(const std::string &s, const char *needle)
 {

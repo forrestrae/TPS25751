@@ -12,11 +12,11 @@
 #include <cstdio>
 #include <cstring>
 #include <string>
-#include <unistd.h>
 
 #include "TPS25751PowerStatus.h"
 #include "TPS25751Register.h"
 #include "TPS25751RegisterAddress.h"
+#include "CaptureStdout.h"
 
 namespace {
 
@@ -31,25 +31,6 @@ void pack(uint8_t *buf, unsigned pos, unsigned len, uint32_t value)
         if ((value >> i) & 1u) buf[b / 8] |= static_cast<uint8_t>(1u << (b % 8));
         else buf[b / 8] &= static_cast<uint8_t>(~(1u << (b % 8)));
     }
-}
-
-std::string captureDebugPrint(const E &reg)
-{
-    fflush(stdout);
-    FILE *tmp = tmpfile();
-    const int saved = dup(fileno(stdout));
-    dup2(fileno(tmp), fileno(stdout));
-    reg.debugPrint();
-    fflush(stdout);
-    dup2(saved, fileno(stdout));
-    close(saved);
-    std::string out;
-    rewind(tmp);
-    char buf[256];
-    size_t n;
-    while ((n = fread(buf, 1, sizeof(buf), tmp)) > 0) out.append(buf, n);
-    fclose(tmp);
-    return out;
 }
 
 bool has(const std::string &s, const char *needle) { return s.find(needle) != std::string::npos; }

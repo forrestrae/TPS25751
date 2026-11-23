@@ -18,11 +18,11 @@
 #include <cstdio>
 #include <cstring>
 #include <string>
-#include <unistd.h>
 
 #include "TPS25751GlobalSystemConfig.h"
 #include "TPS25751Register.h"
 #include "TPS25751RegisterAddress.h"
+#include "CaptureStdout.h"
 
 namespace {
 
@@ -377,28 +377,6 @@ void test_move_assignment_transfers_ownership()
 // --- debugPrint ------------------------------------------------------------------
 
 namespace {
-
-std::string captureDebugPrint(const TPS25751GlobalSystemConfig &reg)
-{
-    fflush(stdout);
-    FILE *tmp = tmpfile();
-    const int saved = dup(fileno(stdout));
-    dup2(fileno(tmp), fileno(stdout));
-
-    reg.debugPrint();
-
-    fflush(stdout);
-    dup2(saved, fileno(stdout));
-    close(saved);
-
-    std::string out;
-    rewind(tmp);
-    char buf[256];
-    size_t n;
-    while ((n = fread(buf, 1, sizeof(buf), tmp)) > 0) out.append(buf, n);
-    fclose(tmp);
-    return out;
-}
 
 }  // namespace
 

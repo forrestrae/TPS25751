@@ -28,11 +28,11 @@
 
 #include <cstdio>
 #include <string>
-#include <unistd.h>
 
 #include "TPS25751Register.h"
 #include "TPS25751RegisterAddress.h"
 #include "TPS25751TransmitPPSStatus.h"
+#include "CaptureStdout.h"
 
 namespace {
 
@@ -70,28 +70,6 @@ Pps makePps(uint32_t value)
 uint32_t fieldMask(uint8_t pos, uint8_t len)
 {
     return ((len >= 32) ? 0xFFFFFFFFu : ((1u << len) - 1)) << pos;
-}
-
-std::string captureDebugPrint(const Pps &reg)
-{
-    fflush(stdout);
-    FILE *tmp = tmpfile();
-    const int saved = dup(fileno(stdout));
-    dup2(fileno(tmp), fileno(stdout));
-
-    reg.debugPrint();
-
-    fflush(stdout);
-    dup2(saved, fileno(stdout));
-    close(saved);
-
-    std::string out;
-    rewind(tmp);
-    char buf[256];
-    size_t n;
-    while ((n = fread(buf, 1, sizeof(buf), tmp)) > 0) out.append(buf, n);
-    fclose(tmp);
-    return out;
 }
 
 // One row per setter that writes a raw field value.

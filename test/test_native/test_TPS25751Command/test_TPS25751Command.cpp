@@ -16,12 +16,12 @@
 #include <cstdio>
 #include <cstring>
 #include <string>
-#include <unistd.h>
 
 #include "TPS25751Command.h"
 #include "TPS25751Task.h"
 #include "TPS25751Register.h"
 #include "TPS25751RegisterAddress.h"
+#include "CaptureStdout.h"
 
 namespace {
 
@@ -31,28 +31,6 @@ constexpr uint8_t CLEAR_DATA[COMMAND_SIZE] = {0, 0, 0, 0};
 constexpr uint8_t REJECTED_DATA[COMMAND_SIZE] = {'!', 'C', 'M', 'D'};
 constexpr uint8_t I2CR_DATA[COMMAND_SIZE] = {'I', '2', 'C', 'r'};
 constexpr uint8_t ALL_ONES[COMMAND_SIZE] = {0xFF, 0xFF, 0xFF, 0xFF};
-
-std::string captureDebugPrint(const TPS25751Command &reg)
-{
-    fflush(stdout);
-    FILE *tmp = tmpfile();
-    const int saved = dup(fileno(stdout));
-    dup2(fileno(tmp), fileno(stdout));
-
-    reg.debugPrint();
-
-    fflush(stdout);
-    dup2(saved, fileno(stdout));
-    close(saved);
-
-    std::string out;
-    rewind(tmp);
-    char buf[256];
-    size_t n;
-    while ((n = fread(buf, 1, sizeof(buf), tmp)) > 0) out.append(buf, n);
-    fclose(tmp);
-    return out;
-}
 
 bool contains(const std::string &s, const char *needle)
 {

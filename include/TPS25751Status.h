@@ -7,16 +7,31 @@
 #include "TPS25751RegisterAddress.h"
 
 // Forward declare enums used for interpreting fields
+
+/**
+ * @brief STATUS Connection State (bits 3:1)
+ *
+ * Source: SLVUCR8B (Rev. B, 2026-08), page 25. Rev. B redefines 2h as
+ * corrosion mitigation (TRM text: "Corrosion Mitigaion (Ra/Ra)"; Rev. A:
+ * "Audio connection (Ra/Ra)") and 5h as "Debug connection (Rp/Rp)" (Rev. A:
+ * Reserved). AUDIO_ACCESSORY and RESERVED are deprecated aliases with the
+ * same values as CORROSION_MITIGATION and DEBUG_ACCESSORY_RP_RP.
+ */
 enum ConnectionState
 {
     DISCONNECTED = 0,
     PORT_DISABLED = 1,
-    AUDIO_ACCESSORY = 2,
-    DEBUG_ACCESSORY = 3,
+    CORROSION_MITIGATION = 2,       ///< 2h: Corrosion Mitigation (Ra/Ra); audio accessory in Rev. A
+    DEBUG_ACCESSORY = 3,            ///< 3h: Debug connection (Rd/Rd)
     NO_CONNECTION_RA_DETECTED = 4,
-    RESERVED = 5,
+    DEBUG_ACCESSORY_RP_RP = 5,      ///< 5h: Debug connection (Rp/Rp); Reserved in Rev. A
     CONNECTED_NO_RA_DETECTED = 6,
-    CONNECTED_RA_DETECTED = 7
+    CONNECTED_RA_DETECTED = 7,
+
+    /// @deprecated Rev. A name for 2h. Same value as CORROSION_MITIGATION.
+    AUDIO_ACCESSORY [[deprecated("SLVUCR8B Rev. B p.25 defines 2h as Corrosion Mitigation (Ra/Ra); use CORROSION_MITIGATION")]] = 2,
+    /// @deprecated Rev. A name for 5h. Same value as DEBUG_ACCESSORY_RP_RP.
+    RESERVED [[deprecated("SLVUCR8B Rev. B p.25 defines 5h as Debug connection (Rp/Rp); use DEBUG_ACCESSORY_RP_RP")]] = 5
 };
 
 

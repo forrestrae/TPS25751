@@ -109,6 +109,18 @@ bool TPS25751InterruptMask::cmd1Complete() const
     return extractBits(30, 1);
 }
 
+// Manufacturer Info message received (bit 29). Source: SLVUCR8B (Rev. B, 2026-08), page 21.
+bool TPS25751InterruptMask::midbReceived() const
+{
+    return extractBits(29, 1);
+}
+
+// Discover Modes process completed (bit 51). Source: SLVUCR8B (Rev. B, 2026-08), page 21.
+bool TPS25751InterruptMask::discoverModeCompleted() const
+{
+    return extractBits(51, 1);
+}
+
 // Register update notifications (bits 23-27)
 bool TPS25751InterruptMask::pdStatusUpdated() const
 {
@@ -226,6 +238,9 @@ void TPS25751InterruptMask::setPlugInsertOrRemoval(bool enabled) { setBits(3, 1,
 
 void TPS25751InterruptMask::setCmd1Complete(bool enabled) { setBits(30, 1, enabled ? 1u : 0u); }
 
+void TPS25751InterruptMask::setMidbReceived(bool enabled) { setBits(29, 1, enabled ? 1u : 0u); }
+void TPS25751InterruptMask::setDiscoverModeCompleted(bool enabled) { setBits(51, 1, enabled ? 1u : 0u); }
+
 void TPS25751InterruptMask::setPdStatusUpdated(bool enabled) { setBits(27, 1, enabled ? 1u : 0u); }
 void TPS25751InterruptMask::setStatusUpdated(bool enabled) { setBits(26, 1, enabled ? 1u : 0u); }
 void TPS25751InterruptMask::setPowerStatusUpdated(bool enabled) { setBits(24, 1, enabled ? 1u : 0u); }
@@ -272,6 +287,7 @@ uint8_t TPS25751InterruptMask::getEnabledCount() const
     if (liquidDetection()) count++;
     if (extDcdcSourceSafeState()) count++;
     if (extDcdcSinkSafeState()) count++;
+    if (discoverModeCompleted()) count++;
     if (unableToSourceError()) count++;
     if (messageDataError()) count++;
     if (protocolError()) count++;
@@ -284,6 +300,7 @@ uint8_t TPS25751InterruptMask::getEnabledCount() const
     if (sinkTransitionCompleted()) count++;
     if (plugInsertOrRemoval()) count++;
     if (cmd1Complete()) count++;
+    if (midbReceived()) count++;
     if (pdStatusUpdated()) count++;
     if (statusUpdated()) count++;
     if (powerStatusUpdated()) count++;
@@ -329,6 +346,7 @@ void TPS25751InterruptMask::debugPrint(Stream &s) const
 
     if (extDcdcSourceSafeState()) s.println(F("  [+] Ext DCDC Source Safe State"));
     if (extDcdcSinkSafeState()) s.println(F("  [+] Ext DCDC Sink Safe State"));
+    if (discoverModeCompleted()) s.println(F("  [+] Discover Mode Completed"));
 
     if (unableToSourceError()) s.println(F("  [+] Unable to Source Error"));
     if (messageDataError()) s.println(F("  [+] Message Data Error"));
@@ -344,6 +362,7 @@ void TPS25751InterruptMask::debugPrint(Stream &s) const
     if (plugInsertOrRemoval()) s.println(F("  [+] Plug Insert or Removal"));
 
     if (cmd1Complete()) s.println(F("  [+] CMD1 Complete"));
+    if (midbReceived()) s.println(F("  [+] MIDB Received"));
 
     if (pdStatusUpdated()) s.println(F("  [+] PD Status Updated"));
     if (statusUpdated()) s.println(F("  [+] Status Updated"));

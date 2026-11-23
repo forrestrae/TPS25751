@@ -5,11 +5,19 @@ ChargerDetectEnable TPS25751PortControl::chargerDetectEnable() const {
 }
 
 ChargerAdvertiseEnable TPS25751PortControl::chargerAdvertiseEnable() const {
-    return extractEnum<ChargerAdvertiseEnable>(26, 3, static_cast<uint8_t>(ChargerAdvertiseEnable::Reserved7), ChargerAdvertiseEnable::None);
+    return extractEnum<ChargerAdvertiseEnable>(26, 3, static_cast<uint8_t>(ChargerAdvertiseEnable::Reserved7), ChargerAdvertiseEnable::SDP);
 }
 
 bool TPS25751PortControl::resistor15kPresent() const {
     return extractBits(24, 1);
+}
+
+bool TPS25751PortControl::dcdEnable() const {
+    return extractBits(25, 1);
+}
+
+bool TPS25751PortControl::automaticIdRequest() const {
+    return extractBits(16, 1);
 }
 
 bool TPS25751PortControl::enableCurrentMonitor() const {
@@ -62,22 +70,24 @@ void TPS25751PortControl::debugPrint(Stream &s) const {
     s.println(F("  Charger Detection:"));
     s.print(F("    Detect Enable: ")); s.println(toString(chargerDetectEnable()));
     s.print(F("    Advertise Enable: ")); s.println(toString(chargerAdvertiseEnable()));
-    s.print(F("    15k Resistor Present: ")); s.println(resistor15kPresent() ? F("Yes") : F("No"));
+    s.print(F("    15k Resistor Present: ")); s.println(yesNo(resistor15kPresent()));
+    s.print(F("    DCD Enable: ")); s.println(dcdEnable() ? F("Enabled") : F("Disabled"));
+    s.print(F("    Automatic ID Request: ")); s.println(automaticIdRequest() ? F("Enabled") : F("Disabled"));
 
     s.println(F("  Power Configuration:"));
     s.print(F("    Current Monitor: ")); s.println(enableCurrentMonitor() ? F("Enabled") : F("Disabled"));
-    s.print(F("    Unconstrained Power: ")); s.println(unconstrainedPower() ? F("Yes") : F("No"));
+    s.print(F("    Unconstrained Power: ")); s.println(yesNo(unconstrainedPower()));
 
     s.println(F("  Data Role Swap:"));
-    s.print(F("    Initiate to DFP: ")); s.println(initiateSwapToDFP() ? F("Yes") : F("No"));
+    s.print(F("    Initiate to DFP: ")); s.println(yesNo(initiateSwapToDFP()));
     s.print(F("    Process to DFP: ")); s.println(processSwapToDFP() ? F("Accept") : F("Reject"));
-    s.print(F("    Initiate to UFP: ")); s.println(initiateSwapToUFP() ? F("Yes") : F("No"));
+    s.print(F("    Initiate to UFP: ")); s.println(yesNo(initiateSwapToUFP()));
     s.print(F("    Process to UFP: ")); s.println(processSwapToUFP() ? F("Accept") : F("Reject"));
 
     s.println(F("  Power Role Swap:"));
-    s.print(F("    Initiate to Source: ")); s.println(initiateSwapToSource() ? F("Yes") : F("No"));
+    s.print(F("    Initiate to Source: ")); s.println(yesNo(initiateSwapToSource()));
     s.print(F("    Process to Source: ")); s.println(processSwapToSource() ? F("Accept") : F("Reject"));
-    s.print(F("    Initiate to Sink: ")); s.println(initiateSwapToSink() ? F("Yes") : F("No"));
+    s.print(F("    Initiate to Sink: ")); s.println(yesNo(initiateSwapToSink()));
     s.print(F("    Process to Sink: ")); s.println(processSwapToSink() ? F("Accept") : F("Reject"));
 
     s.print(F("Type-C Current: ")); s.println(toString(typeCCurrent()));
@@ -89,7 +99,7 @@ const char* toString(ChargerDetectEnable val) {
     switch (val) {
         case ChargerDetectEnable::None: return "None";
         case ChargerDetectEnable::BC12Only: return "BC 1.2 only";
-        case ChargerDetectEnable::Reserved: return "Reserved";
+        case ChargerDetectEnable::ProprietaryOnly: return "Proprietary only";  // SLVUCR8B p.31
         case ChargerDetectEnable::BC12AndProprietary: return "BC 1.2 + Proprietary";
         default: return "Unknown";
     }
@@ -97,7 +107,7 @@ const char* toString(ChargerDetectEnable val) {
 
 const char* toString(ChargerAdvertiseEnable val) {
     switch (val) {
-        case ChargerAdvertiseEnable::None: return "None";
+        case ChargerAdvertiseEnable::SDP: return "BC 1.2 SDP only";  // SLVUCR8B p.31
         case ChargerAdvertiseEnable::CDP: return "CDP";
         case ChargerAdvertiseEnable::DCP: return "DCP";
         case ChargerAdvertiseEnable::Reserved3: return "Reserved (3)";
@@ -140,10 +150,8 @@ bool TPS25751PortControl::isSemanticallyValid() const {
         return false;
     }
 
-    // Check for reserved enum values
-    if (detectEn == ChargerDetectEnable::Reserved) {
-        return false;  // Reserved value used
-    }
+    // Every Charger Detect Enable value (0h-3h) is defined in Rev. B; 2h is
+    // "Detect proprietary chargers only" (SLVUCR8B p.31), so no rejection here.
 
     // Logical consistency checks
     // If 15k resistor is present, certain charger modes shouldn't be used

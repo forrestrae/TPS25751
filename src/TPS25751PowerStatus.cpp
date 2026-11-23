@@ -94,7 +94,7 @@ void TPS25751PowerStatus::debugPrint(Stream &s) const
 
     // Connection status
     s.print(F("  Power Connection: "));
-    s.println(isPowerConnection() ? F("Yes") : F("No"));
+    s.println(yesNo(isPowerConnection()));
 
     if (isPowerConnection()) {
         // Source/Sink

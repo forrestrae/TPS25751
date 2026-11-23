@@ -9,8 +9,10 @@
  * @brief INT_MASK1 register (0x16) class implementation
  *
  * The INT_MASK1 register controls which INT_EVENT1 (0x14) interrupt sources
- * are permitted to assert: "A bit in INT_EVENT1 cannot be set if it is
- * cleared in this register." A mask bit of 1 means the corresponding source
+ * are permitted to assert: "Interrupt mask bit field for INT_EVENT1. Bytes 1
+ * to 10 of this register must be configured through the Application
+ * Customization Tool to enable the corresponding interrupt events." A mask
+ * bit of 1 means the corresponding source
  * is enabled (allowed to set its INT_EVENT1 bit); a mask bit of 0 disables
  * (blocks) that source. This class mirrors TPS25751InterruptEvent's bit
  * layout and accessor names exactly -- see that class for the read-only
@@ -21,7 +23,8 @@
  * - Size: 11 bytes (88 bits)
  * - Access: Read/Write
  *
- * @see TI TPS25751 Technical Reference Manual, Table 3-27 family (INT_MASK1)
+ * @see TI TPS25751 Technical Reference Manual SLVUCR8B (Rev. B), Table 3-9, p.21
+ * (Interrupt Mask for I2Ct_IRQ)
  */
 class TPS25751InterruptMask : public TPS25751Register
 {
@@ -65,7 +68,7 @@ public:
     bool messageDataError() const;
     /** @brief Protocol Error source enabled. @see bit 38 */
     bool protocolError() const;
-    /** @brief Missing Get Capabilities Error source enabled. @see bit 36 */
+    /** @brief Missing Get Capabilities Error source enabled. TRM: "Missing Get Capabalities Message Error" (SLVUCR8B p.21). @see bit 36 */
     bool missingGetCapabilitiesError() const;
     /** @brief Power Event Occurred Error source enabled. @see bit 35 */
     bool powerEventOccurredError() const;
@@ -87,6 +90,12 @@ public:
     // Command completion (bit 30)
     /** @brief CMD1 Complete source enabled. @see bit 30 */
     bool cmd1Complete() const;
+
+    /** @brief MIDB Received (Manufacturer Info message) source enabled. SLVUCR8B p.21. @see bit 29 */
+    bool midbReceived() const;
+
+    /** @brief Discover Mode Completed source enabled. SLVUCR8B p.21. @see bit 51 */
+    bool discoverModeCompleted() const;
 
     // Register update notifications (bits 23-27)
     /** @brief PD Status Updated source enabled. @see bit 27 */
@@ -113,7 +122,7 @@ public:
     // PD message reception (bits 14-15)
     /** @brief Sink Cap Message Received source enabled. @see bit 15 */
     bool sinkCapMessageReceived() const;
-    /** @brief Source Cap Message Received source enabled. @see bit 14 */
+    /** @brief Source Cap Message Received source enabled. TRM: "Source Capabalities Message Received" (SLVUCR8B p.21). @see bit 14 */
     bool sourceCapMessageReceived() const;
 
     // Contract negotiation (bits 12-13)
@@ -164,6 +173,9 @@ public:
     void setPlugInsertOrRemoval(bool enabled);
 
     void setCmd1Complete(bool enabled);
+
+    void setMidbReceived(bool enabled);
+    void setDiscoverModeCompleted(bool enabled);
 
     void setPdStatusUpdated(bool enabled);
     void setStatusUpdated(bool enabled);

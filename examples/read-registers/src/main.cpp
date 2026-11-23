@@ -5,6 +5,7 @@
 #include <TPS25751PowerPathStatus.h>
 #include <TPS25751BootFlags.h>
 #include <TPS25751PortConfig.h>
+#include <TPS25751Rdo.h>
 #include <TPS25751RegisterFactory.h>
 #include "TPS25751InterruptEvent.h"
 #include "TPS25751InterruptMask.h"
@@ -14,6 +15,8 @@
 #include "TPS25751AutoNegotiateSink.h"
 #include "TPS25751IOConfig.h"
 #include "TPS25751LiquidDetectionConfig.h"
+#include "TPS25751Version.h"
+#include "TPS25751PD3Config.h"
 
 #define I2CT_IRQ_PIN 17
 
@@ -164,9 +167,26 @@ void print_contracts()
     else
         Serial.println(F("Failed to create/read Active PDO Contract register via factory"));
 
-    if (const auto rdoContract = pd.readActiveRDOContractRegister(true))
-        rdoContract->debugPrint();
-    else
+    if (const auto rdoContract = pd.readActiveRDOContractRegister(true)) {
+        // Bits 31:0 are the RDO sent as Sink; its kind follows the active PDO (0x34).
+        RdoKind ownKind = RdoKind::Unknown;
+        if (const auto pdoContract = pd.readActivePDOContractRegister(true))
+            ownKind = rdoKindFor(pdoContract->activePdo());
+
+        // Bits 127:96 are a partner's request only while this device is Source; its
+        // kind follows our advertised PDO at that Object Position (0x32).
+        RdoKind requestedKind = RdoKind::Unknown;
+        const uint8_t objectPosition = rdoContract->requestedRdo().objectPosition();
+        if (rdoContract->rawRequestedRdo() != 0 && objectPosition >= 1 && objectPosition <= 7) {
+            const auto statusReg = pd.readStatusRegister(true);
+            if (statusReg && statusReg->portRole() == PORT_SOURCE) {
+                if (const auto txSourceCaps = pd.readTransmitSourceCapsRegister(true))
+                    requestedKind = rdoKindFor(txSourceCaps->pdo(objectPosition - 1));
+            }
+        }
+
+        rdoContract->debugPrint(Serial, ownKind, requestedKind);
+    } else
         Serial.println(F("Failed to create/read Active RDO Contract register via factory"));
 }
 
@@ -202,7 +222,15 @@ void print_sleep_and_customer_use()
 
     TPS25751SleepControl sleepControl;
     if (pd.readSleepControl(sleepControl))
+    {
         sleepControl.debugPrint();
+
+        // Raw register byte, for comparing against the TRM reset value (03h).
+        Serial.print(F("SLEEP_CONTROL raw: 0x"));
+        if (sleepControl.raw()[0] < 0x10)
+            Serial.print('0');
+        Serial.println(sleepControl.raw()[0], HEX);
+    }
     else
         Serial.println(F("Failed to read Sleep Control register"));
 
@@ -220,8 +248,9 @@ void print_interrupt_mask()
     Serial.println();
 
     // INT_MASK1 (0x16) is readable; it gates which INT_EVENT1 sources may
-    // assert IRQ. The companion INT_CLEAR1 (0x18) is write-only and so is not
-    // demonstrated here (this sketch is read-only / non-destructive).
+    // assert IRQ. The companion INT_CLEAR1 (0x18) is not demonstrated here:
+    // writing it is destructive (it clears events) and this sketch is
+    // read-only / non-destructive.
     TPS25751InterruptMask interruptMask;
     if (pd.readInterruptMask(interruptMask))
         interruptMask.debugPrint();
@@ -273,16 +302,209 @@ void print_liquid_detection_config()
         Serial.println(F("Failed to create/read Liquid Detection Config register via factory"));
 }
 
+void print_version_and_pd3_config()
+{
+    Serial.println();
+    Serial.println(F("-------------------- print_version_and_pd3_config --------------------"));
+    Serial.println();
+
+    // VERSION (0x0F) is read-only. PD3_CONFIGURATION (0x42) is R/W, but changing
+    // which PD 3.0 messages a live board answers is outside this read-only
+    // sketch, so only the read paths are demonstrated here.
+    if (const auto version = pd.readVersionRegister(true))
+        version->debugPrint();
+    else
+        Serial.println(F("Failed to create/read Version register via factory"));
+
+    if (const auto pd3Config = pd.readPD3ConfigRegister(true))
+        pd3Config->debugPrint();
+    else
+        Serial.println(F("Failed to create/read PD3 Configuration register via factory"));
+}
+
+void print_global_config_and_sop_identity()
+{
+    Serial.println();
+    Serial.println(F("-------------------- print_global_config_and_sop_identity --------------------"));
+    Serial.println();
+
+    // GLOBAL_SYSTEM_CONFIGURATION (0x27) is R/W, but this sketch never writes it:
+    // a write makes the port disconnect and reconnect, and a wrong PP1 or PP3
+    // role can back-drive the power path. RECEIVED_SOP_IDENTITY (0x48) is read-only.
+    if (const auto globalConfig = pd.readGlobalSystemConfigRegister(true))
+        globalConfig->debugPrint();
+    else
+        Serial.println(F("Failed to create/read Global System Configuration register via factory"));
+
+    if (const auto sopIdentity = pd.readReceivedSOPIdentityRegister(true))
+        sopIdentity->debugPrint();
+    else
+        Serial.println(F("Failed to create/read Received SOP Identity register via factory"));
+
+    // The identity register fills when the controller sends Discover Identity.
+    // Automatic ID Request makes that automatic; Discover Mode Completed is a
+    // later discovery step, not a "0x48 updated" signal.
+    if (const auto portControl = pd.readPortControlRegister(true))
+    {
+        Serial.print(F("PORT_CONTROL Automatic ID Request: "));
+        Serial.println(portControl->automaticIdRequest() ? F("Yes") : F("No"));
+    }
+    else
+        Serial.println(F("Failed to create/read Port Control register via factory"));
+
+    if (const auto interruptEvent = pd.readInterruptEventRegister(true))
+    {
+        Serial.print(F("INT_EVENT1 Discover Mode Completed: "));
+        Serial.println(interruptEvent->discoverModeCompleted() ? F("Yes") : F("No"));
+    }
+    else
+        Serial.println(F("Failed to create/read Interrupt Event register via factory"));
+}
+
+void print_source_info_and_pps_status()
+{
+    Serial.println();
+    Serial.println(F("-------------------- print_source_info_and_pps_status --------------------"));
+    Serial.println();
+
+    // TX_SOURCE_INFO (0x78) and TRANSMITTED_PPS_STATUS (0x7A) are R/W, but this
+    // sketch never writes them: the PD firmware updates 0x78 on its own, and a
+    // wrong value in either register is sent to the port partner in reply to
+    // Get_Source_Info or Get_PPS_Status.
+    if (const auto sourceInfo = pd.readTransmitSourceInfoRegister(true))
+        sourceInfo->debugPrint();
+    else
+        Serial.println(F("Failed to create/read TX Source Info register via factory"));
+
+    if (const auto ppsStatus = pd.readTransmitPPSStatusRegister(true))
+        ppsStatus->debugPrint();
+    else
+        Serial.println(F("Failed to create/read Transmitted PPS Status register via factory"));
+
+    // The controller answers Get_Source_Info and Get_PPS_Status from these
+    // registers only while the matching PD3_CONFIGURATION bit is set; with the
+    // bit clear it replies Not_Supported.
+    if (const auto pd3Config = pd.readPD3ConfigRegister(true))
+    {
+        Serial.print(F("PD3 Support Get Source Info: "));
+        Serial.println(pd3Config->supportGetSourceInfo() ? F("Yes") : F("No"));
+        Serial.print(F("PD3 Support PPS Status: "));
+        Serial.println(pd3Config->supportPpsStatus() ? F("Yes") : F("No"));
+    }
+    else
+        Serial.println(F("Failed to create/read PD3 Configuration register via factory"));
+}
+
+void print_caps_extended()
+{
+    Serial.println();
+    Serial.println(F("-------------------- print_caps_extended --------------------"));
+    Serial.println();
+
+    // TX_SOURCE_CAPABILITIES_EXTENDED (0x77) and TRANSMIT_SINK_CAPABILITIES_EXTENDED
+    // (0x7E) are R/W, but this sketch never writes them: whatever the host stores
+    // is sent to the port partner in reply to Get_Source_Cap_Extended or
+    // Get_Sink_Cap_Extended. The classes decode the fields per the USB PD
+    // specification (R3.3), and debugPrint() prints the decoded values below the
+    // raw ones.
+    if (const auto sourceCaps = pd.readTransmitSourceCapsExtendedRegister(true))
+        sourceCaps->debugPrint();
+    else
+        Serial.println(F("Failed to create/read TX Source Capabilities Extended register via factory"));
+
+    if (const auto sinkCaps = pd.readTransmitSinkCapsExtendedRegister(true))
+        sinkCaps->debugPrint();
+    else
+        Serial.println(F("Failed to create/read Transmit Sink Capabilities Extended register via factory"));
+
+    // The controller answers Get_Source_Cap_Extended and Get_Sink_Cap_Extended
+    // from these registers only while the matching PD3_CONFIGURATION bit is set;
+    // with the bit clear it replies Not_Supported.
+    if (const auto pd3Config = pd.readPD3ConfigRegister(true))
+    {
+        Serial.print(F("PD3 Support Source Extended Message: "));
+        Serial.println(pd3Config->supportSourceExtended() ? F("Yes") : F("No"));
+        Serial.print(F("PD3 Support Sink Cap Extended: "));
+        Serial.println(pd3Config->supportSinkCapExtended() ? F("Yes") : F("No"));
+    }
+    else
+        Serial.println(F("Failed to create/read PD3 Configuration register via factory"));
+}
+
+void print_battery_data()
+{
+    Serial.println();
+    Serial.println(F("-------------------- print_battery_data --------------------"));
+    Serial.println();
+
+    // TRANSMITTED_BATTERY_STATUS (0x7B) and TX_BATTERY_CAPABILITIES (0x7D) are R/W,
+    // but this sketch never writes them: whatever the host stores is sent to the
+    // port partner in reply to Get_Battery_Status or Get_Battery_Capabilities. The
+    // classes decode the fields per the USB PD specification (R3.3), and
+    // debugPrint() prints the decoded values below the raw ones.
+    if (const auto batteryStatus = pd.readTransmitBatteryStatusRegister(true))
+        batteryStatus->debugPrint();
+    else
+        Serial.println(F("Failed to create/read Transmitted Battery Status register via factory"));
+
+    if (const auto batteryCaps = pd.readTransmitBatteryCapabilitiesRegister(true))
+        batteryCaps->debugPrint();
+    else
+        Serial.println(F("Failed to create/read TX Battery Capabilities register via factory"));
+
+    // The controller answers Get_Battery_Status and Get_Battery_Capabilities from
+    // these registers only while the matching PD3_CONFIGURATION bit is set; with
+    // the bit clear it replies Not_Supported.
+    if (const auto pd3Config = pd.readPD3ConfigRegister(true))
+    {
+        Serial.print(F("PD3 Support Battery Status Message: "));
+        Serial.println(pd3Config->supportBatteryStatus() ? F("Yes") : F("No"));
+        Serial.print(F("PD3 Support Battery Capabilities Message: "));
+        Serial.println(pd3Config->supportBatteryCapabilities() ? F("Yes") : F("No"));
+    }
+    else
+        Serial.println(F("Failed to create/read PD3 Configuration register via factory"));
+
+    // The TRM wants the battery counts in TX_SOURCE_CAPABILITIES_EXTENDED (0x77) to
+    // agree with the entries populated in 0x7B and 0x7D, and the USB PD
+    // specification requires 0x77 and 0x7E to agree. Print the counts from both so
+    // the registers can be read against each other.
+    if (const auto sourceCaps = pd.readTransmitSourceCapsExtendedRegister(true))
+    {
+        Serial.print(F("Number Fixed Batteries (0x77): "));
+        Serial.println(sourceCaps->numberFixedBatteries());
+        Serial.print(F("Number Hot Swappable Batteries (0x77): "));
+        Serial.println(sourceCaps->numberHotSwappableBatteries());
+    }
+    else
+        Serial.println(F("Failed to create/read TX Source Capabilities Extended register via factory"));
+
+    if (const auto sinkCaps = pd.readTransmitSinkCapsExtendedRegister(true))
+    {
+        Serial.print(F("Fixed Batteries (0x7E): "));
+        Serial.println(sinkCaps->fixedBatteryCount());
+        Serial.print(F("Hot Swappable Battery Slots (0x7E): "));
+        Serial.println(sinkCaps->hotSwappableBatterySlotCount());
+    }
+    else
+        Serial.println(F("Failed to create/read Transmit Sink Capabilities Extended register via factory"));
+}
+
 void print_app_mode_status(const std::unique_ptr<TPS25751Mode> &modeReg)
 {
     modeReg->debugPrint();
 
+    print_version_and_pd3_config();
     print_boot_flags();
     print_status_register();
     print_pd_status();
     print_power_status();
     print_adc_results();
     print_port_status();
+    print_global_config_and_sop_identity();
+    print_source_info_and_pps_status();
+    print_caps_extended();
+    print_battery_data();
     print_contracts();
     print_interrupt_mask();
     print_sleep_and_customer_use();

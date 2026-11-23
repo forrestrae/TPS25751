@@ -21,10 +21,13 @@
  */
 
 #include <unity.h>
+#include <string>
+#include <cstdio>
 
 #include "TPS25751Status.h"
 #include "TPS25751Register.h"
 #include "TPS25751RegisterAddress.h"
+#include "CaptureStdout.h"
 
 namespace {
 
@@ -167,6 +170,43 @@ void test_connected_source_decode()
 
 // --- Semantic validation ----------------------------------------------------
 
+// Connection State values redefined in Rev. B (SLVUCR8B p.25). Byte 0:
+// bit 0 Plug Present, bits 3:1 Connection State.
+void test_connection_state_2h_is_corrosion_mitigation()
+{
+    const uint8_t data[STATUS_SIZE] = {0x05, 0x00, 0x00, 0x00, 0x00};  // plug, 2h
+    TPS25751Status status(data);
+
+    TEST_ASSERT_TRUE(status.plugPresent());
+    TEST_ASSERT_EQUAL(CORROSION_MITIGATION, status.connectionState());
+    TEST_ASSERT_EQUAL_STRING("Corrosion Mitigation (Ra/Ra)", toString(status.connectionState()).c_str());
+}
+
+void test_connection_state_5h_is_debug_rp_rp()
+{
+    const uint8_t data[STATUS_SIZE] = {0x0B, 0x00, 0x00, 0x00, 0x00};  // plug, 5h
+    TPS25751Status status(data);
+
+    TEST_ASSERT_TRUE(status.plugPresent());
+    TEST_ASSERT_EQUAL(DEBUG_ACCESSORY_RP_RP, status.connectionState());
+    TEST_ASSERT_EQUAL_STRING("Debug connection (Rp/Rp)", toString(status.connectionState()).c_str());
+}
+
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
+void test_deprecated_connection_state_aliases_match_rev_b_names()
+{
+    // Rev. A names keep their old values so existing sketches decode the same.
+    TEST_ASSERT_EQUAL_INT(CORROSION_MITIGATION, AUDIO_ACCESSORY);
+    TEST_ASSERT_EQUAL_INT(DEBUG_ACCESSORY_RP_RP, RESERVED);
+}
+#pragma GCC diagnostic pop
+
+void test_connection_state_1h_string()
+{
+    TEST_ASSERT_EQUAL_STRING("Port is disabled", toString(PORT_DISABLED).c_str());
+}
+
 void test_semantic_valid_states()
 {
     TEST_ASSERT_TRUE(TPS25751Status(DISCONNECTED_DATA).isSemanticallyValid());
@@ -276,6 +316,184 @@ void test_extract_bits64_wide_field()
     TEST_ASSERT_EQUAL_UINT64(0x5544332211ull, TPS25751Register::extractBits64(data, sizeof(data), 0, 40));
 }
 
+
+// --- toString of every enumerator ------------------------------------------
+
+void test_to_string_connection_state_all_values()
+{
+    TEST_ASSERT_EQUAL_STRING("No connection", toString(DISCONNECTED).c_str());
+    TEST_ASSERT_EQUAL_STRING("Port is disabled", toString(PORT_DISABLED).c_str());
+    TEST_ASSERT_EQUAL_STRING("Corrosion Mitigation (Ra/Ra)", toString(CORROSION_MITIGATION).c_str());
+    TEST_ASSERT_EQUAL_STRING("Debug connection (Rd/Rd)", toString(DEBUG_ACCESSORY).c_str());
+    TEST_ASSERT_EQUAL_STRING("No connection - Ra detected (Ra but no Rd)",
+                             toString(NO_CONNECTION_RA_DETECTED).c_str());
+    TEST_ASSERT_EQUAL_STRING("Debug connection (Rp/Rp)", toString(DEBUG_ACCESSORY_RP_RP).c_str());
+    TEST_ASSERT_EQUAL_STRING("Connection present - no Ra detected", toString(CONNECTED_NO_RA_DETECTED).c_str());
+    TEST_ASSERT_EQUAL_STRING("Connection present - Ra detected", toString(CONNECTED_RA_DETECTED).c_str());
+    TEST_ASSERT_EQUAL_STRING("Unknown", toString(static_cast<ConnectionState>(8)).c_str());
+}
+
+void test_to_string_vbus_status_all_values()
+{
+    TEST_ASSERT_EQUAL_STRING("At vSafe0V (less than 0.8V)", toString(VBUS_AT_VSAFE0V).c_str());
+    TEST_ASSERT_EQUAL_STRING("At vSafe5V (4.75V to 5.5V)", toString(VBUS_AT_VSAFE5V).c_str());
+    TEST_ASSERT_EQUAL_STRING("Within expected limits", toString(VBUS_WITHIN_LIMITS).c_str());
+    TEST_ASSERT_EQUAL_STRING("Not within any of the other specified ranges",
+                             toString(VBUS_NOT_WITHIN_LIMITS).c_str());
+    TEST_ASSERT_EQUAL_STRING("Unknown", toString(static_cast<VbusStatus>(4)).c_str());
+}
+
+void test_to_string_usb_host_presence_all_values()
+{
+    TEST_ASSERT_EQUAL_STRING("No host present", toString(USB_NO_HOST_PRESENT).c_str());
+    TEST_ASSERT_EQUAL_STRING("Attached source is not data capable",
+                             toString(USB_HOST_SOURCE_NOT_DATA_CAPABLE).c_str());
+    TEST_ASSERT_EQUAL_STRING("Attached source is not USB PD capable",
+                             toString(USB_HOST_SOURCE_NOT_PD_CAPABLE).c_str());
+    TEST_ASSERT_EQUAL_STRING("Host Present", toString(USB_HOST_PRESENT).c_str());
+    TEST_ASSERT_EQUAL_STRING("Reserved", toString(static_cast<UsbHostPresence>(4)).c_str());
+}
+
+void test_to_string_acting_as_legacy_all_values()
+{
+    TEST_ASSERT_EQUAL_STRING("PD Controller is not in a legacy (non PD) mode", toString(NOT_LEGACY).c_str());
+    TEST_ASSERT_EQUAL_STRING("PD Controller is acting like a legacy sink", toString(LEGACY_SINK).c_str());
+    TEST_ASSERT_EQUAL_STRING("PD Controller is acting like a legacy source", toString(LEGACY_SOURCE).c_str());
+    TEST_ASSERT_EQUAL_STRING("Acting as legacy sink due to dead-battery",
+                             toString(LEGACY_SINK_DEAD_BATTERY).c_str());
+    TEST_ASSERT_EQUAL_STRING("Unknown", toString(static_cast<ActingAsLegacy>(4)).c_str());
+}
+
+void test_to_string_role_and_orientation()
+{
+    TEST_ASSERT_EQUAL_STRING("PD Controller is Source (CCx pull-up active)", toString(PORT_SOURCE).c_str());
+    TEST_ASSERT_EQUAL_STRING("PD Controller is in the Sink role", toString(PORT_SINK).c_str());
+    TEST_ASSERT_EQUAL_STRING("Upward-facing port (UFP)", toString(UFP).c_str());
+    TEST_ASSERT_EQUAL_STRING("Downward-facing port (DFP)", toString(DFP).c_str());
+    TEST_ASSERT_EQUAL_STRING("Upside-up orientation (plug CC on CC1)", toString(CC1).c_str());
+    TEST_ASSERT_EQUAL_STRING("Upside-down orientation (plug CC on CC2)", toString(CC2).c_str());
+}
+
+// --- Decode of every enumerator value, one field at a time -----------------
+
+void test_vbus_status_all_codes()
+{
+    // VBUS Status is bits 21:20 (byte 2 bits 5:4).
+    const VbusStatus expected[4] = {VBUS_AT_VSAFE0V, VBUS_AT_VSAFE5V, VBUS_WITHIN_LIMITS, VBUS_NOT_WITHIN_LIMITS};
+    for (uint8_t code = 0; code < 4; ++code) {
+        const uint8_t data[STATUS_SIZE] = {0x00, 0x00, static_cast<uint8_t>(code << 4), 0x00, 0x00};
+        TEST_ASSERT_EQUAL(expected[code], TPS25751Status(data).vbusStatus());
+    }
+}
+
+void test_usb_host_presence_all_codes()
+{
+    // USB Host Present is bits 23:22 (byte 2 bits 7:6).
+    const UsbHostPresence expected[4] = {USB_NO_HOST_PRESENT, USB_HOST_SOURCE_NOT_DATA_CAPABLE,
+                                         USB_HOST_SOURCE_NOT_PD_CAPABLE, USB_HOST_PRESENT};
+    for (uint8_t code = 0; code < 4; ++code) {
+        const uint8_t data[STATUS_SIZE] = {0x00, 0x00, static_cast<uint8_t>(code << 6), 0x00, 0x00};
+        TEST_ASSERT_EQUAL(expected[code], TPS25751Status(data).usbHostPresent());
+    }
+}
+
+void test_acting_as_legacy_all_codes()
+{
+    // Acting As Legacy is bits 25:24 (byte 3 bits 1:0).
+    const ActingAsLegacy expected[4] = {NOT_LEGACY, LEGACY_SINK, LEGACY_SOURCE, LEGACY_SINK_DEAD_BATTERY};
+    for (uint8_t code = 0; code < 4; ++code) {
+        const uint8_t data[STATUS_SIZE] = {0x00, 0x00, 0x00, code, 0x00};
+        TEST_ASSERT_EQUAL(expected[code], TPS25751Status(data).actingAsLegacy());
+    }
+}
+
+void test_connection_state_all_codes()
+{
+    const ConnectionState expected[8] = {DISCONNECTED, PORT_DISABLED, CORROSION_MITIGATION, DEBUG_ACCESSORY,
+                                         NO_CONNECTION_RA_DETECTED, DEBUG_ACCESSORY_RP_RP,
+                                         CONNECTED_NO_RA_DETECTED, CONNECTED_RA_DETECTED};
+    for (uint8_t code = 0; code < 8; ++code) {
+        const uint8_t data[STATUS_SIZE] = {static_cast<uint8_t>(code << 1), 0x00, 0x00, 0x00, 0x00};
+        TEST_ASSERT_EQUAL(expected[code], TPS25751Status(data).connectionState());
+    }
+}
+
+// --- Semantic validation: remaining branches -------------------------------
+
+void test_semantic_host_present_while_disconnected()
+{
+    // USB Host Present = 1 (source not data capable) with Connection State 0 and no plug.
+    const uint8_t data[STATUS_SIZE] = {0x00, 0x00, 0x40, 0x00, 0x00};
+    TEST_ASSERT_FALSE(TPS25751Status(data).isSemanticallyValid());
+}
+
+void test_semantic_vbus_within_limits_while_disconnected()
+{
+    const uint8_t data[STATUS_SIZE] = {0x00, 0x00, 0x20, 0x00, 0x00};  // VBUS code 2
+    TEST_ASSERT_FALSE(TPS25751Status(data).isSemanticallyValid());
+}
+
+void test_semantic_every_connected_state_with_plug_is_valid()
+{
+    for (uint8_t code = 1; code < 8; ++code) {
+        const uint8_t data[STATUS_SIZE] = {static_cast<uint8_t>((code << 1) | 1), 0x00, 0x00, 0x00, 0x00};
+        TEST_ASSERT_TRUE(TPS25751Status(data).isSemanticallyValid());
+    }
+}
+
+// --- debugPrint --------------------------------------------------------------
+
+namespace {
+
+bool contains(const std::string &haystack, const char *needle)
+{
+    return haystack.find(needle) != std::string::npos;
+}
+
+}  // namespace
+
+void test_debug_print_disconnected()
+{
+    const std::string out = captureDebugPrint(TPS25751Status(DISCONNECTED_DATA));
+
+    TEST_ASSERT_TRUE(contains(out, "=== Status Register (0x1A) ==="));
+    TEST_ASSERT_TRUE(contains(out, "  Plug Present: No\n"));
+    TEST_ASSERT_TRUE(contains(out, "  Connection State: No connection\n"));
+    TEST_ASSERT_TRUE(contains(out, "  Plug Orientation: Upside-up orientation (plug CC on CC1)\n"));
+    TEST_ASSERT_TRUE(contains(out, "  Port Role: PD Controller is in the Sink role\n"));
+    TEST_ASSERT_TRUE(contains(out, "  Data Role: Upward-facing port (UFP)\n"));
+    TEST_ASSERT_TRUE(contains(out, "  VBUS Status: At vSafe0V (less than 0.8V)\n"));
+    TEST_ASSERT_TRUE(contains(out, "  USB Host Present: No host present\n"));
+    TEST_ASSERT_TRUE(contains(out, "  Acting As Legacy: PD Controller is not in a legacy (non PD) mode\n"));
+    TEST_ASSERT_TRUE(contains(out, "  BIST Active: No BIST in progress\n"));
+    TEST_ASSERT_TRUE(contains(out, "  SoC ACK Timeout: SoC has not responded timely\n"));
+}
+
+void test_debug_print_connected_sink()
+{
+    const std::string out = captureDebugPrint(TPS25751Status(CONNECTED_SINK_DATA));
+
+    TEST_ASSERT_TRUE(contains(out, "  Plug Present: Yes\n"));
+    TEST_ASSERT_TRUE(contains(out, "  Connection State: Connection present - no Ra detected\n"));
+    TEST_ASSERT_TRUE(contains(out, "  Plug Orientation: Upside-down orientation (plug CC on CC2)\n"));
+    TEST_ASSERT_TRUE(contains(out, "  Port Role: PD Controller is in the Sink role\n"));
+    TEST_ASSERT_TRUE(contains(out, "  VBUS Status: At vSafe5V (4.75V to 5.5V)\n"));
+    TEST_ASSERT_TRUE(contains(out, "  USB Host Present: Host Present\n"));
+    TEST_ASSERT_TRUE(contains(out, "  BIST Active: BIST in progress\n"));
+    TEST_ASSERT_TRUE(contains(out, "  SoC ACK Timeout: SoC has responded timely\n"));
+}
+
+void test_debug_print_connected_source()
+{
+    const std::string out = captureDebugPrint(TPS25751Status(CONNECTED_SOURCE_DATA));
+
+    TEST_ASSERT_TRUE(contains(out, "  Connection State: Connection present - Ra detected\n"));
+    TEST_ASSERT_TRUE(contains(out, "  Port Role: PD Controller is Source (CCx pull-up active)\n"));
+    TEST_ASSERT_TRUE(contains(out, "  Data Role: Downward-facing port (DFP)\n"));
+    TEST_ASSERT_TRUE(contains(out, "  VBUS Status: Within expected limits\n"));
+    TEST_ASSERT_TRUE(contains(out, "  Acting As Legacy: PD Controller is acting like a legacy source\n"));
+}
+
 // --- Runner -----------------------------------------------------------------
 
 int main(int, char **)
@@ -294,6 +512,11 @@ int main(int, char **)
     RUN_TEST(test_connected_sink_decode);
     RUN_TEST(test_connected_source_decode);
 
+    RUN_TEST(test_connection_state_2h_is_corrosion_mitigation);
+    RUN_TEST(test_connection_state_5h_is_debug_rp_rp);
+    RUN_TEST(test_connection_state_1h_string);
+    RUN_TEST(test_deprecated_connection_state_aliases_match_rev_b_names);
+
     RUN_TEST(test_semantic_valid_states);
     RUN_TEST(test_semantic_plug_present_but_disconnected);
     RUN_TEST(test_semantic_connected_but_no_plug);
@@ -309,6 +532,22 @@ int main(int, char **)
     RUN_TEST(test_extract_bits16_unaligned);
     RUN_TEST(test_extract_bits32_full_word);
     RUN_TEST(test_extract_bits64_wide_field);
+
+    RUN_TEST(test_to_string_connection_state_all_values);
+    RUN_TEST(test_to_string_vbus_status_all_values);
+    RUN_TEST(test_to_string_usb_host_presence_all_values);
+    RUN_TEST(test_to_string_acting_as_legacy_all_values);
+    RUN_TEST(test_to_string_role_and_orientation);
+    RUN_TEST(test_vbus_status_all_codes);
+    RUN_TEST(test_usb_host_presence_all_codes);
+    RUN_TEST(test_acting_as_legacy_all_codes);
+    RUN_TEST(test_connection_state_all_codes);
+    RUN_TEST(test_semantic_host_present_while_disconnected);
+    RUN_TEST(test_semantic_vbus_within_limits_while_disconnected);
+    RUN_TEST(test_semantic_every_connected_state_with_plug_is_valid);
+    RUN_TEST(test_debug_print_disconnected);
+    RUN_TEST(test_debug_print_connected_sink);
+    RUN_TEST(test_debug_print_connected_source);
 
     return UNITY_END();
 }

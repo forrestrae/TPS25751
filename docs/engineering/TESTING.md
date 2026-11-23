@@ -1,6 +1,6 @@
 # TPS25751 Library - Testing Strategy
 
-**Last Updated:** 2026-07-06
+**Last Updated:** 2026-11-19
 **Status:** Active
 
 ---
@@ -16,9 +16,9 @@ host-run Unity tests (no hardware, no Arduino framework) from
 directory is excluded from the published registry tarball via `export.exclude`
 in `library.json`.
 
-**Quality Target:** >90% code coverage for all register implementations.
-(Automated coverage *measurement* is not wired up yet; the target is enforced
-by review until it is.)
+**Quality Target:** >90% line coverage for all register implementations,
+measured with `test/coverage.sh` (see Test Coverage Tracking). Not every file
+meets it yet; the report lists the gaps.
 
 ---
 
@@ -93,19 +93,31 @@ no `Wire`, no Arduino framework. The `[env:native]` environment in
 `platformio.ini`:
 
 - uses **Unity** as the test framework (`test_framework = unity`);
-- compiles only the platform-independent library sources it needs via
-  `build_src_filter` (`test_build_src = yes`) — when a test starts exercising a
-  source file that isn't listed there yet, add it to the filter;
+- compiles every register class, the base class, the debug helpers, and the
+  factory via `build_src_filter` (`test_build_src = yes`), listed in register
+  address order. The I2C-facing sources (`TPS25751.cpp`,
+  `TPS25751DownstreamDevice.cpp`, `TPS25751PatchLoader.cpp`) are not compiled;
+  a new register class must be added to the filter;
 - satisfies the Arduino API symbols those sources reference (`Stream`,
   `Serial`, `F()`, `millis()`, `strncpy_P`) with the **header-only stubs** in
   `test/support/native/` (`Arduino.h`, `Stream.h`). The stubs print to stdout;
   they are just enough surface to compile the decode/encode logic, not an
   Arduino emulation. Extend them (minimally) if a new source file needs more;
-- only runs suites under `test/test_native/` (`test_filter = test_native/*`).
+- only runs suites under `test/test_native/` (`test_filter = test_native/*`);
+- compiles as `-std=gnu++17`, the standard the Teensy build uses, so language
+  features behave the same on the host and on the target. Without the flag the
+  host default applies (Apple clang defaults to gnu++14), where attributes on
+  enumerators such as the rev B aliases compile only as an extension.
 
 PlatformIO defines **`PIO_UNIT_TESTING`** during test builds;
 `TPS25751Register.h` uses it to make the protected `extractBits*` /
 `extractEnum*` helpers public so tests can exercise them directly.
+`test_TPS25751Register` covers those helpers, including fields past bit 255
+(ADR-012).
+
+To compare printed output, include `CaptureStdout.h` from `test/support/native/`.
+`captureDebugPrint(reg)` returns what a register's `debugPrint()` printed, and
+`captureStdout(fn)` returns what any callable printed.
 
 ### Test Structure
 
@@ -227,29 +239,15 @@ private:
 
 ### Factory Integration Tests
 
-```cpp
-void test_factory_creates_all_implemented_registers() {
-    TPS25751Registers::Address addresses[] = {
-        TPS25751Registers::Address::STATUS,
-        TPS25751Registers::Address::MODE,
-        TPS25751Registers::Address::BOOT_STATUS,
-        TPS25751Registers::Address::POWER_PATH_STATUS,
-        TPS25751Registers::Address::PORT_CONFIGURATION,
-        TPS25751Registers::Address::TYPEC_STATE,
-        TPS25751Registers::Address::INT_EVENT1,
-        TPS25751Registers::Address::POWER_STATUS,
-        TPS25751Registers::Address::PD_STATUS,
-        // ... add all implemented addresses
-    };
-
-    for (auto addr : addresses) {
-        auto reg = TPS25751Factory::getInstance().createRegister(addr);
-        TEST_ASSERT_NOT_NULL(reg.get());
-        // The created object reports the address it was created for
-        TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(addr), reg->getAddress());
-    }
-}
-```
+`test_TPS25751RegisterFactory` runs natively. For every address in the TRM it
+checks that each of the three `createRegister()` overloads returns a non-null
+object of the size in `getRegisterInfo()`. With no RTTI on the target, it
+checks the class by behavior: the factory object's `debugPrint()` output must
+equal that of the expected class constructed from the same bytes. A sweep over
+all 256 address byte values checks that the factory and `getRegisterInfo()`
+agree on which addresses exist. A new register needs one line in the suite's
+`kAll` table, mapping its `Address` to its class; the suite then fails until
+all three factory switches have the case.
 
 ### Multi-Register Sequence Tests
 
@@ -585,10 +583,52 @@ fi
 
 ### Test Coverage Tracking
 
-**Not implemented yet.** `pio test` has no built-in coverage flag; measuring
-the >90% target will require adding `--coverage`/gcov flags to the native env
-and a report step. Until then, coverage is judged at review against the
-Required Test Cases list above.
+`test/coverage.sh` measures line coverage of the native suites and prints one
+line per file in `src/`, sorted with the least-covered file first. Run it from
+the library root:
+
+```bash
+test/coverage.sh
+```
+
+Pass `--html` to also write a per-line report to `.pio/coverage/index.html`.
+The script needs gcovr (`brew install gcovr` or `pipx install gcovr`). It
+builds `[env:native-coverage]`, which extends `[env:native]` with `--coverage`
+and `-O0`; `test/support/coverage_link.py` adds `--coverage` to the link step,
+which `build_flags` does not reach. The script rebuilds that environment from
+scratch with an empty build cache on every run, because counters accumulate
+across runs and the shared cache in `.pio/buildcache` restores object files
+without the `.gcno` notes gcov needs. On macOS it reads Apple clang's counters
+with `xcrun llvm-cov gcov`.
+
+Only sources compiled by `[env:native]` appear in the report, so the I2C-facing
+`TPS25751.cpp`, `TPS25751DownstreamDevice.cpp`, and `TPS25751PatchLoader.cpp`
+are not measured. Neither the verify gate nor CI runs the coverage step; the
+>90% target is checked by running the script at review.
+
+First measurement, 2026-11-19 (727 tests): 84% of lines overall. Files under
+90%, lowest first: `TPS25751PowerStatus.cpp` 11%, `TPS25751Debug.cpp` 26%,
+`TPS25751PDStatus.cpp` 36%, `TPS25751TypeCState.cpp` 38%, `TPS25751Data.cpp`
+42%, `TPS25751PowerPathStatus.cpp` 51%, `TPS25751InterruptClear.cpp` 54%,
+`TPS25751Mode.cpp` 56%, `TPS25751Command.cpp` 63%, `TPS25751BootFlags.cpp` 68%,
+`TPS25751ReceivedSinkCaps.cpp` 74%, `TPS25751TransmitSinkCaps.cpp` 77%,
+`TPS25751ReceivedSourceCaps.cpp` 78%, `TPS25751PortConfig.cpp` 82%,
+`TPS25751PortControl.cpp` 83%, `TPS25751Status.cpp` 84%,
+`TPS25751InterruptMask.cpp` 85%, and `TPS25751TransmitSourceCaps.cpp` 86%. Nine
+of the ten lowest have no suite of their own and are reached only through the
+factory suite; the rest miss mostly `debugPrint()` branches and semantic-check
+failure paths.
+
+Second measurement, 2026-11-19 (1063 tests): 98% of lines overall, every file at
+93% or more. New suites cover PowerStatus, PDStatus, PowerPathStatus, BootFlags,
+TypeCState, Mode, Command, Data, and Debug, and eleven existing suites gained
+tests. Most of the lines still missed cannot be reached by any input: `default:`
+returns in `toString()` switches over enums that `extractEnum()` clamps, and
+`> max` checks in `isSemanticallyValid()` on fields too narrow to exceed the
+maximum (for example `TPS25751Status.cpp` 220 and 227, `TPS25751TypeCState.cpp`
+71 and 75, `TPS25751PDStatus.cpp` 241 and 247). Files at or above 90% that the
+second pass did not target, such as `TPS25751InterruptEvent.cpp` (93%) and
+`TPS25751ActivePDOContract.cpp` (95%), were left as they were.
 
 ### Regression Testing
 
@@ -629,6 +669,8 @@ Tests are successful when:
 |---------|------|--------|---------|
 | 1.0 | 2025-10-20 | Claude Code | Initial testing strategy document extracted from implementation plan |
 | 1.1 | 2026-07-06 | Claude Code | Batch 0: replaced aspirational unit-test sections with the real, working `pio test -e native` harness (Unity, native env, Arduino stubs in `test/support/native/`, seed suite for TPS25751Status); corrected fictional API in examples; marked coverage tooling as pending |
+| 1.2 | 2026-11-19 | Claude Code | The native build compiles every register class and the factory; factory and base-class suites; line coverage with `test/coverage.sh` and `[env:native-coverage]`, with the first per-file numbers |
+| 1.3 | 2026-11-19 | Claude Code | Second coverage measurement: 98% of lines, every file at 93% or more, and the kinds of line that remain unreachable |
 
 ---
 

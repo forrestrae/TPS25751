@@ -9,15 +9,17 @@
  *
  * LIQUID_DETECTION_CONFIG configures liquid/moisture detection on the SBU pins
  * (via external detection circuitry) and the corrosion-mitigation response --
- * the sleep intervals used while polling with and without liquid present, the
+ * the wait intervals used while polling with and without liquid present, the
  * ADC sample count and cadence, the ADC threshold pairs (each with hysteresis
  * between the "No Liquid" and "Liquid" states), and the state/enable bits that
  * arm liquid detection and corrosion mitigation.
  *
  * Register Details:
  * - Address: 0x98
- * - Size: 11 bytes (88 bits; only bits 82:0 are defined -- bits 87:83 are
- *   reserved and untouched by this class's setters)
+ * - Size: 12 bytes. The TRM gives 83 bits (11 bytes), but the controller
+ *   reports a length byte of 12, observed on hardware on 2026-11-18, and the
+ *   library's read path requires the two to match. Only bits 82:0 are defined;
+ *   bits 95:83 are untouched by this class's setters.
  * - Access: Read/Write
  * - Reset: all-zero
  *
@@ -31,7 +33,7 @@
  * }
  * @endcode
  *
- * @see TI TPS25751 Technical Reference Manual, Table 3-29
+ * @see TI TPS25751 Technical Reference Manual SLVUCR8B (Rev. B), Section 3.2.37, Table 3-39, p.60
  * @see TPS25751Register
  * @see TPS25751
  */
@@ -46,35 +48,42 @@ public:
     /// @brief Register identity for the typed TPS25751::writeRegister<T>() write path.
     static constexpr TPS25751Registers::Address kAddress = TPS25751Registers::Address::LIQUID_DETECTION_CONFIG;
 
-    // --- Decode: sleep-interval fields (raw + unit-converted pairs) ------------
+    // --- Decode: wait-interval fields (raw + unit-converted pairs) ------------
 
     /**
-     * @brief Get the raw Sleep Time In Sec No Liquid field
-     * @return Raw 16-bit value (1000 ms/LSB); the sleep interval used while
+     * @brief Get the raw Wait Time In Sec Non-Liquid field
+     *
+     * Source: SLVUCR8B (Rev. B, 2026-08), page 60 ("Wait Time In Sec
+     * Non-Liquid"). Rev. A called this field "Sleep Time In Sec No Liquid";
+     * position and units are unchanged.
+     * @return Raw 16-bit value (1000 ms/LSB); the wait interval used while
      *         polling and no liquid has been detected
-     * @see TI TPS25751 Technical Reference Manual, Table 3-29, bits 15:0
+     * @see TI TPS25751 Technical Reference Manual, Table 3-39, bits 15:0
      */
-    uint16_t rawSleepTimeNoLiquid() const;
+    uint16_t rawWaitTimeNoLiquid() const;
 
     /**
-     * @brief Get the No-Liquid sleep interval, in milliseconds
-     * @return sleepTimeNoLiquid in ms (raw * 1000)
+     * @brief Get the No-Liquid wait interval, in milliseconds
+     * @return waitTimeNoLiquid in ms (raw * 1000)
      */
-    uint32_t sleepTimeNoLiquid_ms() const;
+    uint32_t waitTimeNoLiquid_ms() const;
 
     /**
-     * @brief Get the raw Sleep Time In Sec Liquid field
-     * @return Raw 16-bit value (1000 ms/LSB); the sleep interval used while
+     * @brief Get the raw Wait Time In Sec Liquid field
+     *
+     * Source: SLVUCR8B (Rev. B, 2026-08), page 60. Rev. A called this field
+     * "Sleep Time In Sec Liquid"; position and units are unchanged.
+     * @return Raw 16-bit value (1000 ms/LSB); the wait interval used while
      *         polling once liquid has been detected
-     * @see TI TPS25751 Technical Reference Manual, Table 3-29, bits 31:16
+     * @see TI TPS25751 Technical Reference Manual, Table 3-39, bits 31:16
      */
-    uint16_t rawSleepTimeLiquid() const;
+    uint16_t rawWaitTimeLiquid() const;
 
     /**
-     * @brief Get the Liquid-detected sleep interval, in milliseconds
-     * @return sleepTimeLiquid in ms (raw * 1000)
+     * @brief Get the Liquid-detected wait interval, in milliseconds
+     * @return waitTimeLiquid in ms (raw * 1000)
      */
-    uint32_t sleepTimeLiquid_ms() const;
+    uint32_t waitTimeLiquid_ms() const;
 
     // --- Decode: sampling configuration -----------------------------------------
 
@@ -86,7 +95,7 @@ public:
      * is intentionally NOT enforced by this class's validation.
      *
      * @return Raw 8-bit sample count
-     * @see TI TPS25751 Technical Reference Manual, Table 3-29, bits 39:32
+     * @see TI TPS25751 Technical Reference Manual, Table 3-39, bits 39:32
      */
     uint8_t numberOfSamples() const;
 
@@ -96,7 +105,7 @@ public:
      * @brief Get the raw Low Threshold ADC No Liquid field
      * @return Raw 8-bit value (14 mV/LSB); the lower hysteresis bound for
      *         exiting the Liquid Detected state
-     * @see TI TPS25751 Technical Reference Manual, Table 3-29, bits 47:40
+     * @see TI TPS25751 Technical Reference Manual, Table 3-39, bits 47:40
      */
     uint8_t rawLowThresholdNoLiquid() const;
 
@@ -107,7 +116,7 @@ public:
      * @brief Get the raw High Threshold ADC No Liquid field
      * @return Raw 8-bit value (14 mV/LSB); the upper hysteresis bound for
      *         exiting the Liquid Detected state
-     * @see TI TPS25751 Technical Reference Manual, Table 3-29, bits 55:48
+     * @see TI TPS25751 Technical Reference Manual, Table 3-39, bits 55:48
      */
     uint8_t rawHighThresholdNoLiquid() const;
 
@@ -117,7 +126,7 @@ public:
     /**
      * @brief Get the raw Low Threshold ADC Liquid field
      * @return Raw 8-bit value (14 mV/LSB)
-     * @see TI TPS25751 Technical Reference Manual, Table 3-29, bits 63:56
+     * @see TI TPS25751 Technical Reference Manual, Table 3-39, bits 63:56
      */
     uint8_t rawLowThresholdLiquid() const;
 
@@ -127,7 +136,7 @@ public:
     /**
      * @brief Get the raw High Threshold ADC Liquid field
      * @return Raw 8-bit value (14 mV/LSB)
-     * @see TI TPS25751 Technical Reference Manual, Table 3-29, bits 71:64
+     * @see TI TPS25751 Technical Reference Manual, Table 3-39, bits 71:64
      */
     uint8_t rawHighThresholdLiquid() const;
 
@@ -139,7 +148,7 @@ public:
     /**
      * @brief Get the raw Sample Time in 10ms No Liquid field
      * @return Raw 4-bit value (10 ms/LSB)
-     * @see TI TPS25751 Technical Reference Manual, Table 3-29, bits 75:72
+     * @see TI TPS25751 Technical Reference Manual, Table 3-39, bits 75:72
      */
     uint8_t rawSampleTimeNoLiquid() const;
 
@@ -149,7 +158,7 @@ public:
     /**
      * @brief Get the raw Sample Time in 10ms Liquid field
      * @return Raw 4-bit value (10 ms/LSB)
-     * @see TI TPS25751 Technical Reference Manual, Table 3-29, bits 79:76
+     * @see TI TPS25751 Technical Reference Manual, Table 3-39, bits 79:76
      */
     uint8_t rawSampleTimeLiquid() const;
 
@@ -161,7 +170,7 @@ public:
     /**
      * @brief Get the Liquid Detection State bit
      * @return true if the register's current state is Liquid Detected
-     * @see TI TPS25751 Technical Reference Manual, Table 3-29, bit 80
+     * @see TI TPS25751 Technical Reference Manual, Table 3-39, bit 80
      */
     bool liquidDetectionState() const;
 
@@ -170,7 +179,7 @@ public:
      * @return true if corrosion mitigation is enabled -- upon liquid
      *         detection the port is disabled/disconnected and the CC pins
      *         are pulled down
-     * @see TI TPS25751 Technical Reference Manual, Table 3-29, bit 81
+     * @see TI TPS25751 Technical Reference Manual, Table 3-39, bit 81
      */
     bool enableCorrosionMitigation() const;
 
@@ -178,26 +187,52 @@ public:
      * @brief Get the Enable Liquid Detection configuration
      * @return true if liquid detection is enabled (requires proper external
      *         liquid-detection circuitry on the SBU pins)
-     * @see TI TPS25751 Technical Reference Manual, Table 3-29, bit 82
+     * @see TI TPS25751 Technical Reference Manual, Table 3-39, bit 82
      */
     bool enableLiquidDetection() const;
 
     // --- Setters (1:1 with the accessors above; each a single setBits() call) --
 
     /**
-     * @brief Set the raw Sleep Time In Sec No Liquid field
+     * @brief Set the raw Wait Time In Sec No Liquid field
      * @param raw Raw 16-bit value (1000 ms/LSB)
      */
-    void setRawSleepTimeNoLiquid(uint16_t raw);
+    void setRawWaitTimeNoLiquid(uint16_t raw);
 
     /**
-     * @brief Set the raw Sleep Time In Sec Liquid field
+     * @brief Set the raw Wait Time In Sec Liquid field
      * @param raw Raw 16-bit value (1000 ms/LSB)
      */
-    void setRawSleepTimeLiquid(uint16_t raw);
+    void setRawWaitTimeLiquid(uint16_t raw);
 
     /// @brief Set the Number of Samples field
     void setNumberOfSamples(uint8_t raw);
+
+    // --- Deprecated pre-Rev. B names: same bits, same units -------------------
+
+    /// @deprecated Rev. A field name. Use rawWaitTimeNoLiquid().
+    [[deprecated("SLVUCR8B Rev. B p.60 names bits 15:0 Wait Time In Sec Non-Liquid; use rawWaitTimeNoLiquid()")]]
+    uint16_t rawSleepTimeNoLiquid() const { return rawWaitTimeNoLiquid(); }
+
+    /// @deprecated Rev. A field name. Use waitTimeNoLiquid_ms().
+    [[deprecated("SLVUCR8B Rev. B p.60 names bits 15:0 Wait Time In Sec Non-Liquid; use waitTimeNoLiquid_ms()")]]
+    uint32_t sleepTimeNoLiquid_ms() const { return waitTimeNoLiquid_ms(); }
+
+    /// @deprecated Rev. A field name. Use rawWaitTimeLiquid().
+    [[deprecated("SLVUCR8B Rev. B p.60 names bits 31:16 Wait Time In Sec Liquid; use rawWaitTimeLiquid()")]]
+    uint16_t rawSleepTimeLiquid() const { return rawWaitTimeLiquid(); }
+
+    /// @deprecated Rev. A field name. Use waitTimeLiquid_ms().
+    [[deprecated("SLVUCR8B Rev. B p.60 names bits 31:16 Wait Time In Sec Liquid; use waitTimeLiquid_ms()")]]
+    uint32_t sleepTimeLiquid_ms() const { return waitTimeLiquid_ms(); }
+
+    /// @deprecated Rev. A field name. Use setRawWaitTimeNoLiquid().
+    [[deprecated("SLVUCR8B Rev. B p.60 names bits 15:0 Wait Time In Sec Non-Liquid; use setRawWaitTimeNoLiquid()")]]
+    void setRawSleepTimeNoLiquid(uint16_t raw) { setRawWaitTimeNoLiquid(raw); }
+
+    /// @deprecated Rev. A field name. Use setRawWaitTimeLiquid().
+    [[deprecated("SLVUCR8B Rev. B p.60 names bits 31:16 Wait Time In Sec Liquid; use setRawWaitTimeLiquid()")]]
+    void setRawSleepTimeLiquid(uint16_t raw) { setRawWaitTimeLiquid(raw); }
 
     /**
      * @brief Set the raw Low Threshold ADC No Liquid field
@@ -263,11 +298,11 @@ public:
 private:
     // Bit positions/widths from the TRM (already converted from high:low
     // ranges to bitPos/bitLen form used by extractBits()/setBits()).
-    static constexpr uint8_t kSleepTimeNoLiquidShift = 0;
-    static constexpr uint8_t kSleepTimeNoLiquidBits = 16;
+    static constexpr uint8_t kWaitTimeNoLiquidShift = 0;
+    static constexpr uint8_t kWaitTimeNoLiquidBits = 16;
 
-    static constexpr uint8_t kSleepTimeLiquidShift = 16;
-    static constexpr uint8_t kSleepTimeLiquidBits = 16;
+    static constexpr uint8_t kWaitTimeLiquidShift = 16;
+    static constexpr uint8_t kWaitTimeLiquidBits = 16;
 
     static constexpr uint8_t kNumberOfSamplesShift = 32;
     static constexpr uint8_t kNumberOfSamplesBits = 8;

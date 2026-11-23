@@ -3,7 +3,7 @@
 
 #include "TPS25751Register.h"
 #include "TPS25751RegisterAddress.h"
-#include "TPS25751ActivePDOContract.h"  // For PDOType enum
+#include "TPS25751Pdo.h"
 
 /**
  * @file TPS25751TransmitSinkCaps.h
@@ -25,9 +25,8 @@
  * - Bytes 1..24: PDO 1..7, 4 bytes each, little-endian (PDO n at byte 1 + (n-1)*4)
  *
  * This is the library's first PDO ENCODE path (alongside
- * TPS25751TransmitSourceCaps): in addition to the decode getters mirrored
- * from TPS25751ReceivedSinkCaps, this class provides pure static PDO word
- * builders (buildFixedSupplyPDO/buildBatteryPDO/buildVariablePDO/
+ * TPS25751TransmitSourceCaps): in addition to pdo(), this class provides pure
+ * static PDO word builders (on TPS25751Pdo::encode*()) (buildFixedSupplyPDO/buildBatteryPDO/buildVariablePDO/
  * buildPPSPDO) and instance mutators (setPDO/setPDOCount/setFixedSupplyPDO/
  * ...) that build on the base class's setBits() read-modify-write primitive.
  *
@@ -36,7 +35,7 @@
  * - Size: 53 bytes
  * - Access: Read/Write
  *
- * @see TI TPS25751 Technical Reference Manual, Section 3.2.49
+ * @see TI TPS25751 Technical Reference Manual SLVUCR8B (Rev. B), Section 3.2.18, Table 3-20, p.37
  * @see USB Power Delivery Specification 3.1, Section 6.4.1 (Power Data Objects)
  */
 class TPS25751TransmitSinkCaps : public TPS25751Register
@@ -50,7 +49,7 @@ public:
     /// @brief Register identity for the typed TPS25751::writeRegister<T>() write path.
     static constexpr TPS25751Registers::Address kAddress = TPS25751Registers::Address::TRANSMIT_SINK_CAPABILITIES;
 
-    // --- Decode getters (mirror TPS25751ReceivedSinkCaps) ------------------
+    // --- Decode (through TPS25751Pdo, as TPS25751ReceivedSinkCaps) ---------
 
     /**
      * @brief Get number of valid PDOs
@@ -66,42 +65,22 @@ public:
     uint32_t getPDO(uint8_t index) const;
 
     /**
-     * @brief Get PDO type for a specific PDO
+     * @brief Decode one PDO in its position and role
+     *
+     * PDO @p index is PDO @p index + 1 of a Sink_Capabilities message, so the Fixed PDO flags
+     * decode only for index 0 (USB PD R3.3 Tables 6.9, 6.10).
+     *
      * @param index PDO index (0-6)
-     * @return PDO type
+     * @return The PDO as a Sink PDO; an all-zero PDO at an unknown position when
+     *         @p index is 7 or more
      */
-    PDOType getPDOType(uint8_t index) const;
+    TPS25751Pdo pdo(uint8_t index) const;
 
     /**
      * @brief Check if sink capabilities are configured
      * @return true if at least one PDO is present (PDO count > 0 and PDO 1 is non-zero)
      */
     bool hasSinkCaps() const;
-
-    // Helper methods to parse Fixed Supply PDO (type 00, Sink variant)
-    uint16_t getFixedVoltage_mV(uint8_t index) const;
-    uint16_t getFixedMaxCurrent_mA(uint8_t index) const;
-    bool getFixedDualRolePower(uint8_t index) const;
-    bool getFixedHigherCapability(uint8_t index) const;
-    bool getFixedUnconstrainedPower(uint8_t index) const;
-    bool getFixedUSBCommCapable(uint8_t index) const;
-    bool getFixedDualRoleData(uint8_t index) const;
-    uint8_t getFixedFastRoleSwapCurrent(uint8_t index) const;
-
-    // Helper methods to parse Battery PDO (type 01)
-    uint16_t getBatteryMaxVoltage_mV(uint8_t index) const;
-    uint16_t getBatteryMinVoltage_mV(uint8_t index) const;
-    uint32_t getBatteryMaxPower_mW(uint8_t index) const;
-
-    // Helper methods to parse Variable Supply PDO (type 10)
-    uint16_t getVariableMaxVoltage_mV(uint8_t index) const;
-    uint16_t getVariableMinVoltage_mV(uint8_t index) const;
-    uint16_t getVariableMaxCurrent_mA(uint8_t index) const;
-
-    // Helper methods to parse Augmented/PPS PDO (type 11, Sink variant -- no Power Limited field)
-    uint16_t getPPSMaxVoltage_mV(uint8_t index) const;
-    uint16_t getPPSMinVoltage_mV(uint8_t index) const;
-    uint16_t getPPSMaxCurrent_mA(uint8_t index) const;
 
     // --- Encode: pure static PDO word builders ------------------------------
 
@@ -114,7 +93,8 @@ public:
      * @param unconstrainedPower Unconstrained Power
      * @param usbCommCapable USB Communications Capable
      * @param dualRoleData Dual-Role Data capable
-     * @param fastRoleSwapCurrent Fast Role Swap Required Current (2-bit field, bits 24:23)
+     * @param fastRoleSwapCurrent Fast Role Swap Required Current (2-bit field, bits 24:23;
+     *        see FastRoleSwapCurrent)
      * @return Encoded 32-bit PDO word (type bits 31:30 = 00)
      */
     static uint32_t buildFixedSupplyPDO(uint16_t voltage_mV, uint16_t maxCurrent_mA,
@@ -191,17 +171,10 @@ public:
 
     /**
      * @brief Validates transmit sink capabilities register data semantically
+     *
+     * Applies validatePdoList() with PdoListRules::TransmitSink: the receiver rules,
+     * the PDO order, and no SPR AVS APDO (a Sink Shall Not send one).
      * @return true if the configured sink capabilities data is logically consistent
      */
     bool isSemanticallyValid() const override;
-
-private:
-    /**
-     * @brief Extract bits from a specific PDO
-     * @param index PDO index (0-6)
-     * @param bitOffset Bit offset within the PDO
-     * @param bitCount Number of bits to extract
-     * @return Extracted value
-     */
-    uint32_t extractPDOBits(uint8_t index, uint8_t bitOffset, uint8_t bitCount) const;
 };

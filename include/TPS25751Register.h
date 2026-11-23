@@ -25,6 +25,45 @@ public:
      */
     void debugDumpRaw(Stream& s = Serial, const char* prefix = nullptr) const;
 
+    /**
+     * @brief Debug helper: print @p value as exactly @p digits uppercase hex digits
+     *
+     * Stream's HEX output drops leading zeros, so 0x0A prints as "A". debugPrint()
+     * implementations use this to print fixed-width values, such as a byte as
+     * "0A" or a 32-bit word as "0008001A", matching the TRM's notation. No "0x"
+     * prefix is printed. Digits above the value's width print as 0.
+     *
+     * @param s      Output stream
+     * @param value  Value to print
+     * @param digits Number of hex digits, 1 to 8; 0 prints nothing and values
+     *               above 8 are treated as 8
+     */
+    static void printHex(Stream& s, uint32_t value, uint8_t digits);
+
+    /**
+     * @brief Print "<label>0xHH (decimal)" and a newline for one byte field
+     *
+     * Debug helper shared by the register classes whose debugPrint() lists raw
+     * byte fields. The hex part always has two digits, for example
+     * "Load Step: 0x0A (10)".
+     *
+     * @param s     Output stream
+     * @param label Text printed before the value, including any trailing space
+     * @param value Byte to print
+     */
+    static void printByteField(Stream& s, const __FlashStringHelper* label, uint8_t value);
+
+    /**
+     * @brief Return F("Yes") for true and F("No") for false
+     *
+     * Debug helper for boolean fields in debugPrint() output. The result lives in
+     * flash and can be passed straight to Stream::print() or println().
+     *
+     * @param value Flag to describe
+     * @return "Yes" or "No"
+     */
+    static const __FlashStringHelper* yesNo(bool value);
+
 protected:
     uint8_t *_raw;
     size_t _len;
@@ -73,7 +112,7 @@ protected:
      * @param bitLen Number of bits in the field (field width, max 8)
      * @return The extracted value as an unsigned 8-bit integer, or 0 if invalid
      */
-    uint8_t extractBits(uint8_t bitPos, uint8_t bitLen) const;
+    uint8_t extractBits(uint16_t bitPos, uint8_t bitLen) const;
 
     /**
      * @brief Safely extracts a 16-bit bitfield from the register data with validation
@@ -81,7 +120,7 @@ protected:
      * @param bitLen Number of bits in the field (field width, max 16)
      * @return The extracted value as an unsigned 16-bit integer, or 0 if invalid
      */
-    uint16_t extractBits16(uint8_t bitPos, uint8_t bitLen) const;
+    uint16_t extractBits16(uint16_t bitPos, uint8_t bitLen) const;
 
     /**
      * @brief Safely extracts a 32-bit bitfield from the register data with validation
@@ -89,15 +128,16 @@ protected:
      * @param bitLen Number of bits in the field (field width, max 32)
      * @return The extracted value as an unsigned 32-bit integer, or 0 if invalid
      */
-    uint32_t extractBits32(uint8_t bitPos, uint8_t bitLen) const;
+    uint32_t extractBits32(uint16_t bitPos, uint8_t bitLen) const;
 
     /**
      * @brief Safely extracts a 64-bit bitfield from the register data with validation
      * @param bitPos Bit offset of the field within the buffer
      * @param bitLen Number of bits in the field (field width, max 64)
-     * @return The extracted value as an unsigned 64-bit integer, or 0 if invalid
+     * @return The extracted value as an unsigned 64-bit integer, or 0 if invalid.
+     *         Each 32-bit half is bounds-checked on its own; see the static overload.
      */
-    uint64_t extractBits64(uint8_t bitPos, uint8_t bitLen) const;
+    uint64_t extractBits64(uint16_t bitPos, uint8_t bitLen) const;
 
     /**
      * @brief Safely writes a bitfield into the register data (read-modify-write).
@@ -111,13 +151,13 @@ protected:
      * This is the host-side write primitive symmetric to extractBits(); host
      * R/W register setters build on it instead of hand-poking @c _raw. Fields
      * wider than 32 bits have no sub-structure to preserve in this library
-     * (e.g. CUSTOMER_USE) and are written byte-wise by the owning class.
+     * and are written byte-wise by the owning class.
      *
      * @param bitPos Bit offset of the field within the buffer
      * @param bitLen Number of bits in the field (field width, 1..32)
      * @param value  The value to write; masked to @p bitLen bits before insertion
      */
-    void setBits(uint8_t bitPos, uint8_t bitLen, uint32_t value);
+    void setBits(uint16_t bitPos, uint8_t bitLen, uint32_t value);
 
     /**
      * @brief Extracts a bitfield from a packed byte array with bounds checking.
@@ -133,7 +173,7 @@ protected:
      *
      * @return The extracted value as an unsigned 8-bit integer, or 0 if out of bounds
      */
-    static uint8_t extractBits(const uint8_t *data, size_t dataSize, uint8_t bitPos, uint8_t bitLen);
+    static uint8_t extractBits(const uint8_t *data, size_t dataSize, uint16_t bitPos, uint8_t bitLen);
 
     /**
      * @brief Extracts a 16-bit bitfield from a packed byte array with bounds checking.
@@ -143,7 +183,7 @@ protected:
      * @param bitLen    Number of bits in the field (field width, max 16)
      * @return The extracted value as an unsigned 16-bit integer, or 0 if out of bounds
      */
-    static uint16_t extractBits16(const uint8_t *data, size_t dataSize, uint8_t bitPos, uint8_t bitLen);
+    static uint16_t extractBits16(const uint8_t *data, size_t dataSize, uint16_t bitPos, uint8_t bitLen);
 
     /**
      * @brief Extracts a 32-bit bitfield from a packed byte array with bounds checking.
@@ -153,7 +193,7 @@ protected:
      * @param bitLen    Number of bits in the field (field width, max 32)
      * @return The extracted value as an unsigned 32-bit integer, or 0 if out of bounds
      */
-    static uint32_t extractBits32(const uint8_t *data, size_t dataSize, uint8_t bitPos, uint8_t bitLen);
+    static uint32_t extractBits32(const uint8_t *data, size_t dataSize, uint16_t bitPos, uint8_t bitLen);
 
     /**
      * @brief Extracts a 64-bit bitfield from a packed byte array with bounds checking.
@@ -161,9 +201,12 @@ protected:
      * @param dataSize  Size of the data buffer in bytes for bounds checking
      * @param bitPos    Bit offset of the field within the buffer
      * @param bitLen    Number of bits in the field (field width, max 64)
-     * @return The extracted value as an unsigned 64-bit integer, or 0 if out of bounds
+     * @return The extracted value as an unsigned 64-bit integer. A field wider than
+     *         32 bits is read as two 32-bit halves, each bounds-checked on its own:
+     *         a half outside the buffer reads as 0, so a field whose upper half runs
+     *         off the end returns only its lower half.
      */
-    static uint64_t extractBits64(const uint8_t *data, size_t dataSize, uint8_t bitPos, uint8_t bitLen);
+    static uint64_t extractBits64(const uint8_t *data, size_t dataSize, uint16_t bitPos, uint8_t bitLen);
 
     /**
      * @brief Writes a bitfield into a packed byte array with bounds checking (read-modify-write).
@@ -180,7 +223,7 @@ protected:
      * @param bitLen    Number of bits in the field (field width, 1..32)
      * @param value     The value to write; masked to @p bitLen bits before insertion
      */
-    static void setBits(uint8_t *data, size_t dataSize, uint8_t bitPos, uint8_t bitLen, uint32_t value);
+    static void setBits(uint8_t *data, size_t dataSize, uint16_t bitPos, uint8_t bitLen, uint32_t value);
 
     /**
      * @brief Safely converts extracted bits to enum with bounds checking (up to 8 bits)
@@ -192,7 +235,7 @@ protected:
      * @return Valid enum value or defaultValue if out of bounds
      */
     template<typename EnumType>
-    EnumType extractEnum(uint8_t bitPos, uint8_t bitLen, uint8_t maxValidValue, EnumType defaultValue) const
+    EnumType extractEnum(uint16_t bitPos, uint8_t bitLen, uint8_t maxValidValue, EnumType defaultValue) const
     {
         uint8_t rawValue = extractBits(bitPos, bitLen);
         if (rawValue > maxValidValue) {
@@ -211,7 +254,7 @@ protected:
      * @return Valid enum value or defaultValue if out of bounds
      */
     template<typename EnumType>
-    EnumType extractEnum16(uint8_t bitPos, uint8_t bitLen, uint16_t maxValidValue, EnumType defaultValue) const
+    EnumType extractEnum16(uint16_t bitPos, uint8_t bitLen, uint16_t maxValidValue, EnumType defaultValue) const
     {
         uint16_t rawValue = extractBits16(bitPos, bitLen);
         if (rawValue > maxValidValue) {
@@ -230,7 +273,7 @@ protected:
      * @return Valid enum value or defaultValue if out of bounds
      */
     template<typename EnumType>
-    EnumType extractEnum32(uint8_t bitPos, uint8_t bitLen, uint32_t maxValidValue, EnumType defaultValue) const
+    EnumType extractEnum32(uint16_t bitPos, uint8_t bitLen, uint32_t maxValidValue, EnumType defaultValue) const
     {
         uint32_t rawValue = extractBits32(bitPos, bitLen);
         if (rawValue > maxValidValue) {
@@ -249,7 +292,7 @@ protected:
      * @return Valid enum value or defaultValue if out of bounds
      */
     template<typename EnumType>
-    EnumType extractEnum64(uint8_t bitPos, uint8_t bitLen, uint64_t maxValidValue, EnumType defaultValue) const
+    EnumType extractEnum64(uint16_t bitPos, uint8_t bitLen, uint64_t maxValidValue, EnumType defaultValue) const
     {
         uint64_t rawValue = extractBits64(bitPos, bitLen);
         if (rawValue > maxValidValue) {

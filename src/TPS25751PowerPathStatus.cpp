@@ -15,6 +15,58 @@ SwitchState TPS25751PowerPathStatus::pp3Switch() const
     return extractEnum<SwitchState>(12, 3, static_cast<uint8_t>(SwitchState::Enabled_CC2OrSystemOutput), SwitchState::Disabled);
 }
 
+uint8_t TPS25751PowerPathStatus::rawPpCable1Switch() const
+{
+    return extractBits(0, 2);
+}
+
+uint8_t TPS25751PowerPathStatus::rawPp1Switch() const
+{
+    return extractBits(6, 3);
+}
+
+uint8_t TPS25751PowerPathStatus::rawPp3Switch() const
+{
+    return extractBits(12, 3);
+}
+
+// Switch state wording per SLVUCR8B Rev. B, p.27. The codes are shared, the
+// meanings are not: PP3 code 3 is a system input, PP_CABLE1 code 3 is CC2.
+const char *TPS25751PowerPathStatus::ppCable1SwitchText(uint8_t raw)
+{
+    switch (raw)
+    {
+        case 0: return "Disabled";
+        case 1: return "Currently disabled";
+        case 2: return "CC1 enabled (system output)";
+        case 3: return "CC2 enabled (system output)";
+        default: return "Undefined";
+    }
+}
+
+const char *TPS25751PowerPathStatus::pp1SwitchText(uint8_t raw)
+{
+    switch (raw)
+    {
+        case 0: return "Disabled";
+        case 1: return "Disabled due to fault";
+        case 2: return "Enabled (system output)";
+        default: return "Undefined";
+    }
+}
+
+const char *TPS25751PowerPathStatus::pp3SwitchText(uint8_t raw)
+{
+    switch (raw)
+    {
+        case 0: return "Disabled";
+        case 1: return "Disabled due to fault";
+        case 2: return "Enabled (system output)";
+        case 3: return "Enabled (system input)";
+        default: return "Undefined";
+    }
+}
+
 bool TPS25751PowerPathStatus::isPP1Overcurrent() const
 {
     return extractBits(28, 1);
@@ -30,6 +82,19 @@ PowerSource TPS25751PowerPathStatus::powerSource() const
     return extractEnum<PowerSource>(38, 2, static_cast<uint8_t>(PowerSource::Reserved3), PowerSource::Reserved0);
 }
 
+namespace {
+
+void printSwitch(Stream &s, const __FlashStringHelper *label, const char *text, uint8_t raw)
+{
+    s.print(label);
+    s.print(text);
+    s.print(F(" ("));
+    s.print(raw);
+    s.println(F(")"));
+}
+
+}  // namespace
+
 void TPS25751PowerPathStatus::debugPrint(Stream &s) const
 {
     s.println(F("=== Power Path Status Register (0x26) ==="));
@@ -39,12 +104,9 @@ void TPS25751PowerPathStatus::debugPrint(Stream &s) const
     s.println(isPPCable1Overcurrent() ? "Yes" : "No");
     s.print(F("  PP1 Overcurrent: "));
     s.println(isPP1Overcurrent() ? "Yes" : "No");
-    s.print(F("  PP_CABLE1 Switch: "));
-    s.println(toString(ppCable1Switch()));
-    s.print(F("  PP1 Switch: "));
-    s.println(toString(pp1Switch()));
-    s.print(F("  PP3 Switch: "));
-    s.println(toString(pp3Switch()));
+    printSwitch(s, F("  PP_CABLE1 Switch: "), ppCable1SwitchText(rawPpCable1Switch()), rawPpCable1Switch());
+    printSwitch(s, F("  PP1 Switch: "), pp1SwitchText(rawPp1Switch()), rawPp1Switch());
+    printSwitch(s, F("  PP3 Switch: "), pp3SwitchText(rawPp3Switch()), rawPp3Switch());
     s.println();
 }
 
@@ -107,6 +169,12 @@ bool TPS25751PowerPathStatus::isSemanticallyValid() const {
     uint8_t pp3Raw = static_cast<uint8_t>(pp3);
     
     if (cable1Raw > 3 || pp1Raw > 3 || pp3Raw > 3) {
+        return false;
+    }
+
+    // The enum decoders map undefined codes to Disabled, so check the raw codes
+    // against the TRM's defined range (p.27).
+    if (rawPp1Switch() > kPp1SwitchMaxDefined || rawPp3Switch() > kPp3SwitchMaxDefined) {
         return false;
     }
     

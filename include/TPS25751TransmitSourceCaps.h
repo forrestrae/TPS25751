@@ -3,7 +3,7 @@
 
 #include "TPS25751Register.h"
 #include "TPS25751RegisterAddress.h"
-#include "TPS25751ActivePDOContract.h"  // For PDOType enum
+#include "TPS25751Pdo.h"
 
 /**
  * @file TPS25751TransmitSourceCaps.h
@@ -14,21 +14,23 @@
  * This register holds the Source Capabilities message the PD controller
  * ADVERTISES to a port partner -- i.e. the outbound counterpart of
  * TPS25751ReceivedSourceCaps (0x30), which decodes what a partner sent to
- * us. Contains up to 7 Power Data Objects (PDOs), each preceded (as a block)
- * by a 2-bit Power Path selector per PDO. This register is initialized by
+ * us. Contains up to 7 Power Data Objects (PDOs), preceded by a 2-bit Power
+ * Path selector for PDO 1 only. This register is initialized by
  * Application Customization; writes take effect the next time the controller
  * sends a Source Capabilities message, not immediately.
  *
  * Register layout (little-endian PDOs):
  * - Byte 0, bits 2:0: Number Valid PDOs (0-7); bits 7:3 reserved
- * - Byte 1, bits 1:0/3:2/5:4/7:6: Power Path for PDO 1/2/3/4
- * - Byte 2, bits 1:0/3:2/5:4: Power Path for PDO 5/6/7; bits 7:6 reserved
+ * - Byte 1, bits 1:0 (register bits 9:8): Power Path for PDO 1
+ *   (0h = PP5V, 2h = PP_EXT)
+ * - Register bits 23:10 (byte 1 bits 7:2, byte 2): reserved. Rev. A defined
+ *   Power Path for PDO 2-7 here; SLVUCR8B (Rev. B, 2026-08), page 36, marks
+ *   these bits RESERVED, so the library never writes them.
  * - Bytes 3..30: PDO 1..7, 4 bytes each, little-endian (PDO n at byte 3 + (n-1)*4)
  *
- * This is the library's first PDO ENCODE path: in addition to the decode
- * getters mirrored from TPS25751ReceivedSourceCaps, this class provides pure
+ * This is the library's first PDO ENCODE path: in addition to pdo(), this class provides pure
  * static PDO word builders (buildFixedSupplyPDO/buildBatteryPDO/
- * buildVariablePDO/buildPPSPDO) and instance mutators (setPDO/setPDOCount/
+ * buildVariablePDO/buildPPSPDO/buildSprAvsPDO) and instance mutators (setPDO/setPDOCount/
  * setFixedSupplyPDO/... /setPowerPathForPDO) that build on the base class's
  * setBits() read-modify-write primitive.
  *
@@ -37,7 +39,7 @@
  * - Size: 63 bytes
  * - Access: Read/Write
  *
- * @see TI TPS25751 Technical Reference Manual, Section 3.2.48
+ * @see TI TPS25751 Technical Reference Manual SLVUCR8B (Rev. B), Section 3.2.17, Table 3-19, p.36
  * @see USB Power Delivery Specification 3.1, Section 6.4.1 (Power Data Objects)
  */
 class TPS25751TransmitSourceCaps : public TPS25751Register
@@ -51,7 +53,7 @@ public:
     /// @brief Register identity for the typed TPS25751::writeRegister<T>() write path.
     static constexpr TPS25751Registers::Address kAddress = TPS25751Registers::Address::TRANSMIT_SOURCE_CAPABILITIES;
 
-    // --- Decode getters (mirror TPS25751ReceivedSourceCaps) ---------------
+    // --- Decode (through TPS25751Pdo, as TPS25751ReceivedSourceCaps) ------
 
     /**
      * @brief Get number of valid PDOs
@@ -67,11 +69,16 @@ public:
     uint32_t getPDO(uint8_t index) const;
 
     /**
-     * @brief Get PDO type for a specific PDO
+     * @brief Decode one PDO in its position and role
+     *
+     * PDO @p index is PDO @p index + 1 of a Source_Capabilities message, so the Fixed PDO flags
+     * decode only for index 0 (USB PD R3.3 Tables 6.8, 6.10).
+     *
      * @param index PDO index (0-6)
-     * @return PDO type
+     * @return The PDO as a Source PDO; an all-zero PDO at an unknown position when
+     *         @p index is 7 or more
      */
-    PDOType getPDOType(uint8_t index) const;
+    TPS25751Pdo pdo(uint8_t index) const;
 
     /**
      * @brief Check if source capabilities are configured
@@ -80,42 +87,17 @@ public:
     bool hasSourceCaps() const;
 
     /**
-     * @brief Get the Power Path selector for a given PDO
+     * @brief Get the Power Path selector for PDO 1
      *
-     * Register bits 8 + index*2 (width 2). Per TRM: for PDO 1, 0h = PP_5V1,
-     * 2h = PP_EXT1 (1h/3h reserved); for PDO 2..7, 2h = PP_EXT1 (0h/1h/3h
-     * reserved).
+     * Register bits 9:8: 0h = PP5V, 2h = PP_EXT (1h/3h undefined).
+     * Source: SLVUCR8B (Rev. B, 2026-08), page 36. Rev. B defines a Power
+     * Path only for PDO 1; bits 23:10, which Rev. A used for PDO 2-7, are
+     * reserved.
      *
-     * @param index PDO index (0-6)
-     * @return Raw 2-bit Power Path selector value
+     * @param index PDO index; only 0 (PDO 1) is meaningful
+     * @return Raw 2-bit Power Path selector for index 0; 0 for any other index
      */
     uint8_t getPowerPathForPDO(uint8_t index) const;
-
-    // Helper methods to parse Fixed Supply PDO (type 00)
-    uint16_t getFixedVoltage_mV(uint8_t index) const;
-    uint16_t getFixedMaxCurrent_mA(uint8_t index) const;
-    bool getFixedDualRolePower(uint8_t index) const;
-    bool getFixedUSBSuspendSupported(uint8_t index) const;
-    bool getFixedUnconstrainedPower(uint8_t index) const;
-    bool getFixedUSBCommCapable(uint8_t index) const;
-    bool getFixedDualRoleData(uint8_t index) const;
-    bool getFixedUnchunkedSupported(uint8_t index) const;
-
-    // Helper methods to parse Battery PDO (type 01)
-    uint16_t getBatteryMaxVoltage_mV(uint8_t index) const;
-    uint16_t getBatteryMinVoltage_mV(uint8_t index) const;
-    uint32_t getBatteryMaxPower_mW(uint8_t index) const;
-
-    // Helper methods to parse Variable Supply PDO (type 10)
-    uint16_t getVariableMaxVoltage_mV(uint8_t index) const;
-    uint16_t getVariableMinVoltage_mV(uint8_t index) const;
-    uint16_t getVariableMaxCurrent_mA(uint8_t index) const;
-
-    // Helper methods to parse Augmented/PPS PDO (type 11)
-    bool getPPSPowerLimited(uint8_t index) const;
-    uint16_t getPPSMaxVoltage_mV(uint8_t index) const;
-    uint16_t getPPSMinVoltage_mV(uint8_t index) const;
-    uint16_t getPPSMaxCurrent_mA(uint8_t index) const;
 
     // --- Encode: pure static PDO word builders ------------------------------
 
@@ -168,6 +150,17 @@ public:
     static uint32_t buildPPSPDO(uint16_t maxVoltage_mV, uint16_t minVoltage_mV, uint16_t maxCurrent_mA,
                                 bool powerLimited = false);
 
+    /**
+     * @brief Build an SPR AVS Source APDO word (Table 6.15)
+     *
+     * @param current15V_mA Maximum current from 9 to 15 V, multiples of 10 mA are lossless
+     * @param current20V_mA Maximum current from 15 to 20 V, multiples of 10 mA are lossless
+     * @param peak          Peak Current (Table 6.18)
+     * @return Encoded 32-bit PDO word; buildSprAvsPDO(3000, 5000) is 0xE004B1F4
+     */
+    static uint32_t buildSprAvsPDO(uint16_t current15V_mA, uint16_t current20V_mA,
+                                   PdoPeakCurrent peak = PdoPeakCurrent::IoC);
+
     // --- Encode: instance mutators ------------------------------------------
 
     /**
@@ -203,9 +196,19 @@ public:
     void setPPSPDO(uint8_t index, uint16_t maxVoltage_mV, uint16_t minVoltage_mV, uint16_t maxCurrent_mA,
                    bool powerLimited = false);
 
+    /// @brief Build and write an SPR AVS Source APDO at @p index. @see buildSprAvsPDO
+    void setSprAvsPDO(uint8_t index, uint16_t current15V_mA, uint16_t current20V_mA,
+                      PdoPeakCurrent peak = PdoPeakCurrent::IoC);
+
     /**
-     * @brief Set the Power Path selector for a given PDO (register bits 8 + index*2, width 2)
-     * @param index PDO index (0-6)
+     * @brief Set the Power Path selector for PDO 1 (register bits 9:8)
+     *
+     * Source: SLVUCR8B (Rev. B, 2026-08), page 36: 0h = PP5V, 2h = PP_EXT.
+     * Rev. B defines a Power Path only for PDO 1 and marks bits 23:10
+     * reserved, so this is a no-op for any index other than 0; it never
+     * writes bits 23:10.
+     *
+     * @param index PDO index; only 0 (PDO 1) writes, any other index is a no-op
      * @param pp Raw 2-bit Power Path selector value (masked to 2 bits)
      */
     void setPowerPathForPDO(uint8_t index, uint8_t pp);
@@ -214,17 +217,11 @@ public:
 
     /**
      * @brief Validates transmit source capabilities register data semantically
+     *
+     * Applies validatePdoList() with PdoListRules::TransmitSource: the receiver
+     * rules, the PDO order, each Variable PDO's minimum at least 80% of its maximum,
+     * and each SPR AVS APDO's currents matching the 15 V and 20 V Fixed PDOs.
      * @return true if the configured source capabilities data is logically consistent
      */
     bool isSemanticallyValid() const override;
-
-private:
-    /**
-     * @brief Extract bits from a specific PDO
-     * @param index PDO index (0-6)
-     * @param bitOffset Bit offset within the PDO
-     * @param bitCount Number of bits to extract
-     * @return Extracted value
-     */
-    uint32_t extractPDOBits(uint8_t index, uint8_t bitOffset, uint8_t bitCount) const;
 };

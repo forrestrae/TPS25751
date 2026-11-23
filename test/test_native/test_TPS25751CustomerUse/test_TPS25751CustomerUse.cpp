@@ -6,6 +6,7 @@
  *
  * CUSTOMER_USE (0x06) is an opaque 8-byte, application-defined blob with no
  * field structure of its own (TRM Table 3-4). Its reset value is all zeros.
+ * It is read-only at runtime (SLVUCR8B Rev. B p.15), so the class has no setters.
  * Unlike TPS25751SleepControl, isSemanticallyValid() here does NOT call the
  * inherited hasValidData() heuristic (mirroring TPS25751Data's minimal
  * approach), so an all-0xFF buffer is semantically valid for this register --
@@ -15,10 +16,16 @@
  */
 
 #include <unity.h>
+#include <string>
+#include <cstdio>
+
+#include <type_traits>
 
 #include "TPS25751CustomerUse.h"
+#include "TPS25751SleepControl.h"
 #include "TPS25751Register.h"
 #include "TPS25751RegisterAddress.h"
+#include "CaptureStdout.h"
 
 namespace {
 
@@ -142,70 +149,25 @@ void test_byte_at_out_of_range_returns_zero()
     TEST_ASSERT_EQUAL_UINT8(0, reg.byteAt(1000));
 }
 
-// --- Setters -----------------------------------------------------------------
+// --- Read-only ------------------------------------------------------------
+//
+// CUSTOMER_USE is [R] in SLVUCR8B Rev. B (p.15), and on hardware the controller
+// ACKs a runtime write and keeps the old value. The class has no kAddress, so
+// TPS25751::writeRegister<T>() cannot be instantiated for it. This test fails
+// if a kAddress (and with it a write path) is added back.
 
-void test_set_value_round_trip()
+namespace {
+template <typename T, typename = void>
+struct HasKAddress : std::false_type {};
+template <typename T>
+struct HasKAddress<T, decltype((void)T::kAddress)> : std::true_type {};
+}  // namespace
+
+void test_class_has_no_write_path()
 {
-    TPS25751CustomerUse reg;
-    reg.setValue(SEQUENTIAL_VALUE);
-
-    TEST_ASSERT_EQUAL_UINT64(SEQUENTIAL_VALUE, reg.value());
-    TEST_ASSERT_EQUAL_UINT8_ARRAY(SEQUENTIAL_DATA, reg.raw(), CUSTOMER_USE_SIZE);
-}
-
-void test_set_value_zero()
-{
-    TPS25751CustomerUse reg(SEQUENTIAL_DATA);
-    reg.setValue(0);
-    TEST_ASSERT_EQUAL_UINT64(0, reg.value());
-}
-
-void test_set_bytes_short_copy_preserves_remaining_bytes()
-{
-    const uint8_t initial[CUSTOMER_USE_SIZE] = {0xAA, 0xAA, 0xAA, 0xAA, 0xAA, 0xAA, 0xAA, 0xAA};
-    TPS25751CustomerUse reg(initial);
-
-    const uint8_t partial[3] = {0x11, 0x22, 0x33};
-    reg.setBytes(partial, sizeof(partial));
-
-    TEST_ASSERT_EQUAL_UINT8(0x11, reg.byteAt(0));
-    TEST_ASSERT_EQUAL_UINT8(0x22, reg.byteAt(1));
-    TEST_ASSERT_EQUAL_UINT8(0x33, reg.byteAt(2));
-    // Untouched tail bytes remain from before the short copy.
-    for (size_t i = 3; i < CUSTOMER_USE_SIZE; ++i) {
-        TEST_ASSERT_EQUAL_UINT8(0xAA, reg.byteAt(i));
-    }
-}
-
-void test_set_bytes_caps_at_eight_bytes()
-{
-    TPS25751CustomerUse reg;
-    const uint8_t tooLong[10] = {1, 2, 3, 4, 5, 6, 7, 8, 9, 10};
-    reg.setBytes(tooLong, sizeof(tooLong));
-
-    for (size_t i = 0; i < CUSTOMER_USE_SIZE; ++i) {
-        TEST_ASSERT_EQUAL_UINT8(tooLong[i], reg.byteAt(i));
-    }
-}
-
-void test_set_bytes_null_source_is_noop()
-{
-    TPS25751CustomerUse reg(SEQUENTIAL_DATA);
-    reg.setBytes(nullptr, 4);
-    TEST_ASSERT_EQUAL_UINT64(SEQUENTIAL_VALUE, reg.value());  // unchanged
-}
-
-void test_setters_no_op_on_invalid_register()
-{
-    TPS25751CustomerUse reg(SEQUENTIAL_DATA);
-    TPS25751CustomerUse moved(static_cast<TPS25751CustomerUse &&>(reg));
-
-    TEST_ASSERT_FALSE(reg.isValid());
-    reg.setValue(1234);
-    const uint8_t bytes[2] = {0x01, 0x02};
-    reg.setBytes(bytes, sizeof(bytes));
-    TEST_ASSERT_FALSE(reg.isValid());  // still invalid; no crash
-    TEST_ASSERT_EQUAL_UINT64(SEQUENTIAL_VALUE, moved.value());  // untouched
+    TEST_ASSERT_FALSE(HasKAddress<TPS25751CustomerUse>::value);
+    // Control: a R/W host register does expose kAddress.
+    TEST_ASSERT_TRUE(HasKAddress<TPS25751SleepControl>::value);
 }
 
 // --- Rule of Five -----------------------------------------------------------
@@ -232,6 +194,48 @@ void test_move_constructor_transfers_ownership()
     TEST_ASSERT_EQUAL_UINT64(SEQUENTIAL_VALUE, moved.value());
 }
 
+
+// --- debugPrint ---------------------------------------------------------------
+
+namespace {
+
+bool contains(const std::string &haystack, const char *needle)
+{
+    return haystack.find(needle) != std::string::npos;
+}
+
+}  // namespace
+
+void test_debug_print_valid_register()
+{
+    const std::string out = captureDebugPrint(TPS25751CustomerUse(SEQUENTIAL_DATA));
+
+    TEST_ASSERT_TRUE(contains(out, "CUSTOMER_USE (0x6) - 8 bytes\n"));
+    TEST_ASSERT_TRUE(contains(out, "Raw (8 bytes):"));
+    TEST_ASSERT_TRUE(contains(out, "Value: 0x0807060504030201\n"));
+    TEST_ASSERT_FALSE(contains(out, "<invalid>"));
+}
+
+void test_debug_print_invalid_register()
+{
+    TPS25751CustomerUse reg(SEQUENTIAL_DATA);
+    TPS25751CustomerUse moved(static_cast<TPS25751CustomerUse &&>(reg));
+    const std::string out = captureDebugPrint(reg);
+
+    TEST_ASSERT_TRUE(contains(out, "CUSTOMER_USE (0x6)"));
+    TEST_ASSERT_TRUE(contains(out, "  <invalid>\n"));
+    TEST_ASSERT_FALSE(contains(out, "Value: 0x"));
+}
+
+void test_semantically_invalid_when_moved_from()
+{
+    TPS25751CustomerUse reg(SEQUENTIAL_DATA);
+    TPS25751CustomerUse moved(static_cast<TPS25751CustomerUse &&>(reg));
+    TEST_ASSERT_FALSE(reg.isSemanticallyValid());
+    TEST_ASSERT_EQUAL_UINT8(0, reg.byteAt(0));
+    TEST_ASSERT_EQUAL_UINT64(0, reg.value());
+}
+
 // --- Runner -----------------------------------------------------------------
 
 int main(int, char **)
@@ -252,15 +256,14 @@ int main(int, char **)
     RUN_TEST(test_byte_at_matches_raw_bytes);
     RUN_TEST(test_byte_at_out_of_range_returns_zero);
 
-    RUN_TEST(test_set_value_round_trip);
-    RUN_TEST(test_set_value_zero);
-    RUN_TEST(test_set_bytes_short_copy_preserves_remaining_bytes);
-    RUN_TEST(test_set_bytes_caps_at_eight_bytes);
-    RUN_TEST(test_set_bytes_null_source_is_noop);
-    RUN_TEST(test_setters_no_op_on_invalid_register);
+    RUN_TEST(test_class_has_no_write_path);
 
     RUN_TEST(test_copy_constructor_deep_copies);
     RUN_TEST(test_move_constructor_transfers_ownership);
+
+    RUN_TEST(test_debug_print_valid_register);
+    RUN_TEST(test_debug_print_invalid_register);
+    RUN_TEST(test_semantically_invalid_when_moved_from);
 
     return UNITY_END();
 }

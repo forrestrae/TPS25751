@@ -14,16 +14,19 @@
  *   0     ADCIN1        14 mV/LSB
  *   1     ADCIN2        14 mV/LSB
  *   2     LDO3V3        14 mV/LSB
- *   3     VBUS1         98 mV/LSB
+ *   3     VBUS          98 mV/LSB
  *   4     Reserved      --
- *   5     IVBUS1        16.5 mA/LSB (raw*33/2, integer truncation)
+ *   5     IVBUS_Mean    16.5 mA/LSB (raw*33/2, integer truncation)
  *   6     Reserved      --
  *   7     GPIO4         14 mV/LSB
  *   8     GPIO5         14 mV/LSB
  *   9     GPIO0         14 mV/LSB
  *   10    GPIO2         14 mV/LSB
- *   11    IVBUS1_Mean   16.5 mA/LSB (raw*33/2, integer truncation)
+ *   11    IVBUS_Peak    16.5 mA/LSB (raw*33/2, integer truncation)
  *   12    Reserved      --
+ *
+ * Field names per SLVUCR8B (Rev. B, 2026-08), page 51. Earlier library
+ * versions called byte 5 IVBUS1 and byte 11 IVBUS1_Mean.
  */
 
 #include <unity.h>
@@ -40,7 +43,7 @@ constexpr size_t ADC_RESULTS_SIZE = TPS25751Registers::Registers::ADC_RESULTS.si
 // byte (reserved bytes get arbitrary filler that must never surface through
 // an accessor).
 //                                      byte:  0     1     2     3     4     5     6     7     8     9    10    11    12
-//                                     field: ADCIN1 ADCIN2 LDO3V3 VBUS1  RSVD  IVBUS1 RSVD  GPIO4 GPIO5 GPIO0 GPIO2 IVMEAN RSVD
+//                                     field: ADCIN1 ADCIN2 LDO3V3 VBUS   RSVD  IVMEAN RSVD  GPIO4 GPIO5 GPIO0 GPIO2 IVPEAK RSVD
 constexpr uint8_t FULL_BUFFER[ADC_RESULTS_SIZE] = {0x64, 0x32, 0xC8, 0x0A, 0xAA, 0x03, 0x55, 0x05, 0x07, 0x09, 0x0B, 0xFF, 0x99};
 
 constexpr uint8_t ALL_ZEROS_DATA[ADC_RESULTS_SIZE] = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
@@ -89,7 +92,7 @@ void test_reginfo_constructor_allocates_zeroed_buffer()
 
     TEST_ASSERT_TRUE(reg.isValid());
     TEST_ASSERT_EQUAL_size_t(ADC_RESULTS_SIZE, reg.size());
-    TEST_ASSERT_EQUAL_UINT8(0, reg.rawVBUS1());
+    TEST_ASSERT_EQUAL_UINT8(0, reg.rawVBUS());
 }
 
 void test_null_data_behaves_as_zeroed()
@@ -98,7 +101,7 @@ void test_null_data_behaves_as_zeroed()
 
     TEST_ASSERT_TRUE(reg.isValid());
     TEST_ASSERT_EQUAL_UINT8(0, reg.rawADCIN1());
-    TEST_ASSERT_EQUAL_UINT16(0, reg.vbus1Millivolts());
+    TEST_ASSERT_EQUAL_UINT16(0, reg.vbusMillivolts());
 }
 
 void test_wrong_size_fails_size_validation()
@@ -160,19 +163,19 @@ void test_decode_ldo3v3()
     TEST_ASSERT_EQUAL_UINT16(2800, reg.ldo3v3Millivolts());  // 200 * 14
 }
 
-void test_decode_vbus1()
+void test_decode_vbus()
 {
     TPS25751ADCResults reg(FULL_BUFFER);
-    TEST_ASSERT_EQUAL_UINT8(0x0A, reg.rawVBUS1());          // 10
-    TEST_ASSERT_EQUAL_UINT16(980, reg.vbus1Millivolts());   // 10 * 98
+    TEST_ASSERT_EQUAL_UINT8(0x0A, reg.rawVBUS());          // 10
+    TEST_ASSERT_EQUAL_UINT16(980, reg.vbusMillivolts());   // 10 * 98
 }
 
-void test_decode_ivbus1_truncates_half_lsb()
+void test_decode_ivbus_mean_truncates_half_lsb()
 {
     TPS25751ADCResults reg(FULL_BUFFER);
-    TEST_ASSERT_EQUAL_UINT8(0x03, reg.rawIVBUS1());          // 3
+    TEST_ASSERT_EQUAL_UINT8(0x03, reg.rawIVBUSMean());       // 3
     // 3 * 16.5 = 49.5 mA -> truncates to 49 via integer raw*33/2
-    TEST_ASSERT_EQUAL_UINT16(49, reg.ivbus1Milliamps());
+    TEST_ASSERT_EQUAL_UINT16(49, reg.ivbusMeanMilliamps());
 }
 
 void test_decode_gpio4()
@@ -203,13 +206,50 @@ void test_decode_gpio2()
     TEST_ASSERT_EQUAL_UINT16(154, reg.gpio2Millivolts());  // 11 * 14
 }
 
-void test_decode_ivbus1_mean_max_value_truncates_half_lsb()
+void test_decode_ivbus_peak_max_value_truncates_half_lsb()
 {
     TPS25751ADCResults reg(FULL_BUFFER);
-    TEST_ASSERT_EQUAL_UINT8(0xFF, reg.rawIVBUS1Mean());  // 255 (max)
+    TEST_ASSERT_EQUAL_UINT8(0xFF, reg.rawIVBUSPeak());   // 255 (max)
     // 255 * 16.5 = 4207.5 mA -> truncates to 4207 via integer raw*33/2
-    TEST_ASSERT_EQUAL_UINT16(4207, reg.ivbus1MeanMilliamps());
+    TEST_ASSERT_EQUAL_UINT16(4207, reg.ivbusPeakMilliamps());
 }
+
+void test_byte5_drives_mean_and_byte11_drives_peak()
+{
+    // Rev. B (SLVUCR8B p.51): bits 47:40 (byte 5) = IVBUS_Mean,
+    // bits 95:88 (byte 11) = IVBUS_Peak.
+    uint8_t data[ADC_RESULTS_SIZE] = {0};
+    data[5] = 10;   // 10 * 16.5 = 165 mA
+    data[11] = 20;  // 20 * 16.5 = 330 mA
+    TPS25751ADCResults reg(data);
+
+    TEST_ASSERT_EQUAL_UINT16(165, reg.ivbusMeanMilliamps());
+    TEST_ASSERT_EQUAL_UINT16(330, reg.ivbusPeakMilliamps());
+}
+
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
+void test_deprecated_accessors_read_the_same_bytes_as_rev_b_names()
+{
+    // Each pre-Rev. B accessor must keep reading the byte it read before.
+    TPS25751ADCResults reg(FULL_BUFFER);
+
+    TEST_ASSERT_EQUAL_UINT8(reg.rawVBUS(), reg.rawVBUS1());
+    TEST_ASSERT_EQUAL_UINT16(reg.vbusMillivolts(), reg.vbus1Millivolts());
+
+    // byte 5: old "IVBUS1" == Rev. B IVBUS_Mean
+    TEST_ASSERT_EQUAL_UINT8(reg.rawIVBUSMean(), reg.rawIVBUS1());
+    TEST_ASSERT_EQUAL_UINT16(reg.ivbusMeanMilliamps(), reg.ivbus1Milliamps());
+
+    // byte 11: old "IVBUS1_Mean" == Rev. B IVBUS_Peak
+    TEST_ASSERT_EQUAL_UINT8(reg.rawIVBUSPeak(), reg.rawIVBUS1Mean());
+    TEST_ASSERT_EQUAL_UINT16(reg.ivbusPeakMilliamps(), reg.ivbus1MeanMilliamps());
+
+    // The fixture uses distinct values in bytes 5 and 11, so a swapped
+    // alias would fail above.
+    TEST_ASSERT_NOT_EQUAL(reg.rawIVBUSMean(), reg.rawIVBUSPeak());
+}
+#pragma GCC diagnostic pop
 
 // --- Rule of Five -------------------------------------------------------------
 
@@ -220,7 +260,7 @@ void test_copy_constructor_deep_copies()
 
     TEST_ASSERT_NOT_EQUAL(original.raw(), copy.raw());
     TEST_ASSERT_EQUAL_UINT8_ARRAY(original.raw(), copy.raw(), ADC_RESULTS_SIZE);
-    TEST_ASSERT_EQUAL_UINT16(original.vbus1Millivolts(), copy.vbus1Millivolts());
+    TEST_ASSERT_EQUAL_UINT16(original.vbusMillivolts(), copy.vbusMillivolts());
 }
 
 void test_copy_assignment_deep_copies()
@@ -278,13 +318,15 @@ int main(int, char **)
     RUN_TEST(test_decode_adcin1);
     RUN_TEST(test_decode_adcin2);
     RUN_TEST(test_decode_ldo3v3);
-    RUN_TEST(test_decode_vbus1);
-    RUN_TEST(test_decode_ivbus1_truncates_half_lsb);
+    RUN_TEST(test_decode_vbus);
+    RUN_TEST(test_decode_ivbus_mean_truncates_half_lsb);
     RUN_TEST(test_decode_gpio4);
     RUN_TEST(test_decode_gpio5);
     RUN_TEST(test_decode_gpio0);
     RUN_TEST(test_decode_gpio2);
-    RUN_TEST(test_decode_ivbus1_mean_max_value_truncates_half_lsb);
+    RUN_TEST(test_decode_ivbus_peak_max_value_truncates_half_lsb);
+    RUN_TEST(test_byte5_drives_mean_and_byte11_drives_peak);
+    RUN_TEST(test_deprecated_accessors_read_the_same_bytes_as_rev_b_names);
 
     RUN_TEST(test_copy_constructor_deep_copies);
     RUN_TEST(test_copy_assignment_deep_copies);

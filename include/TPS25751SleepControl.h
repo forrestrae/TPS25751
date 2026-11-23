@@ -6,13 +6,20 @@
 /**
  * @brief Minimum time the PD controller waits before entering sleep mode
  *
- * @see TI TPS25751 Technical Reference Manual, Table 3-27 (bits 2:1, Sleep Time)
+ * Source: SLVUCR8B (Rev. B, 2026-08), page 52. Rev. B changed 2h from 1200 ms
+ * (Rev. A) to 1000 ms. Time1200ms is a deprecated alias for Time1000ms with
+ * the same value.
+ *
+ * @see TI TPS25751 Technical Reference Manual SLVUCR8B (Rev. B), Table 3-31, p.52 (bits 2:1, Sleep Time)
  */
 enum class SleepTime : uint8_t {
     Reserved0 = 0,   ///< 0h - Reserved
     Time100ms = 1,   ///< 1h - 100 ms
-    Time1200ms = 2,  ///< 2h - 1200 ms
-    Reserved3 = 3    ///< 3h - Reserved
+    Time1000ms = 2,  ///< 2h - 1000 ms (SLVUCR8B p.52; was 1200 ms in Rev. A)
+    Reserved3 = 3,   ///< 3h - Reserved
+
+    /// @deprecated Rev. A name for 2h. Same value as Time1000ms.
+    Time1200ms [[deprecated("SLVUCR8B Rev. B p.52 defines 2h as 1000 ms; use SleepTime::Time1000ms")]] = 2
 };
 
 /**
@@ -26,12 +33,12 @@ enum class SleepTime : uint8_t {
  * - Address: 0x70
  * - Size: 1 byte
  * - Access: Read/Write
- * - Reset value: 0x01 (Sleep Mode Allowed set, Sleep Time = 0h/Reserved) --
- *   note this reset state is itself semantically INVALID per this class's
- *   isSemanticallyValid() (sleep allowed with a reserved sleep time), which
- *   callers should be prepared for on a factory-fresh device.
+ * - Reset value: 0x03 (Sleep Mode Allowed = 1, Sleep Time = 1h/100 ms), which
+ *   is semantically valid. Source: SLVUCR8B (Rev. B, 2026-08), page 52.
+ *   Rev. A listed 0x01 (Sleep Time = 0h/Reserved), which this class's
+ *   isSemanticallyValid() rejects.
  *
- * @see TI TPS25751 Technical Reference Manual, Section 3.2.28, Table 3-27
+ * @see TI TPS25751 Technical Reference Manual SLVUCR8B (Rev. B), Section 3.2.29, Table 3-31, p.52
  */
 class TPS25751SleepControl : public TPS25751Register
 {
@@ -51,7 +58,7 @@ public:
      * is idle for sleepTime().
      *
      * @return true if sleep mode is allowed, false otherwise
-     * @see TI TPS25751 Technical Reference Manual, Table 3-27, bit 0
+     * @see TI TPS25751 Technical Reference Manual, Table 3-31, bit 0
      */
     bool sleepModeAllowed() const;
 
@@ -61,7 +68,7 @@ public:
      * The minimum time the PD controller waits before entering sleep mode.
      *
      * @return The configured SleepTime value
-     * @see TI TPS25751 Technical Reference Manual, Table 3-27, bits 2:1
+     * @see TI TPS25751 Technical Reference Manual, Table 3-31, bits 2:1
      */
     SleepTime sleepTime() const;
 

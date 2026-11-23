@@ -110,6 +110,18 @@ bool TPS25751InterruptEvent::cmd1Complete() const
     return extractBits(30, 1);
 }
 
+// Manufacturer Info message received (bit 29). Source: SLVUCR8B (Rev. B, 2026-08), page 19.
+bool TPS25751InterruptEvent::midbReceived() const
+{
+    return extractBits(29, 1);
+}
+
+// Discover Modes process completed (bit 51). Source: SLVUCR8B (Rev. B, 2026-08), page 19.
+bool TPS25751InterruptEvent::discoverModeCompleted() const
+{
+    return extractBits(51, 1);
+}
+
 // Register update notifications (bits 23-27)
 bool TPS25751InterruptEvent::pdStatusUpdated() const
 {
@@ -222,6 +234,7 @@ uint8_t TPS25751InterruptEvent::getActiveInterruptCount() const
     if (liquidDetection()) count++;
     if (extDcdcSourceSafeState()) count++;
     if (extDcdcSinkSafeState()) count++;
+    if (discoverModeCompleted()) count++;
     if (unableToSourceError()) count++;
     if (messageDataError()) count++;
     if (protocolError()) count++;
@@ -234,6 +247,7 @@ uint8_t TPS25751InterruptEvent::getActiveInterruptCount() const
     if (sinkTransitionCompleted()) count++;
     if (plugInsertOrRemoval()) count++;
     if (cmd1Complete()) count++;
+    if (midbReceived()) count++;
     if (pdStatusUpdated()) count++;
     if (statusUpdated()) count++;
     if (powerStatusUpdated()) count++;
@@ -284,6 +298,9 @@ void TPS25751InterruptEvent::debugPrint(Stream &s) const
     if (extDcdcSourceSafeState()) s.println(F("  [+] Ext DCDC Source Safe State"));
     if (extDcdcSinkSafeState()) s.println(F("  [+] Ext DCDC Sink Safe State"));
 
+    // Discover Modes
+    if (discoverModeCompleted()) s.println(F("  [+] Discover Mode Completed"));
+
     // Error conditions
     if (unableToSourceError()) s.println(F("  [!] Unable to Source Error"));
     if (messageDataError()) s.println(F("  [!] Message Data Error"));
@@ -301,6 +318,7 @@ void TPS25751InterruptEvent::debugPrint(Stream &s) const
 
     // Command completion
     if (cmd1Complete()) s.println(F("  [+] CMD1 Complete"));
+    if (midbReceived()) s.println(F("  [+] MIDB Received"));
 
     // Register updates
     if (pdStatusUpdated()) s.println(F("  [+] PD Status Updated"));

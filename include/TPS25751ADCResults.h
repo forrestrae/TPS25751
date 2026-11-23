@@ -28,16 +28,23 @@
  * | 0    | ADCIN1       | 14 mV/LSB     |
  * | 1    | ADCIN2       | 14 mV/LSB     |
  * | 2    | LDO3V3       | 14 mV/LSB     |
- * | 3    | VBUS1        | 98 mV/LSB     |
+ * | 3    | VBUS         | 98 mV/LSB     |
  * | 4    | Reserved     | --            |
- * | 5    | IVBUS1       | 16.5 mA/LSB   |
+ * | 5    | IVBUS_Mean   | 16.5 mA/LSB   |
  * | 6    | Reserved     | --            |
  * | 7    | GPIO4        | 14 mV/LSB     |
  * | 8    | GPIO5        | 14 mV/LSB     |
  * | 9    | GPIO0        | 14 mV/LSB     |
  * | 10   | GPIO2        | 14 mV/LSB     |
- * | 11   | IVBUS1_Mean  | 16.5 mA/LSB   |
+ * | 11   | IVBUS_Peak   | 16.5 mA/LSB   |
  * | 12   | Reserved     | --            |
+ *
+ * Source: SLVUCR8B (Rev. B, 2026-08), page 51. IVBUS_Mean and IVBUS_Peak are
+ * estimates of the current through the power path, populated only while
+ * PORT_CONTROL.EnableCurrentMonitor = 1 and cleared on attach for a new
+ * connection. Earlier library versions called byte 5 IVBUS1 ("most recent")
+ * and byte 11 IVBUS1_Mean; Rev. B names byte 5 the mean and byte 11 the peak.
+ * The old accessors remain as deprecated wrappers that read the same bytes.
  *
  * @see TI TPS25751 Technical Reference Manual, ADC_RESULTS register
  */
@@ -86,33 +93,38 @@ public:
     uint16_t ldo3v3Millivolts() const;
 
     /**
-     * @brief Get the raw PA_VBUS (VBUS1) pin voltage reading
+     * @brief Get the raw VBUS pin voltage reading (byte 3)
      * @return Raw 8-bit ADC count (98 mV/LSB)
      */
-    uint8_t rawVBUS1() const;
+    uint8_t rawVBUS() const;
 
     /**
-     * @brief Get the PA_VBUS (VBUS1) pin voltage in millivolts
-     * @return Voltage on PA_VBUS in mV (raw count * 98 mV/LSB)
+     * @brief Get the VBUS pin voltage in millivolts (byte 3)
+     * @return Voltage on VBUS in mV (raw count * 98 mV/LSB)
      */
-    uint16_t vbus1Millivolts() const;
+    uint16_t vbusMillivolts() const;
 
     /**
-     * @brief Get the raw most-recent PP_5V1 current reading
+     * @brief Get the raw recent mean current estimate through the power path (byte 5)
+     *
+     * Populated only while PORT_CONTROL.EnableCurrentMonitor = 1; cleared on
+     * attach for a new connection. Source: SLVUCR8B (Rev. B, 2026-08), page 51.
+     *
      * @return Raw 8-bit ADC count (16.5 mA/LSB)
      */
-    uint8_t rawIVBUS1() const;
+    uint8_t rawIVBUSMean() const;
 
     /**
-     * @brief Get the most-recent PP_5V1 current in milliamps
+     * @brief Get the recent mean current estimate through the power path in milliamps (byte 5)
      *
      * Computed as `raw * 33 / 2` (16.5 mA/LSB expressed as integer math to
      * avoid floating point on this embedded target). This truncates the 0.5
-     * mA half-LSB component for odd raw counts.
+     * mA half-LSB component for odd raw counts. Requires
+     * PORT_CONTROL.EnableCurrentMonitor = 1.
      *
-     * @return Current through PP_5V1 in mA
+     * @return Mean current in mA
      */
-    uint16_t ivbus1Milliamps() const;
+    uint16_t ivbusMeanMilliamps() const;
 
     /**
      * @brief Get the raw GPIO4 pin voltage reading
@@ -163,25 +175,54 @@ public:
     uint16_t gpio2Millivolts() const;
 
     /**
-     * @brief Get the raw recent current peak/mean estimate through PP_5V1
+     * @brief Get the raw recent peak current estimate through the power path (byte 11)
      *
-     * This is a mean if PORT_CONTROL.EnableCurrentMonitor=1; the field is
-     * cleared on attach.
+     * Populated only while PORT_CONTROL.EnableCurrentMonitor = 1; cleared on
+     * attach for a new connection. Source: SLVUCR8B (Rev. B, 2026-08), page 51
+     * (TI's description reads "poewr path").
      *
      * @return Raw 8-bit ADC count (16.5 mA/LSB)
      */
-    uint8_t rawIVBUS1Mean() const;
+    uint8_t rawIVBUSPeak() const;
 
     /**
-     * @brief Get the recent current peak/mean estimate through PP_5V1 in milliamps
+     * @brief Get the recent peak current estimate through the power path in milliamps (byte 11)
      *
      * Computed as `raw * 33 / 2` (16.5 mA/LSB expressed as integer math to
      * avoid floating point on this embedded target). This truncates the 0.5
-     * mA half-LSB component for odd raw counts.
+     * mA half-LSB component for odd raw counts. Requires
+     * PORT_CONTROL.EnableCurrentMonitor = 1.
      *
-     * @return Current through PP_5V1 in mA
+     * @return Peak current in mA
      */
-    uint16_t ivbus1MeanMilliamps() const;
+    uint16_t ivbusPeakMilliamps() const;
+
+    // --- Deprecated pre-Rev. B names. Each reads exactly the byte it read
+    // before; the message names the Rev. B accessor for that same byte. ---
+
+    /// @deprecated Reads byte 3 (VBUS). Use rawVBUS().
+    [[deprecated("reads byte 3, which rev B names VBUS; use rawVBUS()")]]
+    uint8_t rawVBUS1() const { return rawVBUS(); }
+
+    /// @deprecated Reads byte 3 (VBUS). Use vbusMillivolts().
+    [[deprecated("reads byte 3, which rev B names VBUS; use vbusMillivolts()")]]
+    uint16_t vbus1Millivolts() const { return vbusMillivolts(); }
+
+    /// @deprecated Reads byte 5, which Rev. B names IVBUS_Mean. Use rawIVBUSMean().
+    [[deprecated("reads byte 5, which rev B names IVBUS_Mean; use rawIVBUSMean()")]]
+    uint8_t rawIVBUS1() const { return rawIVBUSMean(); }
+
+    /// @deprecated Reads byte 5, which Rev. B names IVBUS_Mean. Use ivbusMeanMilliamps().
+    [[deprecated("reads byte 5, which rev B names IVBUS_Mean; use ivbusMeanMilliamps()")]]
+    uint16_t ivbus1Milliamps() const { return ivbusMeanMilliamps(); }
+
+    /// @deprecated Reads byte 11, which Rev. B names IVBUS_Peak (not the mean). Use rawIVBUSPeak().
+    [[deprecated("reads byte 11, which rev B names IVBUS_Peak; use rawIVBUSPeak()")]]
+    uint8_t rawIVBUS1Mean() const { return rawIVBUSPeak(); }
+
+    /// @deprecated Reads byte 11, which Rev. B names IVBUS_Peak (not the mean). Use ivbusPeakMilliamps().
+    [[deprecated("reads byte 11, which rev B names IVBUS_Peak; use ivbusPeakMilliamps()")]]
+    uint16_t ivbus1MeanMilliamps() const { return ivbusPeakMilliamps(); }
 
     void debugPrint(Stream &s = Serial) const override;
 
@@ -205,22 +246,22 @@ private:
     static constexpr uint8_t kADCIN1BitPos = 0;
     static constexpr uint8_t kADCIN2BitPos = 8;
     static constexpr uint8_t kLDO3V3BitPos = 16;
-    static constexpr uint8_t kVBUS1BitPos = 24;
+    static constexpr uint8_t kVBUSBitPos = 24;
     // Byte 4 is reserved.
-    static constexpr uint8_t kIVBUS1BitPos = 40;
+    static constexpr uint8_t kIVBUSMeanBitPos = 40;
     // Byte 6 is reserved.
     static constexpr uint8_t kGPIO4BitPos = 56;
     static constexpr uint8_t kGPIO5BitPos = 64;
     static constexpr uint8_t kGPIO0BitPos = 72;
     static constexpr uint8_t kGPIO2BitPos = 80;
-    static constexpr uint8_t kIVBUS1MeanBitPos = 88;
+    static constexpr uint8_t kIVBUSPeakBitPos = 88;
     // Byte 12 is reserved.
 
     static constexpr uint8_t kFieldBitLen = 8;
 
     // Unit conversion constants.
     static constexpr uint16_t kMillivoltsPerLsb14 = 14;
-    static constexpr uint16_t kVbus1MillivoltsPerLsb = 98;
+    static constexpr uint16_t kVbusMillivoltsPerLsb = 98;
     static constexpr uint16_t kMilliampsPerLsbNumerator = 33;    ///< 16.5 mA/LSB == 33/2
     static constexpr uint16_t kMilliampsPerLsbDenominator = 2;
 };

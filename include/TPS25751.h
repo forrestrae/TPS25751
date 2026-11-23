@@ -4,31 +4,41 @@
 #include <Wire.h>
 #include "TPS25751.h"  // guard prevents re-entry (intentional no-op self-include)
 #include "TPS25751Mode.h"
+#include "TPS25751CustomerUse.h"
+#include "TPS25751Command.h"
+#include "TPS25751Data.h"
+#include "TPS25751Version.h"
+#include "TPS25751InterruptEvent.h"
+#include "TPS25751InterruptMask.h"
+#include "TPS25751InterruptClear.h"
 #include "TPS25751Status.h"
 #include "TPS25751PowerPathStatus.h"
-#include "TPS25751PowerStatus.h"
-#include "TPS25751PDStatus.h"
-#include "TPS25751BootFlags.h"
+#include "TPS25751GlobalSystemConfig.h"
 #include "TPS25751PortConfig.h"
-#include "TPS25751TypeCState.h"
-#include "TPS25751InterruptEvent.h"
-#include "TPS25751GPIOStatus.h"
 #include "TPS25751PortControl.h"
-#include "TPS25751ActivePDOContract.h"
-#include "TPS25751ActiveRDOContract.h"
+#include "TPS25751BootFlags.h"
 #include "TPS25751ReceivedSourceCaps.h"
 #include "TPS25751ReceivedSinkCaps.h"
 #include "TPS25751TransmitSourceCaps.h"
 #include "TPS25751TransmitSinkCaps.h"
-#include "TPS25751Command.h"
-#include "TPS25751Data.h"
-#include "TPS25751SleepControl.h"
-#include "TPS25751CustomerUse.h"
-#include "TPS25751InterruptMask.h"
-#include "TPS25751InterruptClear.h"
-#include "TPS25751ADCResults.h"
+#include "TPS25751ActivePDOContract.h"
+#include "TPS25751ActiveRDOContract.h"
 #include "TPS25751AutoNegotiateSink.h"
+#include "TPS25751PowerStatus.h"
+#include "TPS25751PDStatus.h"
+#include "TPS25751PD3Config.h"
+#include "TPS25751ReceivedSOPIdentity.h"
 #include "TPS25751IOConfig.h"
+#include "TPS25751TypeCState.h"
+#include "TPS25751ADCResults.h"
+#include "TPS25751SleepControl.h"
+#include "TPS25751GPIOStatus.h"
+#include "TPS25751TransmitSourceCapsExtended.h"
+#include "TPS25751TransmitSourceInfo.h"
+#include "TPS25751TransmitPPSStatus.h"
+#include "TPS25751TransmitBatteryStatus.h"
+#include "TPS25751TransmitBatteryCapabilities.h"
+#include "TPS25751TransmitSinkCapsExtended.h"
 #include "TPS25751LiquidDetectionConfig.h"
 #include "TPS25751RegisterAddress.h"
 #include "TPS25751RegisterFactory.h"
@@ -69,18 +79,29 @@ public:
     bool begin() const;
 
     bool readMode(TPS25751Mode &modeOut) const;
+    bool readCustomerUse(TPS25751CustomerUse &customerUse) const;
+    bool readInterruptEvent(TPS25751InterruptEvent &intEvent) const;
+
+    /**
+     * @brief Read the Interrupt Mask register (0x16)
+     * @param interruptMask Register object to populate
+     * @return true if the read succeeded
+     */
+    bool readInterruptMask(TPS25751InterruptMask &interruptMask) const;
+
     bool readStatus(TPS25751Status &statusOut) const;
     bool readPowerPathStatus(TPS25751PowerPathStatus &pps) const;
-    bool readPowerStatus(TPS25751PowerStatus &powerStatus) const;
-    bool readPDStatus(TPS25751PDStatus &pdStatus) const;
-    bool readBootFlags(TPS25751BootFlags &bootFlags) const;
+
+    /**
+     * @brief Read the Global System Configuration register (0x27)
+     * @param globalSystemConfig Register object to populate (14 bytes)
+     * @return true if the read succeeded
+     */
+    bool readGlobalSystemConfig(TPS25751GlobalSystemConfig &globalSystemConfig) const;
+
     bool readPortConfig(TPS25751PortConfig &portConfig) const;
-    bool readTypeCState(TPS25751TypeCState &typeCState) const;
-    bool readInterruptEvent(TPS25751InterruptEvent &intEvent) const;
-    bool readGPIOStatus(TPS25751GPIOStatus &gpioStatus) const;
     bool readPortControl(TPS25751PortControl &portControl) const;
-    bool readActivePDOContract(TPS25751ActivePDOContract &pdoContract) const;
-    bool readActiveRDOContract(TPS25751ActiveRDOContract &rdoContract) const;
+    bool readBootFlags(TPS25751BootFlags &bootFlags) const;
     bool readReceivedSourceCaps(TPS25751ReceivedSourceCaps &sourceCaps) const;
     bool readReceivedSinkCaps(TPS25751ReceivedSinkCaps &sinkCaps) const;
 
@@ -98,8 +119,38 @@ public:
      */
     bool readTransmitSinkCaps(TPS25751TransmitSinkCaps &sinkCaps) const;
 
-    bool readSleepControl(TPS25751SleepControl &sleepControl) const;
-    bool readCustomerUse(TPS25751CustomerUse &customerUse) const;
+    bool readActivePDOContract(TPS25751ActivePDOContract &pdoContract) const;
+    bool readActiveRDOContract(TPS25751ActiveRDOContract &rdoContract) const;
+
+    /**
+     * @brief Read the Autonegotiate Sink register (0x37)
+     * @param autoNegSink Register object to populate
+     * @return true if the read succeeded
+     */
+    bool readAutoNegotiateSink(TPS25751AutoNegotiateSink &autoNegSink) const;
+
+    bool readPowerStatus(TPS25751PowerStatus &powerStatus) const;
+    bool readPDStatus(TPS25751PDStatus &pdStatus) const;
+
+    /**
+     * @brief Read the PD3 Configuration register (0x42)
+     * @param pd3Config Register object to populate
+     * @return true if the read succeeded
+     */
+    bool readPD3Config(TPS25751PD3Config &pd3Config) const;
+
+    /**
+     * @brief Read the IO Config register (0x5C)
+     *
+     * IO_CONFIG cannot be modified at run-time -- there is no corresponding
+     * write method.
+     *
+     * @param ioConfig Register object to populate
+     * @return true if the read succeeded
+     */
+    bool readIOConfig(TPS25751IOConfig &ioConfig) const;
+
+    bool readTypeCState(TPS25751TypeCState &typeCState) const;
 
     /**
      * @brief Read the ADC Results register (0x6A)
@@ -113,30 +164,50 @@ public:
      */
     bool readADCResults(TPS25751ADCResults &adcResults) const;
 
-    /**
-     * @brief Read the Interrupt Mask register (0x16)
-     * @param interruptMask Register object to populate
-     * @return true if the read succeeded
-     */
-    bool readInterruptMask(TPS25751InterruptMask &interruptMask) const;
+    bool readSleepControl(TPS25751SleepControl &sleepControl) const;
+    bool readGPIOStatus(TPS25751GPIOStatus &gpioStatus) const;
 
     /**
-     * @brief Read the Autonegotiate Sink register (0x37)
-     * @param autoNegSink Register object to populate
+     * @brief Read the TX Source Capabilities Extended register (0x77)
+     * @param caps Register object to populate (15 bytes)
      * @return true if the read succeeded
      */
-    bool readAutoNegotiateSink(TPS25751AutoNegotiateSink &autoNegSink) const;
+    bool readTransmitSourceCapsExtended(TPS25751TransmitSourceCapsExtended &caps) const;
 
     /**
-     * @brief Read the IO Config register (0x5C)
-     *
-     * IO_CONFIG cannot be modified at run-time -- there is no corresponding
-     * write method.
-     *
-     * @param ioConfig Register object to populate
+     * @brief Read the TX Source Info register (0x78)
+     * @param sourceInfo Register object to populate (8 bytes)
      * @return true if the read succeeded
      */
-    bool readIOConfig(TPS25751IOConfig &ioConfig) const;
+    bool readTransmitSourceInfo(TPS25751TransmitSourceInfo &sourceInfo) const;
+
+    /**
+     * @brief Read the Transmitted PPS Status Data Block register (0x7A)
+     * @param ppsStatus Register object to populate (4 bytes)
+     * @return true if the read succeeded
+     */
+    bool readTransmitPPSStatus(TPS25751TransmitPPSStatus &ppsStatus) const;
+
+    /**
+     * @brief Read the Transmitted Battery Status Data Objects register (0x7B)
+     * @param status Register object to populate (16 bytes)
+     * @return true if the read succeeded
+     */
+    bool readTransmitBatteryStatus(TPS25751TransmitBatteryStatus &status) const;
+
+    /**
+     * @brief Read the TX Battery Capabilities register (0x7D)
+     * @param caps Register object to populate (36 bytes)
+     * @return true if the read succeeded
+     */
+    bool readTransmitBatteryCapabilities(TPS25751TransmitBatteryCapabilities &caps) const;
+
+    /**
+     * @brief Read the Transmit Sink Capabilities Extended register (0x7E)
+     * @param caps Register object to populate (14 bytes)
+     * @return true if the read succeeded
+     */
+    bool readTransmitSinkCapsExtended(TPS25751TransmitSinkCapsExtended &caps) const;
 
     /**
      * @brief Read the Liquid Detection Config register (0x98)
@@ -146,12 +217,42 @@ public:
     bool readLiquidDetectionConfig(TPS25751LiquidDetectionConfig &liquidDetectionConfig) const;
 
     /**
-     * @brief Write the Sleep Control register (0x70)
-     * @param sleepControl Register object holding the bytes to write
-     * @return false if @p sleepControl is not valid or not the expected size;
+     * @brief Write the Interrupt Mask register (0x16)
+     * @param interruptMask Register object holding the bytes to write
+     * @return false if @p interruptMask is not valid or not the expected
+     *         size; otherwise the result of the underlying I2C write
+     */
+    bool writeInterruptMask(const TPS25751InterruptMask &interruptMask) const;
+
+    /**
+     * @brief Write the Interrupt Clear register (0x18)
+     *
+     * The TRM marks INT_CLEAR1 R/W (SLVUCR8B p.23), but the library only writes
+     * it: there is no readInterruptClear(), because read-back carries no event
+     * state.
+     *
+     * @param interruptClear Register object holding the staged clear bits to write
+     * @return false if @p interruptClear is not valid or not the expected
+     *         size; otherwise the result of the underlying I2C write
+     */
+    bool writeInterruptClear(const TPS25751InterruptClear &interruptClear) const;
+
+    /**
+     * @brief Write the Global System Configuration register (0x27)
+     *
+     * TRM: "Any modifications to this register will cause a port disconnect and
+     * reconnect with the new settings." PP1 and PP3 describe the board's
+     * power-switch wiring, and a wrong PP3 role can back-drive the power path.
+     * The firmware stores undocumented values in bits the TRM lists as
+     * reserved, so start from a fresh readGlobalSystemConfig() and change only
+     * the fields you mean to. Writing a default-constructed object would clear
+     * those bits as well as rewrite every field.
+     *
+     * @param globalSystemConfig Register object holding the bytes to write
+     * @return false if @p globalSystemConfig is not valid or not the expected size;
      *         otherwise the result of the underlying I2C write
      */
-    bool writeSleepControl(const TPS25751SleepControl &sleepControl) const;
+    bool writeGlobalSystemConfig(const TPS25751GlobalSystemConfig &globalSystemConfig) const;
 
     /**
      * @brief Write the Transmit Source Capabilities register (0x32)
@@ -170,39 +271,118 @@ public:
     bool writeTransmitSinkCaps(const TPS25751TransmitSinkCaps &sinkCaps) const;
 
     /**
-     * @brief Write the Customer Use register (0x06)
-     * @param customerUse Register object holding the bytes to write
-     * @return false if @p customerUse is not valid or not the expected size;
-     *         otherwise the result of the underlying I2C write
-     */
-    bool writeCustomerUse(const TPS25751CustomerUse &customerUse) const;
-
-    /**
-     * @brief Write the Interrupt Mask register (0x16)
-     * @param interruptMask Register object holding the bytes to write
-     * @return false if @p interruptMask is not valid or not the expected
-     *         size; otherwise the result of the underlying I2C write
-     */
-    bool writeInterruptMask(const TPS25751InterruptMask &interruptMask) const;
-
-    /**
-     * @brief Write the Interrupt Clear register (0x18)
-     *
-     * INT_CLEAR1 is write-only: there is no corresponding readInterruptClear().
-     *
-     * @param interruptClear Register object holding the staged clear bits to write
-     * @return false if @p interruptClear is not valid or not the expected
-     *         size; otherwise the result of the underlying I2C write
-     */
-    bool writeInterruptClear(const TPS25751InterruptClear &interruptClear) const;
-
-    /**
      * @brief Write the Autonegotiate Sink register (0x37)
      * @param autoNegSink Register object holding the bytes to write
      * @return false if @p autoNegSink is not valid or not the expected size;
      *         otherwise the result of the underlying I2C write
      */
     bool writeAutoNegotiateSink(const TPS25751AutoNegotiateSink &autoNegSink) const;
+
+    /**
+     * @brief Write the PD3 Configuration register (0x42)
+     * @param pd3Config Register object holding the bytes to write
+     * @return false if @p pd3Config is not valid or not the expected size;
+     *         otherwise the result of the underlying I2C write
+     */
+    bool writePD3Config(const TPS25751PD3Config &pd3Config) const;
+
+    /**
+     * @brief Write the Sleep Control register (0x70)
+     * @param sleepControl Register object holding the bytes to write
+     * @return false if @p sleepControl is not valid or not the expected size;
+     *         otherwise the result of the underlying I2C write
+     */
+    bool writeSleepControl(const TPS25751SleepControl &sleepControl) const;
+
+    /**
+     * @brief Write the TX Source Capabilities Extended (0x77) register
+     *
+     * The controller builds its Get_Source_Cap_Extended reply from this register
+     * only while PD3_CONFIGURATION (0x42) bit 8
+     * (TPS25751PD3Config::supportSourceExtended()) is set; with it clear the controller
+     * answers Get_Source_Cap_Extended with Not_Supported.
+     *
+     * @param caps Register object holding the bytes to write
+     * @return false if @p caps is not valid or not the expected size;
+     *         otherwise the result of the underlying I2C write
+     */
+    bool writeTransmitSourceCapsExtended(const TPS25751TransmitSourceCapsExtended &caps) const;
+
+    /**
+     * @brief Write the TX Source Info register (0x78)
+     *
+     * TRM: "This register is automatically updated by the PD firmware and does
+     * not require any EC implementation." The firmware may overwrite what you
+     * write. The controller sends this register's contents in reply to
+     * Get_Source_Info only while PD3_CONFIGURATION (0x42) bit 18
+     * (TPS25751PD3Config::supportGetSourceInfo()) is set; with it clear the
+     * controller answers Not_Supported.
+     *
+     * @param sourceInfo Register object holding the bytes to write
+     * @return false if @p sourceInfo is not valid or not the expected size;
+     *         otherwise the result of the underlying I2C write
+     */
+    bool writeTransmitSourceInfo(const TPS25751TransmitSourceInfo &sourceInfo) const;
+
+    /**
+     * @brief Write the Transmitted PPS Status Data Block register (0x7A)
+     *
+     * The controller sends this register's contents in reply to Get_PPS_Status
+     * only while PD3_CONFIGURATION (0x42) bit 20
+     * (TPS25751PD3Config::supportPpsStatus()) is set; with it clear the
+     * controller answers Not_Supported. The TRM does not say the firmware
+     * updates this register, so the host supplies the PPS status it wants
+     * reported.
+     *
+     * @param ppsStatus Register object holding the bytes to write
+     * @return false if @p ppsStatus is not valid or not the expected size;
+     *         otherwise the result of the underlying I2C write
+     */
+    bool writeTransmitPPSStatus(const TPS25751TransmitPPSStatus &ppsStatus) const;
+
+    /**
+     * @brief Write the Transmitted Battery Status Data Objects (BSDO) (0x7B) register
+     *
+     * The controller builds its Get_Battery_Status reply from this register
+     * only while PD3_CONFIGURATION (0x42) bit 11
+     * (TPS25751PD3Config::supportBatteryStatus()) is set; with it clear the controller
+     * answers Get_Battery_Status with Not_Supported. The controller takes no automatic
+     * action when this register is written.
+     *
+     * @param status Register object holding the bytes to write
+     * @return false if @p status is not valid or not the expected size;
+     *         otherwise the result of the underlying I2C write
+     */
+    bool writeTransmitBatteryStatus(const TPS25751TransmitBatteryStatus &status) const;
+
+    /**
+     * @brief Write the Tx Battery Capabilities Data Block (0x7D) register
+     *
+     * The controller builds its Get_Battery_Capabilities reply from this register
+     * only while PD3_CONFIGURATION (0x42) bit 10
+     * (TPS25751PD3Config::supportBatteryCapabilities()) is set; with it clear the controller
+     * answers Get_Battery_Capabilities with Not_Supported. The controller takes no automatic
+     * action when this register is written.
+     *
+     * @param caps Register object holding the bytes to write
+     * @return false if @p caps is not valid or not the expected size;
+     *         otherwise the result of the underlying I2C write
+     */
+    bool writeTransmitBatteryCapabilities(const TPS25751TransmitBatteryCapabilities &caps) const;
+
+    /**
+     * @brief Write the Transmit Sink Capabilities Extended (0x7E) register
+     *
+     * The controller builds its Get_Sink_Cap_Extended reply from this register
+     * only while PD3_CONFIGURATION (0x42) bit 17
+     * (TPS25751PD3Config::supportSinkCapExtended()) is set; with it clear the controller
+     * answers Get_Sink_Cap_Extended with Not_Supported.
+     *
+     * @param caps Register object holding the bytes to write
+     * @return false if @p caps is not valid or not the expected size;
+     *         otherwise the result of the underlying I2C write
+     */
+    bool writeTransmitSinkCapsExtended(const TPS25751TransmitSinkCapsExtended &caps) const;
 
     /**
      * @brief Write the Liquid Detection Config register (0x98)
@@ -227,7 +407,7 @@ public:
      * @c RegisterT::kAddress. Because the target address comes from the register
      * class itself, a class can only ever be written to its own register — the
      * whole class of "same-size register mis-pairing" bugs (e.g. INT_MASK1 vs
-     * LIQUID_DETECTION_CONFIG, both 11 bytes) that the untyped
+     * INT_CLEAR1, both 11 bytes) that the untyped
      * @c writeRegister(RegisterInfo,...) path cannot catch is unrepresentable
      * here. Validates @c isValid() and size before touching the bus.
      *
@@ -344,13 +524,6 @@ public:
     
     // Type-safe factory-based convenience methods
     /**
-     * @brief Read Status register using factory pattern
-     * @param validate Whether to validate the register after reading
-     * @return Unique pointer to Status register (nullptr if failed)
-     */
-    std::unique_ptr<TPS25751Status> readStatusRegister(bool validate = true) const;
-    
-    /**
      * @brief Read Mode register using factory pattern
      * @param validate Whether to validate the register after reading
      * @return Unique pointer to Mode register (nullptr if failed)
@@ -358,33 +531,31 @@ public:
     std::unique_ptr<TPS25751Mode> readModeRegister(bool validate = true) const;
     
     /**
-     * @brief Read Boot Flags register using factory pattern
+     * @brief Read Command register (0x08) using factory pattern
+     *
+     * Note: COMMAND is typically transient (write a 4CC, poll until it clears
+     * or rejects via executeCommand()). This convenience read is provided for
+     * symmetry/debugging — under normal use prefer executeCommand().
+     *
      * @param validate Whether to validate the register after reading
-     * @return Unique pointer to Boot Flags register (nullptr if failed)
+     * @return Unique pointer to Command register (nullptr if failed)
      */
-    std::unique_ptr<TPS25751BootFlags> readBootFlagsRegister(bool validate = true) const;
+    std::unique_ptr<TPS25751Command> readCommandRegister(bool validate = true) const;
     
     /**
-     * @brief Read Power Path Status register using factory pattern
+     * @brief Read Data register (0x09) using factory pattern
      * @param validate Whether to validate the register after reading
-     * @return Unique pointer to Power Path Status register (nullptr if failed)
+     * @return Unique pointer to Data register (nullptr if failed)
      */
-    std::unique_ptr<TPS25751PowerPathStatus> readPowerPathStatusRegister(bool validate = true) const;
+    std::unique_ptr<TPS25751Data> readDataRegister(bool validate = true) const;
     
     /**
-     * @brief Read Port Configuration register using factory pattern
+     * @brief Read Version register (0x0F) using factory pattern
      * @param validate Whether to validate the register after reading
-     * @return Unique pointer to Port Configuration register (nullptr if failed)
+     * @return Unique pointer to Version register (nullptr if failed)
      */
-    std::unique_ptr<TPS25751PortConfig> readPortConfigRegister(bool validate = true) const;
-
-    /**
-     * @brief Read Type C State register using factory pattern
-     * @param validate Whether to validate the register after reading
-     * @return Unique pointer to Type C State register (nullptr if failed)
-     */
-    std::unique_ptr<TPS25751TypeCState> readTypeCStateRegister(bool validate = true) const;
-
+    std::unique_ptr<TPS25751Version> readVersionRegister(bool validate = true) const;
+    
     /**
      * @brief Read Interrupt Event register using factory pattern
      * @param validate Whether to validate the register after reading
@@ -393,62 +564,32 @@ public:
     std::unique_ptr<TPS25751InterruptEvent> readInterruptEventRegister(bool validate = true) const;
 
     /**
-     * @brief Read Power Status register using factory pattern
+     * @brief Read Status register using factory pattern
      * @param validate Whether to validate the register after reading
-     * @return Unique pointer to Power Status register (nullptr if failed)
+     * @return Unique pointer to Status register (nullptr if failed)
      */
-    std::unique_ptr<TPS25751PowerStatus> readPowerStatusRegister(bool validate = true) const;
+    std::unique_ptr<TPS25751Status> readStatusRegister(bool validate = true) const;
 
     /**
-     * @brief Read PD Status register using factory pattern
+     * @brief Read Power Path Status register using factory pattern
      * @param validate Whether to validate the register after reading
-     * @return Unique pointer to PD Status register (nullptr if failed)
+     * @return Unique pointer to Power Path Status register (nullptr if failed)
      */
-    std::unique_ptr<TPS25751PDStatus> readPDStatusRegister(bool validate = true) const;
+    std::unique_ptr<TPS25751PowerPathStatus> readPowerPathStatusRegister(bool validate = true) const;
 
     /**
-     * @brief Read GPIO Status register using factory pattern
+     * @brief Read Global System Configuration (0x27) register using factory pattern
      * @param validate Whether to validate the register after reading
-     * @return Unique pointer to GPIO Status register (nullptr if failed)
+     * @return Unique pointer to the register (nullptr if failed)
      */
-    std::unique_ptr<TPS25751GPIOStatus> readGPIOStatusRegister(bool validate = true) const;
+    std::unique_ptr<TPS25751GlobalSystemConfig> readGlobalSystemConfigRegister(bool validate = true) const;
 
     /**
-     * @brief Read ADC Results register using factory pattern
-     *
-     * Note: the PD controller does not update ADC_RESULTS while in
-     * Unconnected Sleep mode, so a stale/all-zero read in that state is
-     * expected and not, by itself, an error.
-     *
+     * @brief Read Port Configuration register using factory pattern
      * @param validate Whether to validate the register after reading
-     * @return Unique pointer to ADC Results register (nullptr if failed)
+     * @return Unique pointer to Port Configuration register (nullptr if failed)
      */
-    std::unique_ptr<TPS25751ADCResults> readADCResultsRegister(bool validate = true) const;
-
-    /**
-     * @brief Read Autonegotiate Sink register using factory pattern
-     * @param validate Whether to validate the register after reading
-     * @return Unique pointer to Autonegotiate Sink register (nullptr if failed)
-     */
-    std::unique_ptr<TPS25751AutoNegotiateSink> readAutoNegotiateSinkRegister(bool validate = true) const;
-
-    /**
-     * @brief Read IO Config register using factory pattern
-     *
-     * IO_CONFIG cannot be modified at run-time -- there is no corresponding
-     * write method.
-     *
-     * @param validate Whether to validate the register after reading
-     * @return Unique pointer to IO Config register (nullptr if failed)
-     */
-    std::unique_ptr<TPS25751IOConfig> readIOConfigRegister(bool validate = true) const;
-
-    /**
-     * @brief Read Liquid Detection Config register using factory pattern
-     * @param validate Whether to validate the register after reading
-     * @return Unique pointer to Liquid Detection Config register (nullptr if failed)
-     */
-    std::unique_ptr<TPS25751LiquidDetectionConfig> readLiquidDetectionConfigRegister(bool validate = true) const;
+    std::unique_ptr<TPS25751PortConfig> readPortConfigRegister(bool validate = true) const;
 
     /**
      * @brief Read Port Control register using factory pattern
@@ -458,18 +599,11 @@ public:
     std::unique_ptr<TPS25751PortControl> readPortControlRegister(bool validate = true) const;
 
     /**
-     * @brief Read Active PDO Contract register using factory pattern
+     * @brief Read Boot Flags register using factory pattern
      * @param validate Whether to validate the register after reading
-     * @return Unique pointer to Active PDO Contract register (nullptr if failed)
+     * @return Unique pointer to Boot Flags register (nullptr if failed)
      */
-    std::unique_ptr<TPS25751ActivePDOContract> readActivePDOContractRegister(bool validate = true) const;
-
-    /**
-     * @brief Read Active RDO Contract register using factory pattern
-     * @param validate Whether to validate the register after reading
-     * @return Unique pointer to Active RDO Contract register (nullptr if failed)
-     */
-    std::unique_ptr<TPS25751ActiveRDOContract> readActiveRDOContractRegister(bool validate = true) const;
+    std::unique_ptr<TPS25751BootFlags> readBootFlagsRegister(bool validate = true) const;
 
     /**
      * @brief Read Received Source Capabilities register using factory pattern
@@ -500,23 +634,139 @@ public:
     std::unique_ptr<TPS25751TransmitSinkCaps> readTransmitSinkCapsRegister(bool validate = true) const;
 
     /**
-     * @brief Read Command register (0x08) using factory pattern
-     *
-     * Note: COMMAND is typically transient (write a 4CC, poll until it clears
-     * or rejects via executeCommand()). This convenience read is provided for
-     * symmetry/debugging — under normal use prefer executeCommand().
-     *
+     * @brief Read Active PDO Contract register using factory pattern
      * @param validate Whether to validate the register after reading
-     * @return Unique pointer to Command register (nullptr if failed)
+     * @return Unique pointer to Active PDO Contract register (nullptr if failed)
      */
-    std::unique_ptr<TPS25751Command> readCommandRegister(bool validate = true) const;
+    std::unique_ptr<TPS25751ActivePDOContract> readActivePDOContractRegister(bool validate = true) const;
 
     /**
-     * @brief Read Data register (0x09) using factory pattern
+     * @brief Read Active RDO Contract register using factory pattern
      * @param validate Whether to validate the register after reading
-     * @return Unique pointer to Data register (nullptr if failed)
+     * @return Unique pointer to Active RDO Contract register (nullptr if failed)
      */
-    std::unique_ptr<TPS25751Data> readDataRegister(bool validate = true) const;
+    std::unique_ptr<TPS25751ActiveRDOContract> readActiveRDOContractRegister(bool validate = true) const;
+
+    /**
+     * @brief Read Autonegotiate Sink register using factory pattern
+     * @param validate Whether to validate the register after reading
+     * @return Unique pointer to Autonegotiate Sink register (nullptr if failed)
+     */
+    std::unique_ptr<TPS25751AutoNegotiateSink> readAutoNegotiateSinkRegister(bool validate = true) const;
+
+    /**
+     * @brief Read Power Status register using factory pattern
+     * @param validate Whether to validate the register after reading
+     * @return Unique pointer to Power Status register (nullptr if failed)
+     */
+    std::unique_ptr<TPS25751PowerStatus> readPowerStatusRegister(bool validate = true) const;
+
+    /**
+     * @brief Read PD Status register using factory pattern
+     * @param validate Whether to validate the register after reading
+     * @return Unique pointer to PD Status register (nullptr if failed)
+     */
+    std::unique_ptr<TPS25751PDStatus> readPDStatusRegister(bool validate = true) const;
+
+    /**
+     * @brief Read PD3 Configuration register (0x42) using factory pattern
+     * @param validate Whether to validate the register after reading
+     * @return Unique pointer to PD3 Configuration register (nullptr if failed)
+     */
+    std::unique_ptr<TPS25751PD3Config> readPD3ConfigRegister(bool validate = true) const;
+
+    /**
+     * @brief Read Received SOP Identity Data Object (0x48) register using factory pattern
+     * @param validate Whether to validate the register after reading
+     * @return Unique pointer to the register (nullptr if failed)
+     */
+    std::unique_ptr<TPS25751ReceivedSOPIdentity> readReceivedSOPIdentityRegister(bool validate = true) const;
+
+    /**
+     * @brief Read IO Config register using factory pattern
+     *
+     * IO_CONFIG cannot be modified at run-time -- there is no corresponding
+     * write method.
+     *
+     * @param validate Whether to validate the register after reading
+     * @return Unique pointer to IO Config register (nullptr if failed)
+     */
+    std::unique_ptr<TPS25751IOConfig> readIOConfigRegister(bool validate = true) const;
+
+    /**
+     * @brief Read Type C State register using factory pattern
+     * @param validate Whether to validate the register after reading
+     * @return Unique pointer to Type C State register (nullptr if failed)
+     */
+    std::unique_ptr<TPS25751TypeCState> readTypeCStateRegister(bool validate = true) const;
+
+    /**
+     * @brief Read ADC Results register using factory pattern
+     *
+     * Note: the PD controller does not update ADC_RESULTS while in
+     * Unconnected Sleep mode, so a stale/all-zero read in that state is
+     * expected and not, by itself, an error.
+     *
+     * @param validate Whether to validate the register after reading
+     * @return Unique pointer to ADC Results register (nullptr if failed)
+     */
+    std::unique_ptr<TPS25751ADCResults> readADCResultsRegister(bool validate = true) const;
+
+    /**
+     * @brief Read GPIO Status register using factory pattern
+     * @param validate Whether to validate the register after reading
+     * @return Unique pointer to GPIO Status register (nullptr if failed)
+     */
+    std::unique_ptr<TPS25751GPIOStatus> readGPIOStatusRegister(bool validate = true) const;
+
+    /**
+     * @brief Read TX Source Capabilities Extended (0x77) register using factory pattern
+     * @param validate Whether to validate the register after reading
+     * @return Unique pointer to the register (nullptr if failed)
+     */
+    std::unique_ptr<TPS25751TransmitSourceCapsExtended> readTransmitSourceCapsExtendedRegister(bool validate = true) const;
+
+    /**
+     * @brief Read TX Source Info (0x78) register using factory pattern
+     * @param validate Whether to validate the register after reading
+     * @return Unique pointer to the register (nullptr if failed)
+     */
+    std::unique_ptr<TPS25751TransmitSourceInfo> readTransmitSourceInfoRegister(bool validate = true) const;
+
+    /**
+     * @brief Read Transmitted PPS Status (0x7A) register using factory pattern
+     * @param validate Whether to validate the register after reading
+     * @return Unique pointer to the register (nullptr if failed)
+     */
+    std::unique_ptr<TPS25751TransmitPPSStatus> readTransmitPPSStatusRegister(bool validate = true) const;
+
+    /**
+     * @brief Read Transmitted Battery Status (0x7B) register using factory pattern
+     * @param validate Whether to validate the register after reading
+     * @return Unique pointer to the register (nullptr if failed)
+     */
+    std::unique_ptr<TPS25751TransmitBatteryStatus> readTransmitBatteryStatusRegister(bool validate = true) const;
+
+    /**
+     * @brief Read TX Battery Capabilities (0x7D) register using factory pattern
+     * @param validate Whether to validate the register after reading
+     * @return Unique pointer to the register (nullptr if failed)
+     */
+    std::unique_ptr<TPS25751TransmitBatteryCapabilities> readTransmitBatteryCapabilitiesRegister(bool validate = true) const;
+
+    /**
+     * @brief Read Transmit Sink Capabilities Extended (0x7E) register using factory pattern
+     * @param validate Whether to validate the register after reading
+     * @return Unique pointer to the register (nullptr if failed)
+     */
+    std::unique_ptr<TPS25751TransmitSinkCapsExtended> readTransmitSinkCapsExtendedRegister(bool validate = true) const;
+
+    /**
+     * @brief Read Liquid Detection Config register using factory pattern
+     * @param validate Whether to validate the register after reading
+     * @return Unique pointer to Liquid Detection Config register (nullptr if failed)
+     */
+    std::unique_ptr<TPS25751LiquidDetectionConfig> readLiquidDetectionConfigRegister(bool validate = true) const;
 
     /**
      * @brief Execute a 4CC command-task via the COMMAND/DATA interface (TRM Sec 4.4.2)

@@ -75,7 +75,7 @@ public:
 
 private:
     // Helper methods for bitfield extraction
-    // Use TPS25751BitUtils for multi-bit fields
+    // Use the base-class extractBits*() helpers for multi-bit fields
 };
 ```
 
@@ -125,12 +125,21 @@ Registers are identified solely by their hardware address
 (`TPS25751Registers::Address`) — there is no separate type enum. The factory
 dispatches object creation directly on the address.
 
-### Step 1: Add the Address (if not already present)
+### Step 1: Add the Address
 
-The 27 hardware addresses already live in `TPS25751Registers::Address` in
-`TPS25751RegisterAddress.h`, each paired with a `RegisterInfo` size entry. If the
-register you are adding is already in that enum (it usually is), there is nothing to
-add here.
+A new register adds four entries to `TPS25751RegisterAddress.h`:
+
+1. An `Address` enumerator, in address order, with a `///` comment giving the TRM
+   title and rev B page, for example
+   `/// PD3 Configuration (SLVUCR8B Rev. B, p.46).`
+2. A `Registers::` `RegisterInfo` constant pairing the address with its size in
+   bytes. The size is the TRM width rounded up to whole bytes, unless hardware
+   reports a different length byte (see CONSTRAINTS.md).
+3. A case in `getRegisterSize()`.
+4. A case in `getRegisterInfo()`.
+
+Check the address first. Registers the library already decodes have all four
+entries, and a register that only lacked a class needs none of them.
 
 ### Step 2: Add Forward Declaration
 
@@ -208,7 +217,7 @@ The per-device factory mirrors the host factory exactly: `<Device>::RegisterFact
 
 #### Big-Endian 16-Bit Assembly Rule
 
-`TPS25751BitUtils::extractBits16` is **little-endian** (assembles `raw[0]` as LSB).
+`TPS25751Register::extractBits16` is **little-endian** (assembles `raw[0]` as LSB).
 Downstream devices such as the BQ25798 store 16-bit registers big-endian. Always
 assemble multi-byte downstream fields manually:
 
@@ -217,7 +226,7 @@ assemble multi-byte downstream fields manually:
 uint16_t raw16 = (static_cast<uint16_t>(data_[0]) << 8) | data_[1];
 
 // WRONG — extractBits16 is little-endian; silently byte-swaps the value
-uint16_t raw16 = TPS25751BitUtils::extractBits16(data_.data(), 0, 16, 0);
+uint16_t raw16 = extractBits16(0, 16);
 ```
 
 For signed ADC channels (e.g. BQ25798 IBUS/IBAT/TDIE), reinterpret the assembled
@@ -264,7 +273,7 @@ inversion), `BQ25798MinimalSystemVoltage` (offset inversion with underflow guard
 
 The write-encoder pattern above was written for **downstream** device registers,
 whose `setField8`/`setField16BE` helpers live in the `lib/BQ25798` repo. Host R/W
-registers (`TPS25751SleepControl`, `TPS25751CustomerUse`, and the Batch B+
+registers (`TPS25751SleepControl` and the Batch B+
 interrupt registers) use the host side's own equivalents, landed before Batch B:
 
 - **`TPS25751Register::setBits(bitPos, bitLen, value)`** — the base-class write
@@ -274,15 +283,17 @@ interrupt registers) use the host side's own equivalents, landed before Batch B:
   bleed into a neighbour. **Every host bitfield setter builds on it** instead of
   hand-poking `_raw[...]`; there are no per-class field masks to keep in sync, so
   the "hand-restated field-position mask drifts" defect class is designed out.
-  Fields with no sub-structure to preserve (e.g. CUSTOMER_USE's opaque 8 bytes)
-  are written byte-wise by the owning class instead.
+  Fields wider than 32 bits with no sub-structure to preserve are written
+  byte-wise by the owning class instead. `bitPos` is `uint16_t` (ADR-012), so
+  `setBits()` and `extractBits*()` reach any field in the buffer, including past
+  bit 255; keep computed bit positions in `uint16_t` or wider, never `uint8_t`.
 - **`static constexpr TPS25751Registers::Address kAddress`** on every host R/W
   register class — the single source of register identity.
 - **`TPS25751::writeRegister<T>(const T&)`** (keyed on `T::kAddress`) is the write
   path: it validates `isValid()` + `isValidSize()` and writes the raw bytes back
   to the register the class *is*. Because the address comes from the class, a
   class can only be written to its own register — same-size mis-pairing (INT_MASK1
-  0x16 vs LIQUID_DETECTION_CONFIG 0x98, both 11 B) is unrepresentable. Any
+  0x16 vs INT_CLEAR1 0x18, both 11 B) is unrepresentable. Any
   `TPS25751::write<Register>()` convenience method is a thin forwarder to it.
 
 Setter rules (unchanged in spirit, now enforced by the primitive):
@@ -451,6 +462,12 @@ void TPS25751Status::debugPrint() const {
 - Indent sub-fields with 2 spaces
 - Keep alignment consistent
 - Always print field names, even if value is unknown
+- Print fixed-width hex with `TPS25751Register::printHex(s, value, digits)`, which
+  zero-pads to exactly `digits` hex digits (`Stream`'s `HEX` output drops leading
+  zeros). Do not add a per-class hex helper.
+- Decode a USB PD encoding that more than one register carries through the shared
+  definition in `TPS25751UsbPd.h` (the load step rate and the overload word of
+  0x77 and 0x7E), so the registers cannot drift apart.
 
 ---
 
@@ -837,6 +854,7 @@ Use this checklist for every new register:
 |---------|------|--------|---------|
 | 1.0 | 2025-10-20 | Claude Code | Initial standards document extracted from implementation plan |
 | 1.1 | 2026-06-24 | Claude Code | Added downstream device register class conventions and big-endian 16-bit assembly rule (ADR-008) |
+| 1.2 | 2026-11-19 | Claude Code | `setBits()`/`extractBits*()` take a 16-bit bit position (ADR-012); shared `printHex()` and `TPS25751UsbPd.h` for debug output and shared USB PD decode |
 
 ---
 

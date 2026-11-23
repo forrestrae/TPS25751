@@ -1,0 +1,219 @@
+#include <Stream.h>
+
+#include "TPS25751TransmitBatteryCapabilities.h"
+
+namespace {
+
+void printHex16Field(Stream &s, const __FlashStringHelper *label, uint16_t value)
+{
+    s.print(label);
+    s.print(F("0x"));
+    TPS25751Register::printHex(s, value, 4);
+    s.print(F(" ("));
+    s.print(value);
+    s.print(F(")"));
+}
+
+}  // namespace
+
+// --- Decode ---------------------------------------------------------------------
+
+uint16_t TPS25751TransmitBatteryCapabilities::vid(uint8_t battery) const
+{
+    if (battery >= kBatteryCount) return 0;
+    return extractBits16(fieldBit(battery, kVidOffset), 16);
+}
+
+uint16_t TPS25751TransmitBatteryCapabilities::pid(uint8_t battery) const
+{
+    if (battery >= kBatteryCount) return 0;
+    return extractBits16(fieldBit(battery, kPidOffset), 16);
+}
+
+uint16_t TPS25751TransmitBatteryCapabilities::batteryDesignCapacity(uint8_t battery) const
+{
+    if (battery >= kBatteryCount) return 0;
+    return extractBits16(fieldBit(battery, kDesignCapacityOffset), 16);
+}
+
+uint16_t TPS25751TransmitBatteryCapabilities::batteryLastFullChargeCapacity(uint8_t battery) const
+{
+    if (battery >= kBatteryCount) return 0;
+    return extractBits16(fieldBit(battery, kLastFullChargeCapacityOffset), 16);
+}
+
+uint8_t TPS25751TransmitBatteryCapabilities::batteryType(uint8_t battery) const
+{
+    if (battery >= kBatteryCount) return 0;
+    return extractBits(fieldBit(battery, kBatteryTypeOffset), 8);
+}
+
+// --- Typed decode (USB PD R3.3 Table 6.64), built on the accessors above ------------
+
+bool TPS25751TransmitBatteryCapabilities::invalidBatteryReference(uint8_t battery) const
+{
+    return (batteryType(battery) & 0x01u) != 0;
+}
+
+bool TPS25751TransmitBatteryCapabilities::batteryPresent(uint8_t battery) const
+{
+    return batteryDesignCapacity(battery) != 0x0000u;
+}
+
+bool TPS25751TransmitBatteryCapabilities::designCapacityKnown(uint8_t battery) const
+{
+    const uint16_t raw = batteryDesignCapacity(battery);
+    return raw != 0x0000u && raw != 0xFFFFu;
+}
+
+uint32_t TPS25751TransmitBatteryCapabilities::batteryDesignCapacity_mWh(uint8_t battery) const
+{
+    if (!designCapacityKnown(battery)) return 0;
+    return static_cast<uint32_t>(batteryDesignCapacity(battery)) * 100u;  // 0.1 Wh = 100 mWh per step
+}
+
+bool TPS25751TransmitBatteryCapabilities::lastFullChargeCapacityKnown(uint8_t battery) const
+{
+    const uint16_t raw = batteryLastFullChargeCapacity(battery);
+    return raw != 0x0000u && raw != 0xFFFFu;
+}
+
+uint32_t TPS25751TransmitBatteryCapabilities::batteryLastFullChargeCapacity_mWh(uint8_t battery) const
+{
+    if (!lastFullChargeCapacityKnown(battery)) return 0;
+    return static_cast<uint32_t>(batteryLastFullChargeCapacity(battery)) * 100u;
+}
+
+// --- Setters ----------------------------------------------------------------------
+
+void TPS25751TransmitBatteryCapabilities::setVid(uint8_t battery, uint16_t value)
+{
+    if (battery >= kBatteryCount) return;
+    setBits(fieldBit(battery, kVidOffset), 16, value);
+}
+
+void TPS25751TransmitBatteryCapabilities::setPid(uint8_t battery, uint16_t value)
+{
+    if (battery >= kBatteryCount) return;
+    setBits(fieldBit(battery, kPidOffset), 16, value);
+}
+
+void TPS25751TransmitBatteryCapabilities::setBatteryDesignCapacity(uint8_t battery, uint16_t value)
+{
+    if (battery >= kBatteryCount) return;
+    setBits(fieldBit(battery, kDesignCapacityOffset), 16, value);
+}
+
+void TPS25751TransmitBatteryCapabilities::setBatteryLastFullChargeCapacity(uint8_t battery, uint16_t value)
+{
+    if (battery >= kBatteryCount) return;
+    setBits(fieldBit(battery, kLastFullChargeCapacityOffset), 16, value);
+}
+
+void TPS25751TransmitBatteryCapabilities::setBatteryType(uint8_t battery, uint8_t value)
+{
+    if (battery >= kBatteryCount) return;
+    setBits(fieldBit(battery, kBatteryTypeOffset), 8, value);
+}
+
+// --- Debug ------------------------------------------------------------------------
+
+void TPS25751TransmitBatteryCapabilities::debugPrint(Stream &s) const
+{
+    s.println(F("========================================"));
+    s.print(F("TX_BATTERY_CAPABILITIES (0x"));
+    s.print(static_cast<uint8_t>(TPS25751Registers::Address::TRANSMIT_BATTERY_CAPABILITIES), HEX);
+    s.print(F(") - "));
+    s.print(size());
+    s.println(F(" bytes"));
+    s.println(F("========================================"));
+
+    // One line per 9-byte entry so each line is one battery.
+    s.println(F("Raw bytes (byte 0 first):"));
+    for (size_t start = 0; start < size(); start += kEntrySize)
+    {
+        size_t end = start + kEntrySize;
+        if (end > size()) end = size();
+
+        s.print(F("  bytes "));
+        s.print(static_cast<unsigned long>(start));
+        s.print(F("-"));
+        s.print(static_cast<unsigned long>(end - 1));
+        s.print(F(":"));
+        for (size_t i = start; i < end; i++)
+        {
+            s.print(F(" "));
+            printHex(s, raw()[i], 2);
+        }
+        s.println();
+    }
+
+    for (uint8_t i = 0; i < kBatteryCount; i++)
+    {
+        s.print(F("Battery "));
+        s.print(i);
+        s.print(F(": VID 0x"));
+        printHex(s, vid(i), 4);
+        s.print(F(", PID 0x"));
+        printHex(s, pid(i), 4);
+        printHex16Field(s, F(", Design Capacity "), batteryDesignCapacity(i));
+        printHex16Field(s, F(", Last Full Charge Capacity "), batteryLastFullChargeCapacity(i));
+        s.print(F(", Battery Type 0x"));
+        printHex(s, batteryType(i), 2);
+        s.println();
+    }
+
+    // Typed decode, USB PD R3.3 Table 6.64.
+    for (uint8_t i = 0; i < kBatteryCount; i++)
+    {
+        s.print(F("Battery "));
+        s.print(i);
+        s.print(F(": "));
+        if (!batteryPresent(i))
+        {
+            s.print(F("not present"));
+        }
+        else
+        {
+            s.print(F("present, design capacity "));
+            if (designCapacityKnown(i))
+            {
+                s.print(static_cast<unsigned long>(batteryDesignCapacity_mWh(i)));
+                s.print(F(" mWh"));
+            }
+            else
+            {
+                s.print(F("unknown"));
+            }
+            s.print(F(", last full charge capacity "));
+            if (lastFullChargeCapacityKnown(i))
+            {
+                s.print(static_cast<unsigned long>(batteryLastFullChargeCapacity_mWh(i)));
+                s.print(F(" mWh"));
+            }
+            else
+            {
+                s.print(F("unknown"));
+            }
+        }
+        if (invalidBatteryReference(i)) s.print(F(", invalid battery reference"));
+        s.println();
+    }
+
+    s.println(F("========================================"));
+}
+
+// --- Validation -------------------------------------------------------------------
+
+bool TPS25751TransmitBatteryCapabilities::isSemanticallyValid() const
+{
+    if (!isValid() || !hasValidData()) return false;
+
+    constexpr size_t expectedSize = TPS25751Registers::Registers::TRANSMIT_BATTERY_CAPABILITIES.size;
+    if (!isValidSize(expectedSize)) return false;
+
+    // No reserved bits and no field rule: the TRM states none. The agreement of
+    // the entries with the battery counts in register 0x77 cannot be checked from
+    // this register alone.
+    return true;
+}

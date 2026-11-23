@@ -21,11 +21,10 @@
  * - Access: Read-only
  *
  * All fields are byte-aligned. Bit offsets in the TRM run past 255 (e.g. the
- * GPIO12 Mapped Event field starts at bit 384), which exceeds the `uint8_t
- * bitPos` parameter of `TPS25751Register::extractBits*()` -- so this class
- * assembles every field directly from `_raw[]` with bounds checks rather than
- * calling `extractBits()`, mirroring
- * `TPS25751TransmitSourceCaps::getPDO()`'s byte-assembly pattern.
+ * GPIO12 Mapped Event field starts at bit 384). `TPS25751Register::extractBits*()`
+ * takes a 16-bit bit position (ADR-012 in ARCHITECTURE.md), so every field is
+ * read through it at bit (byte offset * 8). Before ADR-012 the position was
+ * 8 bits and this class assembled its fields from `_raw[]` by hand.
  *
  * 13-bit-per-GPIO bitmaps (bit *n* of the mask corresponds to GPIO *n*, for
  * GPIO0..GPIO12):
@@ -60,10 +59,9 @@
  * }
  * @endcode
  *
- * @see TI TPS25751 Technical Reference Manual, Section 3.2.20, Table 3-24
+ * @see TI TPS25751 Technical Reference Manual SLVUCR8B (Rev. B), Section 3.2.26, Table 3-28, p.48
  * @see TPS25751Register
  * @see TPS25751
- * @see TPS25751TransmitSourceCaps::getPDO() for the byte-assembly pattern this class follows
  */
 class TPS25751IOConfig : public TPS25751Register
 {
@@ -76,7 +74,7 @@ public:
     /**
      * @brief Get the raw 13-bit GPIO Output Enable bitmap
      * @return Bit *n* set means GPIO *n* is configured as an output (1 = Output Enabled, 0 = Hi-Z)
-     * @see TI TPS25751 Technical Reference Manual, Table 3-24, bits 12:0
+     * @see TI TPS25751 Technical Reference Manual, Table 3-28, bits 12:0
      */
     uint16_t gpioOutputEnableMask() const;
 
@@ -90,7 +88,7 @@ public:
     /**
      * @brief Get the raw 13-bit GPIO Interrupt Enable bitmap
      * @return Bit *n* set means GPIO *n* has its interrupt enabled
-     * @see TI TPS25751 Technical Reference Manual, Table 3-24, bits 44:32
+     * @see TI TPS25751 Technical Reference Manual, Table 3-28, bits 44:32
      */
     uint16_t gpioInterruptEnableMask() const;
 
@@ -104,7 +102,7 @@ public:
     /**
      * @brief Get the raw 13-bit Initial Value bitmap
      * @return Bit *n* set means GPIO *n*'s default output level is high
-     * @see TI TPS25751 Technical Reference Manual, Table 3-24, bits 76:64
+     * @see TI TPS25751 Technical Reference Manual, Table 3-28, bits 76:64
      */
     uint16_t gpioInitialValueMask() const;
 
@@ -118,7 +116,7 @@ public:
     /**
      * @brief Get the raw 13-bit Open Drain Output Enable bitmap
      * @return Bit *n* set means GPIO *n* is open-drain (0 = push-pull)
-     * @see TI TPS25751 Technical Reference Manual, Table 3-24, bits 108:96
+     * @see TI TPS25751 Technical Reference Manual, Table 3-28, bits 108:96
      */
     uint16_t gpioOpenDrainEnableMask() const;
 
@@ -132,7 +130,7 @@ public:
     /**
      * @brief Get the raw 13-bit Internal Pull Down Enable bitmap
      * @return Bit *n* set means GPIO *n*'s internal pull-down is enabled
-     * @see TI TPS25751 Technical Reference Manual, Table 3-24, bits 172:160
+     * @see TI TPS25751 Technical Reference Manual, Table 3-28, bits 172:160
      */
     uint16_t gpioPullDownEnableMask() const;
 
@@ -146,7 +144,7 @@ public:
     /**
      * @brief Get the raw 13-bit Internal Pull Up Enable bitmap
      * @return Bit *n* set means GPIO *n*'s internal pull-up is enabled
-     * @see TI TPS25751 Technical Reference Manual, Table 3-24, bits 204:192
+     * @see TI TPS25751 Technical Reference Manual, Table 3-28, bits 204:192
      */
     uint16_t gpioPullUpEnableMask() const;
 
@@ -160,7 +158,7 @@ public:
     /**
      * @brief Get the raw 13-bit GPIO Event Polarity bitmap
      * @return Bit *n* set means the output event mapped to GPIO *n* has inverted polarity
-     * @see TI TPS25751 Technical Reference Manual, Table 3-24, bits 268:256
+     * @see TI TPS25751 Technical Reference Manual, Table 3-28, bits 268:256
      */
     uint16_t gpioEventPolarityMask() const;
 
@@ -174,14 +172,14 @@ public:
     /**
      * @brief Get the GPIO AI Enable GPIO 0 bit (byte 28, bit 0)
      * @return true if analog-input mode is enabled for GPIO0
-     * @see TI TPS25751 Technical Reference Manual, Table 3-24, bit 224
+     * @see TI TPS25751 Technical Reference Manual, Table 3-28, bit 224
      */
     bool gpio0AnalogInputEnabled() const;
 
     /**
      * @brief Get the GPIO AI Enable GPIO 2 bit (byte 28, bit 2)
      * @return true if analog-input mode is enabled for GPIO2
-     * @see TI TPS25751 Technical Reference Manual, Table 3-24, bit 226
+     * @see TI TPS25751 Technical Reference Manual, Table 3-28, bit 226
      */
     bool gpio2AnalogInputEnabled() const;
 
@@ -189,7 +187,7 @@ public:
      * @brief Get the GPIO 4 Analog Input Control bit (byte 28, bit 4)
      * @return true if GPIO4 is used as an analog input (must also be set
      *         when PORT_CONTROL.ChargerDetectEnable/ChargerAdvertiseEnable is non-zero)
-     * @see TI TPS25751 Technical Reference Manual, Table 3-24, bit 228
+     * @see TI TPS25751 Technical Reference Manual, Table 3-28, bit 228
      */
     bool gpio4AnalogInputControl() const;
 
@@ -197,7 +195,7 @@ public:
      * @brief Get the GPIO 5 Analog Input Control bit (byte 28, bit 5)
      * @return true if GPIO5 is used as an analog input (must also be set
      *         when PORT_CONTROL.ChargerDetectEnable/ChargerAdvertiseEnable is non-zero)
-     * @see TI TPS25751 Technical Reference Manual, Table 3-24, bit 229
+     * @see TI TPS25751 Technical Reference Manual, Table 3-28, bit 229
      */
     bool gpio5AnalogInputControl() const;
 
@@ -210,7 +208,7 @@ public:
      *
      * @param gpio GPIO index
      * @return The GPIO's raw Mapped Event byte, or 0 for GPIO8/GPIO9/out-of-range
-     * @see TI TPS25751 Technical Reference Manual, Table 3-24 (GPIO Mapped Event fields)
+     * @see TI TPS25751 Technical Reference Manual, Table 3-28 (GPIO Mapped Event fields)
      */
     uint8_t gpioMappedEvent(uint8_t gpio) const;
 
@@ -244,7 +242,7 @@ private:
     static constexpr uint8_t kGpio4AiBit = 4;
     static constexpr uint8_t kGpio5AiBit = 5;
 
-    static constexpr uint16_t kGpioBitmapMask = 0x1FFF;  // 13 bits
+    static constexpr uint8_t kGpioBitmapBits = 13;  // GPIO0..GPIO12
     static constexpr uint8_t kMaxGpioIndex = 12;
 
     /**

@@ -21,7 +21,7 @@ The most critical review category for this codebase. Many bugs here cause silent
 - **I2Cr read length cap**: A single I2Cr returns at most **63** data bytes (the 64-byte DATA register reserves `DATA[0]` for the return code); bounds-check `len <= 63`
 - **I2Cr/I2Cw target address must be 7-bit**: Bit 7 of the target-address byte in the I2Cr/I2Cw input payload is reserved and must be 0. Passing a raw 8-bit address (e.g. one that already has a R/W bit baked in) corrupts the target device lookup
 - **`executeCommand()` 5-second spacing is not enforced by the executor**: The TRM's 5 s minimum spacing between consecutive I2Cr (or consecutive I2Cw) commands is tracked by `TPS25751DownstreamDevice`, not `TPS25751::executeCommand()` itself. Code that calls `executeCommand()` directly with `"I2Cr"`/`"I2Cw"` (bypassing `TPS25751DownstreamDevice`) gets no spacing protection at all
-- **Downstream 16-bit registers are big-endian — `extractBits16` byte-swaps them**: `TPS25751BitUtils::extractBits16` assembles `raw[0]` as LSB. Downstream devices (e.g. BQ25798) store 16-bit registers big-endian (`raw[0]` = MSB). Always assemble downstream 16-bit fields manually: `(static_cast<uint16_t>(raw[0]) << 8) | raw[1]`
+- **Downstream 16-bit registers are big-endian — `extractBits16` byte-swaps them**: `TPS25751Register::extractBits16` assembles `raw[0]` as LSB. Downstream devices (e.g. BQ25798) store 16-bit registers big-endian (`raw[0]` = MSB). Always assemble downstream 16-bit fields manually: `(static_cast<uint16_t>(raw[0]) << 8) | raw[1]`
 - **Signed downstream ADC channels**: some downstream ADC values (e.g. BQ25798 IBUS/IBAT/TDIE) are 2's-complement signed. After big-endian assembly, reinterpret as `int16_t` before converting to physical units; treating as `uint16_t` produces wrong sign for negative currents
 - **Downstream factory switch completeness**: Every value in `<Device>::Registers::Address` must have a `case` in all three `createRegister()` overloads; a missing `case` silently returns `nullptr` and causes a null-dereference at the call site
 - **ADC LSB unit-conversion sourced from datasheet, not MCP**: The register-docs MCP servers do not carry ADC step sizes; conversion factors must come from the device datasheet. Using the wrong LSB produces silently wrong physical values
@@ -64,8 +64,8 @@ any code that directly implements the SLVAFV8A PBM sequence:
 
 ### Host-Register Write-Path Traps (Batch A onward)
 
-Review these when a **host** R/W register class (SLEEP_CONTROL, CUSTOMER_USE, and
-the Batch B+ registers) adds field setters or a `TPS25751::writeX()` method:
+Review these when a **host** R/W register class (SLEEP_CONTROL and the Batch B+
+registers) adds field setters or a `TPS25751::writeX()` method:
 
 - **Setters must read-modify-write, never whole-byte assign**: a host setter must
   mask out only its field and OR in the shifted value, preserving reserved and
@@ -82,11 +82,35 @@ the Batch B+ registers) adds field setters or a `TPS25751::writeX()` method:
   write-only. Flag any hand-restated field-position mask.
 - **`writeX()` convenience methods and register-class↔address pairing**: until the
   planned typed `writeRegister<T>()` (keyed on a class-level `kAddress`) lands, the
-  hand-written `writeSleepControl`/`writeCustomerUse`-style methods pair a class
+  hand-written `writeSleepControl`-style methods pair a class
   with a `RegisterInfo` by hand. The `isValidSize()` guard cannot catch a wrong
-  **same-size** pairing (INT_MASK1 0x16 and LIQUID_DETECTION_CONFIG 0x98 are both
+  **same-size** pairing (INT_MASK1 0x16 and INT_CLEAR1 0x18 are both
   11 bytes; RECEIVED_SINK_CAPS and TRANSMIT_SINK_CAPS are both 53). Verify each
   `writeX()` names the register whose bytes it actually writes.
+- **Firmware data in reserved bits must stay visible**: when hardware shows the
+  firmware storing values in TRM-reserved bits and the class drops those checks
+  (PD3_CONFIGURATION bits 3:0, every reserved range of GLOBAL_SYSTEM_CONFIGURATION),
+  `debugPrint()` must still show those bits, and the `writeX()` Doxygen must say
+  to start from a fresh read. Otherwise a write that clears them looks identical
+  to one that preserved them. Caught in the Batch H gate.
+- **The TRM width is not the wire length**: `RegisterInfo` must match the
+  controller's length byte, which can differ from the TRM's bit width rounded up
+  (GLOBAL_SYSTEM_CONFIGURATION: 116 bits in the TRM, 14 bytes on hardware). Do not
+  sign off a new register's size until a hardware read has confirmed the length byte.
+- **A new `Address` needs a case in both lookup switches**: `getRegisterSize()` and
+  `getRegisterInfo()` in `TPS25751RegisterAddress.h` both end in `default`, so the
+  compiler does not report a missing enumerator. A missing `getRegisterInfo()` case
+  makes `readRegisterByAddress()` return null and `writeRegister<T>()` return false
+  without writing, while the direct `readX()` path still works. CUSTOMER_USE lacked
+  that case from the first commit until Batch K's bench walk over all 37 addresses
+  found it. `test_TPS25751RegisterAddress` lists every register and checks both
+  switches; add each new register to its table.
+- **Check the TRM access type before adding a write path**: the TRM can mark a
+  register read-only at runtime even when it looks like host storage. CUSTOMER_USE
+  is `[R]` in rev B ("can only be changed during application customization"), and
+  the controller ACKs a write and keeps the old value, so a successful I2C write is
+  not evidence the register changed. Confirm R/W on hardware with a read-back. The
+  library shipped `writeCustomerUse()` from Batch A until its removal on 2026-11-19.
 
 ### Downstream-Device Write-Path Traps (ADR-009)
 
@@ -116,8 +140,11 @@ Review these when a downstream R/W register class adds field setters or a driver
 - **PDO count vs data length mismatch**: In capability registers, verify that `getPDOCount()` * bytes-per-PDO + header never exceeds the actual data buffer size
 - **Incomplete transcription of a mirrored register's bit set** *(caught in Batch B)*: When a register mirrors another's layout (INT_MASK1/INT_CLEAR1 mirror INT_EVENT1), a *dropped* named source compiles cleanly and passes every round-trip/preservation test — the missing bit is simply absent, so nothing fails. Spot-checking a few bit offsets will not catch it. **Count the named accessors/setters against the reference class** (e.g. `grep -c extractBits` on both) and reconcile the total, and prefer the granular reference register (INT_EVENT1) over the terser MCP MASK/CLEAR field tables, which may lump maskable bits into "Reserved". Root cause is usually an incomplete bit list in the delegated work order (see plan amendment 3) — the review gate, not the compiler, is the only thing that catches it.
 - **PDO byte-offset shift from an embedded header** *(caught in Batch D)*: Do NOT assume every capability register puts PDO 1 at byte 1. TRANSMIT_SOURCE_CAPS (0x32) inserts two Power-Path bytes after the count byte, so PDO 1 starts at **byte 3** (`getPDO`/`setPDO` offset `3 + index*4`), whereas TRANSMIT_SINK_CAPS (0x33) and the Received caps put PDO 1 at byte 1 (`1 + index*4`). Copy-pasting the Received-caps `getPDO` into the source-side class silently reads/writes PDOs two bytes low, corrupting the Power-Path bytes and shifting every PDO. Verify the register's own field table, and unit-test that PDO 0 lands at the expected byte and does not disturb the header bytes.
-- **Boolean getter/parameter for a multi-bit field silently truncates** *(caught in Batch D)*: A field wider than 1 bit modeled as `bool` (e.g. the Fast-Role-Swap-Required-Current field, bits 24:23, a 2-bit value 0–3) collapses values ≥1 to `true`/1 and cannot round-trip an encoded value of 2 or 3. On a read-only decoder this merely loses information; on a **R/W** register it makes encode↔decode non-invertible. Model any field of width > 1 as `uint8_t`/`uint16_t`, not `bool`. (This latent defect exists in the shipped read-only `TPS25751ReceivedSinkCaps::getFixedFastRoleSwapCurrent()`, which returns `bool`; the R/W `TPS25751TransmitSinkCaps` returns `uint8_t` instead — see the follow-up note in CONSTRAINTS.md.)
-- **`extractBits*()`/`setBits()` silently return 0/no-op past bit 255** *(caught in Batch E)*: These take `uint8_t bitPos`, so any field starting at bit ≥ 256 wraps or is simply unreachable — IO_CONFIG's GPIO12 Mapped Event field starts at bit 384. There is no compiler warning and no runtime assertion; a naive port of the extractBits pattern to a register this wide compiles cleanly and returns 0 for every high-offset field. Registers with fields past bit 255 must assemble bytes directly from `_raw[]` (bounds-checked) instead of calling `extractBits*()` at all — see `TPS25751IOConfig` (mirroring `TPS25751TransmitSourceCaps::getPDO()`'s byte-assembly pattern) and the CONSTRAINTS.md note under Read-Only Registers. Flag any new wide register (> ~31 bytes, i.e. > 248 bits) that still calls `extractBits32`/`extractBits64` for its highest fields without first checking the actual bit offset against 255.
+- **Boolean getter/parameter for a multi-bit field silently truncates** *(caught in Batch D)*: A field wider than 1 bit modeled as `bool` (e.g. the Fast-Role-Swap-Required-Current field, bits 24:23, a 2-bit value 0–3) collapses values ≥1 to `true`/1 and cannot round-trip an encoded value of 2 or 3. On a read-only decoder this merely loses information; on a **R/W** register it makes encode↔decode non-invertible. Model any field of width > 1 as `uint8_t`/`uint16_t`, not `bool`. (The read-only `TPS25751ReceivedSinkCaps::getFixedFastRoleSwapCurrent()` returned `bool` until 6627be1; since ADR-013 every capability class reads the field as `TPS25751Pdo::fastRoleSwapCurrent()`.)
+- **A bit position narrowed to 8 bits wraps past bit 255** *(caught in Batch E; base class widened by ADR-012)*: `extractBits*()`, `setBits()`, and `extractEnum*()` took `uint8_t bitPos` until 2026-11-19, so a field at bit 256 or above wrapped to a low bit or was unreachable, with no compiler warning. IO_CONFIG (fields to bit 391) and TX_BATTERY_CAPABILITIES (battery 3 at bits 287:216) carried their own byte assembly to work around it. Since ADR-012 the position is `uint16_t` and those classes call the base helpers. The trap that remains is in the caller: a bit position computed in, stored in, or cast to `uint8_t` (a `uint8_t` local, a `static_cast<uint8_t>(byteOffset * 8)`, a `uint8_t` constant for a bit past 255) wraps before the helper sees it. On any register longer than 31 bytes, check that every computed bit position stays `uint16_t` or wider, and test the highest field by a known value.
+- **`extractBits()` is 8 bits wide; a wider field silently reads 0** *(caught in the Rev. B pass)*: `extractBits()` returns `uint8_t` and rejects `bitLen > 8` by returning 0. Assigning the result to a `uint16_t`/`uint32_t` compiles cleanly, so `extractBits(10, 10)` or `extractBits(0, 32)` looks right and always yields 0. ActiveRDOContract and ActivePDOContract shipped this way from their first version: currents, voltages, power, `activePDO()`, and `hasActiveContract()` all read 0 on hardware. Use `extractBits16` for widths 9-16, `extractBits32` for 17-32, and `extractBits64` above that. The instance `extractBits()` now emits a `TPS_DEBUG_WARN` (category `DEBUG_CAT_PARSING`) when `bitLen > 8`, but that is visible only with warnings compiled in; the review gate is a `grep -n "extractBits(" src/` pass that checks every width argument is 8 or less, plus a known-value test for every multi-bit accessor.
+- **A per-port flag read from a per-offer word** (caught in the 2026-11-22 USB PD cross-check): USB PD puts the port's flags (Dual-Role Power, Unconstrained Power, USB Communications Capable, Dual-Role Data, Unchunked, EPR Capable) only in PDO 1, the vSafe5V PDO (Tables 6.8, 6.9); bits 29:22 of every other Fixed PDO are reserved Device Flags (Table 6.10). Reading them from the PDO at hand, or from the active contract's PDO, returns reserved bits: on the bench, 0x34 printed Unconstrained Power: No from the 20 V PDO of a charger whose PDO 1 sets it. Per-offer fields (Peak Current, voltage, current) do belong to each PDO. When a register holds one PDO word, check which of its fields describe the offer and which describe the port, and take the port's from PDO 1 (in 0x34, First PDO Control Bits). `TPS25751Pdo` encodes this rule; new code should not decode PDO flags itself.
+- **Printing a USB PD field the specification makes conditional** (caught in Batch L of the rev B plan): some specification fields are reserved unless another field has a given value. BSDO Charging Status is reserved when Battery Present is 0 or the capacity is FFFFh; Source_Capabilities_Extended Source Inputs bit 1 is ignored when bit 0 is 0. An accessor may decode the bits regardless, but a `debugPrint()` that prints them unconditionally reports "Charging" or "capacity 0 mWh" for a battery that does not exist, as the first Batch L output did for the 0x7B reset value. Check every typed debug line against the condition column of its specification table.
 
 ---
 
@@ -174,6 +201,8 @@ Verify that new code follows all mandatory standards from [STANDARDS.md](STANDAR
 - **Missing negative tests**: Each validation level must have tests for both passing and failing cases
 - **Factory creation untested**: Every new register must include factory creation tests (with and without data)
 - **Tests that always pass**: Watch for tests with incorrect `EXPECT_*` calls that never actually exercise the failure path
+- **A cached build proves nothing about warnings** (caught in Batch G of the rev B plan): `platformio.ini` sets `build_cache_dir = .pio/buildcache`, so `pio run` and even `pio run -t clean` followed by `pio run` retrieve unchanged objects from the cache ("Retrieved ... from cache") and print none of their warnings. A "warning-free" claim needs a compile that bypasses the cache, for example `PLATFORMIO_BUILD_CACHE_DIR=<empty scratch dir> pio run -e example-read-registers` after `-t clean`, with the log showing a `Compiling` line for each new source file
+- **A saturating fixture cannot catch a wrong shift** (caught in Batch L of the rev B plan): a packed-word fixture such as 0xFFF9 sets every sub-field to its maximum, so a decode with the wrong shift or mask can still produce the expected numbers. For each multi-field word, add one fixture whose sub-fields hold distinct, non-maximal values, and derive the expected values by hand from the specification table
 
 ---
 

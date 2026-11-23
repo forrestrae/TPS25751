@@ -431,43 +431,33 @@ bool isReadOnly() const override {
 > set according to the configuration during the boot process." `TPS25751IOConfig`
 > is therefore decode-only — no setters, no write path, no `kAddress`. It is
 > also the library's first register whose bit offsets run past 255 (up to 391
-> for the GPIO12 Mapped Event field), which exceeds the `uint8_t bitPos`
-> parameter of `TPS25751Register::extractBits*()`/`setBits()`. Every field is
-> byte-aligned, so `TPS25751IOConfig` assembles each one directly from `_raw[]`
-> with bounds checks instead — mirroring
-> `TPS25751TransmitSourceCaps::getPDO()`'s byte-assembly pattern — rather than
-> calling `extractBits()` at all. Any future register whose highest bit offset
-> exceeds 255 must use the same technique.
+> for the GPIO12 Mapped Event field).
+>
+> TX_BATTERY_CAPABILITIES (0x7D, Batch K) is the first R/W register past bit
+> 255. Battery 3 occupies bits 287:216 (bytes 27 to 35), so its Design Capacity
+> starts at bit 248 and ends at 263, and its Last Full Charge Capacity and Battery
+> Type start at bits 264 and 280.
+>
+> Fields past bit 255 need no special handling. `TPS25751Register::extractBits*()`,
+> `setBits()`, and the `extractEnum*()` templates take a `uint16_t bitPos`
+> (ADR-012 in ARCHITECTURE.md) and compute every byte offset and bound in
+> `size_t`, so a field anywhere in the buffer is reachable and a field that runs
+> past the end reads 0 or is not written. Both classes call them directly. Until
+> ADR-012 (2026-11-19) the position was `uint8_t`: IO_CONFIG assembled its fields
+> from `_raw[]` by hand and 0x7D carried class-private byte helpers, and a large
+> offset cast to `uint8_t` would have wrapped to a low bit. When a caller computes
+> a bit position, keep the arithmetic in `uint16_t` or wider; narrowing it to
+> `uint8_t` reintroduces that wrap.
 
-### Write-Only Registers (W)
+### Registers written to trigger an action
 
 **Examples:** COMMAND, INT_CLEAR1
 
-**Characteristics:**
-- Can only be written
-- Reading returns undefined values
-- Used for triggering actions
-
-**Implementation:**
-```cpp
-bool isReadOnly() const override {
-    return false;  // Can be written
-}
-
-// Reading may not be meaningful
-bool validateData() const override {
-    // Skip data validation for write-only registers
-    return true;
-}
-```
-
-**Usage pattern:**
-```cpp
-TPS25751Command cmd;
-cmd.setCommand(CommandCode::SOFTWARE_RESET);
-tps.writeRegister(cmd);
-// Don't try to read back - it's write-only!
-```
+The TRM (SLVUCR8B) marks no TPS25751 register write-only. COMMAND (p.16) and
+INT_CLEAR1 (p.23) are R/W registers that the host writes to trigger an action.
+`TPS25751::executeCommand()` reads COMMAND to poll for completion. Reading
+INT_CLEAR1 back carries no event state, so the library has no
+`readInterruptClear()` and only writes it.
 
 ### Read/Write Registers (R/W)
 
@@ -499,16 +489,210 @@ portControl->setDataRoleSwapEnabled(true);
 tps.writePortControl(*portControl);
 ```
 
-**Trap — a register's hardware reset value can be semantically invalid.**
-SLEEP_CONTROL (0x70) resets to `0x01`: Sleep Mode Allowed = 1 with Sleep Time =
-`0h` (a *Reserved* code). `TPS25751SleepControl::isSemanticallyValid()` flags
-exactly that combination (sleep allowed while the time field is Reserved), so a
-read of a factory-fresh / just-reset device reports **semantically invalid** even
-though the read succeeded and the bytes are exactly what the TRM specifies. This
-is expected, not an I2C error: do not treat `isSemanticallyValid() == false` on
-SLEEP_CONTROL as a read failure. Configure a real Sleep Time (`1h`/`2h`) before
-relying on the field. (General rule: semantic validation encodes *logical*
-consistency, which the reset state is not obligated to satisfy.)
+**Trap — a register's documented reset value can change between TRM revisions.**
+SLEEP_CONTROL (0x70) resets to `0x03` in SLVUCR8B Rev. B (page 52): Sleep Mode
+Allowed = 1, Sleep Time = `1h` (100 ms), which `isSemanticallyValid()` accepts.
+Rev. A listed `0x01` (Sleep Time = `0h`, a *Reserved* code), a combination
+`isSemanticallyValid()` rejects. Rev. B also redefined Sleep Time `2h` from
+1200 ms to 1000 ms. A read of 0x70 after a power cycle on 2026-11-18 returned
+`0x03`, matching Rev. B (Teensy 4.0 host, TPS25751 with an EEPROM-loaded
+configuration, so the read does not separate the silicon reset from a value set
+by that configuration). If a device does report `0x01`, `isSemanticallyValid() == false`
+is expected and is not an I2C error. (General rule: semantic validation encodes
+*logical* consistency, which a reset state is not obligated to satisfy.)
+
+**Trap: firmware can set bits the TRM marks reserved.**
+PD3_CONFIGURATION (0x42) lists bits 3:0 as reserved with reset 0h (SLVUCR8B
+Rev. B, Table 3-26, p.46), and its documented reset is `0x00080010`. On
+2026-11-18 a TPS25751 in APP mode with an EEPROM-loaded configuration (Boot
+Flags Revision ID 193, Teensy 4.0 host) read `0x0008001A`: the documented reset
+plus bits 3 and 1. The read does not show whether the silicon reset or the
+EEPROM configuration sets them. With all reserved bits checked, the validated
+read failed on that board and `readPD3ConfigRegister(true)` returned nullptr. `TPS25751PD3Config` therefore checks only bits 31:21, 16:12, 9,
+and 6:5 (`kCheckedReservedMask`, `0xFFE1F260`), leaves bits 3:0 unchecked
+(`kFirmwareReservedMask`), and reports them in `debugPrint()`. Its setters
+never touch any reserved bit, so a read-modify-write sends bits 3:0 back as
+read. A write round trip on the same board confirmed this: clearing Support
+Get Revision read back `0x0000001A`, and restoring it read back `0x0008001A`.
+This follows the rule in `docs/plans/trm-revB-audit-remaining-registers.md`
+("Validation tiers"): when hardware shows firmware setting a reserved bit, drop
+that check and record why here.
+
+**Trap: GLOBAL_SYSTEM_CONFIGURATION (0x27) is 14 bytes on the wire, not the
+TRM's 116 bits, and its reserved bits carry firmware data.** SLVUCR8B Rev. B
+(Table 3-13, p.28) gives a 116-bit register, which rounds up to 15 bytes. On
+2026-11-18 the same board as above (APP mode, EEPROM configuration, Teensy 4.0
+host) answered a raw read of 0x27 with a length byte of 14 on four consecutive
+reads. `TPS25751::readRegister()` rejects any length byte that differs from
+`RegisterInfo`, so a 15-byte `RegisterInfo` would fail every read.
+`Registers::GLOBAL_SYSTEM_CONFIGURATION` is therefore 14 bytes, and bits
+115:112 are not transmitted. The data was `05 09 14 00 1C 03 00 00 00 00 00 00
+00 00`. The documented fields decode to PP Cable1 enabled, PP1 Source, ILIM Over
+Shoot none, PP3 bi-directional, and RCP 6 mV, but the firmware also sets bit 2
+(reserved 7:1), bit 11 (13:11), bit 20 (21:19), and bits 34, 35, 36, 40, and 41
+(115:24). Every reserved range holds data, so `TPS25751GlobalSystemConfig`
+checks no reserved bit; its semantic rules are PP3 Config ≤ 5 and PP1 Config ≤ 1.
+Two consequences for writers:
+
+- A write must start from a fresh read of the same board. The setters touch
+  only their own fields, so a read-modify-write sends the undocumented bits back
+  unchanged. Writing a default-constructed object clears them and also sets PP1
+  and PP3 to Disabled.
+- The TRM says any modification "will cause a port disconnect and reconnect
+  with the new settings". On 2026-11-19, with the board on a bench supply and
+  nothing attached, `setRcpThreshold()` plus `writeGlobalSystemConfig()` from a
+  fresh read changed byte 2 from `14` to `54`. The read-back matched exactly,
+  so only bits 23:22 changed and every undocumented bit survived. Writing the
+  original bytes back also read back exactly. With no partner there was nothing
+  to disconnect: STATUS kept toggling Port Role about every 85 ms, as it does
+  when unattached, and INT_EVENT1 latched nothing. The reconnect with a partner
+  attached is not observed.
+
+`debugPrint()` prints all 14 raw bytes so a before-and-after comparison shows
+whether the undocumented bits survived.
+
+**Trap: LIQUID_DETECTION_CONFIG (0x98) is 12 bytes on the wire, not the TRM's
+83 bits.** SLVUCR8B Rev. B (p.60) gives 83 bits, which rounds up to 11 bytes, and
+the library shipped an 11-byte `RegisterInfo` from Batch F. On 2026-11-18 the
+same board answered a raw read of 0x98 with a length byte of 12 (`0C`) followed
+by 12 zero bytes. Because `TPS25751::readRegister()` rejects a length byte that
+differs from `RegisterInfo`, every 0x98 read had failed, and
+`example-read-registers` printed "Failed to read register data for address 0x98"
+on every loop. `Registers::LIQUID_DETECTION_CONFIG` is now 12 bytes. Only bits
+82:0 are defined; bits 95:83 are not decoded and the setters do not touch them.
+With 0x27 (14 bytes against 116 bits) this is the second register whose TRM width
+disagrees with the length byte, so confirm the length byte on hardware for any
+register whose TRM width is not a whole number of bytes.
+
+**RECEIVED_SOP_IDENTITY (0x48) and INT_EVENT1 bit 51.** 0x48 holds the latest
+Discover Identity response. INT_EVENT1 bit 51 means "The Discover Modes process
+has completed" (p.19), a later discovery step, and INT_EVENT1 has no Discover
+Identity event. Treat bit 51 as a hint and Response Type (bits 7:6) as the
+authoritative status. On 2026-11-18 the board was attached to a PD source as a
+UFP sink, with PORT_CONTROL Automatic ID Request = 1. 0x48 read Response Type 0
+(not sent or pending) with zero VDOs, and bit 51 was clear. A SOP Discover
+Identity is normally sent by the DFP, so this result is expected for a UFP; the
+TRM does not state the firmware's policy.
+
+On 2026-11-19 the board was attached to an iPhone as the source and DFP, and
+0x48 read Response Type 1 (ACK) with six VDOs; the ID Header VDO carries VID
+0x05AC. Polling every 14 ms showed the order of events on attach: 0x48 cleared
+to all zero in the same sample as the attach, filled about 240 ms later, and
+INT_EVENT1 bit 51 set 106 ms after that. Bit 51 therefore lags the 0x48 update,
+as its TRM text implies. With no partner, 0x48 read Response Type 0 and zero
+VDOs, but after a detach it kept the previous partner's identity until the next
+attach cleared it, so a nonzero 0x48 does not mean a partner is present now.
+
+INT_EVENT1 latches only sources that INT_MASK1 enables. This board's EEPROM
+configuration enables only Ready for Patch and Patch Loaded (INT_MASK1
+`00 … 00 03`), so with the shipped configuration INT_EVENT1 stays all zero
+through attach, discovery, and detach. To observe bit 51 or the plug event,
+set the matching INT_MASK1 bits first.
+
+Typed decode on hardware (Batch L, 2026-11-19): with the same iPhone attached and the
+board DFP, 0x48 read Response Type ACK with three valid VDOs (the earlier walkthrough
+saw six): ID Header `0xD50005AC`, Cert Stat `0x00000000`, Product `0x710C2166`. Per
+USB PD R3.3 Table 6.34 the ID Header decodes to USB Host and USB Device capable, UFP
+PDUSB Peripheral, Alternate Modes supported, DFP PDUSB Host, Connector Type 00b
+(deprecated "unknown", the value a PD 3.0 product sends), and VID 0x05AC (Apple).
+The Product VDO gives PID 0x710C and bcdDevice 0x2166, and XID is 0. The number of
+valid VDOs varies between attaches of the same partner, so read it on every attach.
+
+**TX_SOURCE_INFO (0x78) is R/W, but the firmware owns it.** SLVUCR8B Rev. B
+(p.55) lists every field as R/W and also says the register "is automatically
+updated by the PD firmware and does not require any EC implementation". A host
+write can therefore be overwritten, and the TRM does not say when. It also
+defines two Port Type bits, 63 and 31, with identical text, and does not say how
+the upper word's 0.5 W PDP fields relate to the lower word's 1 W fields. On
+2026-11-18 the same board, sinking from a PD charger, reported a length byte of 8
+and read `00 00 00 80 00 00 00 80`, the documented reset 8000000080000000h. A
+write that changed only the upper word (Port Maximum PDP 30, Port Guaranteed PDP
+20, in 0.5 W units) read back exactly, and restoring the original read back
+exactly; the firmware did not overwrite the value within the 50 ms before the
+read-back. With no partner attached on 2026-11-19 the register also read the
+reset. When an iPhone attached and the board became the source, the firmware
+rewrote the lower word within about 110 ms of the attach, to `64 64 00 80`: Port
+Reported PDP and Port Present PDP 100 W, Port Maximum PDP 0 W, Port Type
+Guaranteed. It left the upper word at its reset, and the value stayed after
+the iPhone was unplugged. A Present PDP above the Maximum PDP is not consistent
+with the field descriptions, but neither the TRM nor USB PD R3.3 states a rule
+between them, so the library checks none. The firmware value also meets the two
+Source_Info rules that the class checks (see USB PD Specification Structures): DPS
+Port is clear, and both Port Maximum PDP fields read 0. `TPS25751TransmitSourceInfo` checks a
+Guaranteed PDP at most Maximum PDP rule on the upper word that the TRM does not
+state. The firmware leaves both of those fields at 0, so hardware has not
+exercised the rule; if firmware-written data breaks it, drop the rule under
+"Validation tiers" in the plan.
+
+TRANSMITTED_PPS_STATUS (0x7A) reported a length byte of 4 on the same board, read
+`00 00 00 00`, and round-tripped a written value (`FA 00 3C 02`: 5000 mV,
+3000 mA, temperature normal, constant voltage) and the restore exactly. The
+board's PD3_CONFIGURATION (`0x0008001A`) has bits 18 and 20 clear, so the
+controller was answering Get_Source_Info and Get_PPS_Status with Not_Supported,
+whatever the two registers held.
+
+**TX_SOURCE_CAPABILITIES_EXTENDED (0x77) does not read its documented reset.**
+SLVUCR8B Rev. B (p.54) gives a reset of 0 for every field. On 2026-11-18 the
+same board, sinking from a PD charger, reported a length byte of 15 and read
+`00 00 00 00 00 00 00 00 00 00 00 00 00 7F 00`: Source PDP (bits 110:104) is 0x7F,
+filled from the firmware configuration, and every other field is 0. No reserved
+bit (119:111) was set, so `TPS25751TransmitSourceCapsExtended` keeps that check;
+validation accepts both the documented reset and the board's value. A write of
+distinct test bytes read back exactly over four reads 250 ms apart, and the
+restore read back exactly. Source Inputs bit 0, which the TRM says the
+Barrel_Jack_Event GPIO event can change, did not change on its own; this board
+has no barrel-jack event.
+
+TRANSMIT_SINK_CAPABILITIES_EXTENDED (0x7E) reported a length byte of 14, read all
+zero (the documented reset), and round-tripped a written value and the restore
+exactly. Both registers match their TRM widths, unlike 0x27 and 0x98. The board's
+PD3_CONFIGURATION has bits 8 and 17 clear, so the controller answers
+Get_Source_Cap_Extended and Get_Sink_Cap_Extended with Not_Supported, and neither
+register's contents go out on the wire. The field encodings come from the USB PD
+specification; see "USB PD Specification Structures (Batch L)" below for the typed
+decode.
+
+**TX_BATTERY_CAPABILITIES (0x7D): the TRM labels battery 3 as battery 0.**
+SLVUCR8B Rev. B (p.58, Table 3-37) describes the five fields at bits 287:216 as
+"battery index 0", but names them VID 3 and PID 3, and they sit at the fourth
+72-bit stride. Three field names (Battery Type, Battery Design Capacity, Battery
+Last Full Charge Capacity) also repeat four times. The library reads bits 287:216
+as battery 3, the only reading consistent with the field names and the stride, and
+identifies every field by bit range. On 7Bh, the TRM (p.57, Table 3-36) names
+battery 3's capacity "Battery 3 Present Info" where batteries 0 to 2 use "Present
+Capacity"; the library uses one name, `rawPresentCapacity(3)`. Both defects are
+recorded in the register-docs server's `known_document_issues.json`.
+
+**TRANSMITTED_BATTERY_STATUS (0x7B) and TX_BATTERY_CAPABILITIES (0x7D) on hardware.**
+On 2026-11-19 the same board, sinking from a PD charger, reported length bytes of
+16 and 36, as the TRM widths imply. 0x7B read `00 02 FF FF` followed by twelve zero
+bytes, the documented reset FFFF0200h, with no reserved byte set, so
+`TPS25751TransmitBatteryStatus` keeps its reserved-byte checks. The reset contains
+0xFF bytes but is not all 0xFF, so it passes the data tier. 0x7D read all zero.
+Raw writes of distinct bytes read back exactly on both registers over four reads
+250 ms apart, the firmware did not overwrite them, and the restores read back
+exactly. Through the classes, setting every battery 3 field of 0x7D and calling
+`writeTransmitBatteryCapabilities()` left bytes 0 to 26, including a nonzero byte
+26 (battery 2's Battery Type), unchanged on the controller. 0x77 reads zero fixed
+and zero hot-swappable batteries while 0x7B battery 0 holds the reset value. Decoded
+per USB PD R3.3 Table 6.24 (Batch L), that reset entry's Battery Info 0x02 sets
+Battery Present, so the controller's own defaults disagree: 0x7B reports battery 0
+present (capacity unknown) while 0x77 and 0x7E report no batteries. A host that
+enables the battery replies should write all three registers consistently. The board's PD3_CONFIGURATION has bits 11 and
+10 clear, so the controller answers Get_Battery_Status and Get_Battery_Capabilities
+with Not_Supported.
+
+**CUSTOMER_USE (0x06) is read-only at runtime in rev B.** SLVUCR8B Rev. B (p.15)
+marks the field `[R]`: it "can only be changed during application customization,
+not at runtime." The library exposed `writeCustomerUse()` from Batch A. Until
+2026-11-19 that call returned false without writing, because `getRegisterInfo()`
+had no CUSTOMER_USE case. With the case added, the write reaches the bus and the
+controller ACKs it, but a read-back 100 ms later still shows the old value (bench,
+2026-11-19). The library now treats CUSTOMER_USE as read-only: `writeCustomerUse()`,
+`TPS25751CustomerUse::setValue()`, `setBytes()`, and `kAddress` are removed, so
+`writeRegister<TPS25751CustomerUse>()` does not compile. This is a breaking change
+for any caller of those methods. Set the bytes in the application configuration
+(the EEPROM image or the patch bundle) instead.
 
 ---
 
@@ -586,36 +770,65 @@ bits** at 6:0 — verified against the hardware-tested decode in
 listed "Bits 26-17" / "Bits 16-8"; the decode `.cpp` is the source of truth —
 corrected in Batch D when the encode inverse was added.)
 
+**Trap: not every Augmented PDO is a PPS PDO.** Bits 31:30 = 11b mark an
+Augmented PDO (APDO); bits 29:28 then select the APDO subtype, and only 00b is
+the SPR PPS layout above. On 2026-11-18 the test board's TRANSMIT_SOURCE_CAPS
+(0x32, EEPROM configuration) carried PDO 5 = `0xE004B1F4`, subtype 10b. Read with
+the PPS layout it gave a 17700 mV minimum and a 200 mV maximum, and the whole
+register failed `isSemanticallyValid()`. USB PD R3.3 Table 6.7 defines the subtypes:
+00b SPR PPS, 01b EPR AVS, 10b SPR AVS, and 11b invalid. That PDO 5 is an SPR AVS
+Source APDO (Table 6.15): Peak Current 00b, Maximum Current 15V 300 (3.0 A), and
+Maximum Current 20V 500 (5.0 A), all in range. The `usb-pd-docs` MCP server serves
+the PDO, APDO, and RDO tables (6.6 to 6.22) since `device-register-mcp-server`
+c4cca8f and c000cdf (2026-11-20). Since 2026-11-22 the library decodes every PDO
+through `TPS25751Pdo` (ADR-013): SPR PPS for a Source and a Sink, and the SPR AVS
+Source APDO; EPR AVS and the deprecated SPR AVS Sink APDO are named and kept raw.
+The paragraph below describes the PPS-only decode that came before. Every PDO class (`TPS25751ActivePDOContract`,
+`TPS25751Received{Source,Sink}Caps`, `TPS25751Transmit{Source,Sink}Caps`)
+therefore exposes the subtype (`apdoSubtype()` / `getAPDOSubtype()`) and
+`isSprPps()` / `isSprPpsPDO()`. The PPS accessors return 0 (or false) for any
+other subtype, semantic validation skips the PPS rules for it, and
+`debugPrint()` names the subtype instead of printing a PPS decode. The shared
+helpers `apdoSubtype(pdo)` and `isSprPpsApdo(pdo)` live in
+`TPS25751ActivePDOContract.h` next to `PDOType`.
+
 ### PDO Parsing Strategy
 
-**Type detection:**
-```cpp
-uint8_t pdoType = (pdo >> 30) & 0x03;
+Decode a PDO word through `TPS25751Pdo` (ADR-013), never with ad hoc shifts in a
+register class. Build it with the word, its 1-based position, and the role of its
+sender; `kind()` combines the PDO type (bits 31:30, Table 6.6) and the APDO type (bits
+29:28, Table 6.7):
 
-switch (pdoType) {
-    case 0b00:  // Fixed Supply
-        return parseFixedSupplyPDO(pdo);
-    case 0b01:  // Battery
-        return parseBatteryPDO(pdo);
-    case 0b10:  // Variable Supply
-        return parseVariablePDO(pdo);
-    case 0b11:  // Augmented (PPS)
-        return parseAugmentedPDO(pdo);
+```cpp
+TPS25751Pdo p = sourceCaps.pdo(i);        // position i + 1, PdoRole::Source
+switch (p.kind()) {
+    case PdoKind::Fixed:    p.fixedVoltage_mV(); p.peakCurrent(); break;  // flags only when i == 0
+    case PdoKind::Battery:  p.batteryPower_mW(); break;
+    case PdoKind::Variable: p.variableCurrent_mA(); break;
+    case PdoKind::SprPps:   p.ppsMaxVoltage_mV(); break;
+    case PdoKind::SprAvs:   p.avsCurrent15V_mA(); break;
+    default: break;  // EprAvs and InvalidApdo: raw() only
 }
 ```
 
 ### RDO (Request Data Object) Structure
 
+Bits 31:22 are common to every RDO (USB PD R3.3 Tables 6.19 to 6.22); the rest
+depends on the PDO at the Object Position, so decode through
+`TPS25751Rdo(word, rdoKindFor(pdo))`:
+
 ```
-Bits 31-28: Object Position (which PDO from 1-7)
-Bit  27:    Give Back Flag
+Bits 31-28: Object Position (which PDO, 1-7)
+Bit  27:    Giveback (deprecated, ignore)
 Bit  26:    Capability Mismatch
 Bit  25:    USB Communications Capable
 Bit  24:    No USB Suspend
 Bit  23:    Unchunked Extended Messages Supported
-Bits 22-20: Reserved
-Bits 19-10: Operating Current/Power (units depend on PDO type)
-Bits 9-0:   Max/Min Operating Current/Power
+Bit  22:    EPR Capable (the TRM marks it reserved in 0x35)
+Fixed/Variable: bits 19-10 Operating Current (10 mA), bits 9-0 deprecated copy
+Battery:        bits 19-10 Operating Power (250 mW), bits 9-0 deprecated copy
+PPS:            bits 20-9 Output Voltage (20 mV), bits 6-0 Operating Current (50 mA)
+AVS:            bits 20-9 Output Voltage (25 mV, bits 10-9 = 00b), bits 6-0 Operating Current (50 mA)
 ```
 
 ### PDO/RDO Array Handling
@@ -649,10 +862,18 @@ for (uint8_t i = 0; i < pdoCount; i++) {
 
 > **The byte-1 PDO offset above is NOT universal.** It holds for
 > RECEIVED_SOURCE/SINK_CAPS (0x30/0x31) and TRANSMIT_SINK_CAPS (0x33), but
-> **TRANSMIT_SOURCE_CAPS (0x32)** inserts two *Power-Path* bytes after the count
-> byte: bits 9:8 = Power Path for PDO 1, 11:10 = PDO 2, … 21:20 = PDO 7 (bits
-> 23:22 reserved), so **PDO 1 starts at byte 3** and PDO *n* at `3 + (n-1)*4`.
+> **TRANSMIT_SOURCE_CAPS (0x32)** inserts two bytes after the count byte:
+> bits 9:8 = Power Path for PDO 1 and bits 23:10 reserved (SLVUCR8B Rev. B,
+> page 36; Rev. A used bits 21:10 for Power Path for PDO 2-7), so **PDO 1
+> starts at byte 3** and PDO *n* at `3 + (n-1)*4`.
 > Always check the specific register's field table before assuming the offset.
+>
+> The firmware on the test board still fills bits 23:10 with the rev A layout.
+> On 2026-11-18 bytes 1 and 2 of 0x32 read `AA 2A`: Power Path for PDO 1 (bits
+> 9:8) = 2h, PP_EXT, and bits 21:10 = `0xAAA`, which in rev A means PP_EXT for
+> PDOs 2 to 7. The library follows rev B and treats bits 23:10 as reserved, so it
+> neither decodes nor writes them, and a read-modify-write keeps the firmware's
+> values.
 
 ### Transmit Capabilities encode quirks (Batch D)
 
@@ -673,20 +894,113 @@ first registers with a PDO *encode* path (`TPS25751TransmitSourceCaps` /
 - **The Sink Fixed PDO differs from the Source Fixed PDO** (bit 28 = Higher
   Capability not USB Suspend; bits 24:23 = Fast-Role-Swap current, a 2-bit
   field; no Unchunked bit). Model that 2-bit field as `uint8_t`, not `bool`.
-  *(Follow-up: the shipped read-only `TPS25751ReceivedSinkCaps::getFixedFastRoleSwapCurrent()`
-  returns `bool` and silently truncates values 2/3 to 1 — a latent decode bug
-  the Batch-D gate surfaced. Left unchanged in Batch D to keep the batch scoped
-  to the TRANSMIT registers; worth a dedicated follow-up fix.)*
+  The read-only `TPS25751ReceivedSinkCaps::getFixedFastRoleSwapCurrent()` returned
+  `bool` and truncated codes 2 and 3 to 1 until 6627be1 (2026-11-19). Since ADR-013
+  every capability class reads it as `pdo(0).fastRoleSwapCurrent()`, a 2-bit enum.
+
+### USB PD Specification Structures (Batch L)
+
+The TRM defers the field encodings of 0x48, 0x77, 0x7A, 0x7B, 0x7D, and 0x7E to the
+USB PD specification. Batch L decodes them from USB PD R3.3 V1.0 (Rev. 3.3), served by
+the `usb-pd-docs` MCP server (`specifications/USB_PD/specification.json` in the
+sibling `device-register-mcp-server` repo). Take every encoding from that server, not
+from memory. Points that are easy to get wrong:
+
+- Offsets. TRM byte n of 0x77 is Source_Capabilities_Extended Data Block (Table 6.59)
+  byte n + 10, and TRM byte n of 0x7E is Sink_Capabilities_Extended Data Block
+  (Table 6.70) byte n + 10, because the controller prepends VID, PID, XID, and the
+  firmware and hardware versions. The EPR PDP bytes fall in TRM reserved bits:
+  0x77 byte 14 (bits 119:112) is the EPR Source PDP Rating, which an SPR Source shall
+  set to 0 (Table 6.59), and 0x7E bits 111:88 are the three EPR Sink PDP bytes. Both
+  classes require those bits to read 0. 0x7B entries are whole BSDOs (Table 6.24), so
+  BSDO bit 8 is bit 0 of the Battery Info byte. 0x7D entries are whole Battery
+  Capability Data Blocks (Table 6.64).
+- Source PDP width. The TRM gives 0x77 Source PDP as 7 bits (110:104); the
+  specification field is a byte with valid values 0 to 100 W. Every code with bit 7
+  set is invalid anyway, so the 7-bit TRM field and the bit 111 reserved check stand.
+  The test board reads 0x7F (127), which `sourcePdpValid()` reports as invalid.
+- Duty Cycle. Peak Current (Table 6.59) and Sink Load Characteristics (Table 6.70)
+  give the duty-cycle sub-field as 4 bits with values "0..31"; only 0 to 15 fit, so
+  the library decodes 0 to 75 percent.
+- Touch Temp. The two extended blocks encode it differently: in 0x77, 0 is IEC
+  60950-1; in 0x7E, 0 is "No applicable standard" and 1 is IEC 60950-1.
+- Conditional fields. BSDO Charging Status is reserved when the battery is absent or
+  the capacity is FFFFh, and Source Inputs bit 1 is ignored when bit 0 is 0. The
+  accessors decode the bits regardless; `debugPrint()` prints them only when they
+  mean something.
+- 0x7A Present Temperature Flag 00b is "Not Supported" in Table 6.67; the TRM leaves it
+  undefined. `PresentTemperatureFlag::NotSupported` names it, and `NotDefined` stays
+  as a deprecated alias of the same value.
+- 0x78 TX Source Info is the two Source_Info Data Objects: bits 31:0 are SIDO1
+  (Table 6.29, 1 W steps) and bits 63:32 are SIDO2 (Table 6.30, 0.5 W steps). The two
+  Port Type bits the TRM leaves unexplained are bit 31 of each object. Table 6.30 says
+  DPS Port requires Port Type 0 in both, and Table 6.29 says SIDO1 Port Maximum PDP
+  equals SIDO2 Port Maximum PDP rounded down to 1 W. Semantic validation checks both
+  rules. The TRM states only the first, and only for bit 63. A host that sets one
+  Port Maximum PDP field must set the other to match, or the register fails
+  validation. The values the firmware wrote on hardware, at reset and with a sink
+  attached, meet both rules.
+- Finding the mapping. Since `device-register-mcp-server` 8673c30, `tps25751-docs`
+  prints a Specification block for 48h, 77h, 78h, 7Ah, 7Bh, 7Dh, and 7Eh that names
+  the object and bits each register carries, and `explain_bitfield` names the object
+  field under each register field. Since 696c854 (2026-11-22) it does the same for
+  30h to 35h, the PDOs and RDOs. Start there, then read the object in `usb-pd-docs`.
+- 0x48 VDO slots. For a dual-role partner the response is the UFP VDO, a 32-bit Pad
+  Object of all 0s, then the DFP VDO (USB PD R3.3 page 158, Figure 6.5), so VDO index 4
+  can read zero with a valid VDO count. After a version 1.0 UFP VDO 1 (Table 6.41),
+  index 4 is UFP VDO 2 (Table 6.42). The library keeps indices 3 to 5 raw.
+- PDOs and RDOs (cross-check against `usb-pd-docs` on 2026-11-22). The PDO field
+  layouts the classes decode match Tables 6.8 to 6.13. Three points the tables add:
+  - Bits 29:22 of a Fixed PDO above 5 V are Device Flags, reserved and populated only
+    in PDO 1 (Table 6.10). `TPS25751Pdo` therefore decodes the flags only at position
+    1 and returns false elsewhere, and 0x34 takes them from First PDO Control Bits
+    through `firstPdoControl()`. Until 2026-11-22 the flag getters read those bits
+    from any PDO.
+  - 0x34 bits 41:32 (First PDO Control Bits) are bits 29:20 of PDO 1, Dual-Role Power
+    through Peak Current (Table 6.8). The TRM does not say so. Hardware confirms it
+    with two chargers: on 2026-11-19 0x34 read 0x098 there while PDO 1 of 0x30 was
+    0x0981912C, whose bits 29:20 are 0x098, and on 2026-11-22 it read 0x080 (bit 7,
+    Unconstrained Power) while PDO 1 decoded as Unconstrained Power set. With that
+    second charger on a 20 V contract, the 0x34 debug output printed Unconstrained
+    Power: No from the active PDO's reserved bits.
+  - 0x35 bits 31:0 follow the Fixed and Variable RDO (Table 6.19), which is TI's
+    layout. In a Battery RDO (Table 6.20) bits 19:10 are Operating Power in 250 mW
+    units, and in a PPS or AVS RDO (Tables 6.21, 6.22) bits 20:9 are Output Voltage and
+    bits 6:0 Operating Current in 50 mA units. TRM reserved bit 22 is EPR Capable in
+    every RDO. 0x35 therefore hands out `TPS25751Rdo` objects decoded by the kind of
+    the requested PDO; its old accessors read every RDO as Fixed/Variable, so a 9 V
+    3 A PPS request read as 2250 mA.
+    On hardware, with the board sinking, 0x35 RequestedRDO (bits 127:96) read the
+    same word as bits 31:0 with both chargers (0x4184B12C, then 0x4104B12C), although
+    the TRM describes it as the RDO a partner sends while this device is source.
+  Validation of 0x30 to 0x34 follows the tables through `validatePdoList()` and
+  `TPS25751Pdo::isValidForReceiver()`. Received lists (0x30, 0x31, and 0x34's
+  active PDO) reject only what the tables tell a receiver to treat as invalid: a
+  Fixed or Variable current above 500, a Battery power above 400, a PPS current above
+  100, a Source PPS voltage outside 110/160/210 and 33/50 (Table 6.13), a Sink PPS
+  voltage outside 50 to 210 (Table 6.14), an SPR AVS current above 500, APDO type
+  11b, and a zero voltage; zero currents and powers are valid. Every list also
+  requires PDO 1 to be a Fixed PDO at exactly 5 V. Transmit lists (0x32, 0x33) add
+  the sender rules: the order Fixed, Battery, Variable, SPR AVS, PPS (page 130); no
+  EPR AVS or invalid APDO; a minimum voltage at most the maximum in every Battery,
+  Variable, and SPR PPS PDO; in 0x32, a Variable PDO's minimum voltage at least 80% of
+  its maximum (Table 6.12) and SPR AVS currents equal to the 15 V and 20 V Fixed PDOs'
+  (Table 6.15); in 0x33, no SPR AVS APDO (page 137). The minimum-at-most-maximum rule
+  is the library's own choice (2026-11-22): the tables state no such rule, so a
+  received list does not check it. The old per-type rules (nonzero current and a 4750
+  to 5250 mV PDO 1) are gone. The board's 0x30, 0x32, and 0x33 values pass every
+  rule.
 
 ### USB PD Specification Reference
 
 For complete details, refer to:
-- **USB Power Delivery Specification 3.1**
-- Section 6.4.1: Power Data Objects
-- Table 6-7: Fixed Supply PDO
-- Table 6-9: Battery Supply PDO
-- Table 6-11: Variable Supply PDO
-- Table 6-13: Augmented Power Data Object
+- **USB Power Delivery Specification R3.3 V1.0**, via the `usb-pd-docs` MCP server:
+  Tables 6.6 and 6.7 (PDO and APDO type), 6.8 to 6.12 (Fixed, Battery, and Variable
+  PDOs), 6.13 to 6.17 (PPS and AVS APDOs), 6.18 (PDO Peak Current), 6.19 to 6.22
+  (RDOs), 6.24 (BSDO), 6.29 and 6.30 (Source_Info SIDO1 and SIDO2), 6.34 (ID Header
+  VDO), 6.38 (Cert Stat VDO), 6.39 (Product VDO), 6.40 to 6.44 and 6.53 (Product Type
+  VDOs, not decoded), 6.59 (Source_Capabilities_Extended), 6.64 (Battery
+  Capabilities), 6.67 (PPS Status), and 6.70 (Sink_Capabilities_Extended)
 
 ---
 
@@ -832,6 +1146,11 @@ bool validateData() const {
 }
 ```
 
+Check reserved bits against the TRM, then against hardware. If a real device
+sets a reserved bit, the check rejects every valid read from it. See the
+PD3_CONFIGURATION and GLOBAL_SYSTEM_CONFIGURATION traps under Read/Write
+Registers.
+
 ### 6. Large Stack Allocations
 
 **Wrong:**
@@ -887,7 +1206,7 @@ Two things remain true on the host side regardless of the device driver:
   section above apply unchanged to *typed* downstream writes — payload `len ≤ 11`,
   `Length = payload + 1` (counts the register-offset byte) — because they ride the
   same I2Cw task as raw writes.
-- `TPS25751BitUtils::extractBits16` is **little-endian** by design (matches the
+- `TPS25751Register::extractBits16` is **little-endian** by design (matches the
   TPS25751's own registers); big-endian downstream devices must assemble
   multi-byte fields manually.
 
@@ -942,7 +1261,7 @@ void foo() {
    - Register definitions
    - Electrical characteristics
 
-2. **USB Power Delivery Specification 3.1**
+2. **USB Power Delivery Specification R3.3 V1.0** (via the `usb-pd-docs` MCP server)
    - PDO/RDO formats
    - Negotiation protocols
    - Voltage/current encoding
@@ -966,6 +1285,19 @@ void foo() {
 | 1.1 | 2026-06-24 | Claude Code | Added BQ25798 downstream device decode conventions (big-endian, signed ADC, LSB sources) |
 | 1.2 | 2026-07-02 | Claude Code | BQ25798 decode/encode conventions moved to the sibling lib/BQ25798 repo with the driver; generic I2Cr/I2Cw framing rules retained here |
 | 1.3 | 2026-07-07 | Claude Code | Batch C: documented the ADC_RESULTS (0x6A) update-frequency caveat — not refreshed in Unconnected Sleep, so a stale/all-zero read is expected, not an error (Read-Only Registers section) |
+| 1.4 | 2026-11-18 | Claude Code | Batch G of the rev B plan: firmware sets PD3_CONFIGURATION (0x42) reserved bits 3:0 on hardware, so validation no longer checks them (Read/Write Registers section) |
+| 1.5 | 2026-11-18 | Claude Code | Batch H of the rev B plan: GLOBAL_SYSTEM_CONFIGURATION (0x27) reports 14 bytes on hardware and the firmware sets bits in all its reserved ranges; RECEIVED_SOP_IDENTITY (0x48) status comes from Response Type, not INT_EVENT1 bit 51 (Read/Write Registers section) |
+| 1.6 | 2026-11-18 | Claude Code | LIQUID_DETECTION_CONFIG (0x98) reports 12 bytes on hardware, not 11 (Read/Write Registers section); PDO classes decode only the SPR PPS APDO subtype after a subtype 10b APDO in 0x32 failed validation (USB Power Delivery Complexity section); the firmware still uses the rev A Power Path layout in 0x32 bits 21:10 |
+| 1.7 | 2026-11-18 | Claude Code | Batch J of the rev B plan: TX_SOURCE_CAPABILITIES_EXTENDED (0x77) reads Source PDP 0x7F from firmware configuration, not the documented reset; 0x77 and TRANSMIT_SINK_CAPABILITIES_EXTENDED (0x7E) report 15 and 14 bytes as the TRM implies, and the firmware sets none of their reserved bits (Read/Write Registers section) |
+| 1.8 | 2026-11-19 | Claude Code | Batch K of the rev B plan: TX_BATTERY_CAPABILITIES (0x7D) is the first R/W register past bit 255 and uses class-local byte helpers (Read-Only Registers section, IO_CONFIG note); the TRM labels 0x7D battery 3 as battery 0; 0x7B and 0x7D report 16 and 36 bytes and round-trip on hardware; CUSTOMER_USE (0x06) ignores runtime writes (Read/Write Registers section) |
+| 1.9 | 2026-11-19 | Claude Code | CUSTOMER_USE (0x06) is read-only in the library: `writeCustomerUse()`, the class setters, and `kAddress` are removed (Read/Write Registers section) |
+| 1.10 | 2026-11-19 | Claude Code | Batches G to I bench checks: a GLOBAL_SYSTEM_CONFIGURATION (0x27) RCP write preserves the undocumented bits; RECEIVED_SOP_IDENTITY (0x48) fills about 106 ms before INT_EVENT1 bit 51 and keeps the last identity after detach; INT_EVENT1 latches only INT_MASK1-enabled sources; the firmware fills the TX_SOURCE_INFO (0x78) lower word when the board sources (Read/Write Registers section) |
+| 1.11 | 2026-11-19 | Claude Code | Batch L of the rev B plan: typed USB PD R3.3 decode for 0x48, 0x77, 0x7E, 0x7B, and 0x7D and the 0x7A PTF 00b meaning (new USB PD Specification Structures section); 0x48 decode of an iPhone on hardware; the 0x7B reset value reports a battery that 0x77 and 0x7E do not (Read/Write Registers section) |
+| 1.12 | 2026-11-19 | Claude Code | ADR-012: the base-class bit helpers take a 16-bit bit position, so IO_CONFIG (0x5C) and TX_BATTERY_CAPABILITIES (0x7D) read and write through them (Read-Only Registers section, IO_CONFIG note) |
+| 1.13 | 2026-11-19 | Claude Code | USB PD cross-check against the linked `tps25751-docs` output: 0x77 byte 14 is the EPR Source PDP Rating, 0x78 is SIDO1 and SIDO2, and the Specification block (USB PD Specification Structures section) |
+| 1.14 | 2026-11-19 | Claude Code | TX_SOURCE_INFO (0x78) semantic validation checks the USB PD R3.3 Table 6.29 and 6.30 rules: DPS Port requires both Port Type bits Managed, and the 1 W Port Maximum PDP equals the 0.5 W value rounded down (USB PD Specification Structures and Read/Write Registers sections) |
+| 1.15 | 2026-11-22 | Claude Code | PDO, APDO, and RDO cross-check against `usb-pd-docs` (device-register-mcp-server 696c854): the 0x32 subtype 10b APDO is an SPR AVS Source APDO, 0x34 First PDO Control Bits are PDO 1 bits 29:20 (confirmed on hardware), fixed-PDO flags are reserved outside PDO 1, 0x35 decodes as a Fixed or Variable RDO only, and the 0x48 Pad Object (USB PD Specification Structures section) |
+| 1.16 | 2026-11-22 | Claude Code | PDOs and RDOs decode through `TPS25751Pdo` and `TPS25751Rdo` (ADR-013): fixed-PDO flags only for PDO 1, SPR AVS Source decode, RDOs by kind, and validation of 0x30 to 0x34 per USB PD R3.3 (USB PD Specification Structures and PDO Parsing Strategy sections) |
 
 ---
 

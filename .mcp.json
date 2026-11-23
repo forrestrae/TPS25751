@@ -5,6 +5,12 @@
       "command": "uv",
       "args": ["--directory", "../device-register-mcp-server", "run", "server.py"],
       "env": { "DEVICE_CONFIG": "devices/tps25751/device.json" }
+    },
+    "usb-pd-docs": {
+      "type": "stdio",
+      "command": "uv",
+      "args": ["--directory", "../device-register-mcp-server", "run", "server.py"],
+      "env": { "DEVICE_CONFIG": "specifications/USB_PD/specification.json" }
     }
   }
 }

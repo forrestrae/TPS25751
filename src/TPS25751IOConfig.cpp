@@ -2,11 +2,7 @@
 
 uint16_t TPS25751IOConfig::readGpioBitmap(size_t byteOffset) const
 {
-    if (!isValid() || byteOffset + 1 >= _len) return 0;
-
-    uint16_t raw = static_cast<uint16_t>(_raw[byteOffset]) |
-                   (static_cast<uint16_t>(_raw[byteOffset + 1]) << 8);
-    return raw & kGpioBitmapMask;
+    return extractBits16(static_cast<uint16_t>(byteOffset * 8), kGpioBitmapBits);
 }
 
 bool TPS25751IOConfig::bitmapBit(uint16_t mask, uint8_t gpio)
@@ -87,26 +83,22 @@ bool TPS25751IOConfig::eventPolarityInverted(uint8_t gpio) const
 
 bool TPS25751IOConfig::gpio0AnalogInputEnabled() const
 {
-    if (!isValid() || kAnalogInputByte >= _len) return false;
-    return (_raw[kAnalogInputByte] >> kGpio0AiBit) & 0x1;
+    return extractBits(static_cast<uint16_t>(kAnalogInputByte * 8 + kGpio0AiBit), 1) != 0;
 }
 
 bool TPS25751IOConfig::gpio2AnalogInputEnabled() const
 {
-    if (!isValid() || kAnalogInputByte >= _len) return false;
-    return (_raw[kAnalogInputByte] >> kGpio2AiBit) & 0x1;
+    return extractBits(static_cast<uint16_t>(kAnalogInputByte * 8 + kGpio2AiBit), 1) != 0;
 }
 
 bool TPS25751IOConfig::gpio4AnalogInputControl() const
 {
-    if (!isValid() || kAnalogInputByte >= _len) return false;
-    return (_raw[kAnalogInputByte] >> kGpio4AiBit) & 0x1;
+    return extractBits(static_cast<uint16_t>(kAnalogInputByte * 8 + kGpio4AiBit), 1) != 0;
 }
 
 bool TPS25751IOConfig::gpio5AnalogInputControl() const
 {
-    if (!isValid() || kAnalogInputByte >= _len) return false;
-    return (_raw[kAnalogInputByte] >> kGpio5AiBit) & 0x1;
+    return extractBits(static_cast<uint16_t>(kAnalogInputByte * 8 + kGpio5AiBit), 1) != 0;
 }
 
 uint8_t TPS25751IOConfig::gpioMappedEvent(uint8_t gpio) const
@@ -128,8 +120,7 @@ uint8_t TPS25751IOConfig::gpioMappedEvent(uint8_t gpio) const
         default: return 0;
     }
 
-    if (!isValid() || byteOffset >= _len) return 0;
-    return _raw[byteOffset];
+    return extractBits(static_cast<uint16_t>(byteOffset * 8), 8);
 }
 
 void TPS25751IOConfig::debugPrint(Stream &s) const
@@ -164,16 +155,16 @@ void TPS25751IOConfig::debugPrint(Stream &s) const
     s.println(gpioEventPolarityMask(), HEX);
 
     s.print(F("GPIO0 Analog Input Enabled: "));
-    s.println(gpio0AnalogInputEnabled() ? F("Yes") : F("No"));
+    s.println(yesNo(gpio0AnalogInputEnabled()));
 
     s.print(F("GPIO2 Analog Input Enabled: "));
-    s.println(gpio2AnalogInputEnabled() ? F("Yes") : F("No"));
+    s.println(yesNo(gpio2AnalogInputEnabled()));
 
     s.print(F("GPIO4 Analog Input Control: "));
-    s.println(gpio4AnalogInputControl() ? F("Yes") : F("No"));
+    s.println(yesNo(gpio4AnalogInputControl()));
 
     s.print(F("GPIO5 Analog Input Control: "));
-    s.println(gpio5AnalogInputControl() ? F("Yes") : F("No"));
+    s.println(yesNo(gpio5AnalogInputControl()));
 
     s.println(F("GPIO Mapped Events:"));
     for (uint8_t gpio = 0; gpio <= kMaxGpioIndex; gpio++) {

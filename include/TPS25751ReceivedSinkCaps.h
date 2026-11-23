@@ -3,13 +3,15 @@
 
 #include "TPS25751Register.h"
 #include "TPS25751RegisterAddress.h"
-#include "TPS25751ActivePDOContract.h"  // For PDOType enum
+#include "TPS25751Pdo.h"
 
 /**
  * @brief TPS25751 Received Sink Capabilities Register (0x31)
  *
  * This register stores the latest Sink Capabilities message received over BMC.
- * Contains up to 7 Power Data Objects (PDOs) from the sink device.
+ * Contains up to 7 Power Data Objects (PDOs) from the sink device, decoded
+ * through TPS25751Pdo (USB PD R3.3) by pdo(). The deprecated SPR AVS Sink APDO
+ * is identified (PdoKind::SprAvs) but not decoded, and does not fail validation.
  *
  * Register Size: 53 bytes (29 bytes data + 24 bytes reserved)
  * Access: Read-only
@@ -37,11 +39,16 @@ public:
     uint32_t getPDO(uint8_t index) const;
 
     /**
-     * @brief Get PDO type for a specific PDO
+     * @brief Decode one PDO in its position and role
+     *
+     * PDO @p index is PDO @p index + 1 of a Sink_Capabilities message, so the Fixed PDO flags
+     * decode only for index 0 (USB PD R3.3 Tables 6.9, 6.10).
+     *
      * @param index PDO index (0-6)
-     * @return PDO type
+     * @return The PDO as a Sink PDO; an all-zero PDO at an unknown position when
+     *         @p index is 7 or more
      */
-    PDOType getPDOType(uint8_t index) const;
+    TPS25751Pdo pdo(uint8_t index) const;
 
     /**
      * @brief Check if sink capabilities were received
@@ -49,46 +56,13 @@ public:
      */
     bool hasSinkCaps() const;
 
-    // Helper methods to parse Fixed Supply PDO (type 00)
-    uint16_t getFixedVoltage_mV(uint8_t index) const;
-    uint16_t getFixedMaxCurrent_mA(uint8_t index) const;
-    bool getFixedDualRolePower(uint8_t index) const;
-    bool getFixedHigherCapability(uint8_t index) const;
-    bool getFixedUnconstrainedPower(uint8_t index) const;
-    bool getFixedUSBCommCapable(uint8_t index) const;
-    bool getFixedDualRoleData(uint8_t index) const;
-    bool getFixedFastRoleSwapCurrent(uint8_t index) const;
-
-    // Helper methods to parse Battery PDO (type 01)
-    uint16_t getBatteryMaxVoltage_mV(uint8_t index) const;
-    uint16_t getBatteryMinVoltage_mV(uint8_t index) const;
-    uint32_t getBatteryMaxPower_mW(uint8_t index) const;
-
-    // Helper methods to parse Variable Supply PDO (type 10)
-    uint16_t getVariableMaxVoltage_mV(uint8_t index) const;
-    uint16_t getVariableMinVoltage_mV(uint8_t index) const;
-    uint16_t getVariableMaxCurrent_mA(uint8_t index) const;
-
-    // Helper methods to parse Augmented/PPS PDO (type 11)
-    uint16_t getPPSMaxVoltage_mV(uint8_t index) const;
-    uint16_t getPPSMinVoltage_mV(uint8_t index) const;
-    uint16_t getPPSMaxCurrent_mA(uint8_t index) const;
-
     void debugPrint(Stream &s = Serial) const override;
 
     /**
      * @brief Validates received sink capabilities register data semantically
+     *
+     * Applies validatePdoList() with PdoListRules::ReceivedSink.
      * @return true if sink capabilities data is logically consistent
      */
     bool isSemanticallyValid() const override;
-
-private:
-    /**
-     * @brief Extract bits from a specific PDO
-     * @param index PDO index (0-6)
-     * @param bitOffset Bit offset within the PDO
-     * @param bitCount Number of bits to extract
-     * @return Extracted value
-     */
-    uint32_t extractPDOBits(uint8_t index, uint8_t bitOffset, uint8_t bitCount) const;
 };

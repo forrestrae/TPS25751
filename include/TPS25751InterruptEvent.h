@@ -17,8 +17,11 @@
  * Access: Read-only
  *
  * This class provides accessor methods for all non-reserved interrupt flags.
- * Use the corresponding INTERRUPT_MASK and INTERRUPT_CLEAR registers (0x16, 0x18)
+ * Use the corresponding INT_MASK1 and INT_CLEAR1 registers (0x16, 0x18)
  * to control interrupt behavior.
+ *
+ * @see TI TPS25751 Technical Reference Manual SLVUCR8B (Rev. B), Table 3-8, p.19
+ * (Interrupt Event for I2Ct_IRQ)
  */
 class TPS25751InterruptEvent : public TPS25751Register
 {
@@ -44,11 +47,14 @@ public:
     bool extDcdcSourceSafeState() const;   // bit 57
     bool extDcdcSinkSafeState() const;     // bit 56
 
+    // Discover Modes (bit 51), new in Rev. B (SLVUCR8B p.19)
+    bool discoverModeCompleted() const;    // bit 51
+
     // Error conditions (bits 32-39, 46)
     bool unableToSourceError() const;      // bit 46
     bool messageDataError() const;         // bit 39
     bool protocolError() const;            // bit 38
-    bool missingGetCapabilitiesError() const; // bit 36
+    bool missingGetCapabilitiesError() const; // bit 36; TRM: "Missing Get Capabalities Message Error" (SLVUCR8B p.19)
     bool powerEventOccurredError() const;  // bit 35
     bool canProvideVoltageLaterError() const; // bit 34
     bool cannotProvideVoltageError() const; // bit 33
@@ -62,6 +68,9 @@ public:
     // Command completion (bit 30)
     bool cmd1Complete() const;             // bit 30
 
+    // Manufacturer Info (bit 29), new in Rev. B (SLVUCR8B p.19)
+    bool midbReceived() const;             // bit 29
+
     // Register update notifications (bits 23-27)
     bool pdStatusUpdated() const;          // bit 27
     bool statusUpdated() const;            // bit 26
@@ -73,12 +82,12 @@ public:
     bool usbHostPresent() const;           // bit 20
 
     // Power Delivery swap requests (bits 17-18)
-    bool dataSwapRequested() const;        // bit 18
-    bool powerSwapRequested() const;       // bit 17
+    bool dataSwapRequested() const;        // bit 18; Rev. B: "Data Role Swap Requested"
+    bool powerSwapRequested() const;       // bit 17; Rev. B: "Power Role Swap Requested"
 
     // PD message reception (bits 14-15)
     bool sinkCapMessageReceived() const;   // bit 15
-    bool sourceCapMessageReceived() const; // bit 14
+    bool sourceCapMessageReceived() const; // bit 14; TRM: "Source Capabalities Message Received" (SLVUCR8B p.20)
 
     // Contract negotiation (bits 12-13)
     bool newContractAsProvider() const;    // bit 13

@@ -90,15 +90,15 @@ std::string toString(const ConnectionState s)
         case DISCONNECTED:
             return "No connection";
         case PORT_DISABLED:
-            return "Port is disable";
-        case AUDIO_ACCESSORY:
-            return "Audio connection (Ra/Ra)";
+            return "Port is disabled";
+        case CORROSION_MITIGATION:
+            return "Corrosion Mitigation (Ra/Ra)";  // SLVUCR8B p.25
         case DEBUG_ACCESSORY:
             return "Debug connection (Rd/Rd)";
         case NO_CONNECTION_RA_DETECTED:
             return "No connection - Ra detected (Ra but no Rd)";
-        case RESERVED:
-            return "Reserved (may be used for Rp/Rp Debug connection)";
+        case DEBUG_ACCESSORY_RP_RP:
+            return "Debug connection (Rp/Rp)";  // SLVUCR8B p.25
         case CONNECTED_NO_RA_DETECTED:
             return "Connection present - no Ra detected";
         case CONNECTED_RA_DETECTED:
@@ -155,7 +155,7 @@ std::string toString(const ActingAsLegacy s)
         case LEGACY_SINK_DEAD_BATTERY:
             return "Acting as legacy sink due to dead-battery";
         default:
-            return "Uknown";
+            return "Unknown";
     }
 }
 

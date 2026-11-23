@@ -11,6 +11,7 @@ dependencies are installed.
 
 from __future__ import annotations
 
+import os
 import re
 import subprocess
 from dataclasses import dataclass
@@ -237,6 +238,40 @@ def is_ancestor(a: str, b: str, cwd: Optional[Path] = None) -> bool:
 def ref_exists(ref: str, cwd: Optional[Path] = None) -> bool:
     return git_ok("rev-parse", "--verify", "--quiet", ref, cwd=cwd)
 
+
+# --------------------------------------------------------------------------
+# Are the workflow hooks active?
+# --------------------------------------------------------------------------
+
+HOOKS_DIR = ".githooks"
+
+
+@dataclass
+class HooksStatus:
+    active: bool
+    configured: Optional[str]   # core.hooksPath as configured, None when unset
+    resolved: Optional[Path]    # where git looks for hooks with that value
+    expected: Path              # the repository's own .githooks directory
+
+
+def hooks_status(cwd: Optional[Path] = None) -> HooksStatus:
+    """Whether core.hooksPath points git at this repository's .githooks directory.
+
+    Compares paths, not strings: ".githooks", "./.githooks", an absolute path,
+    a trailing slash, "~" or a path through a symlink all count as active when
+    they name the same directory. As git does, a relative value is taken
+    relative to the top of the working tree.
+    """
+    top = repo_root(cwd)
+    expected = Path(os.path.realpath(top / HOOKS_DIR))
+    configured = git("config", "--get", "core.hooksPath", cwd=cwd, check=False) or None
+    if configured is None:
+        return HooksStatus(False, None, None, expected)
+    path = Path(os.path.expanduser(configured))
+    if not path.is_absolute():
+        path = top / path
+    resolved = Path(os.path.realpath(path))
+    return HooksStatus(resolved == expected, configured, resolved, expected)
 
 # --------------------------------------------------------------------------
 # The main-branch rule

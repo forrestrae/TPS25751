@@ -313,14 +313,23 @@ def pre_tool_use(payload: dict, env: dict[str, str], agent: str = "claude") -> i
 
 
 def session_start(env: dict[str, str], cwd: str | None = None) -> int:
-    import subprocess
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    import workflow_common as wc
+
     project_dir = env.get("CLAUDE_PROJECT_DIR") or cwd or os.getcwd()
-    value = subprocess.run(["git", "config", "--get", "core.hooksPath"], cwd=project_dir,
-                           capture_output=True, text=True).stdout.strip()
-    if value != ".githooks":
-        print("WARNING: this clone's git workflow hooks are NOT active (core.hooksPath is "
-              f"{value or 'unset'}). Tell the user to run scripts/setup_hooks.sh before any "
-              "commit; see AGENTS.md, 'Git Workflow'.")
+    try:
+        status = wc.hooks_status(Path(project_dir))
+    except wc.GitError:
+        return 0  # not inside a git repository; nothing to warn about
+    if not status.active:
+        if status.configured is None:
+            detail = "core.hooksPath is unset"
+        else:
+            detail = (f"core.hooksPath is {status.configured}, which resolves to "
+                      f"{status.resolved}, not {status.expected}")
+        print(f"WARNING: this clone's git workflow hooks are NOT active ({detail}). Tell the "
+              "user to run scripts/setup_hooks.sh before any commit; see AGENTS.md, "
+              "'Git Workflow'.")
     return 0
 
 

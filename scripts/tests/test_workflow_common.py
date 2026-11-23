@@ -151,5 +151,94 @@ class MainUpdateDecisionTests(unittest.TestCase):
             self.assertIn(self.tip, wc.verified_commits())
 
 
+class HooksStatusTests(unittest.TestCase):
+    """core.hooksPath counts as active when it names the repo's .githooks directory."""
+
+    def setUp(self):
+        self.repo = TempRepo()
+        self.hooks = self.repo.path / ".githooks"
+        self.hooks.mkdir()
+
+    def tearDown(self):
+        self.repo.cleanup()
+
+    def status_for(self, value):
+        if value is None:
+            git_unchecked(self.repo, "config", "--unset-all", "core.hooksPath")
+        else:
+            self.repo.git("config", "core.hooksPath", value)
+        with chdir_env(self.repo):
+            return wc.hooks_status()
+
+    def assertActive(self, value):
+        status = self.status_for(value)
+        self.assertTrue(status.active, f"{value!r} resolved to {status.resolved}")
+
+    def assertInactive(self, value):
+        self.assertFalse(self.status_for(value).active, repr(value))
+
+    def test_unset_is_inactive(self):
+        status = self.status_for(None)
+        self.assertFalse(status.active)
+        self.assertIsNone(status.configured)
+
+    def test_relative_spellings(self):
+        self.assertActive(".githooks")
+        self.assertActive("./.githooks")
+        self.assertActive(".githooks/")
+
+    def test_absolute_path(self):
+        self.assertActive(str(self.hooks))
+        self.assertActive(str(self.hooks) + "/")
+
+    def test_path_through_symlink(self):
+        link = self.repo.path.parent / "hooks-link"
+        link.symlink_to(self.hooks, target_is_directory=True)
+        self.assertActive(str(link))
+        repo_link = self.repo.path.parent / "repo-link"
+        repo_link.symlink_to(self.repo.path, target_is_directory=True)
+        self.assertActive(str(repo_link / ".githooks"))
+
+    def test_home_relative(self):
+        home = os.path.expanduser("~")
+        try:
+            rel = os.path.relpath(self.hooks, home)
+        except ValueError:
+            self.skipTest("hooks directory not reachable from the home directory")
+        self.assertActive("~/" + rel)
+
+    def test_other_directory_is_inactive(self):
+        other = self.repo.path.parent / "elsewhere"
+        other.mkdir()
+        self.assertInactive(str(other))
+        self.assertInactive("hooks")
+        self.assertInactive("/dev/null")
+
+    def test_session_start_warns_only_when_inactive(self):
+        import io
+        from contextlib import redirect_stdout
+        import agent_guard
+
+        def output(value):
+            self.status_for(value)
+            out = io.StringIO()
+            with chdir_env(self.repo), redirect_stdout(out):
+                agent_guard.session_start({"CLAUDE_PROJECT_DIR": str(self.repo.path)})
+            return out.getvalue()
+
+        self.assertEqual(output(str(self.hooks)), "")
+        self.assertEqual(output(".githooks"), "")
+        warning = output(str(self.repo.path.parent))
+        self.assertIn("NOT active", warning)
+        self.assertIn("resolves to", warning)
+        self.assertIn("unset", output(None))
+
+
+def git_unchecked(repo, *args):
+    """Run git in `repo`, ignoring the exit status (unsetting an unset key exits 5)."""
+    import subprocess
+    subprocess.run(["git", *args], cwd=repo.path, env=repo.env, capture_output=True)
+
+
 if __name__ == "__main__":
     unittest.main()

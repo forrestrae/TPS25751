@@ -28,18 +28,38 @@ public:
 
     /**
      * @brief Get the full Active PDO value (bits 31:0)
-     * @return 32-bit PDO value
+     * @return 32-bit PDO word as read
      */
-    uint32_t activePDO() const;
+    uint32_t rawActivePdo() const;
 
     /**
-     * @brief Get First PDO Control Bits (register bits 41:32)
+     * @brief Get First PDO Control Bits (register bits 41:32) as read
      *
      * PDO-specific information drawn from the first PDO, whichever PDO was
-     * selected. Source: SLVUCR8B (Rev. B, 2026-08), page 38.
+     * selected. Source: SLVUCR8B (Rev. B, 2026-08), page 38. firstPdoControl()
+     * decodes it.
      *
-     * These are bits 29:20 of PDO 1, the vSafe5V Fixed Supply PDO (USB PD R3.3
-     * Table 6.8, page 132): bit 9 here is Dual-Role Power (PDO bit 29), bit 8 USB
+     * @return 10-bit control value
+     */
+    uint16_t rawFirstPdoControlBits() const;
+
+    /**
+     * @brief The active PDO, decoded
+     *
+     * The PDO's position in the Source_Capabilities is not known here, so its
+     * position is TPS25751Pdo::kUnknownPosition and the Fixed PDO flag accessors
+     * (Dual-Role Power, Unconstrained Power, and so on) read false: bits 29:22 of a
+     * Fixed PDO above 5 V are reserved Device Flags (USB PD R3.3 Table 6.10).
+     * Peak Current, voltage, current, PPS, and AVS fields decode. firstPdoControl()
+     * carries PDO 1's flags.
+     */
+    TPS25751Pdo activePdo() const;
+
+    /**
+     * @brief PDO 1's flags and Peak Current, from First PDO Control Bits
+     *
+     * The ten bits are bits 29:20 of PDO 1, the vSafe5V Fixed Supply PDO (USB PD
+     * R3.3 Table 6.8, page 132): bit 9 here is Dual-Role Power (PDO bit 29), bit 8 USB
      * Suspend Supported, bit 7 Unconstrained Power, bit 6 USB Communications
      * Capable, bit 5 Dual-Role Data, bit 4 Unchunked Extended Messages Supported,
      * bit 3 EPR Capable, bit 2 reserved, and bits 1:0 Peak Current. The TRM does
@@ -48,59 +68,24 @@ public:
      * 29:20 are 0x098 (2026-11-19), and 0x080 here with PDO 1 decoding as
      * Unconstrained Power set (2026-11-22).
      *
-     * @return 10-bit control value
+     * The returned object is PDO 1 as a Source PDO with only bits 29:20 filled in,
+     * so its flag accessors and peakCurrent() give PDO 1's values. Its voltage and
+     * current read 0 and must not be used.
      */
-    uint16_t firstPDOControlBits() const;
-
-    /**
-     * @brief Get PDO type
-     * @return PDO type (Fixed, Battery, Variable, Augmented)
-     */
-    PDOType pdoType() const;
+    TPS25751Pdo firstPdoControl() const;
 
     /**
      * @brief Check if contract exists
-     * @return true if an active PD contract exists
+     * @return true if an active PD contract exists (the raw active PDO is non-zero)
      */
     bool hasActiveContract() const;
-
-    // Fixed Supply PDO fields (type 00). The flag accessors read bits 29:24 of
-    // the active PDO. In a Fixed PDO above 5 V those bits are Device Flags,
-    // reserved and populated only in PDO 1 (USB PD R3.3 Table 6.10), so for a
-    // contract above 5 V they are not the partner's flags; firstPDOControlBits()
-    // carries PDO 1's flags whichever PDO is active.
-    uint16_t fixedVoltage_mV() const;          ///< Voltage in millivolts (50mV units)
-    uint16_t fixedMaxCurrent_mA() const;       ///< Max current in milliamps (10mA units)
-    bool fixedDualRolePower() const;
-    bool fixedUSBSuspendSupported() const;
-    bool fixedUnconstrainedPower() const;
-    bool fixedUSBCommCapable() const;
-    bool fixedDualRoleData() const;
-    bool fixedUnchunkedSupported() const;
-
-    // Battery PDO fields (type 01)
-    uint16_t batteryMaxVoltage_mV() const;     ///< Max voltage in millivolts (50mV units)
-    uint16_t batteryMinVoltage_mV() const;     ///< Min voltage in millivolts (50mV units)
-    uint32_t batteryMaxPower_mW() const;       ///< Max power in milliwatts (250mW units)
-
-    // Variable Supply PDO fields (type 10)
-    uint16_t variableMaxVoltage_mV() const;    ///< Max voltage in millivolts (50mV units)
-    uint16_t variableMinVoltage_mV() const;    ///< Min voltage in millivolts (50mV units)
-    uint16_t variableMaxCurrent_mA() const;    ///< Max current in milliamps (10mA units)
-
-    // Augmented PDO fields (type 11). The pps*() accessors decode only the SPR
-    // PPS APDO (subtype 00b) and return 0/false for any other subtype.
-    uint8_t apdoSubtype() const;               ///< APDO subtype, bits 29:28 (meaningful for Augmented only)
-    bool isSprPps() const;                     ///< True when the active PDO is an SPR PPS APDO
-    bool ppsPowerLimited() const;
-    uint16_t ppsMaxVoltage_mV() const;         ///< Max voltage in millivolts (100mV units for PPS)
-    uint16_t ppsMinVoltage_mV() const;         ///< Min voltage in millivolts (100mV units for PPS)
-    uint16_t ppsMaxCurrent_mA() const;         ///< Max current in milliamps (50mA units for PPS)
 
     void debugPrint(Stream &s = Serial) const override;
 
     /**
      * @brief Validates active PDO contract register data semantically
+     *
+     * With an active contract, the active PDO must pass TPS25751Pdo::isValidForReceiver().
      * @return true if PDO contract data is logically consistent
      */
     bool isSemanticallyValid() const override;

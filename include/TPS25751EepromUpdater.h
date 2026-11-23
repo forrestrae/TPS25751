@@ -166,7 +166,7 @@ enum class EepromUpdateStatus : uint8_t {
     CompareMismatch,          ///< compareRegion(): the EEPROM differs from the image. writeRegionPointer(): the word read back differs from the value written. An update: the compare of step 3, or the first chunks did not read back at the bundle start in step 2
     PointerRestoreFailed,     ///< Update step 3: the target pointer could not be written to the bundle start
     OldPointerEraseFailed,    ///< Update step 4: the old region pointer could not be written to 0
-    PointerNeighborsChanged,  ///< Bytes 4 to 15 after a pointer changed during a pointer write, or the 16 bytes at the target pointer changed while the first chunks of an update were written
+    PointerNeighborsChanged,  ///< Bytes 4 to 15 after a pointer changed during a pointer write; or the 16 bytes at the target pointer changed while the first chunks of an update were written; or those bytes already held the start of the image before the bundle write
     ResetTimeout,             ///< The controller did not return to APP after GAID
     CommandRejected,          ///< The executor reported "!CMD" (task code not recognized)
     CommandTimeout,           ///< The executor saw neither clear nor "!CMD" before the timeout
@@ -237,6 +237,8 @@ struct EepromUpdateOptions {
  *   image bytes compared so far. The last call has @p done == @p total.
  *
  * The read-back after the first two chunks of the write phase makes no call.
+ * The check that precedes the first task of step 2 comes after the done == 0
+ * call; when it stops the update, that call is the only one.
  * A step that fails makes no further call, so a missing final call means the
  * phase did not complete. updateBothRegions() runs both phases once per region.
  *
@@ -590,7 +592,10 @@ public:
      * step 2:
      *
      * 1. writeRegionPointer(@p target, 0).
-     * 2. FLad to bundleStart(@p target), then FLwd in 32-byte chunks, the last
+     * 2. Before any task, one check of what step 1 read: if bytes 4 to 15
+     *    after the target pointer equal the first 12 bytes of the image, the
+     *    call stops with PointerNeighborsChanged (see below). Otherwise
+     *    FLad to bundleStart(@p target), then FLwd in 32-byte chunks, the last
      *    chunk at its true length. A chunk whose FLwd reports busy (0xFF) is
      *    retried up to FLWD_BUSY_RETRIES times, each retry after
      *    FLWD_BUSY_RETRY_DELAY_MS and preceded by a fresh FLad to that chunk's
@@ -625,6 +630,7 @@ public:
      * | OldPointerEraseFailed | Step 4, when its pointer write fails as for step 1 | Target holds the image and its pointer is valid. Other pointer uncertain, so both may be valid; the low region boots first (Figure 2-9) |
      * | PointerNeighborsChanged | The neighbor check of the pointer write in step 1, 3, or 4 | Bytes 4 to 15 after that pointer changed. Stop and dump the EEPROM |
      * | PointerNeighborsChanged | Step 2, the pointer read of the read-back (lastStep() is WriteBundle) | Target pointer word or the 12 bytes after it changed while the first two chunks were written. Stop and dump the EEPROM |
+     * | PointerNeighborsChanged | Step 2, before any task (lastStep() is WriteBundle, and no FLad or FLwd was issued after step 1) | Target pointer 0 from step 1, nothing else written by this call. The 12 bytes after the target pointer hold the start of the image: the trace of an earlier misplaced write. Dump and repair the EEPROM before another update |
      * | CommandRejected, CommandTimeout, I2cError | The executor, in any step | As the row of the step lastStep() names |
      *
      * For an executor failure, lastStep() gives the row: Preflight leaves the
@@ -646,6 +652,16 @@ public:
      * word have changed (PointerNeighborsChanged). At most 64 bytes are then
      * misplaced, in the unused bytes after the target's pointer word, and the
      * other region and its pointer are untouched.
+     *
+     * A stop of that kind leaves the first bytes of the image after the
+     * target's pointer word. A second attempt would read them in step 1 and
+     * take them as its reference, so the same failure would pass the check
+     * unseen and the rest of the bundle would follow. Step 2 therefore begins
+     * with a check that costs no task: if bytes 4 to 15 of step 1's read-back
+     * equal the first 12 bytes of the image, the call returns
+     * PointerNeighborsChanged before any FLad or FLwd of step 2. The progress
+     * callback has had its done == 0 call by then and gets no other. The
+     * EEPROM has to be dumped and repaired before another update.
      *
      * What it does not prove. It checks the first two chunks only: a write
      * address that goes wrong after the read-back is not seen before FLvy or

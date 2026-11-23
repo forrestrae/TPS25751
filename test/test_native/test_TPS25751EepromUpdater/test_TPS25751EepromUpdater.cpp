@@ -2148,6 +2148,137 @@ void test_update_region_pointer_area_change_stops_the_write()
     assertUnchangedOutside(b, {{LOW_PTR, 4}, {HIGH_START, SMALL_LEN}});
 }
 
+void test_update_region_stops_on_the_trace_of_an_earlier_misplaced_write()
+{
+    // The 12 bytes after the target pointer already hold the first 12 bytes of
+    // the image: what a bundle write that went to the pointer row leaves
+    // behind. Step 2 stops before its first task. PointerNeighborsChanged with
+    // lastStep() WriteBundle: target pointer 0 from step 1, nothing else
+    // written, other region boots.
+    for (EepromRegion target : {EepromRegion::Low, EepromRegion::High}) {
+        Board b;
+        const uint32_t pointerAddr = TPS25751EepromUpdater::regionPointerAddress(target);
+        b.fake.writeBytes(pointerAddr + 4, b.newBundle.data(), 12);
+        b.snapshot();
+        TPS25751EepromUpdater u(b.fake);
+        ProgressLog log;
+        log.updater = &u;
+        u.setProgressCallback(recordProgress, &log);
+
+        ASSERT_STATUS(EepromUpdateStatus::PointerNeighborsChanged,
+                      u.updateRegion(target, b.newBundle.data(), b.newBundle.size()));
+        ASSERT_STEP(EepromUpdateStep::WriteBundle, u.lastStep());
+
+        // The last task is the read-back of step 1. No FLad or FLwd follows it:
+        // the only ones in the log are the pointer write's own.
+        TEST_ASSERT_EQUAL_size_t(IDX_STEP1_READBACK + 1, b.fake.calls.size());
+        TEST_ASSERT_EQUAL_size_t(1, b.fake.countOf("FLad"));
+        TEST_ASSERT_EQUAL_size_t(1, b.fake.countOf("FLwd"));
+        // The progress callback had its done == 0 call, which is where a caller
+        // can cut after step 1, and no other.
+        TEST_ASSERT_EQUAL_size_t(1, log.entries.size());
+        TEST_ASSERT_EQUAL_UINT32(0, log.entries[0].done);
+        ASSERT_STEP(EepromUpdateStep::WriteBundle, log.entries[0].step);
+
+        TEST_ASSERT_EQUAL_HEX32(0, pointerOf(b.fake, target));
+        assertUnchangedOutside(b, {{pointerAddr, 4}});
+        assertStillBoots(b);
+    }
+}
+
+void test_update_region_no_false_stop_on_other_bytes_after_the_pointer()
+{
+    // Only the first 12 bytes of this image after the pointer stop the update.
+    const std::vector<uint8_t> image = makeNewBundle(SMALL_LEN);
+
+    // Erased bytes, the normal case: every other test in this suite.
+    // Eleven of the twelve bytes match: the last differs, then the first.
+    const uint32_t odd[] = {15, 4};
+    for (uint32_t offset : odd) {
+        Board b;
+        b.fake.writeBytes(HIGH_PTR + 4, image.data(), 12);
+        b.fake.eeprom[HIGH_PTR + offset] ^= 0x01;
+        b.snapshot();
+        TPS25751EepromUpdater u(b.fake);
+        ASSERT_STATUS_MESSAGE(EepromUpdateStatus::Success,
+                              u.updateRegion(EepromRegion::High, image.data(), image.size()),
+                              at("differing byte", offset));
+        assertUnchangedOutside(b, {{LOW_PTR, 4}, {HIGH_START, SMALL_LEN}});
+    }
+    // The start of a different bundle: the old one shares the four Header_ID
+    // bytes with the image and differs after them.
+    {
+        Board b;
+        b.fake.writeBytes(HIGH_PTR + 4, b.oldBundle.data(), 12);
+        b.snapshot();
+        TPS25751EepromUpdater u(b.fake);
+        ASSERT_STATUS(EepromUpdateStatus::Success, u.updateRegion(EepromRegion::High, image.data(), image.size()));
+    }
+    // The image's bytes after the other region's pointer do not concern this target.
+    {
+        Board b;
+        b.fake.writeBytes(LOW_PTR + 4, image.data(), 12);
+        b.snapshot();
+        TPS25751EepromUpdater u(b.fake);
+        ASSERT_STATUS(EepromUpdateStatus::Success, u.updateRegion(EepromRegion::High, image.data(), image.size()));
+    }
+}
+
+void test_update_region_repeat_after_a_stop_in_step_2()
+{
+    // End to end. Attempt 1: the FLad to the bundle start reports 0x00 without
+    // taking effect, the first two chunks land just past the target's pointer
+    // word (the fake's model of a stale write address; assumption, not in the
+    // TRM), and the read-back stops the update. Attempt 2 meets the same
+    // fault, and this time the second FLad is faulted the same way. Without
+    // the check on the trace, attempt 2 would take the stray bytes as its
+    // reference, pass the read-back, and send the remaining 446 chunks after
+    // them. With it, attempt 2 stops before any bundle write. The other region
+    // boots after both attempts.
+    for (int sameImage = 0; sameImage < 2; ++sameImage) {
+        for (EepromRegion target : {EepromRegion::Low, EepromRegion::High}) {
+            const char *where = at(sameImage ? "target already holds the image, target" : "target holds the old bundle, target",
+                                   static_cast<size_t>(target));
+            Board b(BUNDLE_LEN);
+            if (sameImage) {
+                b.fake.writeBytes(LOW_START, b.newBundle.data(), b.newBundle.size());
+                b.fake.writeBytes(HIGH_START, b.newBundle.data(), b.newBundle.size());
+                b.snapshot();
+            }
+            TPS25751EepromUpdater u(b.fake);
+
+            // Attempt 1.
+            b.fake.failCall(IDX_BUNDLE_FLAD, Fault::returnCodeOnly(0x00));
+            const EepromUpdateStatus first = u.updateRegion(target, b.newBundle.data(), b.newBundle.size());
+            ASSERT_STATUS_MESSAGE(sameImage ? EepromUpdateStatus::PointerNeighborsChanged
+                                            : EepromUpdateStatus::CompareMismatch, first, where);
+            ASSERT_STEP_MESSAGE(EepromUpdateStep::WriteBundle, u.lastStep(), where);
+            TEST_ASSERT_EQUAL_size_t_MESSAGE(1 + 2, b.fake.countOf("FLwd"), where);
+            assertStillBoots(b, where);
+
+            // Attempt 2, with both bundle FLads of this attempt faulted.
+            const size_t base = b.fake.calls.size();
+            const size_t flwdBefore = b.fake.countOf("FLwd");
+            const size_t fladBefore = b.fake.countOf("FLad");
+            b.fake.failCall(base + IDX_BUNDLE_FLAD, Fault::returnCodeOnly(0x00));
+            b.fake.failCall(base + IDX_RESUME_FLAD, Fault::returnCodeOnly(0x00));
+            b.snapshot();
+            const EepromUpdateStatus second = u.updateRegion(target, b.newBundle.data(), b.newBundle.size());
+
+            ASSERT_STATUS_MESSAGE(EepromUpdateStatus::PointerNeighborsChanged, second, where);
+            ASSERT_STEP_MESSAGE(EepromUpdateStep::WriteBundle, u.lastStep(), where);
+            // Pre-flight and step 1, and nothing after them: one FLad and one
+            // FLwd, both of the pointer write.
+            TEST_ASSERT_EQUAL_size_t_MESSAGE(base + IDX_STEP1_READBACK + 1, b.fake.calls.size(), where);
+            TEST_ASSERT_EQUAL_size_t_MESSAGE(flwdBefore + 1, b.fake.countOf("FLwd"), where);
+            TEST_ASSERT_EQUAL_size_t_MESSAGE(fladBefore + 1, b.fake.countOf("FLad"), where);
+            // The pointer was already 0, so attempt 2 changed nothing at all.
+            assertUnchanged(b, where);
+            assertStillBoots(b, where);
+        }
+    }
+}
+
 void test_update_region_flad_after_the_read_back_fails()
 {
     // Step 2, the fresh FLad to the next unwritten byte. SetAddressFailed:
@@ -3524,6 +3655,9 @@ int main(int, char **)
     RUN_TEST(test_update_region_retry_flad_failure);
     RUN_TEST(test_update_region_read_back_mismatch_stops_the_write);
     RUN_TEST(test_update_region_pointer_area_change_stops_the_write);
+    RUN_TEST(test_update_region_stops_on_the_trace_of_an_earlier_misplaced_write);
+    RUN_TEST(test_update_region_no_false_stop_on_other_bytes_after_the_pointer);
+    RUN_TEST(test_update_region_repeat_after_a_stop_in_step_2);
     RUN_TEST(test_update_region_flad_after_the_read_back_fails);
     RUN_TEST(test_update_region_verify_failure_leaves_pointer_erased);
     RUN_TEST(test_update_region_compare_mismatch_leaves_pointer_erased);

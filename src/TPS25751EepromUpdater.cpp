@@ -459,6 +459,19 @@ EepromUpdateStatus TPS25751EepromUpdater::writeBundle(EepromRegion target, const
     // Step 1 is complete and no task of step 2 has been issued yet.
     reportProgress(0, total);
 
+    // If the 12 bytes after the target pointer already are the first 12 bytes
+    // of the image, an earlier attempt put them there: a bundle write that went
+    // to the pointer row and was stopped by the check below. That check
+    // compares against these same bytes, so it could not see the same thing
+    // happen again. Nothing of step 2 is issued.
+    if (memcmp(pointerRow + 4, image, kFlashReadBytes - 4) == 0) {
+        TPS_DEBUG_ERROR(DEBUG_CAT_TASK,
+                        "EEPROM: the bytes after the pointer at 0x%08lX hold the start of the image; "
+                        "dump and repair the EEPROM before another update",
+                        static_cast<unsigned long>(regionPointerAddress(target)));
+        return EepromUpdateStatus::PointerNeighborsChanged;
+    }
+
     EepromUpdateStatus s = setWriteAddress(base);
     if (s != EepromUpdateStatus::Success) {
         return s;

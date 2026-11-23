@@ -1,6 +1,6 @@
 # TPS25751 Library - System Architecture
 
-**Last Updated:** 2026-11-22
+**Last Updated:** 2026-11-23
 **Status:** Active
 
 ---
@@ -1365,6 +1365,75 @@ validation rules that disagreed with the specification.
 - 0x35 cannot decode its typed fields alone; its single-argument `debugPrint()` prints
   the raw words and common fields with a note that the typed fields need the PDO type.
 
+### ADR-014: EEPROM Updater, a Non-Register Flash-Task Sequencer on an Executor Seam
+**Status:** Accepted
+**Date:** 2026-11-23
+**Context:** The TPS25751 boots its patch bundle from an external EEPROM at 0x50 on its
+I2Cc bus. A host on I2Ct rewrites that EEPROM only through four flash 4CC tasks, `FLrd`,
+`FLad`, `FLwd`, and `FLvy` (TRM SLVUCR8B Tables 4-19 to 4-22, pages 81 and 82), while the
+controller runs in APP. TI application note SLVAFL1 defines a two-region layout and a
+four-step update in which an erased region pointer keeps the controller from loading a
+region while it is written. An ordering error can leave no bootable region; recovery then
+needs a PBM load (ADR-011) or an external programmer. The sequencing therefore needs
+host-run tests that inject a fault at every task, and `src/TPS25751.cpp`, which owns
+`executeCommand()`, cannot run on the host because it needs `Wire`.
+**Decision:**
+- `TPS25751EepromUpdater` is a sequencer, not a register, beside `TPS25751PatchLoader`: it
+  does not inherit `TPS25751Register` and is not in the factory. It provides the task
+  primitives, checked region pointer writes, `updateRegion()`, `updateInactiveRegion()`,
+  `updateBothRegions()`, `programBlank()`, `compareRegion()`, `dump()`, and `coldReset()`.
+- It depends on `TPS25751CommandExecutor`, an interface of five calls (`executeCommand()`,
+  `readMode()`, `readBootFlags()`, `delayMs()`, `nowMs()`) that does not include `Wire.h`.
+  `TPS25751HostExecutor` adapts a `TPS25751` to it on the target, and the native tests use
+  `FakeCommandExecutor`. Virtual calls need no RTTI, so the `-fno-rtti` constraint holds.
+  `TPS25751` itself is unchanged.
+- Region selection reads the pointers first and BOOT_FLAGS (0x2D, BOOT_STATUS in SLVAFL1)
+  second, and only when both pointers are valid. BOOT_FLAGS is latched at boot. After an
+  update without a restart it describes the old layout, and SLVAFL1 Figure 2-2, which
+  decides from BOOT_FLAGS alone, would then select the region whose pointer is the only
+  valid one and erase it. Hardware stage 3 of the plan reached that state and the
+  pointer-first rule chose correctly.
+- The written region is compared with the image through `FLrd` before its pointer is
+  written. The TRM says `FLvy` completes after the header is checked. Stage 3 saw it reject
+  a bundle with one inverted body byte, which is a sample of one, and SLVAFL1 (page 2)
+  says a CRC error in a Low region with a correct header ends the boot without trying
+  High, so a pointer written over a damaged body costs both regions.
+- Step 2 of an update reads back before it trusts the controller's write address. Before
+  any task it checks that the 12 bytes after the erased pointer are not the start of the
+  image, the trace of an earlier misplaced write. After the first two chunks it reads the
+  target pointer row and then the chunks, compares both, and sends a fresh `FLad` before
+  the rest. An `FLad` that reported success without taking effect, a case no TI document
+  describes, then misplaces 64 bytes into the unused bytes after the pointer instead of a
+  whole bundle across the other region, in the case the tests model: a write address left
+  just past the pointer word.
+- `coldReset()` (`GAID`) is a separate call, so the application decides when the port
+  disconnects.
+- `programBlank()` runs steps 1 to 3 per region, Low first, with a checked write of the
+  AppConfigOffset word to 0 after step 1, and refuses while any pointer is valid. It is the
+  flash-task half of the recovery in SLVAFL1 Figure 4-1, after a PBM load.
+**Consequences:**
+- The updater builds in `[env:native]` and `test/coverage.sh` measures it. Its suite
+  checks every call sequence against the plan and sweeps an executor failure and a wrong
+  return code across every task of an update, asserting the EEPROM state the status table
+  promises.
+- `FakeCommandExecutor` models behaviour the TRM does not state, such as an `FLwd` at a
+  stale write address and an `FLvy` that checks only Header_ID. A test that depends on such
+  a choice pins the fake, not the device; the fake labels each one.
+- The read-back of step 2 has residual limits. The `FLad` after the read-back is not
+  verified, a write address that goes wrong later shows only in step 3 and only inside the
+  target region, and when the target already held the image, chunks misplaced outside the
+  pointer row go unseen. In `programBlank()` the last write before the bundle `FLad` is the
+  AppConfigOffset word, so the same modelled fault lands after that word, where the
+  read-back does not look. Whether an `FLrd` moves the write address is not documented and
+  has not been observed.
+- Hardware stages 1 to 4 verified the layout, the result offsets, a 4-byte `FLwd`, a full
+  region update, `updateBothRegions()`, `GAID`, and the boot region after a cut at each
+  step. `programBlank()` and the I2C EEPROM Present flag after a PBM boot wait for stage 5.
+- A region update blocks for about 26 s and both regions for about 52 s (stage 3). An
+  application with a watchdog services it from the progress callback.
+- `TPS25751PatchLoader` and `TPS25751DownstreamDevice` still call `TPS25751` directly.
+  Moving them to the executor seam would give them native tests too; it is not planned.
+
 ---
 
 ## Revision History
@@ -1379,6 +1448,7 @@ validation rules that disagreed with the specification.
 | 1.5 | 2026-07-02 | Claude Code | BQ25798 driver split out to the sibling lib/BQ25798 repo; ADR-008/009/010 retained as the downstream-driver extension-point contract, BQ25798-specific walkthrough moved with the driver |
 | 1.6 | 2026-11-19 | Claude Code | Added ADR-012: 16-bit bit positions in the register base class; moved ADR-010's Consequences back under ADR-010 |
 | 1.7 | 2026-11-22 | Claude Code | Added ADR-013: USB PD PDO and RDO words decode through the TPS25751Pdo and TPS25751Rdo value types |
+| 1.8 | 2026-11-23 | Claude Code | Added ADR-014: TPS25751EepromUpdater, a non-register flash-task sequencer on the TPS25751CommandExecutor seam |
 
 ---
 

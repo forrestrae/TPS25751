@@ -17,11 +17,21 @@
 // It issues only FLrd and FLvy. It makes no EEPROM write and does not reset
 // the controller.
 //
-// The dump lines have the form "xxxxxxxx: xx xx ... xx", which xxd -r turns
-// back into binary. To compare with the full-flash image on the host, save the
-// serial log, keep the lines between the markers, and run:
+// The report runs once in setup() and again each time "r" arrives over serial,
+// so a monitor attached late can still capture a complete run.
 //
-//   xxd -r dump.txt > eeprom.bin && cmp eeprom.bin <image>_fullFlash.bin
+// The dump lines have the form "xxxxxxxx: xx xx ... xx", which xxd -r turns
+// back into binary. The BEGIN and END marker lines are for reading the log;
+// they are not neutral to xxd -r, which would parse parts of them as an
+// address and a byte. Never feed the whole log to xxd. Extract the dump lines
+// first, from a log that holds exactly one report:
+//
+//   grep -aE '^[0-9a-f]{8}:( [0-9a-f]{2}){1,16}\r?$' serial.log > dump.txt
+//   wc -l dump.txt                  # must print 1984
+//   xxd -r dump.txt > eeprom.bin
+//   cmp eeprom.bin <image>_fullFlash.bin
+//
+// A log with several reports gives a multiple of 1984 lines; keep one run.
 //
 // HARDWARE:
 //   - Teensy 4.x MCU
@@ -77,7 +87,7 @@ static void printFlag(const __FlashStringHelper* name, bool value)
     Serial.println(value ? F(": 1") : F(": 0"));
 }
 
-static void printBootStatus()
+static void printBootFlags()
 {
     TPS25751BootFlags flags;
     if (!pd.readBootFlags(flags)) {
@@ -159,12 +169,40 @@ static void dumpEeprom()
     Serial.println(F("-----END EEPROM DUMP-----"));
 
     Serial.print(F("[dump] Result: "));
-    Serial.print(TPS25751EepromUpdater::toString(s));
-    Serial.print(F(", "));
+    Serial.println(TPS25751EepromUpdater::toString(s));
+    if (s != EepromUpdateStatus::Success) {
+        Serial.println(F("[dump] Dump incomplete; the lines above stop at the failing read."));
+        return;
+    }
+    Serial.print(F("[dump] "));
     Serial.print(DUMP_END / TPS25751EepromUpdater::kFlashReadBytes);
     Serial.print(F(" FLrd calls in "));
     Serial.print(elapsed);
     Serial.println(F(" ms"));
+}
+
+// Runs every read-only step once. Issues only FLrd and FLvy.
+static void runReport()
+{
+    Serial.println(F("[report] TPS25751 EEPROM inspection (read-only)"));
+
+    const bool app = printMode();
+    printVersion();
+    printBootFlags();
+
+    if (!app) {
+        Serial.println(F("[report] Not in APP mode; SLVAFL1 describes EEPROM access in APP mode. Skipping the flash tasks."));
+    } else {
+        printPointer(EepromRegion::Low);
+        printPointer(EepromRegion::High);
+        printTarget();
+        printVerify(EepromRegion::Low);
+        printVerify(EepromRegion::High);
+        dumpEeprom();
+        Serial.println(F("[report] Done. No EEPROM write was made."));
+    }
+
+    Serial.println(F("[hint] Send 'r' to run the read-only report again."));
 }
 
 // ---------------------------------------------------------------------------
@@ -182,28 +220,15 @@ void setup()
 
     pd.begin();
 
-    Serial.println(F("[setup] TPS25751 EEPROM inspection (read-only)"));
-
-    const bool app = printMode();
-    printVersion();
-    printBootStatus();
-
-    if (!app) {
-        Serial.println(F("[setup] Not in APP mode; the flash tasks need APP. Stopping."));
-        return;
-    }
-
-    printPointer(EepromRegion::Low);
-    printPointer(EepromRegion::High);
-    printTarget();
-    printVerify(EepromRegion::Low);
-    printVerify(EepromRegion::High);
-    dumpEeprom();
-
-    Serial.println(F("[setup] Done. No EEPROM write was made."));
+    runReport();
 }
 
 void loop()
 {
-    delay(1000);
+    while (Serial.available() > 0) {
+        if (Serial.read() == 'r') {
+            runReport();
+        }
+    }
+    delay(10);
 }

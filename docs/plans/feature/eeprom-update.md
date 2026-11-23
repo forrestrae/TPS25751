@@ -673,6 +673,18 @@ Ordered from safe to destructive. Each stage states its recovery.
    failure code, `FLrd` behaviour when the EEPROM does not answer (Table 4-19 has no
    return code), and whether a BQ25798 interrupt was deferred while the flash tasks made
    the controller ignore I2Cc_IRQ.
+
+   Independent read, 2026-11-23, read-only, run in a fork of the orchestrator session
+   at my request and not rerun since. A scratch sketch read the 24LC256 at 0x50
+   directly on the Teensy's `Wire2`, which is the controller's I2Cc bus, at 100 kHz
+   while the controller ran in APP. The probe was acknowledged. The dump of 0x0000 to
+   0x7C00 (1984 lines, 31744 bytes) is byte-identical to
+   `..._F8091166_fullFlash.bin`; every 16 bytes were read twice with 0 retries and 0
+   mismatches, in 7246 ms. The sketch sends only the two address bytes of a random
+   read. Together with the `FLrd` dump above, this verifies that `FLrd` returns the
+   chip's contents and not a controller-side copy, which the read-back and the compare
+   rely on. One clean read says nothing about direct writes on a bus the controller
+   also masters.
 2. First write: `writeRegionPointer(High, 0)` while the low pointer is valid, then
    restore it to 0x4400. Confirms that `FLwd` writes exactly four bytes (neighbor check)
    and the read-back. This is step 1 of the app note's own flow, so the controller
@@ -715,6 +727,34 @@ that needs no rework. Second, the board runs from the 18650 battery pack, so the
 and the controller stay powered while `GAID` puts the port through Type-C Error
 Recovery. Keep the pack connected and charged for every write stage: an EEPROM write
 interrupted by power loss is the failure the two-region scheme protects against.
+
+Correction, 2026-11-23. The first point above is wrong as written, and the second
+needs a qualification:
+
+- The EEPROM is on the bottom of the board, above a battery-protection PCB. The SOIC8
+  clip cannot be attached while the board runs from the 18650 pack. `write-flash.zsh`
+  needs the stack taken apart and the board unpowered. The teardown is simple, but it
+  is rework, so every "Recovery: `write-flash.zsh`" line above carries that cost.
+- With the pack fitted, a power cycle also needs the stack apart, which affects stage
+  4.
+- The board can run from a bench supply instead of the pack. That leaves the EEPROM
+  exposed for the clip and makes a power cycle a switch. Cautions for that setup: a
+  voltage inside the pack's range with a current limit; the USB-C port unconnected
+  during writes unless a stage needs it, because the BQ25798 then sees a supply where
+  it expects a pack; leads secured before each write command.
+- `load-patch-bundle` has run successfully on this board with the EEPROM fitted, so a
+  PBM load is a recovery from PTCH that needs no teardown. After it, with the Low
+  pointer 0 and the High pointer valid, `u` selects Low and passes pre-flight check 4.
+  Pre-flight check 2 (I2C EEPROM Present in BOOT_FLAGS after a PBM boot) is still
+  inferred; stage 5 confirms it.
+- The EEPROM is reachable from the Teensy directly on `Wire2`.
+
+Open, not decided: which supply the write stages use (the paragraph above says the
+pack); a direct `Wire2` dump as an independent read-only check after `p`, `p2`, and
+`u`; and a direct `Wire2` restore sketch as a recovery that needs no clip. The restore
+sketch is outside this plan and writes the EEPROM on a bus the controller also
+masters, at boot, for the BQ25798, and during every flash task, so it needs its own
+decision, review, and go-ahead.
 
 ## Risks
 

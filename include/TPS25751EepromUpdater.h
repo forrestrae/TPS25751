@@ -132,7 +132,7 @@ constexpr uint32_t FLVY_CMD_TIMEOUT_MS = 1000;
 /// delay so that it ends on the restart (a NAK, or COMMAND reading 0 after the
 /// reboot) and not while MODE still reads APP from before the restart. Three
 /// times the typical delay. Hardware stage 3 saw COMMAND answer for 1277 ms
-/// after GAID, then the controller stop acknowledging (2026-11-23).
+/// after GAID, then a COMMAND poll fail on I2C (2026-11-23).
 constexpr uint32_t GAID_CMD_TIMEOUT_MS = 3000;
 
 /// Delay (ms) before a bundle chunk whose FLwd reported busy (0xFF) is retried.

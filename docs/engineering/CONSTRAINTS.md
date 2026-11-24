@@ -532,8 +532,9 @@ in `executeCommand()` is the first optimization if the update must be faster.
 `GAID` never completes in the normal sense. An APP-mode controller enters Type-C Error
 Recovery and restarts after a typical 1-second delay (Table 4-3), and the port disconnects.
 Stages 3 and 4 measured the same sequence on every reset: COMMAND kept answering for 1276
-to 1277 ms, then the controller stopped acknowledging and `executeCommand()` returned
-`I2CError`; MODE read APP 1938 to 1939 ms after `GAID`. That is one board, with the F8091164
+to 1277 ms, then a COMMAND poll failed on I2C and `executeCommand()` returned `I2CError`;
+the MODE read 100 ms later failed with error 4 (arbitration lost or SCL held low in the
+Teensy driver), not with a NACK; MODE read APP 1938 to 1939 ms after `GAID`. That is one board, with the F8091164
 and the F8091166 bundle running; whether the two bundles differ in firmware is not recorded.
 TRM Table 4-3 marks `GAID` complete by COMMAND returning to 0 on reboot; `coldReset()` does
 not take that as evidence, so that documented completion without a caught NAK is a second
@@ -1502,6 +1503,7 @@ void foo() {
 | 1.19 | 2026-11-23 | Claude Code | `programBlank()` writes both AppConfigOffset words first; `coldReset()` requires an observed restart and returns `ResetNotObserved` otherwise (Flash tasks and EEPROM update section) |
 | 1.20 | 2026-11-23 | Claude Code | `updateRegion()` checks both AppConfigOffset words in its pre-flight and the target's again before the pointer write (AppConfigOffset words section); PTCH after a restart with no valid pointer observed in stage 5 |
 | 1.21 | 2026-11-23 | Claude Code | PBM: 20 ms between `PBMc` completing and the DATA read, `issueCommand()`, the stage 5 evidence and what it does not establish, the 500 µs burst spacing the figures show (Patch Burst Mode section) |
+| 1.22 | 2026-11-23 | Claude Code | The MODE read after a failed `GAID` poll failed with error 4, not a NACK (Cold reset section) |
 
 ---
 

@@ -97,22 +97,39 @@ constexpr uint32_t PBMC_CMD_TIMEOUT_MS = 5000;
 /**
  * @brief Outcome of TPS25751PatchLoader::loadPatchBundle()
  *
- * Each enumerator corresponds to a distinct failure point in the 17-step PBM
- * sequence (SLVAFV8A §4.1), giving callers a precise diagnostic.
+ * Each enumerator names the step of the 17-step PBM sequence (SLVAFV8A
+ * section 4.1) at which the load stopped.
+ *
+ * Three outcomes leave the controller's state unknown, because the patch may
+ * have loaded: I2cError, CommandTimeout, and NotInAppMode. Before retrying a
+ * load after any failure, read MODE. If it reads APP, the patch loaded; if it
+ * reads PTCH, retry; if the read fails, restore the bus first.
  */
 enum class PatchLoadStatus : uint8_t {
-    Success,            ///< All 17 steps completed; device is now in APP mode
-    NotInPatchMode,     ///< Pre-flight MODE read did not return PTCH
-    PbmsRejected,       ///< TPS25751 rejected the PBMs 4CC ("!CMD")
-    BadBundleSize,      ///< PatchStartStatus 0x04 — bundleSize out of valid range
-    BadTargetAddress,   ///< PatchStartStatus 0x05 — target address not accepted
-    BadTimeout,         ///< PatchStartStatus 0x06 — timeout value not accepted
-    BurstFailed,        ///< burstWrite() returned false (one or more I2C chunk errors)
-    PbmcRejected,       ///< TPS25751 rejected the PBMc 4CC ("!CMD")
-    PatchApplyFailed,   ///< DATA[0] was not zero after PBMc + delay (apply error)
-    NotInAppMode,       ///< Final MODE read did not return APP after successful PBMc
-    CommandTimeout,     ///< executeCommand() timed out (neither clear nor "!CMD")
-    I2cError            ///< An I2C transaction failed inside executeCommand()
+    Success,            ///< All 17 steps completed; MODE read APP
+    NotInPatchMode,     ///< Step 2: the MODE read before the load failed or did not read PTCH
+    PbmsRejected,       ///< The controller rejected PBMs ("!CMD"), or PatchStartStatus was
+                        ///< a value other than 0x00, 0x04, 0x05, or 0x06
+    BadBundleSize,      ///< PatchStartStatus 0x04: bundle size out of range (TRM Table 4-15)
+    BadTargetAddress,   ///< PatchStartStatus 0x05: target address not accepted (TRM Table 4-15)
+    BadTimeout,         ///< PatchStartStatus 0x06: timeout value not accepted (TRM Table 4-15)
+    BurstFailed,        ///< burstWrite() returned false: a chunk of the image was not ACKed.
+                        ///< The loader does not issue PBMe (TRM Figure 5-1 does).
+    PbmcRejected,       ///< The controller rejected PBMc ("!CMD"). The loader does not issue
+                        ///< PBMe (TRM Figure 5-1 does).
+    PatchApplyFailed,   ///< Step 16: DATA[0] was not 0 after PBMc and the 20 ms delay
+    NotInAppMode,       ///< Step 17: at least one MODE read succeeded within
+                        ///< PBM_MODE_POLL_CAP_MS, and none read APP. The patch may still
+                        ///< be loading or may have failed.
+    CommandTimeout,     ///< Step 1: the I2Ct_IRQ pin did not go low within 5 s (IRQ mode
+                        ///< only); or COMMAND did not clear and did not read "!CMD" within
+                        ///< PBMS_CMD_TIMEOUT_MS after PBMs or PBMC_CMD_TIMEOUT_MS after PBMc.
+                        ///< After a PBMc timeout the patch may have loaded.
+    I2cError            ///< An I2C transaction failed in the PBMs or PBMc handshake; or,
+                        ///< after PBMc, no DATA read succeeded within PBM_DATA_READ_CAP_MS,
+                        ///< or no MODE read succeeded within PBM_MODE_POLL_CAP_MS. In the
+                        ///< last two cases, and after a PBMc handshake failure, the patch
+                        ///< may have loaded.
 };
 
 // ---------------------------------------------------------------------------

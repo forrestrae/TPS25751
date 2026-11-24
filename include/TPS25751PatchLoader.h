@@ -39,9 +39,10 @@ constexpr uint8_t PBM_I2C_TARGET = 0x30;
 /// inconsistent: Table 4-1 (page 8) lists 0x31 as "3.1 seconds", its byte
 /// listings in steps 4 and 5 (page 8) send 0x32, and its DATA read-back in
 /// step 9 (page 10) shows 0x31. TRM SLVUCR8B Table 4-15 gives the byte in
-/// 100 ms units, which makes 0x31 4.9 s, and recommends 0x32 (5 s). The value
-/// is unchanged from the first release of the loader.
-constexpr uint8_t PBM_TIMEOUT = 0x31;
+/// 100 ms units, which makes 0x31 4.9 s, and recommends 0x32 (5 s), the value
+/// used here since 2026-11-24. NOT YET RUN ON HARDWARE: every load so far
+/// sent 0x31.
+constexpr uint8_t PBM_TIMEOUT = 0x32;
 
 /// 4CC command code to start a Patch Burst Mode session.
 constexpr TPS25751FourCC CMD_PBMS = TPS25751FourCC::of("PBMs");
@@ -154,7 +155,7 @@ enum class PatchLoadStatus : uint8_t {
  *   2.  Read MODE — confirm PTCH via readModeRegister().
  *   3.  (IRQ mode) Configure INT_MASK1 / clear INT_CLEAR1.
  *   4-9. executeCommand(PBMs, config[6]) — start the burst session.
- *        config = bundleSize[4, LE] + targetAddr(0x30) + timeout(0x31).
+ *        config = bundleSize[4, LE] + targetAddr(0x30) + timeout(0x32).
  *  10.  burstWrite(0x30, image, length): stream the image in Wire-sized chunks,
  *       then wait PBM_PRE_COMMIT_DELAY_US (500 us) before the next transaction.
  *  11.  (IRQ mode) Clear INT_CLEAR1 again.

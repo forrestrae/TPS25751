@@ -897,7 +897,7 @@ each with its source. None is changed on this branch, and each is open for the u
 - The 448 burst transactions of 32 bytes go out back to back. The app note's example
   sends three bursts with 500 us after each; the TRM figure shows no spacing.
   `burstWrite()` already takes an inter-chunk delay, which the loader leaves at 0.
-- The `PBMs` timeout byte is 0x31. TRM Table 4-15 (page 76) recommends 0x32, 5 s in
+- The `PBMs` timeout byte was 0x31 (changed to 0x32 on 2026-11-24, see below). TRM Table 4-15 (page 76) recommends 0x32, 5 s in
   100 ms units. The app note lists 0x31 as "3.1 seconds" and shows both values in its
   traces.
 - `PBMe` is never issued after a burst that is not acknowledged or after "!CMD" on
@@ -914,8 +914,9 @@ Decisions of 2026-11-24 on these points and on the other open items:
 | 500 us before `PBMc` | Keep |
 | Spacing between burst transactions | Leave as is, back to back |
 | `coldReset()` evidence rule (a MODE read that is not APP, then APP) | Leave as is: only a failed I2C transaction counts |
+| `PBMs` timeout byte | Changed to 0x32 on 2026-11-24 (session 2). Checked against TRM Table 4-15 (page 76: "recommended to always use 0x32 ... 5 seconds, LSB of 100 ms") and SLVAFV8A (Table 4-1 lists 0x31 as "3.1 seconds"; the byte listings of steps 4 and 5 send 0x32; the step 9 read-back shows 0x31). **0x32 has not run on hardware; every load so far, stages 5 and 6 included, sent 0x31.** A retest needs the user's go-ahead |
 | Is the branch finished | Not yet. `scripts/integrate.py` stays unrun until the user confirms |
-| `PBMs` timeout byte; `PBMe`, DATA read-back, and ReadyForPatch; coverage of `TPS25751.cpp`; `Wire2` dump; `Wire2` restore sketch; stage 4 with a power cycle | Deferred by the user to later sessions, each to be decided there |
+| `PBMe`, DATA read-back, and ReadyForPatch; coverage of `TPS25751.cpp`; `Wire2` dump; `Wire2` restore sketch; stage 4 with a power cycle | Deferred by the user to later sessions, each to be decided there |
 
 Still unverified, and marked so in the code: the new sequence on hardware; which pins the
 driver's pin-low flag covers. The SDA and SCL readout was removed from the `l` diagnostic

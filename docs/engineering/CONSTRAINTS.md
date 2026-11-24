@@ -411,14 +411,27 @@ delay at all. Whether to add the spacing is an open decision.
 These are facts about the code, each with the document it differs from. None has been
 observed to cause a failure.
 
-- ReadyForPatch. TRM Figure 5-1 starts by polling INT_EVENT1.ReadyForPatch every 10 ms.
-  The loader never reads INT_EVENT1. In IRQ mode it waits for the I2Ct_IRQ pin to go low
-  (up to 5 s); in polling mode it does not wait and does not retry.
-- MODE before the load. Figure 5-1 polls MODE until it reads PTCH. The loader reads MODE
-  once and returns `NotInPatchMode` if that read fails or does not read PTCH.
+- ReadyForPatch. TRM Figure 5-1 starts by polling INT_EVENT1.ReadyForPatch every 10 ms,
+  without a bound. In polling mode the loader polls INT_EVENT1 bit 81 every 10 ms,
+  tolerating failed reads; in IRQ mode it waits for the I2Ct_IRQ pin to go low instead and
+  does not read INT_EVENT1. Both waits end at `PBM_READY_WAIT_CAP_MS` (5 s) with
+  `CommandTimeout`. The TRM shows an INT_EVENT1 bit only while its INT_MASK1 bit is set
+  (Table 3-8, page 19), and SLVAFV8A says Ready for Patch is the one interrupt enabled at a
+  cold boot into PTCH (step 1, page 6). Bit 81 has not been read in PTCH on the test
+  board. In APP with the board's configuration INT_EVENT1 read all zero (Read/Write
+  Registers section), so a polling-mode load on a controller in APP ends at this step after
+  5 s, not at the MODE check.
+- MODE before the load. Figure 5-1 polls MODE every 10 ms until it reads PTCH, without a
+  bound. The loader does the same in both modes, tolerating failed reads, and returns
+  `NotInPatchMode` at `PBM_PTCH_POLL_CAP_MS` (5 s), or at once when MODE reads `APP `,
+  which the controller does not leave on its own.
 - DATA before `PBMs`. SLVAFV8A step 5 (page 8) reads DATA back 500 µs after writing it and
-  rewrites it until it matches; Figure 5-1 asks "DATA1 write completed successfully?". The
-  loader writes DATA once and does not read it back.
+  rewrites it until it matches, without a bound; its trace shows a first read-back of zeros
+  after an acknowledged write, and its code (page 17) compares one byte. Figure 5-1 asks
+  "DATA1 write completed successfully?". The loader writes the 6 bytes with
+  `TPS25751::writeCommandData()`, waits 500 µs, reads DATA, and compares all 6, for up to
+  `PBMS_DATA_ATTEMPTS` (3) attempts, then issues `PBMs` with no input. No match returns
+  `PbmsConfigMismatch`, or `I2cError` when no read-back succeeded.
 - Transaction spacing. SLVAFV8A sends its 11392-byte example image as three burst
   transactions with 500 µs after each (step 10, page 10; code, pages 17 and 18). The
   loader sends the test board's 14336-byte image as 448 transactions of 32 bytes, back to
@@ -432,7 +445,11 @@ observed to cause a failure.
 - COMMAND poll interval. Figure 5-1 polls CMD1 with a 10 ms delay. `waitForCommandClear()`,
   used for `PBMs` and `PBMc`, polls every 5 ms.
 - PBMe. Figure 5-1 issues `PBMe` after a burst that is not acknowledged and after `PBMc`
-  reads "!CMD". The loader returns `BurstFailed` or `PbmcRejected` and never issues `PBMe`.
+  reads "!CMD", and on no other failure, then restarts the flow. The loader issues `PBMe`
+  on the same two paths, with a `PBME_CMD_TIMEOUT_MS` (500 ms) timeout, and returns
+  `BurstFailed` or `PbmcRejected`; the `PBMe` outcome is only logged, and the retry is the
+  caller's. Without `PBMe` a retry would find the session open, and TRM Table 4-15 (page
+  76) says a second `PBMs` then ignores its DATA input and keeps the first bundle size.
 - The wait after `PBMc`. TRM Table 4-16 (page 79) says to check DATA when CMD1 goes to 0;
   the 20 ms delay appears only in Figure 5-1 and SLVAFV8A step 15 (page 11). The loader
   follows the figure and the app note.
@@ -1569,6 +1586,7 @@ void foo() {
 | 1.23 | 2026-11-23 | Claude Code | PBM: TRM Figure 5-1 has one 500 µs delay, before `PBMc`, which the loader now gives; the points where the loader departs from the documented flow; the `PBMs` timeout byte. Error 4 lists every source in the Teensy 4 driver (Cold reset section) |
 | 1.24 | 2026-11-23 | Claude Code | PBM: the app note spaces its separate burst transactions by 500 µs and the loader does not, an open decision; the loader's IRQ mode polls COMMAND instead of waiting for I2Ct_IRQ |
 | 1.25 | 2026-11-23 | Claude Code | PBM: SLVAFV8A shows both 0x31 and 0x32 for the `PBMs` timeout byte |
+| 1.26 | 2026-11-24 | Claude Code | PBM: the loader polls Ready for Patch (polling mode) and MODE before the load, reads the `PBMs` configuration back from DATA, and issues `PBMe` on the two paths of TRM Figure 5-1 |
 
 ---
 

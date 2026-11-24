@@ -670,9 +670,10 @@ updater suite has 131 tests. Two review nits are carried into Batch 3:
 
 Status, 2026-11-23: implemented; the review found no blocker and its findings are
 fixed; three of the four decisions that followed it are implemented (see the table
-below); a re-review and stage 5 are pending, and `programBlank()` has not run on
-hardware. `src/TPS25751EepromUpdater.cpp` has 100% line coverage (506 of 506 lines) and
-the updater suite has 149 tests. The example gained `l` (a PBM load while MODE reads
+below); the re-review of `c5c5376..85bab56` found the range clean and ready for stage
+5; stage 5 is pending, and `programBlank()` has not run on hardware.
+`src/TPS25751EepromUpdater.cpp` has 100% line coverage (506 of 506 lines), the updater
+suite has 149 tests, and the native run has 1297. The example gained `l` (a PBM load while MODE reads
 PTCH; it loads the controller's RAM only), `pb` (`programBlank()`), and `zero` (both
 pointers to 0, the start of stage 5); `r` now prints both AppConfigOffset words.
 
@@ -752,6 +753,24 @@ The repair is `writeRegionPointer()` to 0 for both regions followed by
 `programBlank()`, which is `zero` then `pb` in the example. A fourth option, having
 `updateRegion()` write the target's word to 0 itself, would add a write that starts in
 the middle of a page to every update and departs from the four steps of Figure 2-3.
+
+Notes from the re-review, 2026-11-23. The reviewer checked the tasks of the changed
+code against TRM pages 61, 62, 81, and 82 and found no disagreement with this plan. Its
+sweep of an `FLad` without effect, 60 runs against the new order, left no valid
+pointer over a region that does not hold the image; the stray bytes it produced are
+in unused EEPROM and are listed in the limits of `programBlank()`. Two remarks stay
+open:
+
+1. A MODE read other than APP, followed by APP, does not count as evidence of a
+   restart in `coldReset()`, and a test pins that. It is a third false-negative path
+   beside the two the comments list: such a sequence shows that a boot completed,
+   whatever the mode was before `GAID`. The decision of 2026-11-23 names I2C failures
+   only, so the rule is unchanged.
+2. The limits of `programBlank()` in the header give 0x0404 as the place where the
+   first word write lands straight after `zero` if its `FLad` has no effect. That
+   holds only if an `FLrd` leaves the write address alone and a 4-byte `FLwd` advances
+   it by four; with an `FLrd` that moves the address it is 0x040C. The sentence should
+   be worded as conditional with the next change to that file.
 
 Stage 5 should also read 0x03C0 to 0x03FF and 0x07C0 to 0x07FF in its dump. The two
 AppConfigOffset writes are the first `FLwd` calls that start in the middle of a page,

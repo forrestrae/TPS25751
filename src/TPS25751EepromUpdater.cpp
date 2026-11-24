@@ -375,6 +375,49 @@ EepromUpdateStatus TPS25751EepromUpdater::preflight(EepromRegion target, const u
                         toString(other), static_cast<unsigned long>(otherPointer), toString(target));
         return EepromUpdateStatus::NoBootableRegion;
     }
+    //    The controller looks for the kept region's Header_ID at its region
+    //    start plus its AppConfigOffset word (SLVAFL1 Boot Process), so a
+    //    valid pointer over a word that is not 0 is not bootable either
+    //    (decided 2026-11-23).
+    uint32_t otherWord = 0;
+    s = readAppConfigOffset(other, otherWord);
+    if (s != EepromUpdateStatus::Success) {
+        return s;
+    }
+    if (otherWord != 0) {
+        TPS_DEBUG_ERROR(DEBUG_CAT_TASK,
+                        "EEPROM: %s AppConfigOffset reads 0x%08lX, so %s is not bootable; update of %s refused",
+                        toString(other), static_cast<unsigned long>(otherWord), toString(other),
+                        toString(target));
+        return EepromUpdateStatus::NoBootableRegion;
+    }
+
+    // 5. The target's word must be 0 too. updateRegion() does not write it, so
+    //    a target behind another value would end with a valid pointer over a
+    //    region the controller may not load, and step 4 would then erase the
+    //    only bootable pointer.
+    uint32_t targetWord = 0;
+    s = readAppConfigOffset(target, targetWord);
+    if (s != EepromUpdateStatus::Success) {
+        return s;
+    }
+    if (targetWord != 0) {
+        TPS_DEBUG_ERROR(DEBUG_CAT_TASK,
+                        "EEPROM: %s AppConfigOffset reads 0x%08lX; update refused, repair with both pointers to 0 and programBlank()",
+                        toString(target), static_cast<unsigned long>(targetWord));
+        return EepromUpdateStatus::AppConfigOffsetNotZero;
+    }
+    return EepromUpdateStatus::Success;
+}
+
+EepromUpdateStatus TPS25751EepromUpdater::readAppConfigOffset(EepromRegion r, uint32_t& value)
+{
+    uint8_t row[kFlashReadBytes];
+    const EepromUpdateStatus s = readFlash(appConfigOffsetAddress(r), row);
+    if (s != EepromUpdateStatus::Success) {
+        return s;
+    }
+    value = getLe32(row);
     return EepromUpdateStatus::Success;
 }
 
@@ -557,7 +600,7 @@ EepromUpdateStatus TPS25751EepromUpdater::eraseTargetPointer(EepromRegion target
 
 EepromUpdateStatus TPS25751EepromUpdater::installBundle(EepromRegion target, const uint8_t* image,
                                                         size_t length, const uint8_t* pointerRow,
-                                                        bool compare, bool checkAppConfigOffset)
+                                                        bool compare)
 {
     const uint32_t start = bundleStart(target);
 
@@ -584,23 +627,22 @@ EepromUpdateStatus TPS25751EepromUpdater::installBundle(EepromRegion target, con
         }
     }
 
-    // programBlank() only: the AppConfigOffset word was written before the
-    // pass started, so read it once more right before the pointer makes the
-    // region loadable. The controller looks for the Header_ID at the region
-    // start plus this word (SLVAFL1 Boot Process); a word that is not 0 stops
-    // the pass with the pointer still 0.
-    if (checkAppConfigOffset) {
-        _lastStep = EepromUpdateStep::CheckAppConfigOffset;
-        uint8_t row[kFlashReadBytes];
-        s = readFlash(appConfigOffsetAddress(target), row);
-        if (s != EepromUpdateStatus::Success) {
-            return s;
-        }
-        if (getLe32(row) != 0) {
-            TPS_DEBUG_ERROR(DEBUG_CAT_TASK, "EEPROM: %s AppConfigOffset reads 0x%08lX before the pointer write",
-                            toString(target), static_cast<unsigned long>(getLe32(row)));
-            return EepromUpdateStatus::CompareMismatch;
-        }
+    // The AppConfigOffset word was read as 0 before the bundle write (the
+    // pre-flight of updateRegion(), or the word writes of programBlank()), so
+    // read it once more right before the pointer makes the region loadable.
+    // The controller looks for the Header_ID at the region start plus this
+    // word (SLVAFL1 Boot Process); a word that is not 0 stops the pass with
+    // the pointer still 0. Runs whether or not the compare ran.
+    _lastStep = EepromUpdateStep::CheckAppConfigOffset;
+    uint32_t word = 0;
+    s = readAppConfigOffset(target, word);
+    if (s != EepromUpdateStatus::Success) {
+        return s;
+    }
+    if (word != 0) {
+        TPS_DEBUG_ERROR(DEBUG_CAT_TASK, "EEPROM: %s AppConfigOffset reads 0x%08lX before the pointer write",
+                        toString(target), static_cast<unsigned long>(word));
+        return EepromUpdateStatus::CompareMismatch;
     }
 
     _lastStep = EepromUpdateStep::RestorePointer;
@@ -629,8 +671,7 @@ EepromUpdateStatus TPS25751EepromUpdater::updateRegion(EepromRegion target, cons
     }
 
     // Steps 2 and 3.
-    s = installBundle(target, image, length, pointerRow, opt.compareAfterWrite,
-                      /*checkAppConfigOffset=*/false);
+    s = installBundle(target, image, length, pointerRow, opt.compareAfterWrite);
     if (s != EepromUpdateStatus::Success) {
         return s;
     }
@@ -732,8 +773,7 @@ EepromUpdateStatus TPS25751EepromUpdater::programBlank(const uint8_t* image, siz
             return s;
         }
 
-        s = installBundle(target, image, length, pointerRow, /*compare=*/true,
-                          /*checkAppConfigOffset=*/true);
+        s = installBundle(target, image, length, pointerRow, /*compare=*/true);
         if (s != EepromUpdateStatus::Success) {
             return s;
         }
@@ -937,6 +977,7 @@ const char* TPS25751EepromUpdater::toString(EepromUpdateStatus s)
         case EepromUpdateStatus::BadImageHeader:          return "BadImageHeader";
         case EepromUpdateStatus::BadImageLength:          return "BadImageLength";
         case EepromUpdateStatus::NoBootableRegion:        return "NoBootableRegion";
+        case EepromUpdateStatus::AppConfigOffsetNotZero:  return "AppConfigOffsetNotZero";
         case EepromUpdateStatus::EepromNotBlank:          return "EepromNotBlank";
         case EepromUpdateStatus::PointerEraseFailed:      return "PointerEraseFailed";
         case EepromUpdateStatus::SetAddressFailed:        return "SetAddressFailed";

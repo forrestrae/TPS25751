@@ -90,35 +90,40 @@ using Fault = FakeCommandExecutor::Fault;
 constexpr size_t SMALL_LEN = 100;  // three 32-byte chunks and one of 4; seven compare reads
 
 // Call indices of updateRegion() for a SMALL_LEN image with the default
-// options, counted from the plan: one pre-flight read of the other pointer,
-// four tasks per pointer write, FLad plus the first two chunks, the read-back
-// (one read of the target pointer, then four at the bundle start), FLad plus
-// the two remaining chunks, FLvy, seven compare reads, then the pointer writes
-// of steps 3 and 4.
+// options, counted from the plan: three pre-flight reads (the other pointer,
+// the other AppConfigOffset word, the target's word), four tasks per pointer
+// write, FLad plus the first two chunks, the read-back (one read of the target
+// pointer, then four at the bundle start), FLad plus the two remaining chunks,
+// FLvy, seven compare reads, the read of the target's word, then the pointer
+// writes of steps 3 and 4.
 constexpr size_t IDX_PREFLIGHT_READ = 0;
-constexpr size_t IDX_STEP1_READ = 1;
-constexpr size_t IDX_STEP1_FLAD = 2;
-constexpr size_t IDX_STEP1_FLWD = 3;
-constexpr size_t IDX_STEP1_READBACK = 4;
-constexpr size_t IDX_BUNDLE_FLAD = 5;
-constexpr size_t IDX_FIRST_CHUNK = 6;          // chunks 0 and 1 are calls 6 and 7
-constexpr size_t IDX_EARLY_POINTER_READ = 8;
-constexpr size_t IDX_EARLY_READ = 9;           // calls 9 to 12
-constexpr size_t IDX_RESUME_FLAD = 13;
-constexpr size_t IDX_FLVY = 16;
-constexpr size_t IDX_FIRST_COMPARE = 17;
-constexpr size_t IDX_STEP3_READ = 24;
-constexpr size_t IDX_STEP3_FLAD = 25;
-constexpr size_t IDX_STEP3_FLWD = 26;
-constexpr size_t IDX_STEP3_READBACK = 27;
-constexpr size_t IDX_STEP4_READ = 28;
-constexpr size_t IDX_STEP4_FLAD = 29;
-constexpr size_t IDX_STEP4_FLWD = 30;
-constexpr size_t IDX_STEP4_READBACK = 31;
-constexpr size_t SMALL_UPDATE_CALLS = 32;
+constexpr size_t IDX_PREFLIGHT_OTHER_WORD = 1;
+constexpr size_t IDX_PREFLIGHT_TARGET_WORD = 2;
+constexpr size_t IDX_STEP1_READ = 3;
+constexpr size_t IDX_STEP1_FLAD = 4;
+constexpr size_t IDX_STEP1_FLWD = 5;
+constexpr size_t IDX_STEP1_READBACK = 6;
+constexpr size_t IDX_BUNDLE_FLAD = 7;
+constexpr size_t IDX_FIRST_CHUNK = 8;          // chunks 0 and 1 are calls 8 and 9
+constexpr size_t IDX_EARLY_POINTER_READ = 10;
+constexpr size_t IDX_EARLY_READ = 11;          // calls 11 to 14
+constexpr size_t IDX_RESUME_FLAD = 15;
+constexpr size_t IDX_FLVY = 18;
+constexpr size_t IDX_FIRST_COMPARE = 19;
+constexpr size_t IDX_WORD_CHECK = 26;
+constexpr size_t IDX_STEP3_READ = 27;
+constexpr size_t IDX_STEP3_FLAD = 28;
+constexpr size_t IDX_STEP3_FLWD = 29;
+constexpr size_t IDX_STEP3_READBACK = 30;
+constexpr size_t IDX_STEP4_READ = 31;
+constexpr size_t IDX_STEP4_FLAD = 32;
+constexpr size_t IDX_STEP4_FLWD = 33;
+constexpr size_t IDX_STEP4_READBACK = 34;
+constexpr size_t SMALL_UPDATE_CALLS = 35;
 
-// The same count for the real 14336-byte image: 448 chunks and 896 compare reads.
-constexpr size_t REAL_UPDATE_CALLS = 1365;
+// The same count for the real 14336-byte image: 448 chunks and 896 compare
+// reads, so 5 FLad, 451 FLwd, 911 FLrd, and 1 FLvy.
+constexpr size_t REAL_UPDATE_CALLS = 1368;
 
 // Call index of bundle chunk k (zero-based) of an update whose image is longer
 // than 64 bytes: the read-back and the second FLad sit between chunks 1 and 2.
@@ -259,16 +264,19 @@ void expectPointerWrite(std::vector<Expect> &script, EepromRegion r, uint32_t va
 }
 
 // The calls updateRegion() must issue, written from the plan and not from the
-// implementation: the pre-flight read of the other pointer, then the four steps
-// of SLVAFL1 Figure 2-3.
+// implementation: the pre-flight reads of the other pointer, the other
+// AppConfigOffset word, and the target's word, then the four steps of SLVAFL1
+// Figure 2-3, with the target's word read again before the step 3 pointer write.
 std::vector<Expect> expectedUpdate(EepromRegion target, const std::vector<uint8_t> &image,
                                    EepromUpdateOptions opt = {})
 {
     const EepromRegion other = (target == EepromRegion::Low) ? EepromRegion::High : EepromRegion::Low;
     const uint32_t start = TPS25751EepromUpdater::bundleStart(target);
     std::vector<Expect> s;
-    s.push_back(flrd(TPS25751EepromUpdater::regionPointerAddress(other)));  // pre-flight check 4
-    expectPointerWrite(s, target, 0);                                       // step 1
+    s.push_back(flrd(TPS25751EepromUpdater::regionPointerAddress(other)));    // pre-flight check 4
+    s.push_back(flrd(TPS25751EepromUpdater::appConfigOffsetAddress(other)));  // check 4, the word
+    s.push_back(flrd(TPS25751EepromUpdater::appConfigOffsetAddress(target))); // check 5
+    expectPointerWrite(s, target, 0);                                         // step 1
     // Step 2: FLad, the first two chunks, the read of the 16 bytes at the target
     // pointer, the read-back of the chunks at the bundle start (last, so that
     // the last FLrd before the next FLad is inside the target region), then a
@@ -291,6 +299,7 @@ std::vector<Expect> expectedUpdate(EepromRegion target, const std::vector<uint8_
     s.push_back(flvy(start));                                               // step 3
     if (opt.compareAfterWrite)
         for (size_t off = 0; off < image.size(); off += 16) s.push_back(flrd(start + static_cast<uint32_t>(off)));
+    s.push_back(flrd(TPS25751EepromUpdater::appConfigOffsetAddress(target))); // word check, always
     expectPointerWrite(s, target, start);
     if (opt.invalidateOldRegion) expectPointerWrite(s, other, 0);           // step 4
     return s;
@@ -300,13 +309,14 @@ std::vector<Expect> expectedUpdate(EepromRegion target, const std::vector<uint8_
 std::vector<EepromUpdateStep> stepsOf(size_t imageLen, EepromUpdateOptions opt = {})
 {
     std::vector<EepromUpdateStep> s;
-    s.push_back(EepromUpdateStep::Preflight);
+    s.insert(s.end(), 3, EepromUpdateStep::Preflight);
     s.insert(s.end(), 4, EepromUpdateStep::ErasePointer);
     const size_t early = imageLen < 64 ? imageLen : 64;
     s.insert(s.end(), 1 + (imageLen + 31) / 32 + (early + 15) / 16 + 1 + (imageLen > early ? 1 : 0),
              EepromUpdateStep::WriteBundle);
     s.push_back(EepromUpdateStep::VerifyBundle);
     if (opt.compareAfterWrite) s.insert(s.end(), (imageLen + 15) / 16, EepromUpdateStep::CompareBundle);
+    s.push_back(EepromUpdateStep::CheckAppConfigOffset);
     s.insert(s.end(), 4, EepromUpdateStep::RestorePointer);
     if (opt.invalidateOldRegion) s.insert(s.end(), 4, EepromUpdateStep::EraseOldPointer);
     return s;
@@ -1445,8 +1455,11 @@ void test_update_region_real_length_writes_448_chunks()
     // the address advancing by itself.
     TEST_ASSERT_EQUAL_size_t(2 + 3, b.fake.countOf("FLad"));
     TEST_ASSERT_EQUAL_size_t(1, b.fake.countOf("FLvy"));
-    // Pre-flight, two per pointer write, five for the read-back, 896 to compare.
-    TEST_ASSERT_EQUAL_size_t(1 + 6 + 5 + 896, b.fake.countOf("FLrd"));
+    // Three pre-flight reads (the other pointer and both AppConfigOffset
+    // words), two per pointer write, five for the read-back, 896 to compare,
+    // and the word check before the step 3 pointer write: 911.
+    TEST_ASSERT_EQUAL_size_t(3 + 6 + 5 + 896 + 1, b.fake.countOf("FLrd"));
+    TEST_ASSERT_EQUAL_size_t(911, b.fake.countOf("FLrd"));
     TEST_ASSERT_EQUAL_size_t(REAL_UPDATE_CALLS, b.fake.calls.size());
     for (size_t i = 0; i < 448; ++i) {
         const FakeCommandExecutor::Call &chunk = b.fake.calls[chunkIndex(i)];
@@ -1480,7 +1493,7 @@ void test_update_region_short_final_chunk()
     TEST_ASSERT_EQUAL_size_t(8, last.in.size());
     TEST_ASSERT_EQUAL_HEX8_ARRAY(&image[992], last.in.data(), 8);
     // 63 compare reads: the last covers the 8 image bytes only.
-    TEST_ASSERT_EQUAL_size_t(1 + 6 + 5 + 63, b.fake.countOf("FLrd"));
+    TEST_ASSERT_EQUAL_size_t(3 + 6 + 5 + 63 + 1, b.fake.countOf("FLrd"));
 
     TEST_ASSERT_TRUE(regionHolds(b.fake, EepromRegion::High, image));
     assertUnchangedOutside(b, {{LOW_PTR, 4}, {HIGH_START, 1000}});
@@ -1509,19 +1522,19 @@ void test_update_region_reads_back_the_first_two_chunks()
         const auto chunk = [&](size_t from, size_t n) {
             return std::vector<uint8_t>(image.begin() + from, image.begin() + from + n);
         };
-        assertPayload(b.fake.calls[5], "FLad", {0x00, c.startHi, 0x00, 0x00}, 200);   // bundle start
-        assertPayload(b.fake.calls[6], "FLwd", chunk(0, 32), 200);                    // chunk 0
-        assertPayload(b.fake.calls[7], "FLwd", chunk(32, 32), 200);                   // chunk 1
-        assertPayload(b.fake.calls[8], "FLrd", {0x00, c.pointerHi, 0x00, 0x00}, 200); // the target pointer
-        assertPayload(b.fake.calls[9], "FLrd", {0x00, c.startHi, 0x00, 0x00}, 200);   // read back 64 bytes
-        assertPayload(b.fake.calls[10], "FLrd", {0x10, c.startHi, 0x00, 0x00}, 200);
-        assertPayload(b.fake.calls[11], "FLrd", {0x20, c.startHi, 0x00, 0x00}, 200);
-        assertPayload(b.fake.calls[12], "FLrd", {0x30, c.startHi, 0x00, 0x00}, 200);  // last read: in the region
-        assertPayload(b.fake.calls[13], "FLad", {0x40, c.startHi, 0x00, 0x00}, 200);  // next unwritten byte
-        assertPayload(b.fake.calls[14], "FLwd", chunk(64, 32), 200);                  // chunk 2
-        assertPayload(b.fake.calls[15], "FLwd", chunk(96, 4), 200);                   // chunk 3
-        TEST_ASSERT_EQUAL_STRING("FLvy", b.fake.calls[16].cmd.c_str());
-        for (size_t i = 8; i <= 12; ++i) TEST_ASSERT_EQUAL_size_t(16, b.fake.calls[i].outLen);
+        assertPayload(b.fake.calls[7], "FLad", {0x00, c.startHi, 0x00, 0x00}, 200);   // bundle start
+        assertPayload(b.fake.calls[8], "FLwd", chunk(0, 32), 200);                    // chunk 0
+        assertPayload(b.fake.calls[9], "FLwd", chunk(32, 32), 200);                   // chunk 1
+        assertPayload(b.fake.calls[10], "FLrd", {0x00, c.pointerHi, 0x00, 0x00}, 200); // the target pointer
+        assertPayload(b.fake.calls[11], "FLrd", {0x00, c.startHi, 0x00, 0x00}, 200);   // read back 64 bytes
+        assertPayload(b.fake.calls[12], "FLrd", {0x10, c.startHi, 0x00, 0x00}, 200);
+        assertPayload(b.fake.calls[13], "FLrd", {0x20, c.startHi, 0x00, 0x00}, 200);
+        assertPayload(b.fake.calls[14], "FLrd", {0x30, c.startHi, 0x00, 0x00}, 200);  // last read: in the region
+        assertPayload(b.fake.calls[15], "FLad", {0x40, c.startHi, 0x00, 0x00}, 200);  // next unwritten byte
+        assertPayload(b.fake.calls[16], "FLwd", chunk(64, 32), 200);                  // chunk 2
+        assertPayload(b.fake.calls[17], "FLwd", chunk(96, 4), 200);                   // chunk 3
+        TEST_ASSERT_EQUAL_STRING("FLvy", b.fake.calls[18].cmd.c_str());
+        for (size_t i = 10; i <= 14; ++i) TEST_ASSERT_EQUAL_size_t(16, b.fake.calls[i].outLen);
         // The read-back waits for nothing.
         TEST_ASSERT_EQUAL_size_t(0, b.fake.delays.size());
     }
@@ -1543,19 +1556,19 @@ void test_update_region_read_back_of_a_short_image()
         ASSERT_STATUS(EepromUpdateStatus::Success, u.updateRegion(EepromRegion::High, image.data(), image.size()));
 
         assertCalls(b.fake, expectedUpdate(EepromRegion::High, image));
-        assertPayload(b.fake.calls[5], "FLad", {0x00, 0x44, 0x00, 0x00}, 200);
-        TEST_ASSERT_EQUAL_size_t(32, b.fake.calls[6].in.size());
-        TEST_ASSERT_EQUAL_size_t(24, b.fake.calls[7].in.size());
-        TEST_ASSERT_EQUAL_HEX8_ARRAY(&image[32], b.fake.calls[7].in.data(), 24);
-        assertPayload(b.fake.calls[8], "FLrd", {0x00, 0x04, 0x00, 0x00}, 200);
-        assertPayload(b.fake.calls[9], "FLrd", {0x00, 0x44, 0x00, 0x00}, 200);
-        assertPayload(b.fake.calls[10], "FLrd", {0x10, 0x44, 0x00, 0x00}, 200);
-        assertPayload(b.fake.calls[11], "FLrd", {0x20, 0x44, 0x00, 0x00}, 200);
-        assertPayload(b.fake.calls[12], "FLrd", {0x30, 0x44, 0x00, 0x00}, 200);
-        TEST_ASSERT_EQUAL_STRING("FLvy", b.fake.calls[13].cmd.c_str());
+        assertPayload(b.fake.calls[7], "FLad", {0x00, 0x44, 0x00, 0x00}, 200);
+        TEST_ASSERT_EQUAL_size_t(32, b.fake.calls[8].in.size());
+        TEST_ASSERT_EQUAL_size_t(24, b.fake.calls[9].in.size());
+        TEST_ASSERT_EQUAL_HEX8_ARRAY(&image[32], b.fake.calls[9].in.data(), 24);
+        assertPayload(b.fake.calls[10], "FLrd", {0x00, 0x04, 0x00, 0x00}, 200);
+        assertPayload(b.fake.calls[11], "FLrd", {0x00, 0x44, 0x00, 0x00}, 200);
+        assertPayload(b.fake.calls[12], "FLrd", {0x10, 0x44, 0x00, 0x00}, 200);
+        assertPayload(b.fake.calls[13], "FLrd", {0x20, 0x44, 0x00, 0x00}, 200);
+        assertPayload(b.fake.calls[14], "FLrd", {0x30, 0x44, 0x00, 0x00}, 200);
+        TEST_ASSERT_EQUAL_STRING("FLvy", b.fake.calls[15].cmd.c_str());
         TEST_ASSERT_EQUAL_size_t(1 + 3, b.fake.countOf("FLad"));
         TEST_ASSERT_EQUAL_size_t(2 + 3, b.fake.countOf("FLwd"));
-        TEST_ASSERT_EQUAL_size_t(26, b.fake.calls.size());
+        TEST_ASSERT_EQUAL_size_t(29, b.fake.calls.size());
 
         // Bytes 56 to 63 of the last read are the old bundle's and are not compared.
         TEST_ASSERT_TRUE(regionHolds(b.fake, EepromRegion::High, image));
@@ -1569,7 +1582,7 @@ void test_update_region_read_back_of_a_short_image()
         TPS25751EepromUpdater u(b.fake);
         ASSERT_STATUS(EepromUpdateStatus::Success, u.updateRegion(EepromRegion::High, image.data(), image.size()));
         assertCalls(b.fake, expectedUpdate(EepromRegion::High, image));
-        TEST_ASSERT_EQUAL_STRING("FLvy", b.fake.calls[13].cmd.c_str());
+        TEST_ASSERT_EQUAL_STRING("FLvy", b.fake.calls[15].cmd.c_str());
         TEST_ASSERT_EQUAL_size_t(1 + 3, b.fake.countOf("FLad"));
     }
 
@@ -1580,10 +1593,10 @@ void test_update_region_read_back_of_a_short_image()
         TPS25751EepromUpdater u(b.fake);
         ASSERT_STATUS(EepromUpdateStatus::Success, u.updateRegion(EepromRegion::High, image.data(), image.size()));
         assertCalls(b.fake, expectedUpdate(EepromRegion::High, image));
-        assertPayload(b.fake.calls[13], "FLad", {0x40, 0x44, 0x00, 0x00}, 200);
-        TEST_ASSERT_EQUAL_STRING("FLwd", b.fake.calls[14].cmd.c_str());
-        TEST_ASSERT_EQUAL_size_t(1, b.fake.calls[14].in.size());
-        TEST_ASSERT_EQUAL_STRING("FLvy", b.fake.calls[15].cmd.c_str());
+        assertPayload(b.fake.calls[15], "FLad", {0x40, 0x44, 0x00, 0x00}, 200);
+        TEST_ASSERT_EQUAL_STRING("FLwd", b.fake.calls[16].cmd.c_str());
+        TEST_ASSERT_EQUAL_size_t(1, b.fake.calls[16].in.size());
+        TEST_ASSERT_EQUAL_STRING("FLvy", b.fake.calls[17].cmd.c_str());
         TEST_ASSERT_EQUAL_size_t(2 + 3, b.fake.countOf("FLad"));
         TEST_ASSERT_TRUE(regionHolds(b.fake, EepromRegion::High, image));
         assertUnchangedOutside(b, {{LOW_PTR, 4}, {HIGH_START, 65}});
@@ -1604,11 +1617,12 @@ void test_update_region_option_flags()
                           u.updateRegion(EepromRegion::High, b.newBundle.data(), b.newBundle.size(), opt));
 
             assertCalls(b.fake, expectedUpdate(EepromRegion::High, b.newBundle, opt));
-            // Without the compare, the only FLrd calls are pre-flight, the
-            // two per pointer write, and the five of the read-back in step 2,
+            // Without the compare, the only FLrd calls are the three of
+            // pre-flight, the two per pointer write, the five of the read-back
+            // in step 2, and the word check before the step 3 pointer write,
             // which no option turns off.
             const size_t pointerWrites = invalidate ? 3 : 2;
-            TEST_ASSERT_EQUAL_size_t(1 + 2 * pointerWrites + 5 + (compare ? 7 : 0), b.fake.countOf("FLrd"));
+            TEST_ASSERT_EQUAL_size_t(3 + 2 * pointerWrites + 5 + (compare ? 7 : 0) + 1, b.fake.countOf("FLrd"));
             TEST_ASSERT_EQUAL_size_t(2 + pointerWrites, b.fake.countOf("FLad"));
 
             TEST_ASSERT_TRUE(regionHolds(b.fake, EepromRegion::High, b.newBundle));
@@ -1962,15 +1976,15 @@ void test_update_region_busy_first_chunk_is_retried_before_the_read_back()
                   u.updateRegion(EepromRegion::High, b.newBundle.data(), b.newBundle.size()));
 
     const std::vector<uint8_t> chunk0(b.newBundle.begin(), b.newBundle.begin() + 32);
-    assertPayload(b.fake.calls[6], "FLwd", chunk0, 200);                          // busy
-    TEST_ASSERT_EQUAL_HEX8(0xFF, b.fake.calls[6].result.returnCode);
-    assertPayload(b.fake.calls[7], "FLad", {0x00, 0x44, 0x00, 0x00}, 200);        // fresh FLad
-    assertPayload(b.fake.calls[8], "FLwd", chunk0, 200);                          // chunk 0 again
-    TEST_ASSERT_EQUAL_size_t(32, b.fake.calls[9].in.size());                      // chunk 1
-    assertPayload(b.fake.calls[10], "FLrd", {0x00, 0x04, 0x00, 0x00}, 200);       // the pointer row
-    assertPayload(b.fake.calls[11], "FLrd", {0x00, 0x44, 0x00, 0x00}, 200);       // the read-back
-    assertPayload(b.fake.calls[14], "FLrd", {0x30, 0x44, 0x00, 0x00}, 200);
-    assertPayload(b.fake.calls[15], "FLad", {0x40, 0x44, 0x00, 0x00}, 200);
+    assertPayload(b.fake.calls[8], "FLwd", chunk0, 200);                          // busy
+    TEST_ASSERT_EQUAL_HEX8(0xFF, b.fake.calls[8].result.returnCode);
+    assertPayload(b.fake.calls[9], "FLad", {0x00, 0x44, 0x00, 0x00}, 200);        // fresh FLad
+    assertPayload(b.fake.calls[10], "FLwd", chunk0, 200);                          // chunk 0 again
+    TEST_ASSERT_EQUAL_size_t(32, b.fake.calls[11].in.size());                      // chunk 1
+    assertPayload(b.fake.calls[12], "FLrd", {0x00, 0x04, 0x00, 0x00}, 200);       // the pointer row
+    assertPayload(b.fake.calls[13], "FLrd", {0x00, 0x44, 0x00, 0x00}, 200);       // the read-back
+    assertPayload(b.fake.calls[16], "FLrd", {0x30, 0x44, 0x00, 0x00}, 200);
+    assertPayload(b.fake.calls[17], "FLad", {0x40, 0x44, 0x00, 0x00}, 200);
     TEST_ASSERT_EQUAL_size_t(SMALL_UPDATE_CALLS + 2, b.fake.calls.size());
     TEST_ASSERT_EQUAL_size_t(1, b.fake.delays.size());
     TEST_ASSERT_EQUAL_UINT32(10, b.fake.delays[0]);
@@ -2484,7 +2498,7 @@ void test_update_region_executor_failure_at_every_call()
     // the failure (a COMMAND poll that timed out after the write completed).
     // Each must return the mapped status, name the step the call belongs to,
     // issue nothing afterwards, and leave a region that boots. The sweep runs
-    // at 100 bytes (32 calls) and at the real 14336 bytes (1365 calls), so it
+    // at 100 bytes (35 calls) and at the real 14336 bytes (1368 calls), so it
     // covers the read-back calls of step 2 at both lengths.
     //
     // At 100 bytes every call is swept. At the real length every call is swept
@@ -2542,9 +2556,9 @@ void test_update_region_executor_failure_at_every_call()
             }
         }
         // 12 variants of each swept call: two targets, two "ran" settings, three kinds.
-        // 100 bytes: all 32 calls. Real length: 1365 calls less the 896 compare
+        // 100 bytes: all 35 calls. Real length: 1368 calls less the 896 compare
         // reads, plus the 57 of them that are swept (56 at every 16th, and the last).
-        TEST_ASSERT_EQUAL_size_t(12 * (length == SMALL_LEN ? 32 : 1365 - 896 + 57), swept);
+        TEST_ASSERT_EQUAL_size_t(12 * (length == SMALL_LEN ? 35 : 1368 - 896 + 57), swept);
     }
 }
 
@@ -2559,7 +2573,7 @@ void test_update_region_return_code_fault_at_every_call()
     // the TRM does not describe (an FLwd after an FLad that did not take). The
     // assertions do not depend on which status results.
     //
-    // The sweep runs at 100 bytes (32 calls) and at the real 14336 bytes (1365
+    // The sweep runs at 100 bytes (35 calls) and at the real 14336 bytes (1368
     // calls). The length matters: bytes that land in the wrong place stay in
     // unused EEPROM for a short image and would reach the other region for the
     // real one. No case is left out. The bundle FLad that returns 0x00 without
@@ -2812,6 +2826,173 @@ void test_update_region_limit_of_the_read_back_in_step_2()
         // finds no trace either.
         for (uint32_t i = 4; i < 16; ++i) TEST_ASSERT_EQUAL_HEX8(0xFF, b.fake.eeprom[HIGH_PTR + i]);
         assertUnchangedOutside(b, {{LOW_PTR, 4}, {HIGH_PTR + 16, 64}});
+    }
+}
+
+// --- AppConfigOffset checks of updateRegion() (decided 2026-11-23) -------------------
+
+void test_update_region_refuses_a_kept_region_behind_a_nonzero_word()
+{
+    // Pre-flight check 4: the region being kept is bootable only if its
+    // pointer is valid and its AppConfigOffset word reads 0. A valid pointer
+    // over another word gives NoBootableRegion after two FLrd, nothing written.
+    for (EepromRegion target : {EepromRegion::Low, EepromRegion::High}) {
+        const EepromRegion other = TPS25751EepromUpdater::otherRegion(target);
+        Board b;
+        b.fake.writeLe32(TPS25751EepromUpdater::appConfigOffsetAddress(other), 0x00000100);
+        b.snapshot();
+        TPS25751EepromUpdater u(b.fake);
+
+        assertRefusedBeforeAnyWrite(b, u, EepromUpdateStatus::NoBootableRegion,
+                                    u.updateRegion(target, b.newBundle.data(), b.newBundle.size()));
+        const std::vector<Expect> script = {flrd(TPS25751EepromUpdater::regionPointerAddress(other)),
+                                            flrd(TPS25751EepromUpdater::appConfigOffsetAddress(other))};
+        assertCalls(b.fake, script);
+    }
+    // A kept pointer that is not valid is refused without reading its word.
+    Board b;
+    b.fake.writeLe32(LOW_PTR, 0);
+    b.snapshot();
+    TPS25751EepromUpdater u(b.fake);
+    assertRefusedBeforeAnyWrite(b, u, EepromUpdateStatus::NoBootableRegion,
+                                u.updateRegion(EepromRegion::High, b.newBundle.data(), b.newBundle.size()));
+    TEST_ASSERT_EQUAL_size_t(1, b.fake.calls.size());
+}
+
+void test_update_region_refuses_a_target_behind_a_nonzero_word()
+{
+    // Pre-flight check 5: the target's word must read 0, because this call
+    // does not write it. Otherwise AppConfigOffsetNotZero after three FLrd,
+    // nothing written. 0xFFFFFFFF is the erased value.
+    const uint32_t words[] = {0x00000001, 0xFFFFFFFF};
+    for (EepromRegion target : {EepromRegion::Low, EepromRegion::High}) {
+        for (uint32_t word : words) {
+            Board b;
+            b.fake.writeLe32(TPS25751EepromUpdater::appConfigOffsetAddress(target), word);
+            b.snapshot();
+            TPS25751EepromUpdater u(b.fake);
+
+            assertRefusedBeforeAnyWrite(b, u, EepromUpdateStatus::AppConfigOffsetNotZero,
+                                        u.updateRegion(target, b.newBundle.data(), b.newBundle.size()));
+            TEST_ASSERT_EQUAL(target, u.lastTarget());
+            const EepromRegion other = TPS25751EepromUpdater::otherRegion(target);
+            const std::vector<Expect> script = {flrd(TPS25751EepromUpdater::regionPointerAddress(other)),
+                                                flrd(TPS25751EepromUpdater::appConfigOffsetAddress(other)),
+                                                flrd(TPS25751EepromUpdater::appConfigOffsetAddress(target))};
+            assertCalls(b.fake, script);
+        }
+    }
+}
+
+void test_update_region_checks_the_kept_word_before_the_target_word()
+{
+    // Both words not 0: check 4 runs first and reports NoBootableRegion
+    // without reading the target's word.
+    Board b;
+    b.fake.writeLe32(0x03FC, 0x00000100);
+    b.fake.writeLe32(0x07FC, 0x00000200);
+    b.snapshot();
+    TPS25751EepromUpdater u(b.fake);
+    assertRefusedBeforeAnyWrite(b, u, EepromUpdateStatus::NoBootableRegion,
+                                u.updateRegion(EepromRegion::High, b.newBundle.data(), b.newBundle.size()));
+    TEST_ASSERT_EQUAL_size_t(2, b.fake.calls.size());
+}
+
+void test_update_both_regions_stops_before_writing_a_target_behind_a_nonzero_word()
+{
+    // The conflict case of the plan: Low valid with word 0, High a valid
+    // pointer over a word that is not 0. Selection follows BOOT_FLAGS to High;
+    // the first pass stops in its pre-flight with AppConfigOffsetNotZero, no
+    // FLwd is issued, and the EEPROM is unchanged, so Low still boots.
+    Board b;
+    b.fake.writeLe32(0x07FC, 0xFFFFFFFF);
+    b.snapshot();
+    TPS25751EepromUpdater u(b.fake);
+
+    assertRefusedBeforeAnyWrite(b, u, EepromUpdateStatus::AppConfigOffsetNotZero,
+                                u.updateBothRegions(b.newBundle.data(), b.newBundle.size()));
+    TEST_ASSERT_EQUAL(EepromRegion::High, u.lastTarget());
+    TEST_ASSERT_TRUE(pointerValid(b.fake, EepromRegion::Low));
+
+    // The opposite case: the kept region's word is not 0. NoBootableRegion,
+    // nothing written.
+    Board c;
+    c.fake.writeLe32(0x03FC, 0x00000100);
+    c.snapshot();
+    TPS25751EepromUpdater v(c.fake);
+    assertRefusedBeforeAnyWrite(c, v, EepromUpdateStatus::NoBootableRegion,
+                                v.updateBothRegions(c.newBundle.data(), c.newBundle.size()));
+}
+
+void test_update_region_checks_the_target_word_before_the_pointer_write()
+{
+    // Step 3: after FLvy and the optional compare, one FLrd of the target's
+    // word, which must still read 0. A word that changed during the update
+    // (here a hook on FLvy sets it) returns CompareMismatch with lastStep()
+    // CheckAppConfigOffset; the target pointer stays 0 and the other region's
+    // pointer stays valid. The check runs with and without the compare.
+    for (int compare = 0; compare < 2; ++compare) {
+        for (EepromRegion target : {EepromRegion::Low, EepromRegion::High}) {
+            const EepromRegion other = TPS25751EepromUpdater::otherRegion(target);
+            const uint32_t word = TPS25751EepromUpdater::appConfigOffsetAddress(target);
+            Board b;
+            b.fake.failNth("FLvy", 0, Fault::withHook([word](FakeCommandExecutor &f) { f.writeLe32(word, 1); }));
+            TPS25751EepromUpdater u(b.fake);
+            EepromUpdateOptions opt;
+            opt.compareAfterWrite = (compare != 0);
+            const char *where = at(compare ? "compare, target" : "no compare, target", static_cast<size_t>(target));
+
+            ASSERT_STATUS_MESSAGE(EepromUpdateStatus::CompareMismatch,
+                                  u.updateRegion(target, b.newBundle.data(), b.newBundle.size(), opt), where);
+            ASSERT_STEP_MESSAGE(EepromUpdateStep::CheckAppConfigOffset, u.lastStep(), where);
+            TEST_ASSERT_EQUAL_STRING_MESSAGE("FLrd", b.fake.calls.back().cmd.c_str(), where);
+            assertPayload(b.fake.calls.back(), "FLrd", le32(word), 200);
+            TEST_ASSERT_EQUAL_HEX32_MESSAGE(0, pointerOf(b.fake, target), where);
+            TEST_ASSERT_TRUE_MESSAGE(pointerValid(b.fake, other), where);
+            TEST_ASSERT_TRUE_MESSAGE(regionHolds(b.fake, target, b.newBundle), where);
+            // FLwd: the step 1 pointer erase and the four chunks; no pointer write after.
+            TEST_ASSERT_EQUAL_size_t_MESSAGE(1 + 4, b.fake.countOf("FLwd"), where);
+        }
+    }
+}
+
+void test_update_region_executor_failure_on_the_word_reads()
+{
+    // The three new FLrd map executor failures as every read does, with
+    // lastStep() Preflight for the two pre-flight reads and
+    // CheckAppConfigOffset for the read before the pointer write.
+    const struct {
+        size_t index;
+        EepromUpdateStep step;
+    } cases[] = {
+        {IDX_PREFLIGHT_OTHER_WORD, EepromUpdateStep::Preflight},
+        {IDX_PREFLIGHT_TARGET_WORD, EepromUpdateStep::Preflight},
+        {IDX_WORD_CHECK, EepromUpdateStep::CheckAppConfigOffset},
+    };
+    const struct {
+        Fault fault;
+        EepromUpdateStatus expected;
+    } kinds[] = {
+        {Fault::rejected(), EepromUpdateStatus::CommandRejected},
+        {Fault::timeout(), EepromUpdateStatus::CommandTimeout},
+        {Fault::i2cError(), EepromUpdateStatus::I2cError},
+    };
+    for (const auto &c : cases) {
+        for (const auto &k : kinds) {
+            Board b;
+            b.fake.failCall(c.index, k.fault);
+            TPS25751EepromUpdater u(b.fake);
+            const char *where = at("call", c.index, TPS25751EepromUpdater::toString(k.expected));
+
+            ASSERT_STATUS_MESSAGE(k.expected, u.updateRegion(EepromRegion::High, b.newBundle.data(), b.newBundle.size()),
+                                  where);
+            ASSERT_STEP_MESSAGE(c.step, u.lastStep(), where);
+            TEST_ASSERT_EQUAL_size_t_MESSAGE(c.index + 1, b.fake.calls.size(), where);
+            TEST_ASSERT_EQUAL_HEX32_MESSAGE(c.step == EepromUpdateStep::Preflight ? HIGH_START : 0,
+                                            pointerOf(b.fake, EepromRegion::High), where);
+            assertStillBoots(b, where);
+            if (c.step == EepromUpdateStep::Preflight) assertUnchanged(b, where);
+        }
     }
 }
 
@@ -3100,7 +3281,7 @@ void test_update_inactive_region_twice_without_reset_follows_the_pointers()
     TEST_ASSERT_EQUAL_HEX32(0, pointerOf(b.fake, EepromRegion::High));
     // The high pointer was valid until step 4 of the second update: the first
     // write-side task of that update went to the low pointer.
-    assertPayload(b.fake.calls[4], "FLad", {0x00, 0x00, 0x00, 0x00}, 200);
+    assertPayload(b.fake.calls[6], "FLad", {0x00, 0x00, 0x00, 0x00}, 200);
 }
 
 void test_update_inactive_region_refusals_write_nothing()
@@ -3254,7 +3435,7 @@ void test_update_both_regions_refusals_write_nothing()
 
 void test_update_both_regions_executor_failure_at_every_call()
 {
-    // 2 selection reads, 26 calls for the first pass, 22 for the second (no
+    // 2 selection reads, 35 calls for the first pass, 31 for the second (no
     // step 4). A timeout at each one, with the task not run or run: the call
     // stops there and a region still boots.
     const size_t total = 2 + SMALL_UPDATE_CALLS + (SMALL_UPDATE_CALLS - 4);
@@ -4626,6 +4807,7 @@ void test_to_string_covers_every_status()
         {EepromUpdateStatus::BadImageHeader, "BadImageHeader"},
         {EepromUpdateStatus::BadImageLength, "BadImageLength"},
         {EepromUpdateStatus::NoBootableRegion, "NoBootableRegion"},
+        {EepromUpdateStatus::AppConfigOffsetNotZero, "AppConfigOffsetNotZero"},
         {EepromUpdateStatus::EepromNotBlank, "EepromNotBlank"},
         {EepromUpdateStatus::PointerEraseFailed, "PointerEraseFailed"},
         {EepromUpdateStatus::SetAddressFailed, "SetAddressFailed"},
@@ -4643,8 +4825,8 @@ void test_to_string_covers_every_status()
         {EepromUpdateStatus::I2cError, "I2cError"},
     };
     for (const auto &e : all) TEST_ASSERT_EQUAL_STRING(e.name, TPS25751EepromUpdater::toString(e.s));
-    TEST_ASSERT_EQUAL_UINT8(21, sizeof(all) / sizeof(all[0]));
-    TEST_ASSERT_EQUAL_UINT8(20, static_cast<uint8_t>(EepromUpdateStatus::I2cError));
+    TEST_ASSERT_EQUAL_UINT8(22, sizeof(all) / sizeof(all[0]));
+    TEST_ASSERT_EQUAL_UINT8(21, static_cast<uint8_t>(EepromUpdateStatus::I2cError));
     TEST_ASSERT_EQUAL_STRING("Unknown", TPS25751EepromUpdater::toString(static_cast<EepromUpdateStatus>(200)));
 }
 
@@ -4904,6 +5086,12 @@ int main(int, char **)
     RUN_TEST(test_update_region_read_back_bounds_a_misplaced_bundle_write);
     RUN_TEST(test_update_region_read_order_when_flrd_moves_the_write_address);
     RUN_TEST(test_update_region_limit_of_the_read_back_in_step_2);
+    RUN_TEST(test_update_region_refuses_a_kept_region_behind_a_nonzero_word);
+    RUN_TEST(test_update_region_refuses_a_target_behind_a_nonzero_word);
+    RUN_TEST(test_update_region_checks_the_kept_word_before_the_target_word);
+    RUN_TEST(test_update_both_regions_stops_before_writing_a_target_behind_a_nonzero_word);
+    RUN_TEST(test_update_region_checks_the_target_word_before_the_pointer_write);
+    RUN_TEST(test_update_region_executor_failure_on_the_word_reads);
     RUN_TEST(test_progress_callback_sequence);
     RUN_TEST(test_progress_callback_marks_the_step_boundaries);
     RUN_TEST(test_progress_callback_stops_at_a_failure);

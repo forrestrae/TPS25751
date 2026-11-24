@@ -1387,6 +1387,13 @@ host-run tests that inject a fault at every task, and `src/TPS25751.cpp`, which 
   `TPS25751HostExecutor` adapts a `TPS25751` to it on the target, and the native tests use
   `FakeCommandExecutor`. Virtual calls need no RTTI, so the `-fno-rtti` constraint holds.
   `TPS25751` itself is unchanged.
+- A region counts as bootable only if its pointer equals its bundle start and its
+  AppConfigOffset word reads 0, because the controller looks for the Header_ID at the
+  region start plus that word (SLVAFL1 page 2; decided 2026-11-23). The pre-flight of
+  `updateRegion()` requires the kept region to be bootable (`NoBootableRegion`) and the
+  target's word to read 0 (`AppConfigOffsetNotZero`), and step 3 reads the target's word
+  once more before the pointer write. `updateRegion()` does not write the word; a region
+  behind another value is repaired by erasing both pointers and running `programBlank()`.
 - Region selection reads the pointers first and BOOT_FLAGS (0x2D, BOOT_STATUS in SLVAFL1)
   second, and only when both pointers are valid. BOOT_FLAGS is latched at boot. After an
   update without a restart it describes the old layout, and SLVAFL1 Figure 2-2, which
@@ -1435,7 +1442,11 @@ host-run tests that inject a fault at every task, and `src/TPS25751.cpp`, which 
   observed.
 - Hardware stages 1 to 4 verified the layout, the result offsets, a 4-byte `FLwd`, a full
   region update, `updateBothRegions()`, `GAID`, and the boot region after a cut at each
-  step. `programBlank()` and the I2C EEPROM Present flag after a PBM boot wait for stage 5.
+  step; the update sequence then had 1365 tasks for 14336 bytes. Stage 5 verified
+  `programBlank()` with its 2732 tasks, from an EEPROM boot and after a PBM load, the I2C
+  EEPROM Present flag after a PBM boot, and PTCH after a restart with no valid pointer.
+  The three AppConfigOffset reads `updateRegion()` makes since 2026-11-23, which bring the
+  update to 1368 tasks, have not run on hardware.
   The `GAID` sequence the `ResetNotObserved` rule relies on was seen on one board with the
   F8091164 and the F8091166 bundle running; whether the two differ in firmware is not
   recorded.

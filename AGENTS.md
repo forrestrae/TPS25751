@@ -19,8 +19,9 @@ The TPS25751 library is an object-oriented C++ library for interfacing with the 
 **Current Phase:** EEPROM update over I2Ct on `feat/eeprom-update`
 ([eeprom-update.md](docs/plans/feature/eeprom-update.md)): `TPS25751EepromUpdater` updates,
 reads back, and blank-programs the configuration EEPROM through the flash 4CC tasks
-(ADR-014). Batches 1 to 3 are implemented. Hardware stages 1 to 4 passed on 2026-11-22
-and 23; stage 5, blank programming after a PBM load, has not run. Before that: Rev B
+(ADR-014). Batches 1 to 3 are implemented. Hardware stages 1 to 5 passed on 2026-11-22
+and 23; the AppConfigOffset checks added to `updateRegion()` afterwards have not run on
+hardware. Before that: Rev B
 register coverage complete, 37 of the 37 registers in TRM SLVUCR8B,
 with typed USB PD decode (Batch L).
 [trm-revB-audit-remaining-registers.md](docs/plans/trm-revB-audit-remaining-registers.md)
@@ -454,7 +455,9 @@ through `TPS25751CommandExecutor`, so it compiles and is tested in `[env:native]
 
 - `updateInactiveRegion()` and `updateRegion()` run the four steps of SLVAFL1 Figure 2-3:
   erase the target pointer; write the bundle in 32-byte chunks, with a read-back after the
-  first two; `FLvy` and an `FLrd` compare, then the pointer; erase the old pointer.
+  first two; `FLvy` and an `FLrd` compare, then the pointer; erase the old pointer. Their
+  pre-flight refuses, writing nothing, when the kept region is not bootable (pointer valid
+  and AppConfigOffset word 0) or the target's word is not 0 (`AppConfigOffsetNotZero`).
   `updateBothRegions()` leaves the new bundle in both regions with both pointers valid.
 - `programBlank()` is for an EEPROM with no valid pointer, after a PBM load: it writes both
   AppConfigOffset words to 0 first, then the image and the pointer of each region, Low
@@ -467,7 +470,7 @@ Traps: choose the target from the region pointers first, because BOOT_FLAGS stay
 until a restart; never write a pointer before the region has been compared; `FLrd` data
 starts at `outData[0]` and has no return code. Hardware stages 1 to 4 verified the layout,
 the result offsets, a full region update, and the boot region after an update cut at each
-step; `programBlank()` waits for stage 5, which starts from the example's `zero` command.
+step; stage 5, which starts from the example's `zero` command, verified `programBlank()`.
 The `eeprom-update` example drives every call over serial. See ADR-014 in [ARCHITECTURE.md](docs/engineering/ARCHITECTURE.md), the "Flash tasks
 and EEPROM update" subsection of [CONSTRAINTS.md](docs/engineering/CONSTRAINTS.md), and the
 plan.

@@ -43,10 +43,10 @@ the line `yes` sent after its `[confirm]` prompt.
 | `x` | `coldReset()`: `GAID`, then waits for APP; the port disconnects. Reports `ResetNotObserved` when MODE reads APP without a failed I2C transaction first, and then asks for a check of VERSION and BOOT_FLAGS | No |
 | `l` | Only in PTCH: loads the embedded image into the controller's RAM with `TPS25751PatchLoader` (Patch Burst Mode) | No |
 | `p`, `p2` | Pointer tests of hardware stage 2: erase and restore the High pointer; show whether `FLwd` writes more than the bytes it is given | Yes |
-| `u`, `b` | `updateInactiveRegion()` and `updateBothRegions()` with the embedded image | Yes |
+| `u`, `b` | `updateInactiveRegion()` and `updateBothRegions()` with the embedded image. Their plans print both AppConfigOffset words; the library refuses, writing nothing, with `AppConfigOffsetNotZero` when the target's word is not 0 and with `NoBootableRegion` when the kept region's word is not 0 (the same holds for `c1` to `c4`) | Yes |
 | `c1` to `c4` | An update cut after step 1, 2, 3, or 4 of SLVAFL1 Figure 2-3 (hardware stage 4) | Yes |
 | `v` | The `FLvy` experiment of hardware stage 3: writes the image, corrupts one byte, and reports what `FLvy` and the compare say | Yes |
-| `pb` | `programBlank()`: both AppConfigOffset words first, then the image and the pointer of each region, Low first, for an EEPROM with no valid pointer. `u` and `b` do not write an AppConfigOffset word, so do not run them while the word of the region they would write reads other than 0; `zero` followed at once by `pb` repairs such a word | Yes |
+| `pb` | `programBlank()`: both AppConfigOffset words first, then the image and the pointer of each region, Low first, for an EEPROM with no valid pointer. `u` and `b` do not write an AppConfigOffset word and refuse while one they depend on is not 0; `zero` followed at once by `pb` repairs such a word | Yes |
 | `zero` | Both region pointers to 0, Low then High, each with a read-back; the starting state of hardware stage 5 | Yes |
 
 To recover a board whose EEPROM does not boot, so that the controller sits in PTCH, send

@@ -445,10 +445,22 @@ pointers first and read BOOT_FLAGS only when both pointers are valid, as
 
 The controller looks for a region's Header_ID at the region start plus that region's
 AppConfigOffset word (0x03FC and 0x07FC; SLVAFL1 page 2). Both words are 0 in the board's
-image. `programBlank()` writes both to 0 before it writes any pointer or bundle, and reads
-each once more right before that region's pointer write. `updateRegion()` neither reads nor
-writes them, so a region it writes behind a word that is not 0 is not where the controller
-looks.
+image. A region therefore counts as bootable only if its pointer equals its bundle start
+and its word reads 0 (decided 2026-11-23).
+
+- `programBlank()` writes both words to 0 before it writes any pointer or bundle, and reads
+  each once more right before that region's pointer write.
+- `updateRegion()` reads both words but does not write them. Its pre-flight refuses with
+  `NoBootableRegion` when the kept region's word is not 0 and with `AppConfigOffsetNotZero`
+  when the target's word is not 0, writing nothing; step 3 reads the target's word again
+  before the pointer write (`CompareMismatch`, `lastStep()` `CheckAppConfigOffset`).
+- `selectTargetRegion()` reads the pointers only, so a target it chooses can still be
+  refused by the pre-flight.
+- The repair for a word that is not 0 is to write both pointers to 0 and run
+  `programBlank()` (the example's `zero`, then `pb`).
+
+These reads are not hardware-tested: stages 3 and 4 ran the update before they were added,
+and stage 5 ran `programBlank()`, whose word reads predate them.
 
 #### Recovery from PTCH
 
@@ -1461,6 +1473,7 @@ void foo() {
 | 1.17 | 2026-11-23 | Claude Code | Flash tasks and EEPROM update section: result offsets, return-code compare, 32-byte chunks and the 24LC256 page, the `FLvy` limit, one-directional redundancy, the stale BOOT_FLAGS trap, DATA behaviour, timing, cold reset, and bus sharing, with the hardware results of stages 1 to 4 (ADR-014) |
 | 1.18 | 2026-11-23 | Claude Code | Flash tasks and EEPROM update section: what SLVAFL1 says about APP mode, AppConfigOffset words and recovery from PTCH (SLVAFL1 page 13) under their own headings, `FLwd` timing per run |
 | 1.19 | 2026-11-23 | Claude Code | `programBlank()` writes both AppConfigOffset words first; `coldReset()` requires an observed restart and returns `ResetNotObserved` otherwise (Flash tasks and EEPROM update section) |
+| 1.20 | 2026-11-23 | Claude Code | `updateRegion()` checks both AppConfigOffset words in its pre-flight and the target's again before the pointer write (AppConfigOffset words section); PTCH after a restart with no valid pointer observed in stage 5 |
 
 ---
 

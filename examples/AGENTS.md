@@ -68,6 +68,8 @@ consumption and are not the primary build path used in this repo.
   configuration EEPROM, each only after a typed `yes`. Keep that confirmation on any
   command added there that writes. `zero` leaves the EEPROM with no valid pointer on
   purpose, for hardware stage 5; its plan names `pb` as the next step, before any reset.
+  `u`, `b`, and `c1` to `c4` rely on `updateRegion()` to refuse when an AppConfigOffset
+  word is not 0; keep the library as the place that check is made.
 - Serial is 115200 baud; sketches wait briefly for the USB serial connection in
   `setup()`.
 - Debug output is configured via `TPS25751::setDebugLevel()` /

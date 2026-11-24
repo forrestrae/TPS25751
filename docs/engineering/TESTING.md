@@ -250,6 +250,11 @@ What the suite covers:
   compare reads is thinned to the first, every 16th, and the last read of each pass);
 - the modelled misplaced bundle write, the trace check, and the stated limits of the step
   2 read-back, each pinned so that a limit is not mistaken for coverage;
+- the AppConfigOffset checks of `updateRegion()`: each pre-flight refusal for both targets
+  with the EEPROM unchanged, the kept word checked before the target's, the conflict case
+  of the plan in `updateBothRegions()` and its opposite, the word check before the step 3
+  pointer write with and without the compare, executor failures on each new read, and the
+  task counts (1368 for an update, 2732 for `programBlank()`, at 14336 bytes);
 - for `programBlank()`, a sweep of an `FLad` that reports success without taking effect at
   each of its 10 `FLad` calls, from three start states, with and without the moving-address
   model, asserting that no valid pointer leads to a region that does not hold the image;
@@ -746,9 +751,10 @@ maximum (for example `TPS25751Status.cpp` 220 and 227, `TPS25751TypeCState.cpp`
 second pass did not target, such as `TPS25751InterruptEvent.cpp` (93%) and
 `TPS25751ActivePDOContract.cpp` (95%), were left as they were.
 
-Third measurement, 2026-11-23 (1297 tests), the first recorded here with
-`TPS25751EepromUpdater.cpp` in the report: 98% of lines overall, every file at
-93% or more, and the updater at 100% (506 of 506 lines, 149 tests in its suite).
+Third measurement, 2026-11-23 (1303 tests), the first recorded here with
+`TPS25751EepromUpdater.cpp` in the report, after the AppConfigOffset checks of
+`updateRegion()`: 98% of lines overall, every file at 93% or more, and the updater
+at 100% (527 of 527 lines, 155 tests in its suite).
 
 ### Regression Testing
 
@@ -794,6 +800,7 @@ Tests are successful when:
 | 1.4 | 2026-11-23 | Claude Code | USB PD capture bundles and their generated headers |
 | 1.5 | 2026-11-23 | Claude Code | EEPROM updater suite and `FakeCommandExecutor` (what it models and which behaviours are assumptions), the updater in the native build and the coverage report, script tests for `bin_to_header.py` |
 | 1.6 | 2026-11-23 | Claude Code | The `programBlank()` `FLad` sweep, the two `coldReset()` APP outcomes, and the example commands the hardware stages run, including `zero` |
+| 1.7 | 2026-11-23 | Claude Code | Tests of the AppConfigOffset checks of `updateRegion()`, and the coverage numbers after them |
 
 ---
 

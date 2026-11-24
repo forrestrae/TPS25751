@@ -50,16 +50,18 @@ the line `yes` sent after its `[confirm]` prompt.
 | `zero` | Both region pointers to 0, Low then High, each with a read-back; the starting state of hardware stage 5 | Yes |
 
 To recover a board whose EEPROM does not boot, so that the controller sits in PTCH, send
-`l`, then `pb`, then `x`. The loader now waits 20 ms after `PBMc` completes before it
-reads DATA, then polls MODE for APP, as TI's documents describe (SLVAFV8A pages 11 and 18;
-TRM Figure 5-1). Hardware stage 5, on one board, ran the old sequence, which read DATA at
+`l`, then `pb`, then `x`. The loader waits at least 500 us between the burst and `PBMc`,
+and 20 ms after `PBMc` completes before it reads DATA, then polls MODE for APP, as TI's
+documents describe (SLVAFV8A pages 10, 11, and 18; TRM Figure 5-1). It does not follow
+every step of the documented flow; `docs/engineering/CONSTRAINTS.md` lists the steps it
+leaves out. Hardware stage 5, on one board, ran an earlier sequence, which read DATA at
 once: `l` reported `I2cError` although the patch loaded, and every later read from the
-Teensy failed with error 2 (address NACK) until the Teensy was restarted. The new sequence
-has not run on hardware, and the cause of those failed reads is not established. `l` now
+Teensy failed with error 2 (a NACK) until the Teensy was restarted. The current sequence
+has not run on hardware, and the cause of those failed reads is not established. `l`
 prints the Teensy's LPI2C1 registers and the SDA and SCL levels right after the load; if MODE
 cannot be read, it retries every 10 ms for 5 s, then calls `Wire.begin()` and tries again,
-and says which step restored communication. Restart the Teensy, not the controller, only
-if none did.
+and reports when a read succeeded. Restart the Teensy, not the controller, only if no read
+succeeded.
 
 `zero` writes both region pointers to 0, Low then High, each with a read-back, and leaves
 the bundles and the AppConfigOffset words alone. It is how hardware stage 5 reaches an

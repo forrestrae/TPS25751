@@ -35,22 +35,26 @@
 //        Burst Mode image, SLVAFV8A), then MODE, VERSION, and BOOT_FLAGS. The
 //        controller runs the image from RAM; the EEPROM is not written. Waits
 //        for the line "yes" first. Refused in any other mode.
-//        The loader now follows the documented sequence: 20 ms after PBMc
-//        completes, then DATA, then MODE polled until APP (SLVAFV8A pages 11
-//        and 18; TRM Figure 5-1). Hardware stage 5 (2026-11-23, one board) ran
-//        the old sequence, which read DATA as soon as COMMAND cleared: that
-//        read returned 28 of 65 bytes, the load reported I2cError although the
+//        The loader follows the documented timing before and after PBMc: at
+//        least 500 us between the burst and PBMc (TRM Figure 5-1), and 20 ms
+//        after PBMc completes, then DATA, then MODE polled until APP (SLVAFV8A
+//        pages 11 and 18; TRM Figure 5-1). It does not follow every step of
+//        the documented flow; docs/engineering/CONSTRAINTS.md lists the steps
+//        it leaves out. Hardware stage 5 (2026-11-23, one board) ran an earlier
+//        sequence, which read DATA as soon as COMMAND cleared: that read
+//        returned 28 of 65 bytes, the load reported I2cError although the
 //        patch had loaded, and every later read from the Teensy failed with
-//        error 2 (address NACK) until the Teensy was restarted. The new
+//        error 2 (a NACK) until the Teensy was restarted. The current
 //        sequence has not run on hardware, and the cause of the unacknowledged
 //        reads is not established.
 //        Diagnostics, so that a repeat shows which side the fault is on: right
 //        after the load, l prints the Teensy's LPI2C1 registers (MSR, MCR,
 //        MFSR, MCFGR1) and the SDA and SCL levels. If MODE cannot be read, it
 //        retries every 10 ms for 5 s and reports each error code, prints the
-//        registers again, calls Wire.begin(), and tries once more, then says
-//        which step restored communication. Restart the Teensy only if none
-//        did.
+//        registers again, calls Wire.begin(), and tries once more, and
+//        reports when a read succeeded. Restart the Teensy only if no read
+//        succeeded. Reading SDA and SCL with digitalRead() while the pins
+//        belong to LPI2C1 is not verified; an idle bus must print SDA=1 SCL=1.
 //
 // COMMANDS THAT WRITE THE EEPROM
 //   p    Pointer test: writes the High pointer to 0 and back to 0x4400, and
@@ -884,7 +888,7 @@ static void printUpdateResult(EepromUpdateStatus s, uint32_t elapsedMs)
     if (s == EepromUpdateStatus::AppConfigOffsetNotZero) {
         Serial.print(F("[update] The "));
         Serial.print(TPS25751EepromUpdater::toString(updater.lastTarget()));
-        Serial.println(F(" AppConfigOffset word does not read 0, so the controller may not load that region behind a valid pointer. Nothing was written. The region the update would keep is bootable, so the board boots as it is."));
+        Serial.println(F(" AppConfigOffset word does not read 0, so the controller may not load that region behind a valid pointer. Nothing was written. The region the update would keep has a valid pointer and an AppConfigOffset word of 0, so by those two checks the board boots as it is; its image was not checked."));
         Serial.println(F("[update] updateRegion() does not write the word. Repairing it is optional: zero and then pb rewrite both words, but zero leaves no valid pointer until the Low pass of pb completes, so run pb at once, before any reset. If the controller ends up in PTCH, l and then pb recover it."));
         printAppConfigOffsets();
     } else if (s == EepromUpdateStatus::NoBootableRegion && updater.lastStep() == EepromUpdateStep::Preflight) {
@@ -1725,8 +1729,10 @@ static HostI2cState captureHostI2c()
     st.mcr = IMXRT_LPI2C1.MCR;
     st.mfsr = IMXRT_LPI2C1.MFSR;
     st.mcfgr1 = IMXRT_LPI2C1.MCFGR1;
-    // The Wire driver muxes both pins with SION set (the 0x10 in its pin
-    // table), so the GPIO input path, which digitalRead() uses, sees the pads.
+    // The Wire driver muxes both pins to LPI2C1 with SION set (the 0x10 in
+    // its pin table). Reading them through digitalRead() relies on SION
+    // routing the pads to the GPIO input path; that is not verified. An idle
+    // bus must print SDA=1 SCL=1, which the first run checks.
     st.sda = digitalRead(18);
     st.scl = digitalRead(19);
 #endif
@@ -1756,8 +1762,9 @@ static void printHostI2c(const HostI2cState& st, const __FlashStringHelper* when
 }
 
 /// One MODE read made directly on Wire, so that the error code is visible.
-/// Returns 0 when it succeeded; otherwise the endTransmission() code (1 to 4),
-/// or 100 plus the bytes received for a short read.
+/// Returns 0 when it succeeded; otherwise the endTransmission() code (the
+/// Teensy 4 driver returns 2, 4, or 5 on failure), or 100 plus the count
+/// requestFrom() returned when it was not 5.
 static int probeMode(char modeOut[5])
 {
     const uint8_t addr = TPS25751_I2CT_ADDRESS_IDX[0];
@@ -1785,14 +1792,16 @@ static int probeMode(char modeOut[5])
 static void printProbeCode(int code)
 {
     if (code >= 100) {
-        Serial.print(F("short read, "));
+        // The Teensy 4 driver also returns 4 when the bus did not become idle,
+        // so a count of 4 does not prove that 4 bytes arrived.
+        Serial.print(F("requestFrom() returned "));
         Serial.print(code - 100);
-        Serial.print(F(" of 5 bytes"));
+        Serial.print(F(" of 5 (a short read, or a bus error)"));
     } else {
         Serial.print(F("endTransmission() = "));
         Serial.print(code);
         if (code == 2) {
-            Serial.print(F(" (address NACK)"));
+            Serial.print(F(" (NACK)"));
         } else if (code == 4) {
             Serial.print(F(" (other error)"));
         }
@@ -1801,8 +1810,8 @@ static void printProbeCode(int code)
 
 /// After a MODE read that failed: spaced retries for 5 s, then Wire.begin()
 /// and one more try. Prints what happened and returns true when a read
-/// succeeded.
-static bool recoverHostI2c(int firstCode)
+/// succeeded. loadEnd is the millis() value when loadPatchBundle() returned.
+static bool recoverHostI2c(int firstCode, uint32_t loadEnd)
 {
     const uint32_t start = millis();
     Serial.print(F("[l] MODE read failed: "));
@@ -1820,7 +1829,9 @@ static bool recoverHostI2c(int firstCode)
             Serial.print(F(" ms after the first failure: '"));
             Serial.print(mode);
             Serial.println(F("'"));
-            Serial.println(F("[l] Communication restored by: spaced retries"));
+            Serial.print(F("[l] Communication restored after "));
+            Serial.print(millis() - start);
+            Serial.println(F(" ms of retries"));
             return true;
         }
         if (code != lastCode) {
@@ -1846,12 +1857,14 @@ static bool recoverHostI2c(int firstCode)
         Serial.print(F("MODE reads '"));
         Serial.print(mode);
         Serial.println(F("'"));
-        Serial.println(F("[l] Communication restored by: Wire.begin()"));
+        Serial.print(F("[l] Communication restored after Wire.begin(), "));
+        Serial.print(millis() - loadEnd);
+        Serial.println(F(" ms after the load"));
         return true;
     }
     printProbeCode(code);
     Serial.println();
-    Serial.println(F("[l] Communication restored by: nothing. Restart the Teensy (not the controller), then send r."));
+    Serial.println(F("[l] Communication not restored. Restart the Teensy (not the controller), then send r."));
     return false;
 }
 
@@ -1889,9 +1902,10 @@ static void cmdLoadPatch()
 
     const uint32_t started = millis();
     const PatchLoadStatus s = loader.loadPatchBundle(IMAGE, IMAGE_SIZE);
+    const uint32_t loadEnd = millis();
     // Captured before any other Wire call.
     const HostI2cState afterLoad = captureHostI2c();
-    const uint32_t elapsed = millis() - started;
+    const uint32_t elapsed = loadEnd - started;
 
     Serial.print(F("[l] Result: "));
     Serial.println(TPS25751PatchLoader::toString(s));
@@ -1902,7 +1916,7 @@ static void cmdLoadPatch()
 
     char probed[5] = {};
     const int code = probeMode(probed);
-    const bool reachable = (code == 0) || recoverHostI2c(code);
+    const bool reachable = (code == 0) || recoverHostI2c(code, loadEnd);
     if (reachable) {
         printMode();
         printVersion();

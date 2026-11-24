@@ -884,7 +884,8 @@ static void printUpdateResult(EepromUpdateStatus s, uint32_t elapsedMs)
     if (s == EepromUpdateStatus::AppConfigOffsetNotZero) {
         Serial.print(F("[update] The "));
         Serial.print(TPS25751EepromUpdater::toString(updater.lastTarget()));
-        Serial.println(F(" AppConfigOffset word does not read 0, so the controller may not load that region behind a valid pointer. Nothing was written. updateRegion() does not write the word; repair with zero and then pb, before any reset."));
+        Serial.println(F(" AppConfigOffset word does not read 0, so the controller may not load that region behind a valid pointer. Nothing was written. The region the update would keep is bootable, so the board boots as it is."));
+        Serial.println(F("[update] updateRegion() does not write the word. Repairing it is optional: zero and then pb rewrite both words, but zero leaves no valid pointer until the Low pass of pb completes, so run pb at once, before any reset. If the controller ends up in PTCH, l and then pb recover it."));
         printAppConfigOffsets();
     } else if (s == EepromUpdateStatus::NoBootableRegion && updater.lastStep() == EepromUpdateStep::Preflight) {
         Serial.println(F("[update] The region the update would keep is not bootable: its pointer is not valid or its AppConfigOffset word is not 0. Nothing was written. If no pointer reads valid, use pb; otherwise repair with zero and then pb."));

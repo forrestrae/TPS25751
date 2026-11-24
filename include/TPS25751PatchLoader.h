@@ -45,8 +45,25 @@ constexpr TPS25751FourCC CMD_PBMS = TPS25751FourCC::of("PBMs");
 /// 4CC command code to commit (close) a Patch Burst Mode session.
 constexpr TPS25751FourCC CMD_PBMC = TPS25751FourCC::of("PBMc");
 
-/// Post-PBMc settle delay in ms before reading MODE (SLVAFV8A §4.1, step 15).
+/// Delay (ms) between PBMc completing (COMMAND clear) and the first DATA read.
+/// SLVAFV8A step 15 (page 11) and its code (page 18), and TRM SLVUCR8B Figure
+/// 5-1 (page 88), put 20 ms there for the controller to load and apply the
+/// image.
 constexpr uint32_t PATCH_APPLY_DELAY_MS = 20;
+
+/// Interval (ms) between DATA read attempts and between MODE reads after PBMc.
+/// SLVAFV8A polls MODE every 10 ms (code, page 18).
+constexpr uint32_t PBM_POLL_INTERVAL_MS = 10;
+
+/// Longest time (ms), from the first DATA read after PBMc, that failed DATA
+/// reads are retried. Neither TI document bounds this wait; 5000 ms is a
+/// choice. The only timing reference on the test board is GAID to APP at about
+/// 1.9 s.
+constexpr uint32_t PBM_DATA_READ_CAP_MS = 5000;
+
+/// Longest time (ms), from the first MODE read after the DATA check, that MODE
+/// is polled for APP. A choice, as PBM_DATA_READ_CAP_MS.
+constexpr uint32_t PBM_MODE_POLL_CAP_MS = 5000;
 
 /// COMMAND-poll timeout (ms) passed to executeCommand() for the PBMs (session
 /// start) handshake. PBMs only validates the 6-byte config, so it clears quickly.
@@ -105,15 +122,27 @@ enum class PatchLoadStatus : uint8_t {
  *        config = bundleSize[4, LE] + targetAddr(0x30) + timeout(0x31).
  *  10.  burstWrite(0x30, image, length) — stream the image in Wire-sized chunks.
  *  11.  (IRQ mode) Clear INT_CLEAR1 again.
- *  12-14. executeCommand(PBMc) — commit the bundle.
- *  15.  delay(PATCH_APPLY_DELAY_MS).
- *  16.  Read DATA[0] — confirm PatchStartStatus is 0.
- *  17.  Read MODE — confirm APP.
+ *  12-14. issueCommand(PBMc): commit the bundle and wait for COMMAND to
+ *        clear, without reading DATA.
+ *  15.  delay(PATCH_APPLY_DELAY_MS), 20 ms.
+ *  16.  Read DATA, retried every PBM_POLL_INTERVAL_MS on a failed read for up
+ *       to PBM_DATA_READ_CAP_MS; DATA[0] must be 0.
+ *  17.  Read MODE every PBM_POLL_INTERVAL_MS until it reads APP, tolerating
+ *       failed reads, for up to PBM_MODE_POLL_CAP_MS.
  *
- * The 4CC handshake (DATA staging, COMMAND write, completion polling, "!CMD"
- * detection, DATA read-back) is handled entirely by TPS25751::executeCommand();
- * this class just supplies the payload and maps TPS25751TaskResult to
- * PatchLoadStatus.
+ * Steps 12 to 16 follow the documents, which put 20 ms between PBMc
+ * completing and the DATA read (SLVAFV8A page 11 step 15 and page 18; TRM
+ * Figure 5-1, page 88). Hardware stage 5 of the EEPROM-update plan, on one
+ * board, ran an earlier version that read DATA at once: that read returned 28
+ * of 65 bytes, the call returned I2cError although the patch had loaded, and
+ * every later read from the host failed with error 2 until the host
+ * restarted; the cause of those failures is not established. The current
+ * sequence has not run on hardware.
+ *
+ * The 4CC handshakes go through TPS25751::executeCommand() for PBMs, whose
+ * DATA is read right after COMMAND clears (SLVAFV8A steps 8 and 9, pages 9 and
+ * 10), and TPS25751::issueCommand() for PBMc, whose DATA this class reads
+ * itself after the delay.
  *
  * @note Not a register class.  Does not inherit TPS25751Register.  Does not
  *       register with TPS25751RegisterFactory.  See ARCHITECTURE.md ADR-011.
@@ -170,8 +199,13 @@ private:
     /// Step 2: read MODE and confirm isPatchMode().
     bool confirmPatchMode() const;
 
-    /// Step 17: read MODE and confirm isApplicationMode().
-    bool confirmAppMode() const;
+    /// Step 16: read DATA, retrying failed reads; Success, PatchApplyFailed,
+    /// or I2cError at the cap.
+    PatchLoadStatus readPatchResult() const;
+
+    /// Step 17: poll MODE until APP; Success, or at the cap NotInAppMode (the
+    /// last read that succeeded was not APP) or I2cError (no read succeeded).
+    PatchLoadStatus waitForAppMode() const;
 
     /// Step 3: configure INT_MASK1 to enable CMD1-complete interrupt (IRQ mode only).
     void configInterruptMask() const;

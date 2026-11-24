@@ -769,15 +769,39 @@ public:
     std::unique_ptr<TPS25751LiquidDetectionConfig> readLiquidDetectionConfigRegister(bool validate = true) const;
 
     /**
+     * @brief Start a 4CC task and wait for it to complete, without reading DATA
+     *
+     * Writes @p inData to DATA when @p inData is not nullptr and @p inLen is not
+     * 0, writes @p cmd to COMMAND, then polls COMMAND every 5 ms until the
+     * controller clears it (Success), replaces it with "!CMD" (Rejected), or
+     * @p timeoutMs passes (Timeout). A failed I2C transaction returns I2CError
+     * at once. DATA is not read: the caller reads it, when and if the task
+     * requires.
+     *
+     * For tasks whose output is read right after COMMAND clears, use
+     * executeCommand(), which is this call followed by the DATA read. This
+     * call exists for PBMc, after which TI's documents wait 20 ms before
+     * reading DATA (SLVAFV8A, step 15 on page 11 and the code on page 18; TRM
+     * SLVUCR8B Figure 5-1, page 88).
+     *
+     * @param cmd       4-character task code
+     * @param inData    Input payload for DATA, or nullptr for none
+     * @param inLen     Length of @p inData in bytes (0 to 64)
+     * @param timeoutMs Longest wait for COMMAND to clear or reject
+     * @return Success, Rejected, Timeout, or I2CError
+     */
+    TPS25751TaskStatus issueCommand(TPS25751FourCC cmd,
+                                    const uint8_t* inData = nullptr, size_t inLen = 0,
+                                    uint32_t timeoutMs = 200) const;
+
+    /**
      * @brief Execute a 4CC command-task via the COMMAND/DATA interface (TRM Sec 4.4.2)
      *
-     * Writes @p inData to DATA (if provided), writes @p cmd to COMMAND, then polls
-     * COMMAND until the TPS25751 clears it (success), replaces it with "!CMD"
-     * (rejected/unrecognized), or @p timeoutMs elapses. On success, the full 64-byte
-     * DATA register is read back; @p outData is filled from DATA byte 0 (so
-     * outData[0] is the task return code) up to min(outLen, 64) bytes. Task-specific
-     * output layouts (e.g. I2Cr's read bytes starting at DATA offset 1) are unpacked
-     * by the caller.
+     * issueCommand(), then, on Success, a read of the full 64-byte DATA register
+     * at once. @p outData is filled from DATA byte 0 (so outData[0] is the task
+     * return code) up to min(outLen, 64) bytes. Task-specific output layouts
+     * (e.g. I2Cr's read bytes starting at DATA offset 1) are unpacked by the
+     * caller. A failed DATA read returns I2CError.
      *
      * @param cmd       4-character command code (e.g. TPS25751FourCC::of("I2Cr"))
      * @param inData    Optional input payload written to DATA before COMMAND (nullptr to skip)

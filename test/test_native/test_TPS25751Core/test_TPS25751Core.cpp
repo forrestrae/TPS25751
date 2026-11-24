@@ -246,6 +246,30 @@ void test_execute_command_i2c_failure_at_each_transaction()
     }
 }
 
+void test_issue_command_does_not_read_data()
+{
+    // The same DATA write, COMMAND write, and polls as executeCommand(), and
+    // no DATA read: the caller reads DATA when the task requires.
+    Rig r;
+    r.dev.tasks["TEST"] = FakeTps25751Target::TaskScript{2, false, {0x00}, nullptr};
+    const uint8_t in[3] = {1, 2, 3};
+    TEST_ASSERT_EQUAL(TPS25751TaskStatus::Success,
+                      r.pd.issueCommand(TPS25751FourCC::of("TEST"), in, sizeof(in), 200));
+    TEST_ASSERT_EQUAL_size_t(2 + 3 * 2, r.dev.log.size());
+    TEST_ASSERT_EQUAL_size_t(0, r.dev.count([&](const Txn &t) { return r.dev.isRead(t, 0x09); }));
+    assertWrite(r.dev.log[0], 0x20, bytes({0x09, 3, 1, 2, 3}), true, "DATA write");
+
+    // Without input there is no DATA write; the other outcomes match executeCommand().
+    Rig q;
+    TEST_ASSERT_EQUAL(TPS25751TaskStatus::Rejected, q.pd.issueCommand(TPS25751FourCC::of("XXXX")));
+    TEST_ASSERT_TRUE(q.dev.isRegWrite(q.dev.log[0], 0x08));
+    Rig t;
+    Fault f;
+    f.index = 0;
+    t.dev.faults.push_back(f);
+    TEST_ASSERT_EQUAL(TPS25751TaskStatus::I2CError, t.pd.issueCommand(TPS25751FourCC::of("TEST"), in, sizeof(in)));
+}
+
 // --- Raw burst -----------------------------------------------------------------------
 
 void test_burst_write_chunks_without_register_or_length_byte()
@@ -311,6 +335,7 @@ int main(int, char **)
     RUN_TEST(test_execute_command_without_input_or_output);
     RUN_TEST(test_execute_command_rejected_and_timeout);
     RUN_TEST(test_execute_command_i2c_failure_at_each_transaction);
+    RUN_TEST(test_issue_command_does_not_read_data);
     RUN_TEST(test_burst_write_chunks_without_register_or_length_byte);
     RUN_TEST(test_burst_write_failures);
     return UNITY_END();

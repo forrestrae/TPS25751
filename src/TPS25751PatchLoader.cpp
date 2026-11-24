@@ -75,21 +75,53 @@ bool TPS25751PatchLoader::confirmPatchMode() const
     return true;
 }
 
-bool TPS25751PatchLoader::confirmAppMode() const
+PatchLoadStatus TPS25751PatchLoader::readPatchResult() const
 {
-    auto mode = _pd.readModeRegister(/*validate=*/false);
-    if (!mode) {
-        TPS_DEBUG_ERROR(DEBUG_CAT_TASK, "PBM: step 17 — failed to read MODE register");
-        return false;
+    // Step 16. A failed read is retried every PBM_POLL_INTERVAL_MS up to
+    // PBM_DATA_READ_CAP_MS (a choice; the documents give no bound).
+    const uint32_t start = millis();
+    for (;;) {
+        auto data = _pd.readDataRegister(/*validate=*/false);
+        if (data && data->isValid()) {
+            if (data->raw()[0] != 0x00) {
+                TPS_DEBUG_ERROR(DEBUG_CAT_TASK,
+                    "PBM: step 16: PatchStartStatus not cleared (DATA[0]=0x%02X)", data->raw()[0]);
+                return PatchLoadStatus::PatchApplyFailed;
+            }
+            return PatchLoadStatus::Success;
+        }
+        if (millis() - start >= PBM_DATA_READ_CAP_MS) {
+            TPS_DEBUG_ERROR(DEBUG_CAT_TASK, "PBM: step 16: no DATA read succeeded within %u ms",
+                            (unsigned)PBM_DATA_READ_CAP_MS);
+            return PatchLoadStatus::I2cError;
+        }
+        delay(PBM_POLL_INTERVAL_MS);
     }
-    if (!mode->isApplicationMode()) {
-        TPS_DEBUG_ERROR(DEBUG_CAT_TASK,
-            "PBM: step 17 — device not in APP mode after patch (got '%s')",
-            mode->modeString());
-        return false;
+}
+
+PatchLoadStatus TPS25751PatchLoader::waitForAppMode() const
+{
+    // Step 17. SLVAFV8A polls MODE every 10 ms until APP (code, page 18). Failed
+    // reads are tolerated; the poll ends at PBM_MODE_POLL_CAP_MS (a choice).
+    const uint32_t start = millis();
+    bool anyRead = false;
+    for (;;) {
+        auto mode = _pd.readModeRegister(/*validate=*/false);
+        if (mode) {
+            anyRead = true;
+            if (mode->isApplicationMode()) {
+                TPS_DEBUG_INFO(DEBUG_CAT_TASK, "PBM: step 17: MODE reads APP, patch load complete");
+                return PatchLoadStatus::Success;
+            }
+        }
+        if (millis() - start >= PBM_MODE_POLL_CAP_MS) {
+            TPS_DEBUG_ERROR(DEBUG_CAT_TASK, "PBM: step 17: MODE did not read APP within %u ms",
+                            (unsigned)PBM_MODE_POLL_CAP_MS);
+            // The last read that succeeded was not APP, or none succeeded.
+            return anyRead ? PatchLoadStatus::NotInAppMode : PatchLoadStatus::I2cError;
+        }
+        delay(PBM_POLL_INTERVAL_MS);
     }
-    TPS_DEBUG_INFO(DEBUG_CAT_TASK, "PBM: step 17 — confirmed APP mode, patch load complete");
-    return true;
 }
 
 void TPS25751PatchLoader::configInterruptMask() const
@@ -219,48 +251,38 @@ PatchLoadStatus TPS25751PatchLoader::loadPatchBundle(const uint8_t* image, size_
     // Step 11: clear interrupts again (IRQ mode only)
     clearInterrupts();
 
-    // Steps 12-14: PBMc — commit (close) the bundle session
-    TPS_DEBUG_INFO(DEBUG_CAT_TASK, "PBM: step 12-14 — issuing PBMc");
+    // Steps 12 to 14: PBMc commits the bundle. issueCommand() waits for COMMAND
+    // to clear and does not read DATA. TI's documents wait 20 ms between PBMc
+    // completing and the DATA read (SLVAFV8A step 15, page 11, and the code on
+    // page 18; TRM Figure 5-1, page 88). Hardware stage 5 of the EEPROM-update
+    // plan, on one board, ran the earlier sequence, which read DATA at once:
+    // the read returned 28 of 65 bytes, this call returned I2cError although
+    // the patch had loaded, and every later read failed with error 2 until the
+    // host restarted. The cause of those failures is not established. The
+    // sequence below has not run on hardware.
+    TPS_DEBUG_INFO(DEBUG_CAT_TASK, "PBM: steps 12 to 14: issuing PBMc");
 
-    TPS25751TaskResult pbmcResult = _pd.executeCommand(
-        CMD_PBMC,
-        nullptr, 0,
-        nullptr, 0,
-        PBMC_CMD_TIMEOUT_MS);
-
-    if (pbmcResult.status != TPS25751TaskStatus::Success) {
-        _lastStatus = mapTaskStatus(pbmcResult.status, PatchLoadStatus::PbmcRejected);
+    const TPS25751TaskStatus pbmcStatus = _pd.issueCommand(CMD_PBMC, nullptr, 0, PBMC_CMD_TIMEOUT_MS);
+    if (pbmcStatus != TPS25751TaskStatus::Success) {
+        _lastStatus = mapTaskStatus(pbmcStatus, PatchLoadStatus::PbmcRejected);
         TPS_DEBUG_ERROR(DEBUG_CAT_TASK,
-            "PBM: PBMc failed with executor status %u", (unsigned)pbmcResult.status);
+            "PBM: PBMc failed with executor status %u", (unsigned)pbmcStatus);
         return _lastStatus;
     }
 
-    TPS_DEBUG_INFO(DEBUG_CAT_TASK,
-        "PBM: PBMc complete, returnCode=0x%02X", pbmcResult.returnCode);
-
-    // Step 15: delay for the device to apply the patch
-    TPS_DEBUG_TRACE(DEBUG_CAT_TASK,
-        "PBM: step 15 — delay %u ms for patch apply", PATCH_APPLY_DELAY_MS);
+    // Step 15: let the controller load and apply the image.
+    TPS_DEBUG_TRACE(DEBUG_CAT_TASK, "PBM: step 15: delay %u ms for patch apply", (unsigned)PATCH_APPLY_DELAY_MS);
     delay(PATCH_APPLY_DELAY_MS);
 
-    // Step 16: read DATA[0] and confirm PatchStartStatus is cleared to 0
-    TPS_DEBUG_TRACE(DEBUG_CAT_TASK, "PBM: step 16 — reading DATA to confirm PatchStartStatus=0");
-    auto data = _pd.readDataRegister(/*validate=*/false);
-    if (!data || !data->isValid()) {
-        TPS_DEBUG_ERROR(DEBUG_CAT_TASK, "PBM: step 16 — failed to read DATA register");
-        _lastStatus = PatchLoadStatus::I2cError;
-        return _lastStatus;
-    }
-    if (data->raw()[0] != 0x00) {
-        TPS_DEBUG_ERROR(DEBUG_CAT_TASK,
-            "PBM: step 16 — PatchStartStatus not cleared (DATA[0]=0x%02X)", data->raw()[0]);
-        _lastStatus = PatchLoadStatus::PatchApplyFailed;
+    // Step 16: DATA[0] must read 0.
+    _lastStatus = readPatchResult();
+    if (_lastStatus != PatchLoadStatus::Success) {
         return _lastStatus;
     }
 
-    // Step 17: confirm APP mode
-    if (!confirmAppMode()) {
-        _lastStatus = PatchLoadStatus::NotInAppMode;
+    // Step 17: MODE must read APP.
+    _lastStatus = waitForAppMode();
+    if (_lastStatus != PatchLoadStatus::Success) {
         return _lastStatus;
     }
 

@@ -837,6 +837,33 @@ TPS25751TaskStatus TPS25751::waitForCommandClear(uint32_t timeoutMs) const
     }
 }
 
+TPS25751TaskStatus TPS25751::issueCommand(TPS25751FourCC cmd, const uint8_t* inData, size_t inLen,
+                                          uint32_t timeoutMs) const
+{
+    TPS_DEBUG_TRACE(DEBUG_CAT_TASK, "issueCommand: '%c%c%c%c' (inLen=%u)",
+                    cmd.code[0], cmd.code[1], cmd.code[2], cmd.code[3], (unsigned)inLen);
+
+    // Stage the input payload in DATA first (if any). Uses the private raw
+    // overload (exact inLen) rather than the public Address overload, which
+    // requires length == DATA's full 64 bytes and would reject short payloads.
+    if (inData != nullptr && inLen > 0) {
+        if (!writeRegister(static_cast<uint8_t>(TPS25751Registers::Address::DATA), inData, inLen)) {
+            TPS_DEBUG_ERROR(DEBUG_CAT_TASK, "executeCommand: failed to write DATA");
+            return TPS25751TaskStatus::I2CError;
+        }
+    }
+
+    // Kick off the task by writing the 4CC to COMMAND.
+    if (!writeRegister(TPS25751Registers::Address::COMMAND, reinterpret_cast<const uint8_t*>(cmd.code), sizeof(cmd.code))) {
+        TPS_DEBUG_ERROR(DEBUG_CAT_TASK, "executeCommand: failed to write COMMAND");
+        return TPS25751TaskStatus::I2CError;
+    }
+
+    // DATA is not read here: PBMc needs 20 ms between COMMAND clearing and the
+    // DATA read (SLVAFV8A page 11 and page 18; TRM Figure 5-1, page 88).
+    return waitForCommandClear(timeoutMs);
+}
+
 TPS25751TaskResult TPS25751::executeCommand(
     TPS25751FourCC cmd,
     const uint8_t* inData, size_t inLen,
@@ -846,23 +873,8 @@ TPS25751TaskResult TPS25751::executeCommand(
     TPS_DEBUG_TRACE(DEBUG_CAT_TASK, "executeCommand: '%c%c%c%c' (inLen=%u, outLen=%u)",
                      cmd.code[0], cmd.code[1], cmd.code[2], cmd.code[3], (unsigned)inLen, (unsigned)outLen);
 
-    // Stage the input payload in DATA first (if any). Uses the private raw
-    // overload (exact inLen) rather than the public Address overload, which
-    // requires length == DATA's full 64 bytes and would reject short payloads.
-    if (inData != nullptr && inLen > 0) {
-        if (!writeRegister(static_cast<uint8_t>(TPS25751Registers::Address::DATA), inData, inLen)) {
-            TPS_DEBUG_ERROR(DEBUG_CAT_TASK, "executeCommand: failed to write DATA");
-            return TPS25751TaskResult{TPS25751TaskStatus::I2CError, 0};
-        }
-    }
-
-    // Kick off the task by writing the 4CC to COMMAND.
-    if (!writeRegister(TPS25751Registers::Address::COMMAND, reinterpret_cast<const uint8_t*>(cmd.code), sizeof(cmd.code))) {
-        TPS_DEBUG_ERROR(DEBUG_CAT_TASK, "executeCommand: failed to write COMMAND");
-        return TPS25751TaskResult{TPS25751TaskStatus::I2CError, 0};
-    }
-
-    TPS25751TaskStatus status = waitForCommandClear(timeoutMs);
+    // The same DATA write, COMMAND write, and COMMAND polls as issueCommand().
+    TPS25751TaskStatus status = issueCommand(cmd, inData, inLen, timeoutMs);
     if (status != TPS25751TaskStatus::Success) {
         return TPS25751TaskResult{status, 0};
     }

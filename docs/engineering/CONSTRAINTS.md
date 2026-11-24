@@ -643,10 +643,7 @@ interrupt or another task during an update, and a progress callback that returns
 issue any. The TRM states the 5-second spacing for I2Cr and I2Cw only; nothing on pages 81
 and 82 applies it to the flash tasks. Each flash task makes the controller ignore the
 I2Cc_IRQ pin until it completes, so an interrupt from a device on I2Cc can be deferred;
-that has not been measured. The EEPROM also answers on the MCU's own bus where it is wired
-to one (`Wire2` on this board), and a direct read there matched the image. The controller
-masters the same bus at boot, for the BQ25798, and during every flash task, so a direct
-write needs its own review; the library does not offer one.
+that has not been measured.
 
 ### Maximum Read Sizes
 

@@ -1028,18 +1028,6 @@ Ordered from safe to destructive. Each stage states its recovery.
    failure code, `FLrd` behaviour when the EEPROM does not answer (Table 4-19 has no
    return code), and whether a BQ25798 interrupt was deferred while the flash tasks made
    the controller ignore I2Cc_IRQ.
-
-   Independent read, 2026-11-23, read-only, run in a fork of the orchestrator session
-   at my request and not rerun since. A scratch sketch read the 24LC256 at 0x50
-   directly on the Teensy's `Wire2`, which is the controller's I2Cc bus, at 100 kHz
-   while the controller ran in APP. The probe was acknowledged. The dump of 0x0000 to
-   0x7C00 (1984 lines, 31744 bytes) is byte-identical to
-   `..._F8091166_fullFlash.bin`; every 16 bytes were read twice with 0 retries and 0
-   mismatches, in 7246 ms. The sketch sends only the two address bytes of a random
-   read. Together with the `FLrd` dump above, this verifies that `FLrd` returns the
-   chip's contents and not a controller-side copy, which the read-back and the compare
-   rely on. One clean read says nothing about direct writes on a bus the controller
-   also masters.
 2. First write: `writeRegionPointer(High, 0)` while the low pointer is valid, then
    restore it to 0x4400. Confirms that `FLwd` writes exactly four bytes (neighbor check)
    and the read-back. This is step 1 of the app note's own flow, so the controller

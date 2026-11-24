@@ -1435,8 +1435,10 @@ host-run tests that inject a fault at every task, and `src/TPS25751.cpp`, which 
   observed.
 - Hardware stages 1 to 4 verified the layout, the result offsets, a 4-byte `FLwd`, a full
   region update, `updateBothRegions()`, `GAID`, and the boot region after a cut at each
-  step. `programBlank()`, the I2C EEPROM Present flag after a PBM boot, and the
-  `ResetNotObserved` rule against a second firmware wait for stage 5 or later.
+  step. `programBlank()` and the I2C EEPROM Present flag after a PBM boot wait for stage 5.
+  The `GAID` sequence the `ResetNotObserved` rule relies on was seen on one board with the
+  F8091164 and the F8091166 bundle running; whether the two differ in firmware is not
+  recorded.
 - A region update blocks for about 26 s and both regions for about 52 s (stage 3). An
   application with a watchdog services it from the progress callback.
 - `TPS25751PatchLoader` and `TPS25751DownstreamDevice` still call `TPS25751` directly.

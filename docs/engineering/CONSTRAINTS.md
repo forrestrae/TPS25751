@@ -494,8 +494,12 @@ in `executeCommand()` is the first optimization if the update must be faster.
 Recovery and restarts after a typical 1-second delay (Table 4-3), and the port disconnects.
 Stages 3 and 4 measured the same sequence on every reset: COMMAND kept answering for 1276
 to 1277 ms, then the controller stopped acknowledging and `executeCommand()` returned
-`I2CError`; MODE read APP 1938 to 1939 ms after `GAID`. That is one board and one firmware
-(F8091166).
+`I2CError`; MODE read APP 1938 to 1939 ms after `GAID`. That is one board, with the F8091164
+and the F8091166 bundle running; whether the two bundles differ in firmware is not recorded.
+TRM Table 4-3 marks `GAID` complete by COMMAND returning to 0 on reboot; `coldReset()` does
+not take that as evidence, so that documented completion without a caught NAK is a second
+false-negative path. A successful MODE read other than APP is not evidence either, because
+`coldReset()` does not read MODE before `GAID`.
 
 MODE reads APP before and after a restart, so it cannot by itself tell a restart from a
 `GAID` the controller accepted without restarting. `coldReset()` therefore returns `Success`

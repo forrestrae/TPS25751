@@ -42,7 +42,7 @@
  * safe: a region is written while its pointer is 0, and the pointer is
  * restored only after the written bundle has been checked.
  *
- * What hardware has shown (stages 1 to 4 of the plan, 2026-11-22 and 23, one
+ * What hardware has shown (stages 1 to 5 of the plan, 2026-11-22 and 23, one
  * board with a 24LC256): FLrd returns its 16 bytes in DATA bytes 0 to 15 and
  * takes its address least significant byte first; FLad and FLwd report 0x00
  * on success; a 4-byte FLwd writes exactly four bytes; the write address
@@ -50,9 +50,13 @@
  * valid" for one with a corrupted body byte; updateRegion(),
  * updateBothRegions(), and coldReset() work on the device, and after a cut
  * at each step of an update the controller boots the region the state table
- * predicts. Not observed: a busy FLwd, any FLad or FLwd failure code, and
- * whether an FLrd moves the write address. programBlank() has not run on
- * hardware; stage 5 covers it.
+ * predicts. Stage 5 ran programBlank() twice, once from an EEPROM boot and
+ * once after a PBM load, on an EEPROM whose pointers zero had written to 0,
+ * with the task counts its Doxygen gives; a controller that finds no valid
+ * pointer at a restart came up in PTCH. Not observed: a busy FLwd, any FLad
+ * or FLwd failure code, whether an FLrd moves the write address, programming
+ * an erased EEPROM, and the three AppConfigOffset reads updateRegion() makes
+ * since 2026-11-23.
  *
  * Not a register class: it does not inherit TPS25751Register and is not in the
  * factory, in the manner of TPS25751PatchLoader (ADR-011). It depends on the
@@ -832,9 +836,9 @@ public:
      * 1. MODE reads APP (NotInAppMode; I2cError if MODE cannot be read).
      * 2. BOOT_FLAGS (0x2D) reports I2C EEPROM Present (NoEepromPresent;
      *    I2cError if it cannot be read). The TRM (page 33) sets the bit when
-     *    an EEPROM device was discovered during boot. That it is set for a
-     *    blank EEPROM after a PBM boot is inferred; hardware stage 5 of the
-     *    plan checks it.
+     *    an EEPROM device was discovered during boot. Hardware stage 5 saw it
+     *    set in PTCH and after a PBM load, on an EEPROM with both pointers 0;
+     *    an erased EEPROM was not tested.
      * 3. checkImage() accepts the image for the smaller of the two region
      *    capacities (BadImageHeader, BadImageLength).
      * 4. Neither region pointer equals its bundle start (EepromNotBlank), so
@@ -862,8 +866,8 @@ public:
      * There is no step 4: both pointers stay valid. The first failure ends the
      * call, and nothing is written after it. With no retry, a 14336-byte image
      * issues 2732 tasks: 2 FLrd of pre-flight, 8 for the two words, and 1361
-     * per region. That is about the 52 s hardware stage 3 measured for
-     * updateBothRegions().
+     * per region. Hardware stage 5 ran exactly that sequence (1818 FLrd, 902
+     * FLwd, 10 FLad, 2 FLvy) in 51943 and 52118 ms.
      *
      * Why both words first. The last write before each bundle FLad is then
      * the pointer erase, as in updateRegion(), so the pointer-row checks of
@@ -928,12 +932,16 @@ public:
      *
      * One FLad is outside that sweep's reach: the first of the call, for the
      * Low word. Without effect, its four zero bytes go wherever the write
-     * address stood before the call: straight after the example's zero
-     * command that is 0x0404, the four unused bytes after the High pointer
-     * word; after a PBM load it is not documented. The word's read-back then
-     * stops the call unless the word already read 0. The fake starts with no
-     * write address and rejects that FLwd with 0x03, so no sweep shows where
-     * the bytes would land.
+     * address stood when that FLad ran. Straight after the example's zero
+     * command, the last write was the four bytes of the High pointer at
+     * 0x0400, and the last read before the FLad is the word write's own FLrd
+     * at 0x03FC. If an FLrd leaves the write address alone and a 4-byte FLwd
+     * advances it by four, the bytes land at 0x0404, the four unused bytes
+     * after the High pointer word; if an FLrd moves the address to the
+     * address it read plus 16, they land at 0x040C. Neither is documented,
+     * and after a PBM load the address is not documented either. The word's read-back then stops the call unless the
+     * word already read 0. The fake starts with no write address and rejects
+     * that FLwd with 0x03, so no sweep shows where the bytes would land.
      *
      * The progress callback runs as for updateRegion(), once per pass;
      * lastTarget() names the region in progress. The word writes make no

@@ -513,8 +513,14 @@ cost is a false negative: a restart that completes between two MODE reads, or be
 the first one, is reported as not observed. The caller then confirms with VERSION and
 BOOT_FLAGS. If that false negative is seen on hardware, the first-read delay and the
 poll interval are the values to change. The Doxygen of `coldReset()` and a comment at
-the check record the hazard, the stage 3 evidence (one board, firmware F8091166), and
-this cost.
+the check record the hazard, the evidence of stages 3 and 4 (one board, with the
+F8091164 and the F8091166 bundle running), and this cost.
+
+TRM Table 4-3 says `GAID` is marked complete by COMMAND returning to 0 on reboot, and
+that the controller can momentarily NAK. The rule sets that completion mark aside: an
+executor `Success` on `GAID` followed by APP, with no NAK caught, is
+`ResetNotObserved`. On this board every reset showed the NAK, so the case has not
+occurred.
 
 ### Status values and the state each leaves
 
@@ -663,7 +669,7 @@ updater suite has 131 tests. Two review nits are carried into Batch 3:
 - Gate: hardware stage 5.
 
 Status, 2026-11-23: implemented; the review found no blocker and its findings are
-fixed; four of the five decisions that followed it are implemented (see the table
+fixed; three of the four decisions that followed it are implemented (see the table
 below); a re-review and stage 5 are pending, and `programBlank()` has not run on
 hardware. `src/TPS25751EepromUpdater.cpp` has 100% line coverage (506 of 506 lines) and
 the updater suite has 149 tests. The example gained `l` (a PBM load while MODE reads
@@ -975,9 +981,10 @@ Ordered from safe to destructive. Each stage states its recovery.
 
    1. `zero`, then `r`: the dump must equal the full-flash image with both pointer
       words 0 and nothing else changed.
-   2. `pb`, then `r`: the dump must show both pointers valid, both words 0, the
-      F8091164 bundle in both regions, the last 64 bytes of each old bundle unchanged,
-      and 0x03C0 to 0x03FF and 0x07C0 to 0x07FF unchanged apart from the two words.
+   2. `pb`, then `r`: the whole dump must equal an expected image built from the
+      full-flash image with the F8091164 bundle written at 0x0800 and at 0x4400. That
+      image has both pointers valid, both words 0, the last 64 bytes of each old
+      bundle unchanged, and no other byte changed, which covers 0x0004 to 0x07FF.
       Record the task counts and times.
    3. `x`: VERSION must read 0xF8091164 with Patch Config Source EEPROM Loaded.
 
@@ -992,11 +999,16 @@ Ordered from safe to destructive. Each stage states its recovery.
    3. `pb`, then `r`: the dump must be identical to `..._F8091166_fullFlash.bin`.
    4. `x`: VERSION 0xF8091166 and BOOT_FLAGS `18 00 F0 A2 C1`, as in stage 1.
 
-   If I2C EEPROM Present is not set after the PBM boot, `pb` refuses with
-   `NoEepromPresent` and nothing is written. The programBlank section then applies:
-   pre-flight check 2 is dropped for that call, which is a code change. The Teensy can
-   be reflashed without resetting the controller, so the controller stays in APP
-   meanwhile.
+   If I2C EEPROM Present is not set after the PBM boot, `pb` is refused and nothing is
+   written: the example's own check refuses first, and `programBlank()` would return
+   `NoEepromPresent`. The programBlank section then applies: pre-flight check 2 is
+   dropped for that call, which is a code change in the example and in the updater.
+   The Teensy can be reflashed without resetting the controller, so the controller
+   stays in APP meanwhile.
+
+   Not shown by this procedure: that an AppConfigOffset write changes a value. Both
+   words are already 0, so the first `FLwd` calls that start in the middle of a page
+   write 0 over 0. The stage can show only that they change no other byte.
 
    Recovery, in order: `l` then `pb` from PTCH; `examples/load-patch-bundle` followed
    by `pb`; `write-flash.zsh` with the clip, which needs the stack apart.

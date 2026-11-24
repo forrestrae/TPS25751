@@ -84,6 +84,15 @@ constexpr uint32_t PBM_DATA_READ_CAP_MS = 5000;
 /// is polled for APP. A choice, as PBM_DATA_READ_CAP_MS.
 constexpr uint32_t PBM_MODE_POLL_CAP_MS = 5000;
 
+/// Delay (us) between writing the PBMs configuration to DATA and reading it
+/// back (SLVAFV8A step 5, page 8, and its code on page 17).
+constexpr uint32_t PBMS_DATA_VERIFY_DELAY_US = 500;
+
+/// Attempts at writing the PBMs configuration to DATA and reading back the
+/// same 6 bytes. TRM Figure 5-1 (page 88) and SLVAFV8A (page 17) rewrite
+/// without a bound; 3 is a choice.
+constexpr uint8_t PBMS_DATA_ATTEMPTS = 3;
+
 /// COMMAND-poll timeout (ms) passed to executeCommand() for the PBMs (session
 /// start) handshake. PBMs only validates the 6-byte config, so it clears quickly.
 constexpr uint32_t PBMS_CMD_TIMEOUT_MS = 500;
@@ -132,11 +141,15 @@ enum class PatchLoadStatus : uint8_t {
                         ///< only); or COMMAND did not clear and did not read "!CMD" within
                         ///< PBMS_CMD_TIMEOUT_MS after PBMs or PBMC_CMD_TIMEOUT_MS after PBMc.
                         ///< After a PBMc timeout the patch may have loaded.
-    I2cError            ///< An I2C transaction failed in the PBMs or PBMc handshake; or,
-                        ///< after PBMc, no DATA read succeeded within PBM_DATA_READ_CAP_MS,
-                        ///< or no MODE read succeeded within PBM_MODE_POLL_CAP_MS. In the
-                        ///< last two cases, and after a PBMc handshake failure, the patch
-                        ///< may have loaded.
+    I2cError,           ///< An I2C transaction failed in the PBMs or PBMc handshake; or no
+                        ///< read-back of the PBMs configuration in DATA succeeded in
+                        ///< PBMS_DATA_ATTEMPTS attempts; or, after PBMc, no DATA read
+                        ///< succeeded within PBM_DATA_READ_CAP_MS, or no MODE read succeeded
+                        ///< within PBM_MODE_POLL_CAP_MS. In the last two cases, and after a
+                        ///< PBMc handshake failure, the patch may have loaded.
+    PbmsConfigMismatch  ///< Steps 4 and 5: in PBMS_DATA_ATTEMPTS attempts, DATA never read
+                        ///< back the 6-byte PBMs configuration just written (SLVAFV8A step 5).
+                        ///< PBMs was not issued. Appended last to keep the earlier values.
 };
 
 // ---------------------------------------------------------------------------
@@ -154,8 +167,10 @@ enum class PatchLoadStatus : uint8_t {
  *   1.  (Optional) Wait for I2Ct_IRQ low — device signals "Ready-for-Patch".
  *   2.  Read MODE — confirm PTCH via readModeRegister().
  *   3.  (IRQ mode) Configure INT_MASK1 / clear INT_CLEAR1.
- *   4-9. executeCommand(PBMs, config[6]) — start the burst session.
+ *   4-5. writeCommandData(config[6]), wait PBMS_DATA_VERIFY_DELAY_US, read DATA,
+ *        and compare the 6 bytes; up to PBMS_DATA_ATTEMPTS attempts.
  *        config = bundleSize[4, LE] + targetAddr(0x30) + timeout(0x32).
+ *   6-9. executeCommand(PBMs) with no input — start the burst session.
  *  10.  burstWrite(0x30, image, length): stream the image in Wire-sized chunks,
  *       then wait PBM_PRE_COMMIT_DELAY_US (500 us) before the next transaction.
  *  11.  (IRQ mode) Clear INT_CLEAR1 again.
@@ -236,6 +251,10 @@ private:
 
     /// Step 2: read MODE and confirm isPatchMode().
     bool confirmPatchMode() const;
+
+    /// Steps 4 and 5: write the PBMs configuration to DATA and read it back;
+    /// Success, PbmsConfigMismatch, or I2cError (no read-back succeeded).
+    PatchLoadStatus stagePbmsConfig(const uint8_t* config, size_t length) const;
 
     /// Step 16: read DATA, retrying failed reads; Success, PatchApplyFailed,
     /// or I2cError at the cap.

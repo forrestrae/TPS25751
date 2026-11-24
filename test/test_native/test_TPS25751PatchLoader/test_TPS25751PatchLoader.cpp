@@ -126,15 +126,19 @@ void test_load_follows_the_documented_sequence()
 
     // Step 2: MODE reads PTCH.
     TEST_ASSERT_TRUE(r.dev.isRead(log[1], REG_MODE));
-    // Steps 4 to 9: the PBMs configuration in DATA, little-endian bundle size,
-    // target 0x30, timeout 0x32 (TRM Table 4-15; hardware stage 7), then PBMs, its COMMAND
-    // poll, and DATA read at once (steps 8 and 9 read DATA right after the
-    // COMMAND clear).
+    // Step 4: the PBMs configuration in DATA, little-endian bundle size,
+    // target 0x30, timeout 0x32 (TRM Table 4-15; hardware stage 7).
     const uint8_t config[] = {0x09, 6, 100, 0, 0, 0, 0x30, 0x32};
     TEST_ASSERT_TRUE(r.dev.isRegWrite(log[2], REG_DATA));
     TEST_ASSERT_EQUAL_HEX8_ARRAY(config, log[2].bytes.data(), sizeof(config));
+    // Step 5: DATA read back 500 us after the write (SLVAFV8A page 8).
+    TEST_ASSERT_TRUE(r.dev.isRead(log[4], REG_DATA));
+    TEST_ASSERT_EQUAL_UINT64(log[2].timeUs + 500, log[3].timeUs);
+    // Steps 6 to 9: PBMs with no DATA write of its own, its COMMAND poll, and
+    // DATA read at once (steps 8 and 9 read DATA right after the COMMAND clear).
     const long pbms = r.commandWrite("PBMs");
-    TEST_ASSERT_EQUAL_INT(3, pbms);
+    TEST_ASSERT_EQUAL_INT(5, pbms);
+    TEST_ASSERT_EQUAL_size_t(1, r.dev.count([&](const Txn &t) { return r.dev.isRegWrite(t, REG_DATA) && t.bytes.size() > 1; }));
     const long pbmsClear = r.commandClear(pbms);
     TEST_ASSERT_TRUE(pbmsClear > pbms);
     TEST_ASSERT_TRUE(r.dev.isRead(log[pbmsClear + 2], REG_DATA));
@@ -435,13 +439,109 @@ void test_pbms_outcomes()
         r.dev.tasks["PBMs"].pollsBeforeDone = 100000;
         ASSERT_LOAD(PatchLoadStatus::CommandTimeout, r.load());
     }
+}
+
+// --- The PBMs configuration in DATA (steps 4 and 5) ----------------------------------
+
+namespace {
+
+// A fault on writes to DATA of at least 2 bytes, which skips the 1-byte
+// pointer write of a DATA read.
+Fault dataWrites(uint8_t writeError, int remaining)
+{
+    Fault f;
+    f.kind = 0;
+    f.reg = REG_DATA;
+    f.minBytes = 2;
+    f.writeError = writeError;
+    f.remaining = remaining;
+    return f;
+}
+
+size_t configWrites(const Rig &r)
+{
+    return r.dev.count([&](const Txn &t) { return r.dev.isRegWrite(t, REG_DATA) && t.bytes.size() == 8; });
+}
+
+}  // namespace
+
+void test_pbms_config_rewritten_after_a_dropped_write()
+{
+    // SLVAFV8A step 5 (page 8): the controller acknowledged the write, DATA
+    // read back zeros, and the host wrote it again.
+    Rig r;
+    r.dev.faults.push_back(dataWrites(0, 1));
+    ASSERT_LOAD(PatchLoadStatus::Success, r.load());
+    TEST_ASSERT_EQUAL_size_t(2, configWrites(r));
+    const long pbms = r.commandWrite("PBMs");
+    TEST_ASSERT_EQUAL_size_t(2, r.reads(REG_DATA).size() - r.reads(REG_DATA, pbms).size());
+}
+
+void test_pbms_config_never_reads_back()
+{
+    // Every write dropped: three attempts, three read-backs, PbmsConfigMismatch,
+    // and no COMMAND write at all.
+    Rig r;
+    r.dev.faults.push_back(dataWrites(0, -1));
+    ASSERT_LOAD(PatchLoadStatus::PbmsConfigMismatch, r.load());
+    TEST_ASSERT_EQUAL_UINT8(3, PBMS_DATA_ATTEMPTS);
+    TEST_ASSERT_EQUAL_size_t(3, configWrites(r));
+    TEST_ASSERT_EQUAL_size_t(3, r.reads(REG_DATA).size());
+    TEST_ASSERT_EQUAL_size_t(0, r.dev.count([&](const Txn &t) { return r.dev.isRegWrite(t, REG_COMMAND); }));
+}
+
+void test_pbms_config_write_or_read_back_fails()
+{
     {
-        // The DATA write of the configuration is not acknowledged.
+        // The first write is not acknowledged: no read-back follows it, and
+        // the second attempt succeeds.
         Rig r;
-        Fault f;
-        f.index = 2;
-        r.dev.faults.push_back(f);
+        r.dev.faults.push_back(dataWrites(2, 1));
+        ASSERT_LOAD(PatchLoadStatus::Success, r.load());
+        TEST_ASSERT_EQUAL_size_t(2, configWrites(r));
+        const long pbms = r.commandWrite("PBMs");
+        TEST_ASSERT_EQUAL_size_t(1, r.reads(REG_DATA).size() - r.reads(REG_DATA, pbms).size());
+    }
+    {
+        // Every write fails: I2cError after three attempts, no read-back, no PBMs.
+        Rig r;
+        r.dev.faults.push_back(dataWrites(2, -1));
         ASSERT_LOAD(PatchLoadStatus::I2cError, r.load());
+        TEST_ASSERT_EQUAL_size_t(3, configWrites(r));
+        TEST_ASSERT_EQUAL_size_t(0, r.reads(REG_DATA).size());
+        TEST_ASSERT_EQUAL_INT(-1, r.commandWrite("PBMs"));
+    }
+    {
+        // The first read-back is short: the configuration is written again.
+        Rig r;
+        Fault f = shortReads(REG_DATA, 0, 1000000, 10);
+        f.remaining = 1;
+        r.dev.faults.push_back(f);
+        ASSERT_LOAD(PatchLoadStatus::Success, r.load());
+        TEST_ASSERT_EQUAL_size_t(2, configWrites(r));
+    }
+    {
+        // No read-back succeeds: I2cError, not PbmsConfigMismatch, because
+        // nothing showed what DATA holds.
+        Rig r;
+        r.dev.faults.push_back(shortReads(REG_DATA, 0, 1000000, 10));
+        ASSERT_LOAD(PatchLoadStatus::I2cError, r.load());
+        TEST_ASSERT_EQUAL_size_t(3, configWrites(r));
+        TEST_ASSERT_EQUAL_INT(-1, r.commandWrite("PBMs"));
+    }
+    {
+        // One mismatch, one failed read-back, one failed write: some read-back
+        // succeeded, so PbmsConfigMismatch.
+        Rig r;
+        r.dev.faults.push_back(dataWrites(0, 1));
+        Fault rd = shortReads(REG_DATA, 0, 1000000, 10);
+        rd.index = 7;  // the second read-back: MODE 0-1, write 2, read 3-4, write 5, read 6-7
+        r.dev.faults.push_back(rd);
+        Fault wr = dataWrites(2, -1);
+        wr.index = 8;  // the third write
+        r.dev.faults.push_back(wr);
+        ASSERT_LOAD(PatchLoadStatus::PbmsConfigMismatch, r.load());
+        TEST_ASSERT_EQUAL_size_t(3, configWrites(r));
     }
 }
 
@@ -516,11 +616,13 @@ void test_to_string_and_debug_print()
         PatchLoadStatus::BadBundleSize,    PatchLoadStatus::BadTargetAddress, PatchLoadStatus::BadTimeout,
         PatchLoadStatus::BurstFailed,      PatchLoadStatus::PbmcRejected,   PatchLoadStatus::PatchApplyFailed,
         PatchLoadStatus::NotInAppMode,     PatchLoadStatus::CommandTimeout, PatchLoadStatus::I2cError,
+        PatchLoadStatus::PbmsConfigMismatch,
     };
     const char *names[] = {"Success",          "NotInPatchMode", "PbmsRejected", "BadBundleSize",
                            "BadTargetAddress", "BadTimeout",     "BurstFailed",  "PbmcRejected",
-                           "PatchApplyFailed", "NotInAppMode",   "CommandTimeout", "I2cError"};
-    for (size_t i = 0; i < 12; ++i) TEST_ASSERT_EQUAL_STRING(names[i], TPS25751PatchLoader::toString(all[i]));
+                           "PatchApplyFailed", "NotInAppMode",   "CommandTimeout", "I2cError",
+                           "PbmsConfigMismatch"};
+    for (size_t i = 0; i < 13; ++i) TEST_ASSERT_EQUAL_STRING(names[i], TPS25751PatchLoader::toString(all[i]));
     TEST_ASSERT_EQUAL_STRING("Unknown", TPS25751PatchLoader::toString(static_cast<PatchLoadStatus>(200)));
 
     // debugPrint() reports the result of the last load.
@@ -551,6 +653,9 @@ int main(int, char **)
     RUN_TEST(test_irq_ready_wait_across_a_millis_wrap);
     RUN_TEST(test_not_in_patch_mode);
     RUN_TEST(test_pbms_outcomes);
+    RUN_TEST(test_pbms_config_rewritten_after_a_dropped_write);
+    RUN_TEST(test_pbms_config_never_reads_back);
+    RUN_TEST(test_pbms_config_write_or_read_back_fails);
     RUN_TEST(test_burst_failure);
     RUN_TEST(test_pbmc_outcomes);
     RUN_TEST(test_irq_mode);

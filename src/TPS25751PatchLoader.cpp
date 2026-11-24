@@ -75,6 +75,39 @@ bool TPS25751PatchLoader::confirmPatchMode() const
     return true;
 }
 
+PatchLoadStatus TPS25751PatchLoader::stagePbmsConfig(const uint8_t* config, size_t length) const
+{
+    // Steps 4 and 5. SLVAFV8A writes DATA, waits 500 us, reads it back, and
+    // rewrites it until it matches (step 5, page 8; code, page 17); its trace
+    // shows a first read-back of zeros after an acknowledged write. TRM Figure
+    // 5-1 (page 88) rewrites until "DATA1 write completed successfully". Both
+    // loop without a bound; PBMS_DATA_ATTEMPTS bounds it here.
+    bool anyReadBack = false;
+    for (uint8_t attempt = 1; attempt <= PBMS_DATA_ATTEMPTS; ++attempt) {
+        if (!_pd.writeCommandData(config, length)) {
+            TPS_DEBUG_WARN(DEBUG_CAT_TASK, "PBM: step 4: DATA write failed (attempt %u)", (unsigned)attempt);
+            continue;
+        }
+        delayMicroseconds(PBMS_DATA_VERIFY_DELAY_US);
+        auto data = _pd.readDataRegister(/*validate=*/false);
+        if (!data || !data->isValid()) {
+            TPS_DEBUG_WARN(DEBUG_CAT_TASK, "PBM: step 5: DATA read-back failed (attempt %u)", (unsigned)attempt);
+            continue;
+        }
+        anyReadBack = true;
+        if (memcmp(data->raw(), config, length) == 0) {
+            TPS_DEBUG_INFO(DEBUG_CAT_TASK, "PBM: step 5: DATA holds the PBMs configuration (attempt %u)",
+                           (unsigned)attempt);
+            return PatchLoadStatus::Success;
+        }
+        TPS_DEBUG_WARN(DEBUG_CAT_TASK, "PBM: step 5: DATA read-back differs from the write (attempt %u)",
+                       (unsigned)attempt);
+    }
+    TPS_DEBUG_ERROR(DEBUG_CAT_TASK, "PBM: steps 4 and 5: no matching DATA read-back in %u attempts",
+                    (unsigned)PBMS_DATA_ATTEMPTS);
+    return anyReadBack ? PatchLoadStatus::PbmsConfigMismatch : PatchLoadStatus::I2cError;
+}
+
 PatchLoadStatus TPS25751PatchLoader::readPatchResult() const
 {
     // Step 16. A failed read is retried every PBM_POLL_INTERVAL_MS up to
@@ -179,7 +212,8 @@ PatchLoadStatus TPS25751PatchLoader::loadPatchBundle(const uint8_t* image, size_
     configInterruptMask();
     clearInterrupts();
 
-    // Steps 4-9: PBMs — start the burst session
+    // Steps 4 to 9: stage the PBMs configuration in DATA and check it, then
+    // start the burst session with PBMs.
     // Config payload (6 bytes): bundleSize[4, little-endian] + targetAddr + timeout
     uint8_t config[6];
     config[0] = static_cast<uint8_t>((length >>  0) & 0xFF);  // bundleSize LSB
@@ -193,9 +227,15 @@ PatchLoadStatus TPS25751PatchLoader::loadPatchBundle(const uint8_t* image, size_
         "PBM: step 4-9 — issuing PBMs (bundleSize=%u, target=0x%02X, timeout=0x%02X)",
         (unsigned)length, PBM_I2C_TARGET, PBM_TIMEOUT);
 
+    _lastStatus = stagePbmsConfig(config, sizeof(config));
+    if (_lastStatus != PatchLoadStatus::Success) {
+        return _lastStatus;
+    }
+
+    // DATA is already staged and checked, so PBMs goes out with no input.
     TPS25751TaskResult pbmsResult = _pd.executeCommand(
         CMD_PBMS,
-        config, sizeof(config),
+        nullptr, 0,
         nullptr, 0,
         PBMS_CMD_TIMEOUT_MS);
 
@@ -320,6 +360,7 @@ const char* TPS25751PatchLoader::toString(PatchLoadStatus status)
         case PatchLoadStatus::NotInAppMode:      return "NotInAppMode";
         case PatchLoadStatus::CommandTimeout:    return "CommandTimeout";
         case PatchLoadStatus::I2cError:          return "I2cError";
+        case PatchLoadStatus::PbmsConfigMismatch: return "PbmsConfigMismatch";
         default:                                 return "Unknown";
     }
 }

@@ -27,8 +27,10 @@
 //
 // Faults: a rule matches a transaction by its index in the log, by a time
 // window on the stub clock, by address, by register (the register pointer for
-// reads), and by kind. A matching write returns writeError (2 NACK, 4, or 5,
-// the codes the Teensy driver returns) without effect; a
+// reads), by kind, and by a minimum write length. A matching write returns
+// writeError (2 NACK, 4, or 5, the codes the Teensy driver returns) without
+// effect; writeError 0 models a write the controller acknowledges and then
+// drops, as the first DATA read-back of SLVAFV8A step 5 (page 8) shows. A
 // matching read returns only readBytes of the normal response. A task's
 // onDone hook can add rules, for example a window that starts when the task
 // completes.
@@ -78,7 +80,8 @@ public:
         int addr = -1;            // -1 for any
         int reg = -1;             // -1 for any
         int kind = -1;            // 0 write, 1 read, -1 any
-        uint8_t writeError = 2;   // endTransmission code for a matched write: 2, 4, or 5, as the Teensy driver returns
+        size_t minBytes = 0;      // match only writes of at least this many bytes; 2 skips the pointer write of a read
+        uint8_t writeError = 2;   // endTransmission code for a matched write: 2, 4, or 5 as the Teensy driver returns, or 0 for a dropped write
         size_t readBytes = 0;     // bytes a matched read returns
         int remaining = -1;       // matches left, -1 for unlimited
     };
@@ -183,6 +186,7 @@ private:
             if (f.addr >= 0 && f.addr != t.addr) continue;
             if (f.reg >= 0 && f.reg != t.reg) continue;
             if (f.kind >= 0 && f.kind != (t.kind == Kind::Write ? 0 : 1)) continue;
+            if (f.minBytes > 0 && (t.kind != Kind::Write || t.bytes.size() < f.minBytes)) continue;
             if (f.remaining > 0) --f.remaining;
             return &f;
         }

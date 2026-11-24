@@ -356,8 +356,12 @@ config[1] = (length >>  8) & 0xFF
 config[2] = (length >> 16) & 0xFF
 config[3] = (length >> 24) & 0xFF  // bundleSize MSB
 config[4] = 0x30                   // PBM_I2C_TARGET
-config[5] = 0x31                   // PBM_TIMEOUT (~3.1 s)
+config[5] = 0x31                   // PBM_TIMEOUT
 ```
+
+The timeout byte is in 100 ms units (TRM Table 4-15), so 0x31 is 4.9 s, and the TRM
+recommends 0x32 (5 s). SLVAFV8A Table 4-1 (page 8) lists 0x31 as "3.1 seconds", but the
+byte trace below that table sends 0x32. The loader sends 0x31.
 
 **PatchStartStatus** (DATA byte 0 after PBMs / PBMc, i.e. `result.returnCode`):
 `0x00` = success; `0x04` = bad bundle size; `0x05` = bad target address; `0x06` =
@@ -379,17 +383,56 @@ stays on `executeCommand()`.
 Evidence, one board, hardware stage 5 of the EEPROM-update plan, with the earlier code
 that read DATA at once: the read returned 28 of 65 bytes, the load reported `I2cError`
 although the patch had loaded, and every later read from the host failed with error 2
-(the Teensy driver's code for a NACK on a free bus) until the host restarted. The Teensy
-driver source does not support a stuck host: its paths for a held line or a stuck
-peripheral return 4. A controller that did not acknowledge its address fits the codes as
-well, and the cause is not established. The current sequence has not run on hardware.
+until the host restarted. The Teensy 4 driver returns 2 only after `wait_idle()` found the
+bus free and the peripheral then saw a NACK, of the address or of a data byte (the driver
+cannot tell which); a busy bus, lost arbitration, a pin-low timeout, and its 50 ms timeout
+return 4. A controller that did not acknowledge fits the codes. They argue against a held
+line on the host side but do not rule out a host fault, and the cause is not established.
+The current sequence has not run on hardware.
 
-Two more points from the figures. TRM Figure 5-1 also waits at least 500 µs after each
-burst and before `PBMc`, and SLVAFV8A adds 500 µs between its bursts and before `PBMc`;
-`burstWrite()` sends its 32-byte chunks without that delay unless `interChunkDelayUs` is
-given, and the loader does not give it. Stage 5 loaded the image that way. The 20 ms
-wait can be replaced by the INT_EVENT1.PatchLoaded interrupt (SLVAFV8A footnote 5); the
-loader keeps the delay.
+#### 500 µs before PBMc
+
+TRM Figure 5-1 (page 88) has one delay box, "Delay at least 500us", between "Entire Patch
+Bundle has been written? Yes" and the `PBMc` write; it has none between bursts. SLVAFV8A
+step 10 (page 10) puts 500 µs between its bursts and before `PBMc` as a description of its
+example, which sends three bursts of up to 4095 bytes. The loader waits
+`PBM_PRE_COMMIT_DELAY_US` (500 µs) once, directly after `burstWrite()` returns, so that the
+next transaction is at least 500 µs after the last chunk: the INT_CLEAR1 write of step 11 in
+IRQ mode, the `PBMc` COMMAND write otherwise. `burstWrite()` sends its 32-byte chunks back
+to back; the loader leaves `interChunkDelayUs` at 0. Hardware stage 5 loaded an image with
+no delay at all.
+
+#### Where the loader departs from the documented flow
+
+These are facts about the code, each with the document it differs from. None has been
+observed to cause a failure.
+
+- ReadyForPatch. TRM Figure 5-1 starts by polling INT_EVENT1.ReadyForPatch every 10 ms.
+  The loader never reads INT_EVENT1. In IRQ mode it waits for the I2Ct_IRQ pin to go low
+  (up to 5 s); in polling mode it does not wait and does not retry.
+- MODE before the load. Figure 5-1 polls MODE until it reads PTCH. The loader reads MODE
+  once and returns `NotInPatchMode` if that read fails or does not read PTCH.
+- DATA before `PBMs`. SLVAFV8A step 5 (page 8) reads DATA back 500 µs after writing it and
+  rewrites it until it matches; Figure 5-1 asks "DATA1 write completed successfully?". The
+  loader writes DATA once and does not read it back.
+- COMMAND poll interval. Figure 5-1 polls CMD1 with a 10 ms delay. `waitForCommandClear()`,
+  used for `PBMs` and `PBMc`, polls every 5 ms.
+- PBMe. Figure 5-1 issues `PBMe` after a burst that is not acknowledged and after `PBMc`
+  reads "!CMD". The loader returns `BurstFailed` or `PbmcRejected` and never issues `PBMe`.
+- The wait after `PBMc`. TRM Table 4-16 (page 79) says to check DATA when CMD1 goes to 0;
+  the 20 ms delay appears only in Figure 5-1 and SLVAFV8A step 15 (page 11). The loader
+  follows the figure and the app note.
+- DATA read length after `PBMc`. SLVAFV8A step 16 (page 12) reads 40 bytes, and TRM
+  Table 4-16 gives `PBMc` 320 bits of output. The loader reads the whole 64-byte DATA
+  register and checks byte 0 only.
+- PatchLoaded. Figure 5-1 polls INT_EVENT1.PatchLoaded after DATA reads 0. The loader does
+  not. SLVAFV8A footnote 5 (page 11) says the interrupt can replace the 20 ms delay and
+  that doing so saved no time; the loader keeps the delay.
+- The delay before the final MODE read. Figure 5-1 waits 10 ms before reading MODE; its
+  footnote 2 calls the delay optional but recommended. The loader reads MODE right after
+  the DATA check, then polls every 10 ms until APP (SLVAFV8A code, page 18).
+- The `PBMs` timeout byte is 0x31, where TRM Table 4-15 recommends 0x32 (see the
+  configuration layout above).
 
 See `TPS25751PatchLoader` (`include/TPS25751PatchLoader.h`, `src/TPS25751PatchLoader.cpp`)
 for the complete 17-step implementation, and ADR-011 in ARCHITECTURE.md for the
@@ -533,8 +576,13 @@ in `executeCommand()` is the first optimization if the update must be faster.
 Recovery and restarts after a typical 1-second delay (Table 4-3), and the port disconnects.
 Stages 3 and 4 measured the same sequence on every reset: COMMAND kept answering for 1276
 to 1277 ms, then a COMMAND poll failed on I2C and `executeCommand()` returned `I2CError`;
-the MODE read 100 ms later failed with error 4 (arbitration lost or SCL held low in the
-Teensy driver), not with a NACK; MODE read APP 1938 to 1939 ms after `GAID`. That is one board, with the F8091164
+the MODE read 100 ms later failed with error 4, not with a NACK; MODE read APP 1938 to
+1939 ms after `GAID`. The Teensy 4 driver returns 4 from `endTransmission()` when no
+transmission was begun (not the case here), when the bus did not become idle within 16 ms
+and `force_clock()` could not free it, on lost arbitration, on a pin-low timeout (PLTF; the
+driver leaves MCFGR1.TIMECFG clear, and which pins that covers was not checked against the
+i.MX RT1060 reference manual), and on its own 50 ms transaction timeout. Which one occurred
+is not recorded. That is one board, with the F8091164
 and the F8091166 bundle running; whether the two bundles differ in firmware is not recorded.
 TRM Table 4-3 marks `GAID` complete by COMMAND returning to 0 on reboot; `coldReset()` does
 not take that as evidence, so that documented completion without a caught NAK is a second
@@ -1504,6 +1552,7 @@ void foo() {
 | 1.20 | 2026-11-23 | Claude Code | `updateRegion()` checks both AppConfigOffset words in its pre-flight and the target's again before the pointer write (AppConfigOffset words section); PTCH after a restart with no valid pointer observed in stage 5 |
 | 1.21 | 2026-11-23 | Claude Code | PBM: 20 ms between `PBMc` completing and the DATA read, `issueCommand()`, the stage 5 evidence and what it does not establish, the 500 µs burst spacing the figures show (Patch Burst Mode section) |
 | 1.22 | 2026-11-23 | Claude Code | The MODE read after a failed `GAID` poll failed with error 4, not a NACK (Cold reset section) |
+| 1.23 | 2026-11-23 | Claude Code | PBM: TRM Figure 5-1 has one 500 µs delay, before `PBMc`, which the loader now gives; the points where the loader departs from the documented flow; the `PBMs` timeout byte. Error 4 lists every source in the Teensy 4 driver (Cold reset section) |
 
 ---
 

@@ -362,6 +362,35 @@ void test_pbmc_that_takes_longer_than_200_ms()
     TEST_ASSERT_TRUE(r.dev.log[clear].timeUs - r.dev.log[pbmc].timeUs >= 300000);
 }
 
+void test_pbms_that_takes_longer_than_200_ms()
+{
+    // PBMs is polled for up to PBMS_CMD_TIMEOUT_MS (500 ms), not the 200 ms
+    // default of the task calls: a PBMs that completes after 300 ms of polls
+    // succeeds.
+    Rig r;
+    r.dev.tasks["PBMs"].pollsBeforeDone = 60;  // 60 polls 5 ms apart
+    ASSERT_LOAD(PatchLoadStatus::Success, r.load());
+    const long pbms = r.commandWrite("PBMs");
+    const long clear = r.commandClear(pbms);
+    TEST_ASSERT_TRUE(r.dev.log[clear].timeUs - r.dev.log[pbms].timeUs >= 300000);
+}
+
+void test_irq_ready_wait_across_a_millis_wrap()
+{
+    // The step 1 wait for I2Ct_IRQ low measures elapsed time by unsigned
+    // subtraction, so a wait that starts 2 s before millis() wraps still lasts
+    // the full 5 s before CommandTimeout.
+    Rig r;
+    const uint64_t startUs = (0x100000000ull - 2000) * 1000;
+    fake_arduino::g_nowUs = startUs;
+    ASSERT_LOAD(PatchLoadStatus::CommandTimeout, r.load(5));
+    TEST_ASSERT_EQUAL_size_t(0, r.dev.log.size());
+    const uint64_t waitedMs = (fake_arduino::g_nowUs - startUs) / 1000;
+    TEST_ASSERT_TRUE(waitedMs > 5000);
+    TEST_ASSERT_TRUE(waitedMs <= 5002);
+    TEST_ASSERT_TRUE(millis() < 10000);  // wrapped
+}
+
 // --- Every other status --------------------------------------------------------------
 
 void test_not_in_patch_mode()
@@ -518,6 +547,8 @@ int main(int, char **)
     RUN_TEST(test_mode_poll_cap_outcomes);
     RUN_TEST(test_caps_across_a_millis_wrap);
     RUN_TEST(test_pbmc_that_takes_longer_than_200_ms);
+    RUN_TEST(test_pbms_that_takes_longer_than_200_ms);
+    RUN_TEST(test_irq_ready_wait_across_a_millis_wrap);
     RUN_TEST(test_not_in_patch_mode);
     RUN_TEST(test_pbms_outcomes);
     RUN_TEST(test_burst_failure);

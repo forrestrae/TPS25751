@@ -430,337 +430,135 @@ std::unique_ptr<TPS25751Register> TPS25751::readAndValidateRegisterByAddress(TPS
 
 // Type-safe factory-based convenience method implementations
 std::unique_ptr<TPS25751Mode> TPS25751::readModeRegister(bool validate) const {
-    auto reg = readAndValidateRegisterByAddress(TPS25751Registers::Address::MODE, validate);
-    if (!reg) return nullptr;
-    
-    if (reg) {
-        TPS25751Mode* modeReg = static_cast<TPS25751Mode*>(reg.release());
-        return std::unique_ptr<TPS25751Mode>(modeReg);
-    }
-    return nullptr;
+    return readAndValidateAs<TPS25751Mode>(TPS25751Registers::Address::MODE, validate);
 }
 
 std::unique_ptr<TPS25751Command> TPS25751::readCommandRegister(bool validate) const {
-    auto reg = readAndValidateRegisterByAddress(TPS25751Registers::Address::COMMAND, validate);
-    if (!reg) return nullptr;
-
-    if (reg) {
-        TPS25751Command* commandReg = static_cast<TPS25751Command*>(reg.release());
-        return std::unique_ptr<TPS25751Command>(commandReg);
-    }
-    return nullptr;
+    return readAndValidateAs<TPS25751Command>(TPS25751Registers::Address::COMMAND, validate);
 }
 
 std::unique_ptr<TPS25751Data> TPS25751::readDataRegister(bool validate) const {
-    auto reg = readAndValidateRegisterByAddress(TPS25751Registers::Address::DATA, validate);
-    if (!reg) return nullptr;
-
-    if (reg) {
-        TPS25751Data* dataReg = static_cast<TPS25751Data*>(reg.release());
-        return std::unique_ptr<TPS25751Data>(dataReg);
-    }
-    return nullptr;
+    return readAndValidateAs<TPS25751Data>(TPS25751Registers::Address::DATA, validate);
 }
 
 std::unique_ptr<TPS25751Version> TPS25751::readVersionRegister(bool validate) const {
-    auto reg = readAndValidateRegisterByAddress(TPS25751Registers::Address::VERSION, validate);
-    if (!reg) return nullptr;
-
-    TPS25751Version* versionReg = static_cast<TPS25751Version*>(reg.release());
-    return std::unique_ptr<TPS25751Version>(versionReg);
+    return readAndValidateAs<TPS25751Version>(TPS25751Registers::Address::VERSION, validate);
 }
 
 std::unique_ptr<TPS25751InterruptEvent> TPS25751::readInterruptEventRegister(bool validate) const {
-    auto reg = readAndValidateRegisterByAddress(TPS25751Registers::Address::INT_EVENT1, validate);
-    if (!reg) return nullptr;
-
-    if (reg) {
-        TPS25751InterruptEvent* intEventReg = static_cast<TPS25751InterruptEvent*>(reg.release());
-        return std::unique_ptr<TPS25751InterruptEvent>(intEventReg);
-    }
-    return nullptr;
+    return readAndValidateAs<TPS25751InterruptEvent>(TPS25751Registers::Address::INT_EVENT1, validate);
 }
 
 std::unique_ptr<TPS25751Status> TPS25751::readStatusRegister(bool validate) const {
-    auto reg = readAndValidateRegisterByAddress(TPS25751Registers::Address::STATUS, validate);
-    if (!reg) return nullptr;
-    
-    // Since we control the factory creation, we can use static_cast
-    if (reg) {
-        TPS25751Status* statusReg = static_cast<TPS25751Status*>(reg.release());
-        return std::unique_ptr<TPS25751Status>(statusReg);
-    }
-    return nullptr;
+    return readAndValidateAs<TPS25751Status>(TPS25751Registers::Address::STATUS, validate);
 }
 
 std::unique_ptr<TPS25751PowerPathStatus> TPS25751::readPowerPathStatusRegister(bool validate) const {
-    auto reg = readAndValidateRegisterByAddress(TPS25751Registers::Address::POWER_PATH_STATUS, validate);
-    if (!reg) return nullptr;
-    
-    if (reg) {
-        TPS25751PowerPathStatus* powerReg = static_cast<TPS25751PowerPathStatus*>(reg.release());
-        return std::unique_ptr<TPS25751PowerPathStatus>(powerReg);
-    }
-    return nullptr;
+    return readAndValidateAs<TPS25751PowerPathStatus>(TPS25751Registers::Address::POWER_PATH_STATUS, validate);
 }
 
 std::unique_ptr<TPS25751GlobalSystemConfig> TPS25751::readGlobalSystemConfigRegister(bool validate) const {
-    auto reg = readAndValidateRegisterByAddress(TPS25751Registers::Address::GLOBAL_SYSTEM_CONFIGURATION, validate);
-    if (!reg) return nullptr;
-
-    TPS25751GlobalSystemConfig* typedReg = static_cast<TPS25751GlobalSystemConfig*>(reg.release());
-    return std::unique_ptr<TPS25751GlobalSystemConfig>(typedReg);
+    return readAndValidateAs<TPS25751GlobalSystemConfig>(TPS25751Registers::Address::GLOBAL_SYSTEM_CONFIGURATION, validate);
 }
 
 std::unique_ptr<TPS25751PortConfig> TPS25751::readPortConfigRegister(bool validate) const {
-    auto reg = readAndValidateRegisterByAddress(TPS25751Registers::Address::PORT_CONFIGURATION, validate);
-    if (!reg) return nullptr;
-
-    if (reg) {
-        TPS25751PortConfig* configReg = static_cast<TPS25751PortConfig*>(reg.release());
-        return std::unique_ptr<TPS25751PortConfig>(configReg);
-    }
-    return nullptr;
+    return readAndValidateAs<TPS25751PortConfig>(TPS25751Registers::Address::PORT_CONFIGURATION, validate);
 }
 
 std::unique_ptr<TPS25751PortControl> TPS25751::readPortControlRegister(bool validate) const {
-    auto reg = readAndValidateRegisterByAddress(TPS25751Registers::Address::PORT_CONTROL, validate);
-    if (!reg) return nullptr;
-
-    if (reg) {
-        TPS25751PortControl* portControlReg = static_cast<TPS25751PortControl*>(reg.release());
-        return std::unique_ptr<TPS25751PortControl>(portControlReg);
-    }
-    return nullptr;
+    return readAndValidateAs<TPS25751PortControl>(TPS25751Registers::Address::PORT_CONTROL, validate);
 }
 
 std::unique_ptr<TPS25751BootFlags> TPS25751::readBootFlagsRegister(bool validate) const {
-    auto reg = readAndValidateRegisterByAddress(TPS25751Registers::Address::BOOT_FLAGS, validate);
-    if (!reg) return nullptr;
-    
-    if (reg) {
-        TPS25751BootFlags* bootReg = static_cast<TPS25751BootFlags*>(reg.release());
-        return std::unique_ptr<TPS25751BootFlags>(bootReg);
-    }
-    return nullptr;
+    return readAndValidateAs<TPS25751BootFlags>(TPS25751Registers::Address::BOOT_FLAGS, validate);
 }
 
 std::unique_ptr<TPS25751ReceivedSourceCaps> TPS25751::readReceivedSourceCapsRegister(bool validate) const {
-    auto reg = readAndValidateRegisterByAddress(TPS25751Registers::Address::RECEIVED_SOURCE_CAPABILITIES, validate);
-    if (!reg) return nullptr;
-
-    if (reg) {
-        TPS25751ReceivedSourceCaps* sourceCapsReg = static_cast<TPS25751ReceivedSourceCaps*>(reg.release());
-        return std::unique_ptr<TPS25751ReceivedSourceCaps>(sourceCapsReg);
-    }
-    return nullptr;
+    return readAndValidateAs<TPS25751ReceivedSourceCaps>(TPS25751Registers::Address::RECEIVED_SOURCE_CAPABILITIES, validate);
 }
 
 std::unique_ptr<TPS25751ReceivedSinkCaps> TPS25751::readReceivedSinkCapsRegister(bool validate) const {
-    auto reg = readAndValidateRegisterByAddress(TPS25751Registers::Address::RECEIVED_SINK_CAPABILITIES, validate);
-    if (!reg) return nullptr;
-
-    if (reg) {
-        TPS25751ReceivedSinkCaps* sinkCapsReg = static_cast<TPS25751ReceivedSinkCaps*>(reg.release());
-        return std::unique_ptr<TPS25751ReceivedSinkCaps>(sinkCapsReg);
-    }
-    return nullptr;
+    return readAndValidateAs<TPS25751ReceivedSinkCaps>(TPS25751Registers::Address::RECEIVED_SINK_CAPABILITIES, validate);
 }
 
 std::unique_ptr<TPS25751TransmitSourceCaps> TPS25751::readTransmitSourceCapsRegister(bool validate) const {
-    auto reg = readAndValidateRegisterByAddress(TPS25751Registers::Address::TRANSMIT_SOURCE_CAPABILITIES, validate);
-    if (!reg) return nullptr;
-
-    if (reg) {
-        TPS25751TransmitSourceCaps* sourceCapsReg = static_cast<TPS25751TransmitSourceCaps*>(reg.release());
-        return std::unique_ptr<TPS25751TransmitSourceCaps>(sourceCapsReg);
-    }
-    return nullptr;
+    return readAndValidateAs<TPS25751TransmitSourceCaps>(TPS25751Registers::Address::TRANSMIT_SOURCE_CAPABILITIES, validate);
 }
 
 std::unique_ptr<TPS25751TransmitSinkCaps> TPS25751::readTransmitSinkCapsRegister(bool validate) const {
-    auto reg = readAndValidateRegisterByAddress(TPS25751Registers::Address::TRANSMIT_SINK_CAPABILITIES, validate);
-    if (!reg) return nullptr;
-
-    if (reg) {
-        TPS25751TransmitSinkCaps* sinkCapsReg = static_cast<TPS25751TransmitSinkCaps*>(reg.release());
-        return std::unique_ptr<TPS25751TransmitSinkCaps>(sinkCapsReg);
-    }
-    return nullptr;
+    return readAndValidateAs<TPS25751TransmitSinkCaps>(TPS25751Registers::Address::TRANSMIT_SINK_CAPABILITIES, validate);
 }
 
 std::unique_ptr<TPS25751ActivePDOContract> TPS25751::readActivePDOContractRegister(bool validate) const {
-    auto reg = readAndValidateRegisterByAddress(TPS25751Registers::Address::ACTIVE_PDO_CONTRACT, validate);
-    if (!reg) return nullptr;
-
-    if (reg) {
-        TPS25751ActivePDOContract* pdoContractReg = static_cast<TPS25751ActivePDOContract*>(reg.release());
-        return std::unique_ptr<TPS25751ActivePDOContract>(pdoContractReg);
-    }
-    return nullptr;
+    return readAndValidateAs<TPS25751ActivePDOContract>(TPS25751Registers::Address::ACTIVE_PDO_CONTRACT, validate);
 }
 
 std::unique_ptr<TPS25751ActiveRDOContract> TPS25751::readActiveRDOContractRegister(bool validate) const {
-    auto reg = readAndValidateRegisterByAddress(TPS25751Registers::Address::ACTIVE_RDO_CONTRACT, validate);
-    if (!reg) return nullptr;
-
-    if (reg) {
-        TPS25751ActiveRDOContract* rdoContractReg = static_cast<TPS25751ActiveRDOContract*>(reg.release());
-        return std::unique_ptr<TPS25751ActiveRDOContract>(rdoContractReg);
-    }
-    return nullptr;
+    return readAndValidateAs<TPS25751ActiveRDOContract>(TPS25751Registers::Address::ACTIVE_RDO_CONTRACT, validate);
 }
 
 std::unique_ptr<TPS25751AutoNegotiateSink> TPS25751::readAutoNegotiateSinkRegister(bool validate) const {
-    auto reg = readAndValidateRegisterByAddress(TPS25751Registers::Address::AUTONEGOTIATE_SINK, validate);
-    if (!reg) return nullptr;
-
-    if (reg) {
-        TPS25751AutoNegotiateSink* autoNegSinkReg = static_cast<TPS25751AutoNegotiateSink*>(reg.release());
-        return std::unique_ptr<TPS25751AutoNegotiateSink>(autoNegSinkReg);
-    }
-    return nullptr;
+    return readAndValidateAs<TPS25751AutoNegotiateSink>(TPS25751Registers::Address::AUTONEGOTIATE_SINK, validate);
 }
 
 std::unique_ptr<TPS25751PowerStatus> TPS25751::readPowerStatusRegister(bool validate) const {
-    auto reg = readAndValidateRegisterByAddress(TPS25751Registers::Address::POWER_STATUS, validate);
-    if (!reg) return nullptr;
-
-    if (reg) {
-        TPS25751PowerStatus* powerStatusReg = static_cast<TPS25751PowerStatus*>(reg.release());
-        return std::unique_ptr<TPS25751PowerStatus>(powerStatusReg);
-    }
-    return nullptr;
+    return readAndValidateAs<TPS25751PowerStatus>(TPS25751Registers::Address::POWER_STATUS, validate);
 }
 
 std::unique_ptr<TPS25751PDStatus> TPS25751::readPDStatusRegister(bool validate) const {
-    auto reg = readAndValidateRegisterByAddress(TPS25751Registers::Address::PD_STATUS, validate);
-    if (!reg) return nullptr;
-
-    if (reg) {
-        TPS25751PDStatus* pdStatusReg = static_cast<TPS25751PDStatus*>(reg.release());
-        return std::unique_ptr<TPS25751PDStatus>(pdStatusReg);
-    }
-    return nullptr;
+    return readAndValidateAs<TPS25751PDStatus>(TPS25751Registers::Address::PD_STATUS, validate);
 }
 
 std::unique_ptr<TPS25751PD3Config> TPS25751::readPD3ConfigRegister(bool validate) const {
-    auto reg = readAndValidateRegisterByAddress(TPS25751Registers::Address::PD3_CONFIGURATION, validate);
-    if (!reg) return nullptr;
-
-    TPS25751PD3Config* pd3ConfigReg = static_cast<TPS25751PD3Config*>(reg.release());
-    return std::unique_ptr<TPS25751PD3Config>(pd3ConfigReg);
+    return readAndValidateAs<TPS25751PD3Config>(TPS25751Registers::Address::PD3_CONFIGURATION, validate);
 }
 
 std::unique_ptr<TPS25751ReceivedSOPIdentity> TPS25751::readReceivedSOPIdentityRegister(bool validate) const {
-    auto reg = readAndValidateRegisterByAddress(TPS25751Registers::Address::RECEIVED_SOP_IDENTITY, validate);
-    if (!reg) return nullptr;
-
-    TPS25751ReceivedSOPIdentity* typedReg = static_cast<TPS25751ReceivedSOPIdentity*>(reg.release());
-    return std::unique_ptr<TPS25751ReceivedSOPIdentity>(typedReg);
+    return readAndValidateAs<TPS25751ReceivedSOPIdentity>(TPS25751Registers::Address::RECEIVED_SOP_IDENTITY, validate);
 }
 
 std::unique_ptr<TPS25751IOConfig> TPS25751::readIOConfigRegister(bool validate) const {
-    auto reg = readAndValidateRegisterByAddress(TPS25751Registers::Address::IO_CONFIG, validate);
-    if (!reg) return nullptr;
-
-    if (reg) {
-        TPS25751IOConfig* ioConfigReg = static_cast<TPS25751IOConfig*>(reg.release());
-        return std::unique_ptr<TPS25751IOConfig>(ioConfigReg);
-    }
-    return nullptr;
+    return readAndValidateAs<TPS25751IOConfig>(TPS25751Registers::Address::IO_CONFIG, validate);
 }
 
 std::unique_ptr<TPS25751TypeCState> TPS25751::readTypeCStateRegister(bool validate) const {
-    auto reg = readAndValidateRegisterByAddress(TPS25751Registers::Address::TYPEC_STATE, validate);
-    if (!reg) return nullptr;
-
-    if (reg) {
-        TPS25751TypeCState* typeCReg = static_cast<TPS25751TypeCState*>(reg.release());
-        return std::unique_ptr<TPS25751TypeCState>(typeCReg);
-    }
-    return nullptr;
+    return readAndValidateAs<TPS25751TypeCState>(TPS25751Registers::Address::TYPEC_STATE, validate);
 }
 
 std::unique_ptr<TPS25751ADCResults> TPS25751::readADCResultsRegister(bool validate) const {
-    auto reg = readAndValidateRegisterByAddress(TPS25751Registers::Address::ADC_RESULTS, validate);
-    if (!reg) return nullptr;
-
-    if (reg) {
-        TPS25751ADCResults* adcResultsReg = static_cast<TPS25751ADCResults*>(reg.release());
-        return std::unique_ptr<TPS25751ADCResults>(adcResultsReg);
-    }
-    return nullptr;
+    return readAndValidateAs<TPS25751ADCResults>(TPS25751Registers::Address::ADC_RESULTS, validate);
 }
 
 std::unique_ptr<TPS25751GPIOStatus> TPS25751::readGPIOStatusRegister(bool validate) const {
-    auto reg = readAndValidateRegisterByAddress(TPS25751Registers::Address::GPIO_STATUS, validate);
-    if (!reg) return nullptr;
-
-    if (reg) {
-        TPS25751GPIOStatus* gpioStatusReg = static_cast<TPS25751GPIOStatus*>(reg.release());
-        return std::unique_ptr<TPS25751GPIOStatus>(gpioStatusReg);
-    }
-    return nullptr;
+    return readAndValidateAs<TPS25751GPIOStatus>(TPS25751Registers::Address::GPIO_STATUS, validate);
 }
 
 std::unique_ptr<TPS25751TransmitSourceCapsExtended> TPS25751::readTransmitSourceCapsExtendedRegister(bool validate) const {
-    auto reg = readAndValidateRegisterByAddress(TPS25751Registers::Address::TRANSMIT_SOURCE_CAPABILITIES_EXTENDED, validate);
-    if (!reg) return nullptr;
-
-    TPS25751TransmitSourceCapsExtended* typedReg = static_cast<TPS25751TransmitSourceCapsExtended*>(reg.release());
-    return std::unique_ptr<TPS25751TransmitSourceCapsExtended>(typedReg);
+    return readAndValidateAs<TPS25751TransmitSourceCapsExtended>(TPS25751Registers::Address::TRANSMIT_SOURCE_CAPABILITIES_EXTENDED, validate);
 }
 
 std::unique_ptr<TPS25751TransmitSourceInfo> TPS25751::readTransmitSourceInfoRegister(bool validate) const {
-    auto reg = readAndValidateRegisterByAddress(TPS25751Registers::Address::TRANSMIT_SOURCE_INFO, validate);
-    if (!reg) return nullptr;
-
-    TPS25751TransmitSourceInfo* typedReg = static_cast<TPS25751TransmitSourceInfo*>(reg.release());
-    return std::unique_ptr<TPS25751TransmitSourceInfo>(typedReg);
+    return readAndValidateAs<TPS25751TransmitSourceInfo>(TPS25751Registers::Address::TRANSMIT_SOURCE_INFO, validate);
 }
 
 std::unique_ptr<TPS25751TransmitPPSStatus> TPS25751::readTransmitPPSStatusRegister(bool validate) const {
-    auto reg = readAndValidateRegisterByAddress(TPS25751Registers::Address::TRANSMIT_PPS_STATUS, validate);
-    if (!reg) return nullptr;
-
-    TPS25751TransmitPPSStatus* typedReg = static_cast<TPS25751TransmitPPSStatus*>(reg.release());
-    return std::unique_ptr<TPS25751TransmitPPSStatus>(typedReg);
+    return readAndValidateAs<TPS25751TransmitPPSStatus>(TPS25751Registers::Address::TRANSMIT_PPS_STATUS, validate);
 }
 
 std::unique_ptr<TPS25751TransmitBatteryStatus> TPS25751::readTransmitBatteryStatusRegister(bool validate) const {
-    auto reg = readAndValidateRegisterByAddress(TPS25751Registers::Address::TRANSMIT_BATTERY_STATUS, validate);
-    if (!reg) return nullptr;
-
-    TPS25751TransmitBatteryStatus* typedReg = static_cast<TPS25751TransmitBatteryStatus*>(reg.release());
-    return std::unique_ptr<TPS25751TransmitBatteryStatus>(typedReg);
+    return readAndValidateAs<TPS25751TransmitBatteryStatus>(TPS25751Registers::Address::TRANSMIT_BATTERY_STATUS, validate);
 }
 
 std::unique_ptr<TPS25751TransmitBatteryCapabilities> TPS25751::readTransmitBatteryCapabilitiesRegister(bool validate) const {
-    auto reg = readAndValidateRegisterByAddress(TPS25751Registers::Address::TRANSMIT_BATTERY_CAPABILITIES, validate);
-    if (!reg) return nullptr;
-
-    TPS25751TransmitBatteryCapabilities* typedReg = static_cast<TPS25751TransmitBatteryCapabilities*>(reg.release());
-    return std::unique_ptr<TPS25751TransmitBatteryCapabilities>(typedReg);
+    return readAndValidateAs<TPS25751TransmitBatteryCapabilities>(TPS25751Registers::Address::TRANSMIT_BATTERY_CAPABILITIES, validate);
 }
 
 std::unique_ptr<TPS25751TransmitSinkCapsExtended> TPS25751::readTransmitSinkCapsExtendedRegister(bool validate) const {
-    auto reg = readAndValidateRegisterByAddress(TPS25751Registers::Address::TRANSMIT_SINK_CAPABILITIES_EXTENDED, validate);
-    if (!reg) return nullptr;
-
-    TPS25751TransmitSinkCapsExtended* typedReg = static_cast<TPS25751TransmitSinkCapsExtended*>(reg.release());
-    return std::unique_ptr<TPS25751TransmitSinkCapsExtended>(typedReg);
+    return readAndValidateAs<TPS25751TransmitSinkCapsExtended>(TPS25751Registers::Address::TRANSMIT_SINK_CAPABILITIES_EXTENDED, validate);
 }
 
 std::unique_ptr<TPS25751LiquidDetectionConfig> TPS25751::readLiquidDetectionConfigRegister(bool validate) const {
-    auto reg = readAndValidateRegisterByAddress(TPS25751Registers::Address::LIQUID_DETECTION_CONFIG, validate);
-    if (!reg) return nullptr;
-
-    if (reg) {
-        TPS25751LiquidDetectionConfig* liquidDetectionConfigReg = static_cast<TPS25751LiquidDetectionConfig*>(reg.release());
-        return std::unique_ptr<TPS25751LiquidDetectionConfig>(liquidDetectionConfigReg);
-    }
-    return nullptr;
+    return readAndValidateAs<TPS25751LiquidDetectionConfig>(TPS25751Registers::Address::LIQUID_DETECTION_CONFIG, validate);
 }
 
 // PBM raw burst write (SLVAFV8A Table 3-3 / §4.1 step 10)

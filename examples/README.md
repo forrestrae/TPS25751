@@ -50,13 +50,18 @@ the line `yes` sent after its `[confirm]` prompt.
 | `zero` | Both region pointers to 0, Low then High, each with a read-back; the starting state of hardware stage 5 | Yes |
 
 To recover a board whose EEPROM does not boot, so that the controller sits in PTCH, send
-`l`, then `pb`, then `x`.
+`l`, then `pb`, then `x`. In hardware stage 5 on one board, `l` reported `I2cError` after
+about 1.4 s although the patch loaded, and every later I2C transaction from the Teensy failed
+until the Teensy was restarted; MODE then read APP with Patch Config Source I2C Loaded and
+`pb` worked. The cause of the stuck host I2C is not established. After an `I2cError` from
+`l`, restart the Teensy, not the controller, and check with `r` before `pb`.
 
 `zero` writes both region pointers to 0, Low then High, each with a read-back, and leaves
 the bundles and the AppConfigOffset words alone. It is how hardware stage 5 reaches an
 EEPROM with no valid pointer without a teardown. The controller keeps running what it
-loaded until a reset; after a reset it is expected to start in PTCH (SLVAFL1 page 2, not
-yet observed on this board). Run `pb` straight after `zero`, before any reset. The fallback
+loaded until a reset; after a reset it starts in PTCH, as hardware stage 5 observed on this
+board (MODE PTCH, both regions Attempted and Invalid). Run `pb` straight after `zero`,
+before any reset. The fallback
 is an external programmer on the EEPROM through a SOIC8 clip, which on this kind of board
 may need disassembly.
 

@@ -35,6 +35,15 @@
 //        Burst Mode image, SLVAFV8A), then MODE, VERSION, and BOOT_FLAGS. The
 //        controller runs the image from RAM; the EEPROM is not written. Waits
 //        for the line "yes" first. Refused in any other mode.
+//        Seen in hardware stage 5 on one board (2026-11-23): loadPatchBundle()
+//        returned I2cError after about 1.4 s although the patch loaded. The
+//        DATA read that executeCommand() makes right after PBMc completes
+//        returned 28 of 65 bytes, and the loader returned before its own DATA
+//        and MODE checks. Afterwards every I2C transaction from the Teensy
+//        failed with an address NACK until the Teensy was restarted; then MODE
+//        read APP with Patch Config Source "I2C Loaded", and pb worked. The
+//        cause of the stuck host I2C is not established. After an I2cError
+//        from l, restart the Teensy (not the controller) and send r.
 //
 // COMMANDS THAT WRITE THE EEPROM
 //   p    Pointer test: writes the High pointer to 0 and back to 0x4400, and
@@ -88,8 +97,11 @@
 //        while src/patch_bundle.h is the placeholder, so that pb can follow.
 //
 // RECOVERY OF AN EEPROM THAT DOES NOT BOOT (hardware stage 5)
-//   The controller comes up in PTCH. Send l, then pb, then x: the controller
-//   restarts from the EEPROM pb wrote. Stage 5 reaches an EEPROM with no valid
+//   The controller comes up in PTCH; stage 5 observed that on this board with
+//   both pointers 0 (MODE PTCH, VERSION 0xF8091100, BOOT_FLAGS F8 00 60 02 C1,
+//   both regions Attempted and Invalid, I2C EEPROM Present 1). Send l, then
+//   pb, then x: the controller restarts from the EEPROM pb wrote. See the
+//   note under l on restarting the Teensy after l. Stage 5 reaches an EEPROM with no valid
 //   pointer with zero instead of a teardown and minipro; pb then runs at once,
 //   before any reset. r at start-up and on request says so
 //   when MODE reads PTCH. SLVAFL1 (Recovering From EEPROM Failure, page 13)
@@ -1727,7 +1739,12 @@ static void cmdLoadPatch()
     if (s == PatchLoadStatus::Success) {
         Serial.println(F("[l] The controller runs the image from RAM. The EEPROM is unchanged: send pb to program it when no region pointer is valid, or r to inspect it first."));
     } else {
-        Serial.println(F("[l] The load did not complete. MODE above shows where the controller stands; nothing was written to the EEPROM."));
+        Serial.println(F("[l] loadPatchBundle() did not report Success. Nothing was written to the EEPROM."));
+        if (s == PatchLoadStatus::I2cError) {
+            Serial.println(F("[l] In hardware stage 5 this board reported I2cError although the patch loaded, and the Teensy's I2C then failed with an address NACK until the Teensy was restarted; the cause is not established. Restart the Teensy (not the controller), then send r: MODE APP with Patch Config Source I2C Loaded means the load took."));
+        } else {
+            Serial.println(F("[l] MODE above shows where the controller stands."));
+        }
     }
 }
 
@@ -1866,7 +1883,7 @@ static void cmdZeroPointers()
     printAppConfigOffsets();
     Serial.println(F("[plan] After this the EEPROM has no valid region pointer."));
     Serial.println(F("[plan] The controller keeps running the firmware it already loaded until the next reset or power cycle."));
-    Serial.println(F("[plan] After a reset it is expected to start in PTCH (SLVAFL1 page 2; not yet observed on this board) and to stay there until a host loads a patch (l here, or examples/load-patch-bundle) or the EEPROM is restored."));
+    Serial.println(F("[plan] After a reset it starts in PTCH, as hardware stage 5 observed on this board (MODE PTCH, both regions Attempted and Invalid), and waits there for a host to load a patch (l here, or examples/load-patch-bundle) or for the EEPROM to be restored (SLVAFL1 page 2)."));
     Serial.println(F("[plan] pb can run now, before any reset, and is the intended next step. The fallback is an external programmer on the EEPROM through a SOIC8 clip, which on this kind of board may need disassembly."));
     Serial.println(F("[plan] This command writes the EEPROM."));
     if (!confirm()) {

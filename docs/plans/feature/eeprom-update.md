@@ -935,7 +935,31 @@ INT_EVENT1 bit only while its INT_MASK1 bit is set (Table 3-8, page 19), and SLV
 says ReadyForPatch is the one interrupt enabled at a cold boot into PTCH (step 1, page
 6). A controller whose mask or event was changed before the load fails the polling-mode
 wait after 5 s although it is ready. A read of INT_EVENT1 and INT_MASK1 in PTCH on the
-board settles it; that needs the user's go-ahead.
+board settles it; that needs the user's go-ahead. One related fact is already recorded
+(CONSTRAINTS.md, Read/Write Registers): in APP, the board's configuration sets INT_MASK1
+to `00 … 00 03`, which enables Ready for Patch and Patch Loaded, and INT_EVENT1 read all
+zero. So bit 81 is clear in APP, and a polling-mode load on a controller in APP now ends
+at step 1 with `CommandTimeout` after 5 s instead of at step 2 with `NotInPatchMode` at
+once.
+
+Implemented on 2026-11-24, session 3, in the commits below, after the
+decision record (`b882969`):
+
+| Commit | Change |
+|---|---|
+| `91bdab0` | `TPS25751::writeCommandData()`, the exact-length DATA write; `issueCommand()` stages its input through it |
+| `110f5e2` | The PBMs configuration read back from DATA before `PBMs`; `PatchLoadStatus::PbmsConfigMismatch`, appended last |
+| `e466770` | `PBMe` after a burst chunk that is not acknowledged and after "!CMD" on `PBMc` |
+| `943b8e6` | The Ready for Patch poll in polling mode and the MODE poll in both modes |
+| `2defe0d`, `d0e2c94`, `e54b097` | CONSTRAINTS.md departure list, AGENTS.md steps, ADR-011 amendment, review guide, TESTING.md |
+
+Verification, native only: 1348 tests pass, 30 in the loader suite and 15 in the core
+suite; the three example environments build; line coverage of `TPS25751PatchLoader.cpp`
+is 99% (217 of 218, the unreachable `default:` of `mapTaskStatus()`), and of
+`TPS25751.cpp` 34% (178 of 521), with `writeCommandData()` covered. None of the three
+changes has run on hardware. A hardware retest needs the controller in PTCH, so it is
+stage 7's procedure (`zero`, `x`, `l`, `pb`, `x`) with its EEPROM writes, and needs the
+user's go-ahead.
 
 Still unverified, and marked so in the code: the new sequence on hardware; which pins the
 driver's pin-low flag covers. The SDA and SCL readout was removed from the `l` diagnostic

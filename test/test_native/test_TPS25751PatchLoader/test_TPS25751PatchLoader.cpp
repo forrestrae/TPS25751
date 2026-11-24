@@ -547,14 +547,126 @@ void test_pbms_config_write_or_read_back_fails()
 
 void test_burst_failure()
 {
+    // TRM Figure 5-1 (page 88): a burst transaction that is not acknowledged
+    // goes to PBMe. PBMe closes the burst port, then its DATA is read at once,
+    // and nothing follows; PBMc is never written.
     Rig r;
-    Fault f;
-    f.addr = 0x30;
-    f.writeError = 2;
-    f.remaining = 1;
-    r.dev.faults.push_back(f);
+    // The second chunk fails. onDone runs inside the COMMAND read that
+    // completes PBMs, before that read is logged at log.size(); the DATA read
+    // takes the next two entries, then chunk 1, then chunk 2.
+    r.dev.tasks["PBMs"].onDone = [](FakeTps25751Target &d) {
+        Fault f;
+        f.addr = 0x30;
+        f.writeError = 2;
+        f.index = static_cast<long>(d.log.size()) + 4;
+        d.faults.push_back(f);
+    };
     ASSERT_LOAD(PatchLoadStatus::BurstFailed, r.load());
+    TEST_ASSERT_EQUAL_size_t(2, r.dev.count([](const Txn &t) { return t.addr == 0x30; }));
     TEST_ASSERT_EQUAL_INT(-1, r.commandWrite("PBMc"));
+    const long pbme = r.commandWrite("PBMe");
+    TEST_ASSERT_TRUE(pbme > 0);
+    TEST_ASSERT_EQUAL_HEX8(0x30, r.dev.log[pbme - 1].addr);
+    TEST_ASSERT_FALSE(r.dev.burstOpen);
+    TEST_ASSERT_EQUAL_STRING("PBMe", r.dev.lastCompleted.c_str());
+    const long clear = r.commandClear(pbme);
+    TEST_ASSERT_TRUE(r.dev.isRead(r.dev.log[clear + 2], REG_DATA));
+    TEST_ASSERT_EQUAL_size_t(static_cast<size_t>(clear) + 3, r.dev.log.size());
+}
+
+void test_pbme_after_pbmc_rejected()
+{
+    // TRM Figure 5-1: "!CMD" on PBMc goes to PBMe.
+    Rig r;
+    r.dev.tasks["PBMc"].reject = true;
+    ASSERT_LOAD(PatchLoadStatus::PbmcRejected, r.load());
+    const long pbmc = r.commandWrite("PBMc");
+    const long pbme = r.commandWrite("PBMe");
+    TEST_ASSERT_TRUE(pbme > pbmc);
+    TEST_ASSERT_FALSE(r.dev.burstOpen);
+    // No DATA or MODE read between PBMc and PBMe: PBMe follows the "!CMD" poll.
+    TEST_ASSERT_TRUE(r.dev.isRead(r.dev.log[pbme - 1], REG_COMMAND));
+}
+
+void test_pbme_failure_keeps_the_load_status()
+{
+    {
+        // PBMe rejected.
+        Rig r;
+        r.dev.tasks["PBMc"].reject = true;
+        r.dev.tasks["PBMe"].reject = true;
+        ASSERT_LOAD(PatchLoadStatus::PbmcRejected, r.load());
+        TEST_ASSERT_TRUE(r.commandWrite("PBMe") > 0);
+    }
+    {
+        // The PBMe COMMAND write is not acknowledged.
+        Rig r;
+        r.dev.tasks["PBMc"].reject = true;
+        r.dev.tasks["PBMc"].onDone = [](FakeTps25751Target &d) {
+            Fault f;
+            f.kind = 0;
+            f.reg = REG_COMMAND;
+            f.minBytes = 2;
+            d.faults.push_back(f);
+        };
+        ASSERT_LOAD(PatchLoadStatus::PbmcRejected, r.load());
+        TEST_ASSERT_EQUAL_UINT8(2, r.dev.log.back().result);
+    }
+    {
+        // PBMe never completes: the poll ends after PBME_CMD_TIMEOUT_MS.
+        Rig r;
+        r.dev.tasks["PBMc"].reject = true;
+        r.dev.tasks["PBMe"].pollsBeforeDone = 100000;
+        ASSERT_LOAD(PatchLoadStatus::PbmcRejected, r.load());
+        const long pbme = r.commandWrite("PBMe");
+        const uint64_t polledUs = r.dev.log.back().timeUs - r.dev.log[pbme].timeUs;
+        TEST_ASSERT_EQUAL_UINT32(500, PBME_CMD_TIMEOUT_MS);
+        TEST_ASSERT_TRUE(polledUs > PBME_CMD_TIMEOUT_MS * 1000ull);
+        TEST_ASSERT_TRUE(polledUs <= PBME_CMD_TIMEOUT_MS * 1000ull + 5000);
+    }
+}
+
+void test_no_pbme_on_other_failures()
+{
+    // Figure 5-1 has no PBMe after a PBMs failure, a PBMc DATA result other
+    // than 0, or a PBMc that did not complete.
+    const auto none = [](Rig &r) { TEST_ASSERT_EQUAL_INT(-1, r.commandWrite("PBMe")); };
+    {
+        Rig r;
+        r.dev.tasks["PBMs"].reject = true;
+        ASSERT_LOAD(PatchLoadStatus::PbmsRejected, r.load());
+        none(r);
+    }
+    {
+        Rig r;
+        r.dev.tasks["PBMs"].output = {0x04};
+        ASSERT_LOAD(PatchLoadStatus::BadBundleSize, r.load());
+        none(r);
+    }
+    {
+        Rig r;
+        r.dev.tasks["PBMc"].pollsBeforeDone = 100000;
+        ASSERT_LOAD(PatchLoadStatus::CommandTimeout, r.load());
+        none(r);
+    }
+    {
+        Rig r;
+        r.dev.tasks["PBMc"].output = {0x01};
+        ASSERT_LOAD(PatchLoadStatus::PatchApplyFailed, r.load());
+        none(r);
+    }
+    {
+        // A failed COMMAND poll after PBMc: I2cError, and no PBMe.
+        Rig r;
+        r.dev.tasks["PBMc"].pollsBeforeDone = 3;
+        r.dev.tasks["PBMs"].onDone = [](FakeTps25751Target &d) {
+            Fault f = shortReads(REG_COMMAND, d.lastCompletedUs / 1000 + 1, d.lastCompletedUs / 1000 + 1000000);
+            d.faults.push_back(f);
+        };
+        ASSERT_LOAD(PatchLoadStatus::I2cError, r.load());
+        TEST_ASSERT_TRUE(r.commandWrite("PBMc") > 0);
+        none(r);
+    }
 }
 
 void test_pbmc_outcomes()
@@ -657,6 +769,9 @@ int main(int, char **)
     RUN_TEST(test_pbms_config_never_reads_back);
     RUN_TEST(test_pbms_config_write_or_read_back_fails);
     RUN_TEST(test_burst_failure);
+    RUN_TEST(test_pbme_after_pbmc_rejected);
+    RUN_TEST(test_pbme_failure_keeps_the_load_status);
+    RUN_TEST(test_no_pbme_on_other_failures);
     RUN_TEST(test_pbmc_outcomes);
     RUN_TEST(test_irq_mode);
     RUN_TEST(test_to_string_and_debug_print);

@@ -50,6 +50,10 @@ constexpr TPS25751FourCC CMD_PBMS = TPS25751FourCC::of("PBMs");
 /// 4CC command code to commit (close) a Patch Burst Mode session.
 constexpr TPS25751FourCC CMD_PBMC = TPS25751FourCC::of("PBMc");
 
+/// 4CC command code to end a Patch Burst Mode session without committing it
+/// (TRM SLVUCR8B Table 4-17, page 80).
+constexpr TPS25751FourCC CMD_PBME = TPS25751FourCC::of("PBMe");
+
 /// Delay (ms) between PBMc completing (COMMAND clear) and the first DATA read.
 /// SLVAFV8A step 15 (page 11) and its code (page 18), and TRM SLVUCR8B Figure
 /// 5-1 (page 88), put 20 ms there for the controller to load and apply the
@@ -97,6 +101,10 @@ constexpr uint8_t PBMS_DATA_ATTEMPTS = 3;
 /// start) handshake. PBMs only validates the 6-byte config, so it clears quickly.
 constexpr uint32_t PBMS_CMD_TIMEOUT_MS = 500;
 
+/// COMMAND-poll timeout (ms) for PBMe after a failed load. A choice, equal to
+/// PBMS_CMD_TIMEOUT_MS; neither TI document gives one.
+constexpr uint32_t PBME_CMD_TIMEOUT_MS = 500;
+
 /// COMMAND-poll timeout (ms) for the PBMc (commit) handshake — longer than PBMs
 /// because the device applies the bundle and begins the PTCH→APP transition
 /// before clearing COMMAND.
@@ -130,9 +138,10 @@ enum class PatchLoadStatus : uint8_t {
     BadTargetAddress,   ///< PatchStartStatus 0x05: target address not accepted (TRM Table 4-15)
     BadTimeout,         ///< PatchStartStatus 0x06: timeout value not accepted (TRM Table 4-15)
     BurstFailed,        ///< burstWrite() returned false: a chunk of the image was not ACKed.
-                        ///< The loader does not issue PBMe (TRM Figure 5-1 does).
-    PbmcRejected,       ///< The controller rejected PBMc ("!CMD"). The loader does not issue
-                        ///< PBMe (TRM Figure 5-1 does).
+                        ///< The loader then issued PBMe (TRM Figure 5-1), whose outcome is
+                        ///< logged only.
+    PbmcRejected,       ///< The controller rejected PBMc ("!CMD"). The loader then issued
+                        ///< PBMe (TRM Figure 5-1), whose outcome is logged only.
     PatchApplyFailed,   ///< Step 16: DATA[0] was not 0 after PBMc and the 20 ms delay
     NotInAppMode,       ///< Step 17: at least one MODE read succeeded within
                         ///< PBM_MODE_POLL_CAP_MS, and none read APP. The patch may still
@@ -173,9 +182,12 @@ enum class PatchLoadStatus : uint8_t {
  *   6-9. executeCommand(PBMs) with no input — start the burst session.
  *  10.  burstWrite(0x30, image, length): stream the image in Wire-sized chunks,
  *       then wait PBM_PRE_COMMIT_DELAY_US (500 us) before the next transaction.
+ *       A chunk that is not acknowledged ends the load with BurstFailed
+ *       after PBMe (TRM Figure 5-1, page 88).
  *  11.  (IRQ mode) Clear INT_CLEAR1 again.
  *  12-14. issueCommand(PBMc): commit the bundle and wait for COMMAND to
- *        clear, without reading DATA.
+ *        clear, without reading DATA. "!CMD" ends the load with
+ *        PbmcRejected after PBMe (TRM Figure 5-1).
  *  15.  delay(PATCH_APPLY_DELAY_MS), 20 ms.
  *  16.  Read DATA, retried every PBM_POLL_INTERVAL_MS on a failed read for up
  *       to PBM_DATA_READ_CAP_MS; DATA[0] must be 0.
@@ -255,6 +267,12 @@ private:
     /// Steps 4 and 5: write the PBMs configuration to DATA and read it back;
     /// Success, PbmsConfigMismatch, or I2cError (no read-back succeeded).
     PatchLoadStatus stagePbmsConfig(const uint8_t* config, size_t length) const;
+
+    /// After a burst chunk that is not acknowledged or "!CMD" on PBMc, and on
+    /// no other failure (TRM Figure 5-1, page 88): issue PBMe to end the
+    /// session. Best effort; the outcome is logged and does not change the
+    /// load's status.
+    void endSession() const;
 
     /// Step 16: read DATA, retrying failed reads; Success, PatchApplyFailed,
     /// or I2cError at the cap.

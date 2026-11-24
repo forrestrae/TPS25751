@@ -17,8 +17,9 @@
 //   - PBMs and PBMc (TRM Tables 4-15 and 4-16, SLVAFV8A): PBMs answers DATA[0]
 //     = PatchStartStatus (0 by default) and, when that is 0, opens the burst
 //     port at 0x30; PBMc answers DATA[0] = 0 by default and sets MODE to
-//     "APP " modeAppDelayMs after it completes. The burst port acknowledges
-//     only while open and records every byte.
+//     "APP " modeAppDelayMs after it completes. PBMe (TRM Table 4-17)
+//     answers DATA[0] = 0 and closes the burst port; MODE stays as it is.
+//     The burst port acknowledges only while open and records every byte.
 //   - Unknown 4CC codes, and any task with reject set, complete as "!CMD".
 //
 // Choices the documents do not make, which a test that relies on them pins
@@ -101,6 +102,7 @@ public:
         setReg(kRegData, std::vector<uint8_t>(64, 0));
         tasks["PBMs"] = TaskScript{1, false, {0x00}, nullptr};
         tasks["PBMc"] = TaskScript{1, false, {0x00}, nullptr};
+        tasks["PBMe"] = TaskScript{1, false, {0x00}, nullptr};
     }
 
     // --- State -------------------------------------------------------------------
@@ -233,6 +235,7 @@ private:
             const std::vector<uint8_t> &output = it->second.output;
             for (size_t i = 0; i < output.size() && i < dataReg.size(); ++i) dataReg[i] = output[i];
             if (_pending == "PBMs") burstOpen = (!output.empty() && output[0] == 0);
+            if (_pending == "PBMe") burstOpen = false;
             if (_pending == "PBMc" && !output.empty() && output[0] == 0) {
                 burstOpen = false;
                 _modeSwitchPending = true;

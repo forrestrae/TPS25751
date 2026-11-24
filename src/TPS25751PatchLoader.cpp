@@ -108,6 +108,20 @@ PatchLoadStatus TPS25751PatchLoader::stagePbmsConfig(const uint8_t* config, size
     return anyReadBack ? PatchLoadStatus::PbmsConfigMismatch : PatchLoadStatus::I2cError;
 }
 
+void TPS25751PatchLoader::endSession() const
+{
+    // TRM Table 4-17 (page 80): PBMe ends the session, restores the second
+    // target address, and leaves MODE at PTCH. Table 4-15 (page 76): a second
+    // PBMs in an open session ignores its DATA input, so without PBMe a retry
+    // with an image of another size would keep this session's bundle size.
+    const TPS25751TaskResult r = _pd.executeCommand(CMD_PBME, nullptr, 0, nullptr, 0, PBME_CMD_TIMEOUT_MS);
+    if (r.status == TPS25751TaskStatus::Success) {
+        TPS_DEBUG_INFO(DEBUG_CAT_TASK, "PBM: PBMe complete, return code 0x%02X", r.returnCode);
+    } else {
+        TPS_DEBUG_WARN(DEBUG_CAT_TASK, "PBM: PBMe failed with executor status %u", (unsigned)r.status);
+    }
+}
+
 PatchLoadStatus TPS25751PatchLoader::readPatchResult() const
 {
     // Step 16. A failed read is retried every PBM_POLL_INTERVAL_MS up to
@@ -284,6 +298,7 @@ PatchLoadStatus TPS25751PatchLoader::loadPatchBundle(const uint8_t* image, size_
     if (!_pd.burstWrite(PBM_I2C_TARGET, image, length)) {
         _lastStatus = PatchLoadStatus::BurstFailed;
         TPS_DEBUG_ERROR(DEBUG_CAT_TASK, "PBM: step 10 — burstWrite failed");
+        endSession();  // TRM Figure 5-1: not acknowledged, issue PBMe
         return _lastStatus;
     }
 
@@ -317,6 +332,11 @@ PatchLoadStatus TPS25751PatchLoader::loadPatchBundle(const uint8_t* image, size_
         _lastStatus = mapTaskStatus(pbmcStatus, PatchLoadStatus::PbmcRejected);
         TPS_DEBUG_ERROR(DEBUG_CAT_TASK,
             "PBM: PBMc failed with executor status %u", (unsigned)pbmcStatus);
+        // TRM Figure 5-1 issues PBMe after "!CMD" only. After a timeout PBMc
+        // may still be running, and after an I2C failure its state is unknown.
+        if (pbmcStatus == TPS25751TaskStatus::Rejected) {
+            endSession();
+        }
         return _lastStatus;
     }
 

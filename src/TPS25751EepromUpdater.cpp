@@ -557,7 +557,7 @@ EepromUpdateStatus TPS25751EepromUpdater::eraseTargetPointer(EepromRegion target
 
 EepromUpdateStatus TPS25751EepromUpdater::installBundle(EepromRegion target, const uint8_t* image,
                                                         size_t length, const uint8_t* pointerRow,
-                                                        bool compare)
+                                                        bool compare, bool checkAppConfigOffset)
 {
     const uint32_t start = bundleStart(target);
 
@@ -581,6 +581,25 @@ EepromUpdateStatus TPS25751EepromUpdater::installBundle(EepromRegion target, con
         s = compareImage(target, image, length, nullptr, /*report=*/true);
         if (s != EepromUpdateStatus::Success) {
             return s;
+        }
+    }
+
+    // programBlank() only: the AppConfigOffset word was written before the
+    // pass started, so read it once more right before the pointer makes the
+    // region loadable. The controller looks for the Header_ID at the region
+    // start plus this word (SLVAFL1 Boot Process); a word that is not 0 stops
+    // the pass with the pointer still 0.
+    if (checkAppConfigOffset) {
+        _lastStep = EepromUpdateStep::CheckAppConfigOffset;
+        uint8_t row[kFlashReadBytes];
+        s = readFlash(appConfigOffsetAddress(target), row);
+        if (s != EepromUpdateStatus::Success) {
+            return s;
+        }
+        if (getLe32(row) != 0) {
+            TPS_DEBUG_ERROR(DEBUG_CAT_TASK, "EEPROM: %s AppConfigOffset reads 0x%08lX before the pointer write",
+                            toString(target), static_cast<unsigned long>(getLe32(row)));
+            return EepromUpdateStatus::CompareMismatch;
         }
     }
 
@@ -610,7 +629,8 @@ EepromUpdateStatus TPS25751EepromUpdater::updateRegion(EepromRegion target, cons
     }
 
     // Steps 2 and 3.
-    s = installBundle(target, image, length, pointerRow, opt.compareAfterWrite);
+    s = installBundle(target, image, length, pointerRow, opt.compareAfterWrite,
+                      /*checkAppConfigOffset=*/false);
     if (s != EepromUpdateStatus::Success) {
         return s;
     }
@@ -676,36 +696,44 @@ EepromUpdateStatus TPS25751EepromUpdater::programBlank(const uint8_t* image, siz
         return s;
     }
 
-    // Low first, then High, each pass complete before the next starts. After a
-    // failure in the High pass the Low region is the one that boots.
     // Every failure below returns at once: nothing is written after it.
     const EepromRegion order[] = {EepromRegion::Low, EepromRegion::High};
+
+    // Both AppConfigOffset words to 0 first, Low then High, before any pointer
+    // or bundle write (decision of 2026-11-23). The controller looks for a
+    // region's Header_ID at the region start plus this word (SLVAFL1 Boot
+    // Process). Writing both words first means a stop in either pass never
+    // leaves a word that updateRegion() cannot write, and the last write
+    // before each bundle FLad is the pointer erase, as in updateRegion(), so
+    // the pointer-row checks of step 2 look where a misplaced write would go.
+    // Each word uses the checked four-byte write of a pointer; its failures
+    // pass through as raised, with lastStep() ClearAppConfigOffset and
+    // lastTarget() naming the word. The read-back at 0x03FC covers the High
+    // pointer word; the one at 0x07FC covers the first 12 bytes at 0x0800,
+    // which this call has not written yet.
+    _lastStep = EepromUpdateStep::ClearAppConfigOffset;
+    for (const EepromRegion target : order) {
+        _lastTarget = target;
+        s = writeWordChecked(appConfigOffsetAddress(target), 0);
+        if (s != EepromUpdateStatus::Success) {
+            return s;
+        }
+    }
+
+    // Then each region exactly as steps 1 to 3 of updateRegion(), Low first,
+    // with the compare always on and the word read once more before the
+    // pointer write. After a failure in the High pass the Low pass is complete.
     for (const EepromRegion target : order) {
         _lastTarget = target;
 
-        // Step 1, as in updateRegion().
         uint8_t pointerRow[kFlashReadBytes];
         s = eraseTargetPointer(target, pointerRow);
         if (s != EepromUpdateStatus::Success) {
             return s;
         }
 
-        // The AppConfigOffset word to 0: the controller looks for the region's
-        // Header_ID at the region start plus this offset (SLVAFL1 Boot
-        // Process). The same checked four-byte write as a pointer, with its
-        // failures passed through as raised; lastStep() tells them apart.
-        // Its 16-byte read-back runs into the High pointer word (Low pass) or
-        // the start of the Low bundle (High pass). The check compares those
-        // bytes before and after the write, so bytes the Low pass put there
-        // cannot make the High pass refuse.
-        _lastStep = EepromUpdateStep::ClearAppConfigOffset;
-        s = writeWordChecked(appConfigOffsetAddress(target), 0);
-        if (s != EepromUpdateStatus::Success) {
-            return s;
-        }
-
-        // Steps 2 and 3, as in updateRegion(), with the compare always on.
-        s = installBundle(target, image, length, pointerRow, /*compare=*/true);
+        s = installBundle(target, image, length, pointerRow, /*compare=*/true,
+                          /*checkAppConfigOffset=*/true);
         if (s != EepromUpdateStatus::Success) {
             return s;
         }
@@ -932,6 +960,7 @@ const char* TPS25751EepromUpdater::toString(EepromUpdateStep step)
         case EepromUpdateStep::WriteBundle:     return "WriteBundle";
         case EepromUpdateStep::VerifyBundle:    return "VerifyBundle";
         case EepromUpdateStep::CompareBundle:   return "CompareBundle";
+        case EepromUpdateStep::CheckAppConfigOffset: return "CheckAppConfigOffset";
         case EepromUpdateStep::RestorePointer:  return "RestorePointer";
         case EepromUpdateStep::EraseOldPointer: return "EraseOldPointer";
         case EepromUpdateStep::Reset:           return "Reset";

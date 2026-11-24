@@ -65,14 +65,15 @@
 //        bytes after the pointer before it starts, and a read-back after the
 //        first two chunks. A failed check stops it with nothing further
 //        written.
-//   pb   programBlank() with the embedded image: writes both pointers, both
-//        AppConfigOffset words, and the image in both regions, the layout of
-//        the full-flash binary. Only when MODE reads APP and no region pointer
-//        is valid, which is the state after l on a blank or corrupt EEPROM.
-//        Its plan adds both AppConfigOffset words. When it refuses because a
-//        pointer is valid, and after a stop in its High pass, it prints both
-//        words: u and b do not write them, so do not run u or b while the
-//        word of the region they would write is not 0.
+//   pb   programBlank() with the embedded image: writes both AppConfigOffset
+//        words to 0 first, then the image and the pointer of the Low region,
+//        then those of the High region, the layout of the full-flash binary.
+//        Only when MODE reads APP and no region pointer is valid, which is the
+//        state after l on a blank or corrupt EEPROM. Its plan
+//        adds both AppConfigOffset words. When it refuses because a pointer is
+//        valid, and after a stop in its High pass, it prints both words: u and
+//        b do not write them, so do not run u or b while the word of the
+//        region they would write is not 0.
 //
 // RECOVERY OF AN EEPROM THAT DOES NOT BOOT (hardware stage 5)
 //   The controller comes up in PTCH. Send l, then pb, then x: the controller
@@ -1733,7 +1734,8 @@ static void cmdProgramBlank()
     printPlan(F("pb: programBlank() with the embedded image. Writes both pointers, both AppConfigOffset words, and the image in both regions"),
               EepromRegion::Low, true);
     printAppConfigOffsets();
-    Serial.println(F("[plan] On success the EEPROM holds the full-flash layout. After a failure in the Low pass no pointer is valid unless the pointers printed afterwards say so. After a failure in the High pass the Low pass is complete: its pointer was written after the region passed FLvy and the compare."));
+    Serial.println(F("[plan] Order: both AppConfigOffset words to 0, then the Low region and its pointer, then the High region and its pointer."));
+    Serial.println(F("[plan] On success the EEPROM holds the full-flash layout. After a failure before the Low pointer is written, no pointer is valid unless the pointers printed afterwards say so. After a failure in the High pass the Low pass is complete: its pointer was written after the region passed FLvy and the compare and its word read 0."));
     if (!confirm()) {
         return;
     }
@@ -1758,13 +1760,20 @@ static void cmdProgramBlank()
         s == EepromUpdateStatus::PointerNeighborsChanged) {
         Serial.println(F("[pb] Bytes after an AppConfigOffset word changed during its write. Dump the EEPROM with r before any further write."));
     }
-    if (updater.lastTarget() == EepromRegion::High) {
-        // Established: the Low pointer was written after FLvy and the compare.
-        // Not established: that nothing of the High pass reached the Low region.
-        Serial.println(F("[pb] The Low pass completed: the Low pointer was written after the Low region passed FLvy and the compare. The High pass did not complete."));
+    if (updater.lastStep() == EepromUpdateStep::ClearAppConfigOffset) {
+        // The word writes come before any pointer or bundle write.
+        Serial.print(F("[pb] Writing the "));
+        Serial.print(TPS25751EepromUpdater::toString(updater.lastTarget()));
+        Serial.println(F(" AppConfigOffset word failed. No pointer was written by this command; none is valid unless the pointers above say so. Fix the cause and send pb again."));
+    } else if (updater.lastTarget() == EepromRegion::High) {
+        // Established: the Low pointer was written after FLvy, the compare,
+        // and a read of the Low word as 0. Not established: that nothing of
+        // the High pass reached the Low region.
+        Serial.println(F("[pb] The Low pass completed: the Low pointer was written after the Low region passed FLvy and the compare and its word read 0. The High pass did not complete."));
         if (s == EepromUpdateStatus::PointerNeighborsChanged || updater.lastStep() == EepromUpdateStep::WriteBundle) {
-            Serial.println(F("[pb] This stop can mean bytes landed outside the High region, and the Low bundle starts at 0x0800, next to the High AppConfigOffset word. Check the Low region with r (compare the dump with the image) before relying on it."));
+            Serial.println(F("[pb] This stop means bytes may lie where they do not belong. Check the Low region with r (compare the dump with the image) before relying on it."));
         }
+        Serial.println(F("[pb] Both AppConfigOffset words were written before either pass. While [offset] High above reads 0x00000000, b finishes the layout: it writes High, then rewrites Low, and ends with both pointers valid. u alone would leave only High valid."));
         printOffsetAdvice();
     } else {
         Serial.println(F("[pb] The Low pass did not complete. Unless a pointer above reads valid, the controller has no region to load and comes up in PTCH at its next restart; l then pb recovers from there."));

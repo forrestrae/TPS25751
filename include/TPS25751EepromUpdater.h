@@ -175,7 +175,7 @@ enum class EepromUpdateStatus : uint8_t {
     WriteFailed,              ///< FLwd returned a code other than written (0x00) or busy (0xFF)
     FlashBusy,                ///< FLwd reported busy (0xFF): for a bundle chunk, still busy after the retries; for a pointer or AppConfigOffset word, at once, since those writes are not retried
     VerifyFailed,             ///< FLvy reported the bundle not valid (0x01) or an unknown code
-    CompareMismatch,          ///< compareRegion(): the EEPROM differs from the image. writeRegionPointer(), and the AppConfigOffset write of programBlank(): the word read back differs from the value written. An update: the compare of step 3, or the first chunks did not read back at the bundle start in step 2
+    CompareMismatch,          ///< compareRegion(): the EEPROM differs from the image. writeRegionPointer(), and the AppConfigOffset write of programBlank(): the word read back differs from the value written. programBlank(), before a pointer write: the region's AppConfigOffset word no longer reads 0. An update: the compare of step 3, or the first chunks did not read back at the bundle start in step 2
     PointerRestoreFailed,     ///< Update step 3: the target pointer could not be written to the bundle start
     OldPointerEraseFailed,    ///< Update step 4: the old region pointer could not be written to 0
     PointerNeighborsChanged,  ///< Bytes 4 to 15 after a pointer, or after an AppConfigOffset word in programBlank(), changed during its write; or the 16 bytes at the target pointer changed while the first chunks of an update were written; or those bytes already held the start of the image before the bundle write
@@ -202,10 +202,11 @@ enum class EepromUpdateStep : uint8_t {
     None,                  ///< No update or reset has run on this object
     Preflight,             ///< Region selection or the pre-flight checks; this call has issued no write
     ErasePointer,          ///< Step 1: writing the target region's pointer to 0
-    ClearAppConfigOffset,  ///< programBlank() only, between steps 1 and 2: writing the target region's AppConfigOffset word to 0
+    ClearAppConfigOffset,  ///< programBlank() only, before either pass: writing the AppConfigOffset word of the region lastTarget() names to 0
     WriteBundle,           ///< Step 2: FLad to the bundle start, then the FLwd chunks
     VerifyBundle,          ///< Step 3: FLvy at the bundle start
     CompareBundle,         ///< Step 3: FLrd compare of the written region with the image
+    CheckAppConfigOffset,  ///< programBlank() only, step 3: FLrd of the target's AppConfigOffset word right before its pointer write; the word must read 0
     RestorePointer,        ///< Step 3: writing the target pointer to the bundle start
     EraseOldPointer,       ///< Step 4: writing the other region's pointer to 0
     Reset,                 ///< coldReset(): GAID issued, or MODE being polled
@@ -242,9 +243,9 @@ struct EepromUpdateOptions {
  *
  * Write phase, lastStep() == EepromUpdateStep::WriteBundle:
  * - once with @p done == 0, after step 1 has completed (the target pointer
- *   has been read back as 0), in programBlank() also after the target's
- *   AppConfigOffset word has been read back as 0, and before any task of
- *   step 2 is issued;
+ *   has been read back as 0), and before any task of step 2 is issued (in
+ *   programBlank() the AppConfigOffset words were written before either
+ *   pass);
  * - then after every chunk whose FLwd reported success, with @p done the image
  *   bytes written so far. The last call has @p done == @p total.
  *
@@ -264,7 +265,7 @@ struct EepromUpdateOptions {
  * A callback that never returns stops the update where it stands: at
  * @p done == 0 of the write phase the EEPROM is as step 1 left it (SLVAFL1
  * Figure 2-7), and at @p done == @p total of the write phase as step 2 left it
- * (Figure 2-8). In programBlank() neither state has a bootable region during
+ * (Figure 2-8). In programBlank() neither state has a valid pointer during
  * the Low pass; see its state table.
  *
  * The callback may call lastStep() and lastTarget(). A callback that returns
@@ -811,90 +812,91 @@ public:
      *    pointer words only, not the bundles or the AppConfigOffset words.
      *    Both pointers are read, Low first; a read failure returns its status.
      *
-     * Then, for the Low region and then the High region:
+     * Then, in this order (decided 2026-11-23):
      *
-     * 1. writeRegionPointer(region, 0), as step 1 of updateRegion().
-     * 2. The region's AppConfigOffset word (appConfigOffsetAddress()) to 0,
-     *    with the same four-task write and read-back as a pointer: FLrd of
-     *    the 16 bytes at the word, FLad, a 4-byte FLwd, FLrd again. Bytes 4
-     *    to 15 must not change and the word must read 0. The controller looks
-     *    for a region's Header_ID at the region start plus this offset
-     *    (SLVAFL1 Boot Process, page 2), so the word must be 0 before the
-     *    pointer is written to the bundle start.
-     * 3. Step 2 of updateRegion() unchanged: the check of the 12 bytes after
-     *    the region pointer against the start of the image, FLad, the first
-     *    two chunks, the read-back of the pointer row and of the chunks, a
-     *    fresh FLad, and the remaining chunks.
-     * 4. Step 3 of updateRegion() with the compare always on: FLvy, the FLrd
-     *    compare of the region with the image, then writeRegionPointer(region,
-     *    bundleStart(region)).
+     * 1. Both AppConfigOffset words (appConfigOffsetAddress()) to 0, Low
+     *    (0x03FC) then High (0x07FC), before any pointer or bundle write. Each
+     *    uses the four-task write and read-back of a pointer: FLrd of the 16
+     *    bytes at the word, FLad, a 4-byte FLwd, FLrd again; bytes 4 to 15
+     *    must not change and the word must read 0. The controller looks for a
+     *    region's Header_ID at the region start plus this word (SLVAFL1 Boot
+     *    Process, page 2).
+     * 2. For the Low region and then the High region, steps 1 to 3 of
+     *    updateRegion() with the compare always on: writeRegionPointer(region,
+     *    0); the bundle write of step 2 with its trace check and read-back;
+     *    FLvy; the FLrd compare; then one FLrd of the region's AppConfigOffset
+     *    word, which must read 0 (CompareMismatch otherwise, with the pointer
+     *    still 0); then writeRegionPointer(region, bundleStart(region)).
      *
      * There is no step 4: both pointers stay valid. The first failure ends the
-     * call, and nothing is written after it. A 14336-byte image issues 2730
-     * tasks with no retry, about the 52 s hardware stage 3 measured for
+     * call, and nothing is written after it. With no retry, a 14336-byte image
+     * issues 2732 tasks: 2 FLrd of pre-flight, 8 for the two words, and 1361
+     * per region. That is about the 52 s hardware stage 3 measured for
      * updateBothRegions().
      *
-     * What the read-backs of the AppConfigOffset write cover. The 16 bytes at
-     * 0x03FC run into the High pointer word at 0x0400 and the 8 bytes after
-     * it. The 16 bytes at 0x07FC run into the first 12 bytes of the Low
-     * bundle at 0x0800, which the Low pass has written and compared by then.
-     * The check compares those bytes before and after the write, not with
-     * erased bytes, so the Low bundle cannot make the High pass refuse, and
-     * no trace check applies to that row. Hardware stage 2 showed that a
-     * 4-byte FLwd writes exactly four bytes.
+     * Why both words first. The last write before each bundle FLad is then
+     * the pointer erase, as in updateRegion(), so the pointer-row checks of
+     * step 2 look where a write address left behind by an FLad that did not
+     * take effect would put the chunks. And a stop in either pass leaves both
+     * words already 0, so updateRegion() can complete the layout from any
+     * stop. A failure writing the High word ends the call before Low is
+     * written, which costs nothing on a part that had no valid pointer.
      *
-     * State afterwards, with "region" the region of the pass that failed,
-     * which lastTarget() names, and the steps those of updateRegion():
+     * What the read-backs of the word writes cover. The 16 bytes at 0x03FC
+     * run into the High pointer word at 0x0400 and the 8 bytes after it. The
+     * 16 bytes at 0x07FC run into the first 12 bytes at 0x0800, which this
+     * call has not written yet. The check compares those bytes before and
+     * after the write, and no trace check applies to either row. Hardware
+     * stage 2 showed that a 4-byte FLwd writes exactly four bytes.
      *
-     * | Status | Raised by | EEPROM state afterwards |
+     * State afterwards, for a part on which pre-flight found no valid
+     * pointer. "Region" is the one lastTarget() names:
+     *
+     * | Status | Raised by (lastStep()) | EEPROM state afterwards |
      * |---|---|---|
-     * | Success | The whole flow | Both pointers valid, both AppConfigOffset words 0, the image in both regions. Every other byte as before the call: a blank part then equals the full-flash layout byte for byte |
-     * | NotInAppMode, NoEepromPresent, BadImageHeader, BadImageLength, EepromNotBlank | Pre-flight | Unchanged |
-     * | PointerEraseFailed | Step 1 | Region pointer uncertain, nothing else of the region written |
-     * | SetAddressFailed, WriteFailed, FlashBusy, CompareMismatch (lastStep() is ClearAppConfigOffset) | The AppConfigOffset write | Region pointer 0, its AppConfigOffset word uncertain |
-     * | PointerNeighborsChanged (lastStep() is ClearAppConfigOffset) | The neighbor check of the AppConfigOffset write | Region pointer 0. The 12 bytes after the word changed: in the Low pass the High pointer word and the 8 bytes after it; in the High pass the first 12 bytes of the Low bundle, so the Low region may no longer boot. Stop and dump the EEPROM |
-     * | SetAddressFailed, WriteFailed, FlashBusy, CompareMismatch, PointerNeighborsChanged (lastStep() is WriteBundle) | Step 2 | As the step 2 rows of updateRegion(): region pointer 0, region untouched, partly written, or the first chunks misplaced |
-     * | VerifyFailed, CompareMismatch (lastStep() is CompareBundle) | Step 3, FLvy or the compare | Region written but not valid, pointer 0 |
-     * | PointerRestoreFailed, PointerNeighborsChanged (lastStep() is RestorePointer) | Step 3, the pointer write | Region holds the image, compared; its pointer uncertain |
+     * | Success | The whole flow (Done) | Both pointers valid, both AppConfigOffset words 0, the image in both regions. Every other byte as before the call: a blank part then equals the full-flash layout byte for byte |
+     * | NotInAppMode, NoEepromPresent, BadImageHeader, BadImageLength, EepromNotBlank | Pre-flight (Preflight) | Unchanged |
+     * | SetAddressFailed, WriteFailed, FlashBusy, CompareMismatch | The word write of the region (ClearAppConfigOffset) | No pointer written. That region's word uncertain; for High, the Low word reads 0 |
+     * | PointerNeighborsChanged | The neighbor check of the word write (ClearAppConfigOffset) | No pointer written. The 12 bytes after the word changed: for Low, the High pointer word and the 8 bytes after it; for High, the first 12 bytes at 0x0800, before the Low bundle is written. Stop and dump the EEPROM |
+     * | PointerEraseFailed, PointerNeighborsChanged | Step 1 of the region's pass (ErasePointer) | Both words 0. Region pointer uncertain, the region otherwise untouched |
+     * | SetAddressFailed, WriteFailed, FlashBusy, CompareMismatch, PointerNeighborsChanged | Step 2 (WriteBundle) | As the step 2 rows of updateRegion(): region pointer 0, region untouched, partly written, or the first chunks misplaced. Both words 0 |
+     * | VerifyFailed, CompareMismatch | Step 3, FLvy (VerifyBundle) or the compare (CompareBundle) | Region written but not valid, pointer 0. Both words 0 |
+     * | CompareMismatch | The word check before the pointer write (CheckAppConfigOffset) | Region holds the image, compared, pointer 0; its word no longer reads 0 |
+     * | PointerRestoreFailed, PointerNeighborsChanged | The pointer write (RestorePointer) | Region holds the image, compared, its word read 0; its pointer uncertain |
      * | CommandRejected, CommandTimeout, I2cError | The executor, in any step | As the row of the step lastStep() names |
      *
-     * What else holds. A failure in the Low pass leaves the High pointer as
-     * pre-flight found it, not valid, so no region boots: the controller keeps
-     * running the patch it holds in RAM and comes up in PTCH at its next
-     * restart. A failure in the High pass leaves the Low pass complete: the
-     * Low region holds the image, compared, with its AppConfigOffset word 0
-     * and a valid pointer, and boots. After any failure a valid pointer leads
-     * only to a region that passed FLvy and the compare.
+     * What else holds. Until the Low pass has written its pointer, no pointer
+     * is valid unless a failed pointer write took effect, so the controller
+     * keeps running the patch it holds in RAM and has no region to load at its
+     * next restart. A failure in the High pass (lastTarget() High and
+     * lastStep() other than ClearAppConfigOffset) leaves the Low pass
+     * complete: the Low region holds the image, compared, and its word read 0
+     * right before its pointer was written. After any failure a valid pointer
+     * leads only to a region that passed FLvy and the compare, with a word
+     * that read 0 before the pointer write.
      *
      * Recovery. While no pointer reads valid, call programBlank() again; after
      * PointerNeighborsChanged, or CompareMismatch from step 2, dump the EEPROM
-     * first. When a pointer reads valid, programBlank() refuses, and
-     * updateRegion() on the other region with invalidateOldRegion false
-     * completes the layout. updateRegion() does not write the AppConfigOffset
-     * word, so read that region's word first: it is 0 only if the failed pass
-     * got past ClearAppConfigOffset or it read 0 already.
+     * first. When only the Low pointer reads valid after a High-pass failure,
+     * updateRegion(High) with invalidateOldRegion false completes the layout;
+     * the High word was written 0 before the passes began, and reading it
+     * first confirms it. updateRegion() does not write the word.
      *
-     * Limits beyond those of updateRegion(). In this flow the last write
-     * before the FLad to the bundle start is the AppConfigOffset word, not
-     * the pointer, and the last read is that word's read-back. An FLad that
-     * reported success without taking effect would therefore leave the write
-     * address after the AppConfigOffset word, not after the pointer: at
-     * 0x0400 in the Low pass, the High pointer word, and at 0x0800 in the High
-     * pass, the start of the Low bundle, which then receives its own bytes
-     * again. Step 2's read-back stops either case when the bundle start does
-     * not already hold the image, which holds for a blank EEPROM. It cannot see
-     * either case when the region already held the image, because it watches
-     * the region's pointer row and not those addresses; 64 bytes are then
-     * misplaced, at 0x0400 to 0x043F or over identical bytes. If, in
-     * addition, an FLrd moved the write address to the address it read plus
-     * 16, which is not documented either, the stale address in the High pass
-     * would be 0x080C, and the first two chunks would overwrite bytes 12 to
-     * 75 of the Low bundle. The read-back stops the call there on a blank
-     * High region, but the Low region would no longer boot. No TI document
-     * describes either behaviour.
+     * Limits. Each pass inherits the limits of steps 1 to 3 of updateRegion(),
+     * stated there, because the last write before its bundle FLad is the
+     * pointer erase and the last read is the erase's read-back. Under the
+     * modelled faults (an FLad that reports success without taking effect,
+     * alone or with an FLrd that moves the write address to the address read
+     * plus 16), the other stray writes this flow can make land on a pointer
+     * word about to be erased, on bytes after a pointer, on the Low bundle
+     * start before the Low pass writes it, or past the end of a written
+     * image. The test suite sweeps every FLad of the call under both models
+     * from three start states and finds no valid pointer over a region that
+     * does not hold the image. No TI document describes either behaviour.
      *
-     * The progress callback runs as for updateRegion(), once per region;
-     * lastTarget() names the region in progress.
+     * The progress callback runs as for updateRegion(), once per pass;
+     * lastTarget() names the region in progress. The word writes make no
+     * call.
      *
      * @param image  Bundle image (a low-region binary); must stay valid for the call
      * @param length Image length in bytes
@@ -1150,9 +1152,12 @@ private:
     /// programBlank(): the bundle write with its read-back, FLvy, the compare
     /// when @p compare is set, and the target pointer to the bundle start.
     /// Sets lastStep() for each phase. @p pointerRow is the 16 bytes step 1's
-    /// read-back saw at the target pointer.
+    /// read-back saw at the target pointer. With @p checkAppConfigOffset set
+    /// (programBlank()), the target's AppConfigOffset word is read right before
+    /// the pointer write and must be 0 (CompareMismatch otherwise).
     EepromUpdateStatus installBundle(EepromRegion target, const uint8_t* image, size_t length,
-                                     const uint8_t* pointerRow, bool compare);
+                                     const uint8_t* pointerRow, bool compare,
+                                     bool checkAppConfigOffset);
 
     /// Step 2 of updateRegion(): FLad, the first two chunks, the early
     /// read-back, a fresh FLad, and the remaining chunks, with progress calls.

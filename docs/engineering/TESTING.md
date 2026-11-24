@@ -226,6 +226,12 @@ to, clock stretching, the driver's 50 ms transaction timeouts, or `requestFrom()
 returning 4 when the bus did not become idle, which a caller cannot tell from a 4-byte
 read.
 
+One fault is not driver behaviour. `Wire.rxMissing` makes `requestFrom()` return the
+count the target gave while the last `rxMissing` of those bytes are absent from the
+receive buffer, so `available()` falls short of the reported count. The Teensy driver
+cannot do this, but the `available()` checks in `TPS25751::readRegister()` guard against
+cores that can, and this is how the tests reach them.
+
 The Arduino stub's `millis()`, `micros()`, `delay()`, and `delayMicroseconds()` use a
 clock the tests set and read (`fake_arduino::g_nowUs`); `millis()` and `micros()` wrap at
 32 bits, as on the Teensy, and `digitalRead()` returns pin
@@ -240,7 +246,10 @@ write, the read of size + 1 bytes, the bytes the decoded object holds, the
 pointer write or write, a length byte that is not the register size, an object of the wrong
 size); it also covers `readRegisterByAddress()` for all 37 addresses and an unknown one,
 `readRegisterAs<T>()`, the address-keyed and `RegisterInfo` forms, `begin()`, and the debug
-setters. `test_TPS25751Core` covers the register read and write with the
+setters. It also injects a factory that returns null through `TPS25751Factory::setFactory()`
+to reach the decoder check of `readRegisterByAddress()` (its `tearDown()` restores the
+default factory), and uses `Wire.rxMissing` for a read whose buffer is empty or one byte
+short of the count `requestFrom()` reported. `test_TPS25751Core` covers the register read and write with the
 length byte and their failures, `writeCommandData()` (the exact-length DATA write and the
 lengths it refuses), `executeCommand()` and `issueCommand()` (the handshake,
 DATA read at the instant COMMAND clears or not at all, rejected, the timeout at its exact
@@ -852,6 +861,14 @@ info, which cannot happen while the factory covers every address. The other 23 a
 functions. Changing `src/` to remove them is outside this
 change. `TPS25751PatchLoader.cpp` stays at 99% and `TPS25751EepromUpdater.cpp` at 100%.
 
+Seventh measurement, 2026-11-24 (1444 tests): 99% of lines overall (5841 of 5900), with
+`TPS25751.cpp` at 100% (343 of 343 lines). The 23 dead lines of the sixth measurement are
+gone: the typed `read*Register()` functions now call one private `readAndValidateAs<T>()`
+template, which cut the measured lines of `TPS25751.cpp` from 521 to 343. Three new tests in
+`test_TPS25751Typed` reach the other six lines, one with an injected null factory and two
+with `Wire.rxMissing`. `TPS25751PatchLoader.cpp` stays at 99% and
+`TPS25751EepromUpdater.cpp` at 100%.
+
 ### Regression Testing
 
 Maintain a regression test suite:
@@ -902,6 +919,7 @@ Tests are successful when:
 | 1.10 | 2026-11-23 | Claude Code | Loader tests of a slow `PBMs` and of the IRQ ready wait across a `millis()` wrap; the fourth measurement rerun (1336 tests) |
 | 1.11 | 2026-11-24 | Claude Code | Core test of `writeCommandData()`; loader tests of the Ready for Patch and MODE polls, the PBMs configuration read-back, and `PBMe`; the fake's additions; the fifth measurement (1348 tests) |
 | 1.12 | 2026-11-24 | Claude Code | `test_TPS25751Typed`: the typed read and write wrappers and the factory read functions, and the sixth coverage measurement (1441 tests, `TPS25751.cpp` at 94%) |
+| 1.13 | 2026-11-24 | Claude Code | The `Wire.rxMissing` fault, the null-factory and short-buffer tests, and the seventh coverage measurement (1444 tests, `TPS25751.cpp` at 100%) |
 
 ---
 

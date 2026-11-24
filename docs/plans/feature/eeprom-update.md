@@ -916,7 +916,26 @@ Decisions of 2026-11-24 on these points and on the other open items:
 | `coldReset()` evidence rule (a MODE read that is not APP, then APP) | Leave as is: only a failed I2C transaction counts |
 | `PBMs` timeout byte | Changed to 0x32 on 2026-11-24 (session 2). Checked against TRM Table 4-15 (page 76: "recommended to always use 0x32 ... 5 seconds, LSB of 100 ms") and SLVAFV8A (Table 4-1 lists 0x31 as "3.1 seconds"; the byte listings of steps 4 and 5 send 0x32; the step 9 read-back shows 0x31). Retested on hardware the same day, see stage 7 |
 | Is the branch finished | Not yet. `scripts/integrate.py` stays unrun until the user confirms |
-| `PBMe`, DATA read-back, and ReadyForPatch; coverage of `TPS25751.cpp`; `Wire2` dump; `Wire2` restore sketch; stage 4 with a power cycle | Deferred by the user to later sessions, each to be decided there |
+| `PBMe`, DATA read-back, and ReadyForPatch | Decided in session 3, see below |
+| Coverage of `TPS25751.cpp`; `Wire2` dump; `Wire2` restore sketch; stage 4 with a power cycle | Deferred by the user to later sessions, each to be decided there |
+
+Decisions of 2026-11-24, session 3, on three of the loader's departures from TI's flow.
+Burst transaction spacing and the 500 us before `PBMc` stay out of scope by the user's
+decision. Each change follows TRM Figure 5-1 (page 88) and SLVAFV8A as read in that
+session:
+
+| Item | What the documents show | Decision |
+|---|---|---|
+| `PBMe` | Figure 5-1 issues `PBMe` after a burst transaction that is not acknowledged and after `PBMc` reads "!CMD", and on no other failure. TRM Table 4-17 (page 80): `PBMe` ends the session, restores the second target address, and leaves MODE at PTCH. Table 4-15 (page 76): a second `PBMs` in an open session ignores its DATA input, so without `PBMe` a retry with an image of another size keeps the first session's bundle size | Issue `PBMe` on exactly those two paths, best effort, with a 500 ms timeout. The load still returns `BurstFailed` or `PbmcRejected`; the `PBMe` outcome is logged only. No `PBMe` after a `PBMc` timeout, because the task may still be running |
+| DATA before `PBMs` | Figure 5-1 rewrites DATA1 until the write completes. SLVAFV8A step 5 (page 8) reads DATA back 500 us after the write and rewrites it on a mismatch; its trace shows a first read-back of zeros, so the controller acknowledged a write that did not take effect. Its code (page 17) compares one byte and loops without a bound | Write the 6 configuration bytes, wait 500 us, read DATA, and compare all 6; up to 3 attempts (a choice). Then `PBMs` with no input. No match returns the new `PbmsConfigMismatch`, or `I2cError` when no read-back succeeded. `TPS25751::writeCommandData()` is added for the exact-length DATA write |
+| ReadyForPatch and MODE | Figure 5-1 polls INT_EVENT1.ReadyForPatch every 10 ms, then MODE every 10 ms until PTCH, both without a bound. SLVAFV8A waits on ReadyForPatch through I2Ct_IRQ and calls the PTCH check "not necessary but included for completeness" (step 2, page 6) | In polling mode, poll INT_EVENT1 bit 81 every 10 ms for up to 5 s, tolerating failed reads; no set bit returns `CommandTimeout`, as the IRQ wait does. In both modes, then poll MODE every 10 ms for up to 5 s until PTCH, tolerating failed reads; `APP ` returns `NotInPatchMode` at once |
+
+Open after the decision: bit 81 has not been read on this board. The TRM shows an
+INT_EVENT1 bit only while its INT_MASK1 bit is set (Table 3-8, page 19), and SLVAFV8A
+says ReadyForPatch is the one interrupt enabled at a cold boot into PTCH (step 1, page
+6). A controller whose mask or event was changed before the load fails the polling-mode
+wait after 5 s although it is ready. A read of INT_EVENT1 and INT_MASK1 in PTCH on the
+board settles it; that needs the user's go-ahead.
 
 Still unverified, and marked so in the code: the new sequence on hardware; which pins the
 driver's pin-low flag covers. The SDA and SCL readout was removed from the `l` diagnostic

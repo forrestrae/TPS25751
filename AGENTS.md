@@ -329,8 +329,9 @@ a UFP VDO 2, and index 5 a dual-role partner's DFP VDO (USB PD R3.3 page 158).
   TI app note SLVAFV8A to load a firmware/configuration image directly into the
   TPS25751 when no EEPROM is present (PTCH → APP bring-up path). **Not a register
   class** — does not inherit `TPS25751Register` and is not wired into the factory.
-  Builds entirely on `TPS25751::executeCommand()` (for the PBMs/PBMc 4CC handshakes)
-  and `TPS25751::burstWrite()` (raw chunked burst to I2C address 0x30); see ADR-011
+  Builds on `TPS25751::executeCommand()` for PBMs, `TPS25751::issueCommand()` for PBMc
+  (which waits 20 ms before DATA is read), and `TPS25751::burstWrite()` (raw chunked
+  burst to I2C address 0x30); see ADR-011
   in [ARCHITECTURE.md](docs/engineering/ARCHITECTURE.md)
 - **`TPS25751CommandExecutor`**, **`TPS25751HostExecutor`**
   (`include/TPS25751CommandExecutor.h`, `include/TPS25751HostExecutor.h`): the host
@@ -433,13 +434,17 @@ for the host to push the firmware+configuration image over I2Ct.  The 17-step fl
 4-9. `executeCommand(PBMs, config[6])` — `config` = `bundleSize[4, LE] + 0x30 + 0x31`.
 10. `burstWrite(0x30, image, length)` — raw chunked burst (no reg number, no length byte).
 11. (IRQ mode) Clear `INT_CLEAR1`.
-12-14. `executeCommand(PBMc)` — commit the bundle.
-15. `delay(20)` ms.
-16. Read `DATA[0]` — confirm `PatchStartStatus` == 0.
-17. Read MODE — confirm APP.
+12-14. `issueCommand(PBMc)`: commit the bundle and wait for COMMAND to clear, without
+   reading DATA.
+15. `delay(20)` ms (SLVAFV8A step 15; TRM Figure 5-1).
+16. Read DATA, retried every 10 ms on a failed read for up to 5 s; `DATA[0]` must be 0.
+17. Poll MODE every 10 ms until APP, tolerating failed reads, for up to 5 s.
 
-Steps 4-9 and 12-14 are each a single `executeCommand()` call; only step 10 uses the
-new `TPS25751::burstWrite()` primitive (the only addition to the core class).
+Steps 4-9 are a single `executeCommand()` call and steps 12-14 a single `issueCommand()`
+call, which writes DATA and COMMAND and polls COMMAND but reads no DATA; step 10 uses
+`TPS25751::burstWrite()`. An earlier version read DATA as soon as `PBMc` cleared COMMAND;
+in hardware stage 5 that read returned 28 of 65 bytes and the load reported `I2cError`
+although the patch had loaded. The current sequence has not run on hardware.
 `PatchLoadStatus` provides one distinct enumerator per failure point.
 
 See ADR-011 in [ARCHITECTURE.md](docs/engineering/ARCHITECTURE.md) and the PBM
@@ -819,8 +824,11 @@ pio test -e native -f "test_native/test_TPS25751Status"  # one suite
 ```
 
 The `[env:native]` environment compiles the platform-independent sources
-against Arduino API stubs in `test/support/native/`; Unity suites live under
-`test/test_native/` (one directory per register class —
+against Arduino API stubs in `test/support/native/`, and `TPS25751.cpp` and
+`TPS25751PatchLoader.cpp` against a TwoWire fake there (`Wire.h`, driven by
+`FakeTps25751Target.h`), with a clock the tests control. Unity suites live under
+`test/test_native/` (one directory per register class, plus suites for the
+core class, the patch loader, and the EEPROM updater;
 `test_TPS25751Status` is the seed/reference suite). A green native test run is
 a hard gate for every register batch. See
 [TESTING.md](docs/engineering/TESTING.md) for the harness details, required
@@ -835,8 +843,11 @@ test/coverage.sh
 
 The first run, on 2026-11-19, measured 84% of lines, with 18 files under the
 >90% target. After nine new suites and additions to eleven more, the same day's
-run measured 98% (1063 tests), with every file at 93% or more. The verify gate
-and CI do not run it.
+run measured 98% (1063 tests), with every file at 93% or more. On 2026-11-23,
+with `TPS25751.cpp` and `TPS25751PatchLoader.cpp` added to the native build, it
+measured 93% (1328 tests): the patch loader at 95%, the EEPROM updater at 100%,
+and `TPS25751.cpp` at 32%, because its typed register wrappers have no tests of
+their own. The verify gate and CI do not run it.
 
 ### Publishing the Library
 

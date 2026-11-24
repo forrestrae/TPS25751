@@ -1287,6 +1287,25 @@ to start the session, `PBMc` to commit it) plus a raw burst write to I2C address
   consistent with host-register byte order but opposite to BQ25798 downstream registers
   (which are big-endian). See CONSTRAINTS.md "Patch Burst Mode (PBM)".
 
+Amendment, 2026-11-23: `PBMc` no longer goes through `executeCommand()`, which reads
+DATA the instant COMMAND clears. SLVAFV8A (step 15, page 11, and its code on page 18) and
+TRM Figure 5-1 (page 88) wait 20 ms between `PBMc` completing and the DATA read. In hardware
+stage 5 of the EEPROM-update plan, on one board, that immediate read returned 28 of 65
+bytes and the load reported `I2cError` although the patch had loaded; every later read
+from the host failed with error 2, for a cause not established on either side of the bus.
+- `TPS25751::issueCommand()` writes DATA and COMMAND and waits for COMMAND to clear or
+  read "!CMD", without reading DATA. `executeCommand()` is `issueCommand()` plus the DATA
+  read, with the same transactions as before. `PBMs` keeps `executeCommand()`, because
+  SLVAFV8A reads its DATA right after the clear (steps 8 and 9, pages 9 and 10).
+- After `PBMc` the loader waits `PATCH_APPLY_DELAY_MS` (20 ms), reads DATA with a retry
+  every 10 ms for up to `PBM_DATA_READ_CAP_MS`, then polls MODE every 10 ms for up to
+  `PBM_MODE_POLL_CAP_MS` until APP, tolerating failed reads. Both caps are 5000 ms, a
+  choice the documents do not bound. The INT_EVENT1.PatchLoaded poll of Figure 5-1 is not
+  used; SLVAFV8A goes from DATA to MODE without it.
+- `TPS25751.cpp` and `TPS25751PatchLoader.cpp` now build in `[env:native]` against a
+  TwoWire fake, and `test_TPS25751PatchLoader` pins the transaction order and the 20 ms.
+  The new sequence has not run on hardware.
+
 
 ### ADR-012: 16-Bit Bit Positions in the Register Base Class
 **Status:** Accepted
@@ -1470,6 +1489,7 @@ host-run tests that inject a fault at every task, and `src/TPS25751.cpp`, which 
 | 1.6 | 2026-11-19 | Claude Code | Added ADR-012: 16-bit bit positions in the register base class; moved ADR-010's Consequences back under ADR-010 |
 | 1.7 | 2026-11-22 | Claude Code | Added ADR-013: USB PD PDO and RDO words decode through the TPS25751Pdo and TPS25751Rdo value types |
 | 1.8 | 2026-11-23 | Claude Code | Added ADR-014: TPS25751EepromUpdater, a non-register flash-task sequencer on the TPS25751CommandExecutor seam |
+| 1.9 | 2026-11-23 | Claude Code | ADR-011 amendment: PBMc through issueCommand(), 20 ms before the DATA read, native tests through a TwoWire fake |
 
 ---
 

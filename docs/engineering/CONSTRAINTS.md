@@ -364,6 +364,33 @@ config[5] = 0x31                   // PBM_TIMEOUT (~3.1 s)
 bad timeout.  Map each to a distinct `PatchLoadStatus` enumerator (not a generic
 error).
 
+#### After PBMc: 20 ms before DATA
+
+Do not read DATA as soon as `PBMc` clears COMMAND. SLVAFV8A (step 15, page 11, and its
+code on page 18) and TRM Figure 5-1 (page 88) wait 20 ms between `PBMc` completing and the
+DATA read, while the controller loads and applies the image; the TRM says `PBMc` changes
+the I2C target address back to its normal value before it completes (Table 4-16, page
+79). The loader therefore issues `PBMc` with `TPS25751::issueCommand()`, which reads no
+DATA, waits 20 ms, reads DATA (retrying every 10 ms on a failed read, for up to 5000 ms),
+and then polls MODE every 10 ms until APP (up to 5000 ms; the caps are a choice). `PBMs`
+is different: SLVAFV8A reads its DATA right after COMMAND clears (steps 8 and 9), so it
+stays on `executeCommand()`.
+
+Evidence, one board, hardware stage 5 of the EEPROM-update plan, with the earlier code
+that read DATA at once: the read returned 28 of 65 bytes, the load reported `I2cError`
+although the patch had loaded, and every later read from the host failed with error 2
+(the Teensy driver's code for a NACK on a free bus) until the host restarted. The Teensy
+driver source does not support a stuck host: its paths for a held line or a stuck
+peripheral return 4. A controller that did not acknowledge its address fits the codes as
+well, and the cause is not established. The current sequence has not run on hardware.
+
+Two more points from the figures. TRM Figure 5-1 also waits at least 500 µs after each
+burst and before `PBMc`, and SLVAFV8A adds 500 µs between its bursts and before `PBMc`;
+`burstWrite()` sends its 32-byte chunks without that delay unless `interChunkDelayUs` is
+given, and the loader does not give it. Stage 5 loaded the image that way. The 20 ms
+wait can be replaced by the INT_EVENT1.PatchLoaded interrupt (SLVAFV8A footnote 5); the
+loader keeps the delay.
+
 See `TPS25751PatchLoader` (`include/TPS25751PatchLoader.h`, `src/TPS25751PatchLoader.cpp`)
 for the complete 17-step implementation, and ADR-011 in ARCHITECTURE.md for the
 design rationale.
@@ -1474,6 +1501,7 @@ void foo() {
 | 1.18 | 2026-11-23 | Claude Code | Flash tasks and EEPROM update section: what SLVAFL1 says about APP mode, AppConfigOffset words and recovery from PTCH (SLVAFL1 page 13) under their own headings, `FLwd` timing per run |
 | 1.19 | 2026-11-23 | Claude Code | `programBlank()` writes both AppConfigOffset words first; `coldReset()` requires an observed restart and returns `ResetNotObserved` otherwise (Flash tasks and EEPROM update section) |
 | 1.20 | 2026-11-23 | Claude Code | `updateRegion()` checks both AppConfigOffset words in its pre-flight and the target's again before the pointer write (AppConfigOffset words section); PTCH after a restart with no valid pointer observed in stage 5 |
+| 1.21 | 2026-11-23 | Claude Code | PBM: 20 ms between `PBMc` completing and the DATA read, `issueCommand()`, the stage 5 evidence and what it does not establish, the 500 µs burst spacing the figures show (Patch Burst Mode section) |
 
 ---
 

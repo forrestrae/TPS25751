@@ -97,10 +97,11 @@ no `Wire`, no Arduino framework. The `[env:native]` environment in
   RDO value types, and the factory via `build_src_filter` (`test_build_src =
   yes`), listed in register address order, followed by
   `TPS25751EepromUpdater.cpp`, which reaches the controller only through the
-  `TPS25751CommandExecutor` interface. The I2C-facing sources (`TPS25751.cpp`,
-  `TPS25751HostExecutor.cpp`, `TPS25751DownstreamDevice.cpp`,
-  `TPS25751PatchLoader.cpp`) are not compiled; a new register class must be
-  added to the filter;
+  `TPS25751CommandExecutor` interface, and by `TPS25751.cpp` and
+  `TPS25751PatchLoader.cpp`, which reach the bus through the TwoWire fake (see
+  "I2C Tests: the Wire Fake" below). `TPS25751HostExecutor.cpp` and
+  `TPS25751DownstreamDevice.cpp` are not compiled, because no suite tests them; a
+  new register class must be added to the filter;
 - satisfies the Arduino API symbols those sources reference (`Stream`,
   `Serial`, `F()`, `millis()`, `strncpy_P`) with the **header-only stubs** in
   `test/support/native/` (`Arduino.h`, `Stream.h`). The stubs print to stdout;
@@ -196,6 +197,40 @@ int main(int, char **)
     return UNITY_END();
 }
 ```
+
+### I2C Tests: the Wire Fake
+
+`test/support/native/Wire.h` gives the native build a `TwoWire` class and a `Wire`
+object with the calls the library makes (`begin()`, `beginTransmission()`, `write()`,
+`endTransmission()`, `requestFrom()`, `available()`, `read()`). It hands each transaction
+to a target and has a 136-byte transmit buffer, as the Teensy 4 driver does.
+`test/support/native/FakeTps25751Target.h` is that target, a scripted TPS25751:
+
+- the register protocol of the unique address: a pointer write, then a read of the count
+  byte and the register; a write of register, count, and data;
+- COMMAND and DATA as a 4CC task: a code written to COMMAND reads back for a scripted
+  number of polls, then clears or reads "!CMD", and DATA takes the task's output;
+- PBMs opening the burst port at 0x30 on a PatchStartStatus of 0, the port recording the
+  raw burst, and PBMc setting MODE to APP after a scripted delay;
+- faults by transaction index, time window, address, register, and kind: a write error
+  code (2 for an address NACK, 3, 4) or a read that returns only N bytes, and a hook on a
+  task's completion that can open a fault window then;
+- a log of every transaction with the stub clock's time.
+
+The Arduino stub's `millis()`, `micros()`, `delay()`, and `delayMicroseconds()` use a
+clock the tests set and read (`fake_arduino::g_nowUs`), and `digitalRead()` returns pin
+levels the tests set. The poll counts, the 0xFF padding of a long read, and the exact
+time MODE switches are choices of the fake, not documented behaviour.
+
+Two suites use it. `test_TPS25751Core` covers the register read and write with the
+length byte and their failures, `executeCommand()` and `issueCommand()` (the handshake,
+DATA read at the instant COMMAND clears or not at all, rejected, timeout, and an I2C
+failure at each transaction), and `burstWrite()`. `test_TPS25751PatchLoader` covers
+`loadPatchBundle()`: the transaction order of SLVAFV8A section 4, no DATA read within
+20 ms of `PBMc` completing (the regression test for the defect hardware stage 5 found;
+it fails against the earlier loader), a controller modelled off the bus for those 20 ms,
+the DATA retry and its cap, the MODE poll through failed and PTCH reads and both outcomes
+at its cap, every `PatchLoadStatus`, the PBMs configuration bytes, and IRQ mode.
 
 ### Sequencer Tests: the EEPROM Updater
 
@@ -720,11 +755,10 @@ across runs and the shared cache in `.pio/buildcache` restores object files
 without the `.gcno` notes gcov needs. On macOS it reads Apple clang's counters
 with `xcrun llvm-cov gcov`.
 
-Only sources compiled by `[env:native]` appear in the report, so the I2C-facing
-`TPS25751.cpp`, `TPS25751HostExecutor.cpp`, `TPS25751DownstreamDevice.cpp`, and
-`TPS25751PatchLoader.cpp` are not measured. `TPS25751EepromUpdater.cpp` is: it
-compiles natively because it depends on the executor interface, not on
-`TPS25751`. Neither the verify gate nor CI runs the coverage step; the >90%
+Only sources compiled by `[env:native]` appear in the report, so
+`TPS25751HostExecutor.cpp` and `TPS25751DownstreamDevice.cpp` are not measured.
+`TPS25751EepromUpdater.cpp` is, through the executor interface, and `TPS25751.cpp`
+and `TPS25751PatchLoader.cpp` are, through the Wire fake. Neither the verify gate nor CI runs the coverage step; the >90%
 target is checked by running the script at review.
 
 First measurement, 2026-11-19 (727 tests): 84% of lines overall. Files under
@@ -755,6 +789,18 @@ Third measurement, 2026-11-23 (1303 tests), the first recorded here with
 `TPS25751EepromUpdater.cpp` in the report, after the AppConfigOffset checks of
 `updateRegion()`: 98% of lines overall, every file at 93% or more, and the updater
 at 100% (527 of 527 lines, 155 tests in its suite).
+
+Fourth measurement, 2026-11-23 (1328 tests), with `TPS25751.cpp` and
+`TPS25751PatchLoader.cpp` in the native build: 93% of lines overall.
+`TPS25751PatchLoader.cpp` is at 95% (163 of 171 lines, 14 tests); it misses
+`debugPrint()` and the `default:` of `mapTaskStatus()`, which no caller reaches.
+`TPS25751.cpp` is at 32% (165 of 515 lines, 11 tests in `test_TPS25751Core`): the
+register read and write, the task calls, and the burst are covered; the typed
+`read*()` and `write*()` wrappers and the factory-based `read*Register()` functions,
+which each forward to those paths, `begin()`, the debug setters, and two unreachable
+branches after a full-length read are not, and no test calls them only to count lines.
+`TPS25751EepromUpdater.cpp` stays at 100% (527 of 527 lines, 155 tests). Every other
+file is at 93% or more.
 
 ### Regression Testing
 
@@ -801,6 +847,7 @@ Tests are successful when:
 | 1.5 | 2026-11-23 | Claude Code | EEPROM updater suite and `FakeCommandExecutor` (what it models and which behaviours are assumptions), the updater in the native build and the coverage report, script tests for `bin_to_header.py` |
 | 1.6 | 2026-11-23 | Claude Code | The `programBlank()` `FLad` sweep, the two `coldReset()` APP outcomes, and the example commands the hardware stages run, including `zero` |
 | 1.7 | 2026-11-23 | Claude Code | Tests of the AppConfigOffset checks of `updateRegion()`, and the coverage numbers after them |
+| 1.8 | 2026-11-23 | Claude Code | The Wire fake, the core and patch-loader suites, `TPS25751.cpp` and `TPS25751PatchLoader.cpp` in the native build, and the fourth coverage measurement |
 
 ---
 

@@ -21,6 +21,7 @@
 
 #include "TPS25751.h"
 #include "FakeTps25751Target.h"
+#include "CaptureStdout.h"
 
 namespace {
 
@@ -126,7 +127,7 @@ void test_load_follows_the_documented_sequence()
     // Step 2: MODE reads PTCH.
     TEST_ASSERT_TRUE(r.dev.isRead(log[1], REG_MODE));
     // Steps 4 to 9: the PBMs configuration in DATA, little-endian bundle size,
-    // target 0x30, timeout 0x31 (SLVAFV8A Table 4-2), then PBMs, its COMMAND
+    // target 0x30, timeout 0x31 (SLVAFV8A Table 4-1), then PBMs, its COMMAND
     // poll, and DATA read at once (steps 8 and 9 read DATA right after the
     // COMMAND clear).
     const uint8_t config[] = {0x09, 6, 100, 0, 0, 0, 0x30, 0x31};
@@ -348,6 +349,21 @@ void test_caps_across_a_millis_wrap()
     }
 }
 
+void test_pbmc_that_takes_longer_than_200_ms()
+{
+    // PBMc is polled for up to PBMC_CMD_TIMEOUT_MS (5000 ms), not the 200 ms
+    // default of the task calls: a PBMc that completes after 300 ms of polls
+    // succeeds.
+    Rig r;
+    r.dev.tasks["PBMc"].pollsBeforeDone = 60;  // 60 polls 5 ms apart
+    ASSERT_LOAD(PatchLoadStatus::Success, r.load());
+    const long pbmc = r.commandWrite("PBMc");
+    const long clear = r.commandClear(pbmc);
+    TEST_ASSERT_TRUE(r.dev.log[clear].timeUs - r.dev.log[pbmc].timeUs >= 300000);
+}
+
+// --- Every other status --------------------------------------------------------------
+
 void test_not_in_patch_mode()
 {
     {
@@ -478,6 +494,14 @@ void test_to_string_and_debug_print()
     for (size_t i = 0; i < 12; ++i) TEST_ASSERT_EQUAL_STRING(names[i], TPS25751PatchLoader::toString(all[i]));
     TEST_ASSERT_EQUAL_STRING("Unknown", TPS25751PatchLoader::toString(static_cast<PatchLoadStatus>(200)));
 
+    // debugPrint() reports the result of the last load.
+    Rig r;
+    TPS25751PatchLoader loader(r.pd);
+    r.dev.tasks["PBMc"].reject = true;
+    ASSERT_LOAD(PatchLoadStatus::PbmcRejected, loader.loadPatchBundle(r.image.data(), r.image.size()));
+    const std::string out = captureStdout([&] { loader.debugPrint(Serial); });
+    TEST_ASSERT_TRUE(out.find("TPS25751PatchLoader") != std::string::npos);
+    TEST_ASSERT_TRUE(out.find("lastStatus : PbmcRejected") != std::string::npos);
 }
 
 int main(int, char **)
@@ -493,6 +517,7 @@ int main(int, char **)
     RUN_TEST(test_mode_poll_through_failed_reads_and_ptch_to_app);
     RUN_TEST(test_mode_poll_cap_outcomes);
     RUN_TEST(test_caps_across_a_millis_wrap);
+    RUN_TEST(test_pbmc_that_takes_longer_than_200_ms);
     RUN_TEST(test_not_in_patch_mode);
     RUN_TEST(test_pbms_outcomes);
     RUN_TEST(test_burst_failure);

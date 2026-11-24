@@ -295,6 +295,26 @@ void test_command_poll_across_a_millis_wrap()
     }
 }
 
+void test_issue_command_honours_its_timeout()
+{
+    // With a 100 ms timeout, COMMAND is polled at 0, 5, ..., 105 ms: a task that
+    // clears on the poll at 105 ms succeeds and one that would clear at 110 ms
+    // times out. 100 is not the default, so a call that ignored its argument
+    // would let both succeed.
+    {
+        Rig r;
+        r.dev.tasks["TEST"] = FakeTps25751Target::TaskScript{21, false, {0x00}, nullptr};
+        TEST_ASSERT_EQUAL(TPS25751TaskStatus::Success, r.pd.issueCommand(TPS25751FourCC::of("TEST"), nullptr, 0, 100));
+        TEST_ASSERT_EQUAL_UINT32(105, millis());
+    }
+    {
+        Rig r;
+        r.dev.tasks["TEST"] = FakeTps25751Target::TaskScript{22, false, {0x00}, nullptr};
+        TEST_ASSERT_EQUAL(TPS25751TaskStatus::Timeout, r.pd.issueCommand(TPS25751FourCC::of("TEST"), nullptr, 0, 100));
+        TEST_ASSERT_EQUAL_UINT32(105, millis());
+    }
+}
+
 void test_wire_fake_matches_the_teensy_driver()
 {
     // The limits of WireIMXRT.cpp the fake reproduces.
@@ -381,6 +401,7 @@ int main(int, char **)
     RUN_TEST(test_execute_command_i2c_failure_at_each_transaction);
     RUN_TEST(test_issue_command_does_not_read_data);
     RUN_TEST(test_command_poll_across_a_millis_wrap);
+    RUN_TEST(test_issue_command_honours_its_timeout);
     RUN_TEST(test_wire_fake_matches_the_teensy_driver);
     RUN_TEST(test_burst_write_chunks_without_register_or_length_byte);
     RUN_TEST(test_burst_write_failures);

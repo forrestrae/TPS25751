@@ -52,6 +52,10 @@
 //        valid. Never changes the pointer's value and repairs nothing.
 //   u    updateInactiveRegion() with the embedded image.
 //   b    updateBothRegions() with the embedded image.
+//        u, b, and c1 to c4 print both AppConfigOffset words in their plan.
+//        updateRegion() refuses, writing nothing, when the target's word is
+//        not 0 (AppConfigOffsetNotZero) or the kept region's word is not 0
+//        (NoBootableRegion).
 //   c1   Update the inactive region and halt after step 1 of SLVAFL1
 //        Figure 2-3 (target pointer erased).
 //   c2   The same, halting after step 2 (bundle written, pointer still 0).
@@ -71,10 +75,11 @@
 //        Only when MODE reads APP and no region pointer is valid, which is the
 //        state after l on a blank or corrupt EEPROM, or after zero. Its plan
 //        adds both AppConfigOffset words. When it refuses because a pointer is
-//        valid, and after a stop in its High pass, it prints both words: u and
-//        b do not write them, so do not run u or b while the word of the
-//        region they would write is not 0. pb itself writes both words, so
-//        zero followed at once by pb repairs a word that is not 0.
+//        valid, and after a stop in its High pass, it prints both words. u, b,
+//        and c1 to c4 do not write the words and refuse through the library
+//        while one is not 0: AppConfigOffsetNotZero for the target's word,
+//        NoBootableRegion for the kept region's. pb itself writes both words,
+//        so zero followed at once by pb repairs a word that is not 0.
 //   zero Writes both region pointers to 0, Low then High, each with a
 //        read-back, and prints the 16-byte rows at both pointers afterwards.
 //        Leaves the bundles and the AppConfigOffset words as they are. After
@@ -476,6 +481,14 @@ static void printAppConfigOffsets()
     printAppConfigOffset(EepromRegion::High);
 }
 
+/// The plan lines u, b, and c1 to c4 add: both words, and what the library
+/// does when one is not 0.
+static void printUpdateOffsetPlan()
+{
+    printAppConfigOffsets();
+    Serial.println(F("[plan] updateRegion() refuses, writing nothing, with AppConfigOffsetNotZero if the target's [offset] word is not 0x00000000, and with NoBootableRegion if the kept region's word is not. It reads the target's word again before its final pointer write."));
+}
+
 static void printTarget()
 {
     EepromRegion target = EepromRegion::Low;
@@ -848,6 +861,17 @@ static void printUpdateResult(EepromUpdateStatus s, uint32_t elapsedMs)
     if (updater.lastStep() == EepromUpdateStep::WriteBundle &&
         (s == EepromUpdateStatus::CompareMismatch || s == EepromUpdateStatus::PointerNeighborsChanged)) {
         Serial.println(F("[update] A check of step 2 stopped the write. Dump the EEPROM with r and find the misplaced bytes before any further write."));
+    }
+    if (s == EepromUpdateStatus::AppConfigOffsetNotZero) {
+        Serial.print(F("[update] The "));
+        Serial.print(TPS25751EepromUpdater::toString(updater.lastTarget()));
+        Serial.println(F(" AppConfigOffset word does not read 0, so the controller may not load that region behind a valid pointer. Nothing was written. updateRegion() does not write the word; repair with zero and then pb, before any reset."));
+        printAppConfigOffsets();
+    } else if (s == EepromUpdateStatus::NoBootableRegion && updater.lastStep() == EepromUpdateStep::Preflight) {
+        Serial.println(F("[update] The region the update would keep is not bootable: its pointer is not valid or its AppConfigOffset word is not 0. Nothing was written. If no pointer reads valid, use pb; otherwise repair with zero and then pb."));
+        printAppConfigOffsets();
+    } else if (updater.lastStep() == EepromUpdateStep::CheckAppConfigOffset && s == EepromUpdateStatus::CompareMismatch) {
+        Serial.println(F("[update] The target's AppConfigOffset word no longer read 0 right before the pointer write, so the pointer was left at 0. Dump the EEPROM with r before any further write."));
     }
 }
 
@@ -1248,6 +1272,7 @@ static void cmdUpdate(bool both)
     printPlan(both ? F("b: updateBothRegions() with the embedded image")
                    : F("u: updateInactiveRegion() with the embedded image"),
               target, both);
+    printUpdateOffsetPlan();
     if (!confirm()) {
         return;
     }
@@ -1286,6 +1311,7 @@ static void cmdCut(uint8_t step)
       : (step == 3) ? F("c3: update the inactive region and stop after step 3 (target pointer restored, old pointer kept)")
                     : F("c4: update the inactive region completely, steps 1 to 4");
     printPlan(action, target, false);
+    printUpdateOffsetPlan();
     if (!confirm()) {
         return;
     }
@@ -1705,11 +1731,11 @@ static void cmdLoadPatch()
     }
 }
 
-/// After a pb refusal or a failed pb: u and b never write an AppConfigOffset
-/// word, so a region they write behind a word that is not 0 would not load.
+/// After a pb refusal or a failed pb. u, b, and c1 to c4 never write an
+/// AppConfigOffset word; updateRegion() refuses while one it depends on is not 0.
 static void printOffsetAdvice()
 {
-    Serial.println(F("[pb] Read [offset] High above. Do not run u or b while it, or the [offset] line of any region they would write, is not 0x00000000: u and b do not write that word."));
+    Serial.println(F("[pb] Read the [offset] lines above. u, b, and c1 to c4 do not write these words: they refuse, writing nothing, with AppConfigOffsetNotZero while the word of the region they would write is not 0x00000000, and with NoBootableRegion while the word of the region they would keep is not."));
     Serial.println(F("[pb] pb writes both words. To repair a word that is not 0, send zero and then pb; zero leaves no valid pointer until pb completes, so run pb before any reset."));
 }
 
@@ -1783,7 +1809,7 @@ static void cmdProgramBlank()
         if (s == EepromUpdateStatus::PointerNeighborsChanged || updater.lastStep() == EepromUpdateStep::WriteBundle) {
             Serial.println(F("[pb] This stop means bytes may lie where they do not belong. Check the Low region with r (compare the dump with the image) before relying on it."));
         }
-        Serial.println(F("[pb] Both AppConfigOffset words were written before either pass. While [offset] High above reads 0x00000000, b finishes the layout if it succeeds: it writes High and erases the Low pointer, then rewrites Low, and ends with both pointers valid. u alone would leave only High valid."));
+        Serial.println(F("[pb] Both AppConfigOffset words were written before either pass. While both [offset] lines above read 0x00000000, b finishes the layout if it succeeds: it writes High and erases the Low pointer, then rewrites Low, and ends with both pointers valid. u alone would leave only High valid."));
         printOffsetAdvice();
     } else {
         Serial.println(F("[pb] The Low pass did not complete. Unless a pointer above reads valid, the controller has no region to load and comes up in PTCH at its next restart; l then pb recovers from there."));

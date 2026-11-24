@@ -54,7 +54,8 @@
 //     a typical 1-second Type-C Error Recovery delay before the restart and
 //     does not say what COMMAND and MODE read during it.
 //   - Any other code: COMMAND reads "!CMD" (Rejected).
-//   - MODE and BOOT_FLAGS register contents, with read failures on demand.
+//   - MODE and BOOT_FLAGS register contents, with read failures on demand,
+//     and an optional script of MODE contents for successive reads.
 //   - A fake clock: delayMs() advances it, and every executeCommand() advances
 //     it by msPerCommand. It wraps like millis(), and the reboot window is
 //     measured by unsigned subtraction, so a test can start it near the wrap.
@@ -167,6 +168,11 @@ public:
 
     bool modeReadFails = false;
     bool bootFlagsReadFails = false;
+
+    // MODE contents returned, in order, by the next successful MODE reads,
+    // before the reads fall back to `mode`. Lets a test script a controller
+    // that answers, for example, PTCH and then APP without a failed read.
+    std::vector<std::string> modeReadScript;
     size_t modeReads = 0;
     size_t bootFlagsReads = 0;
 
@@ -297,6 +303,13 @@ public:
     {
         ++modeReads;
         if (modeReadFails || stillRebooting()) return false;
+        if (!modeReadScript.empty()) {
+            uint8_t scripted[kModeSize];
+            memcpy(scripted, modeReadScript.front().c_str(), kModeSize);
+            modeReadScript.erase(modeReadScript.begin());
+            out = TPS25751Mode(scripted);
+            return true;
+        }
         out = TPS25751Mode(mode);
         return true;
     }

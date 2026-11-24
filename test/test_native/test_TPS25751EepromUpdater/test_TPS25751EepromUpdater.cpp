@@ -4566,8 +4566,9 @@ void test_cold_reset_requires_an_observed_restart()
         TEST_ASSERT_EQUAL_size_t(2, fake.modeReads);
         ASSERT_STEP(EepromUpdateStep::Done, u.lastStep());
     }
-    // So is an I2CError on GAID with every MODE read succeeding: the sequence
-    // stage 3 saw, when the controller was back before the first read.
+    // So is an I2CError on GAID with every MODE read succeeding. Stage 3 saw
+    // the I2CError and a failed first MODE read as well; here the reboot is
+    // over before the first read, so the I2CError alone is the evidence.
     {
         FakeCommandExecutor fake;
         fake.rebootDurationMs = 0;
@@ -4577,6 +4578,18 @@ void test_cold_reset_requires_an_observed_restart()
         TPS25751EepromUpdater u(fake);
         ASSERT_STATUS(EepromUpdateStatus::Success, u.coldReset());
         TEST_ASSERT_EQUAL_size_t(1, fake.modeReads);
+    }
+    // A MODE read that succeeds and is not APP is not evidence: the call does
+    // not read MODE before GAID, so it cannot know the controller was in APP
+    // then. PTCH twice and then APP, with no failed read, is ResetNotObserved.
+    {
+        FakeCommandExecutor fake;
+        fake.rebootDurationMs = 0;
+        fake.modeReadScript = {"PTCH", "PTCH"};
+        TPS25751EepromUpdater u(fake);
+        ASSERT_STATUS(EepromUpdateStatus::ResetNotObserved, u.coldReset());
+        TEST_ASSERT_EQUAL_size_t(3, fake.modeReads);
+        TEST_ASSERT_EQUAL_UINT32(200, fake.nowMs());
     }
     // A MODE that reads PTCH without ever failing is neither: the call waits
     // for APP and times out.

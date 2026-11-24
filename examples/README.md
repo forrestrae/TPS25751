@@ -41,7 +41,7 @@ the line `yes` sent after its `[confirm]` prompt.
 |---|---|---|
 | `r` | Report: MODE, VERSION, BOOT_FLAGS, both region pointers, both AppConfigOffset words, the region an update would target, `FLvy` for each region, and a dump of 0x0000 to 0x7C00. In PTCH it says to recover with `l`, then `pb` | No |
 | `x` | `coldReset()`: `GAID`, then waits for APP; the port disconnects. Reports `ResetNotObserved` when MODE reads APP without a failed I2C transaction first, and then asks for a check of VERSION and BOOT_FLAGS | No |
-| `l` | Only in PTCH: loads the embedded image into the controller's RAM with `TPS25751PatchLoader` (Patch Burst Mode) | No |
+| `l` | Only in PTCH: loads the embedded image into the controller's RAM with `TPS25751PatchLoader` (Patch Burst Mode), then prints host I2C diagnostics and recovers communication if MODE cannot be read | No |
 | `p`, `p2` | Pointer tests of hardware stage 2: erase and restore the High pointer; show whether `FLwd` writes more than the bytes it is given | Yes |
 | `u`, `b` | `updateInactiveRegion()` and `updateBothRegions()` with the embedded image. Their plans print both AppConfigOffset words; the library refuses, writing nothing, with `AppConfigOffsetNotZero` when the target's word is not 0 and with `NoBootableRegion` when the kept region's word is not 0 (the same holds for `c1` to `c4`) | Yes |
 | `c1` to `c4` | An update cut after step 1, 2, 3, or 4 of SLVAFL1 Figure 2-3 (hardware stage 4) | Yes |
@@ -50,11 +50,16 @@ the line `yes` sent after its `[confirm]` prompt.
 | `zero` | Both region pointers to 0, Low then High, each with a read-back; the starting state of hardware stage 5 | Yes |
 
 To recover a board whose EEPROM does not boot, so that the controller sits in PTCH, send
-`l`, then `pb`, then `x`. In hardware stage 5 on one board, `l` reported `I2cError` after
-about 1.4 s although the patch loaded, and every later I2C transaction from the Teensy failed
-until the Teensy was restarted; MODE then read APP with Patch Config Source I2C Loaded and
-`pb` worked. The cause of the stuck host I2C is not established. After an `I2cError` from
-`l`, restart the Teensy, not the controller, and check with `r` before `pb`.
+`l`, then `pb`, then `x`. The loader now waits 20 ms after `PBMc` completes before it
+reads DATA, then polls MODE for APP, as TI's documents describe (SLVAFV8A pages 11 and 18;
+TRM Figure 5-1). Hardware stage 5, on one board, ran the old sequence, which read DATA at
+once: `l` reported `I2cError` although the patch loaded, and every later read from the
+Teensy failed with error 2 (address NACK) until the Teensy was restarted. The new sequence
+has not run on hardware, and the cause of those failed reads is not established. `l` now
+prints the Teensy's LPI2C1 registers and the SDA and SCL levels right after the load; if MODE
+cannot be read, it retries every 10 ms for 5 s, then calls `Wire.begin()` and tries again,
+and says which step restored communication. Restart the Teensy, not the controller, only
+if none did.
 
 `zero` writes both region pointers to 0, Low then High, each with a read-back, and leaves
 the bundles and the AppConfigOffset words alone. It is how hardware stage 5 reaches an

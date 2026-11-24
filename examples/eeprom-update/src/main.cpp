@@ -35,15 +35,22 @@
 //        Burst Mode image, SLVAFV8A), then MODE, VERSION, and BOOT_FLAGS. The
 //        controller runs the image from RAM; the EEPROM is not written. Waits
 //        for the line "yes" first. Refused in any other mode.
-//        Seen in hardware stage 5 on one board (2026-11-23): loadPatchBundle()
-//        returned I2cError after about 1.4 s although the patch loaded. The
-//        DATA read that executeCommand() makes right after PBMc completes
-//        returned 28 of 65 bytes, and the loader returned before its own DATA
-//        and MODE checks. Afterwards every I2C transaction from the Teensy
-//        failed with an address NACK until the Teensy was restarted; then MODE
-//        read APP with Patch Config Source "I2C Loaded", and pb worked. The
-//        cause of the stuck host I2C is not established. After an I2cError
-//        from l, restart the Teensy (not the controller) and send r.
+//        The loader now follows the documented sequence: 20 ms after PBMc
+//        completes, then DATA, then MODE polled until APP (SLVAFV8A pages 11
+//        and 18; TRM Figure 5-1). Hardware stage 5 (2026-11-23, one board) ran
+//        the old sequence, which read DATA as soon as COMMAND cleared: that
+//        read returned 28 of 65 bytes, the load reported I2cError although the
+//        patch had loaded, and every later read from the Teensy failed with
+//        error 2 (address NACK) until the Teensy was restarted. The new
+//        sequence has not run on hardware, and the cause of the unacknowledged
+//        reads is not established.
+//        Diagnostics, so that a repeat shows which side the fault is on: right
+//        after the load, l prints the Teensy's LPI2C1 registers (MSR, MCR,
+//        MFSR, MCFGR1) and the SDA and SCL levels. If MODE cannot be read, it
+//        retries every 10 ms for 5 s and reports each error code, prints the
+//        registers again, calls Wire.begin(), and tries once more, then says
+//        which step restored communication. Restart the Teensy only if none
+//        did.
 //
 // COMMANDS THAT WRITE THE EEPROM
 //   p    Pointer test: writes the High pointer to 0 and back to 0x4400, and
@@ -101,7 +108,7 @@
 //   both pointers 0 (MODE PTCH, VERSION 0xF8091100, BOOT_FLAGS F8 00 60 02 C1,
 //   both regions Attempted and Invalid, I2C EEPROM Present 1). Send l, then
 //   pb, then x: the controller restarts from the EEPROM pb wrote. See the
-//   note under l on restarting the Teensy after l. Stage 5 reaches an EEPROM with no valid
+//   note under l on what stage 5 saw and on its diagnostics. Stage 5 reaches an EEPROM with no valid
 //   pointer with zero instead of a teardown and minipro; pb then runs at once,
 //   before any reset. r at start-up and on request says so
 //   when MODE reads PTCH. SLVAFL1 (Recovering From EEPROM Failure, page 13)
@@ -1692,6 +1699,161 @@ static void cmdColdReset()
 // with the PBM tasks, then correct the EEPROM with the flash tasks.
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// Host I2C diagnostics for l. Wire is LPI2C1 on pins 18 (SDA) and 19 (SCL) in
+// the Teensy 4 core (WireIMXRT.cpp). Only status and configuration registers
+// are read; MRDR is never read, because reading it consumes receive data.
+// ---------------------------------------------------------------------------
+
+struct HostI2cState {
+    bool available = false;
+    uint32_t msr = 0;
+    uint32_t mcr = 0;
+    uint32_t mfsr = 0;
+    uint32_t mcfgr1 = 0;
+    int sda = -1;
+    int scl = -1;
+};
+
+static HostI2cState captureHostI2c()
+{
+    HostI2cState st;
+#if defined(__IMXRT1062__)
+    st.available = true;
+    st.msr = IMXRT_LPI2C1.MSR;
+    st.mcr = IMXRT_LPI2C1.MCR;
+    st.mfsr = IMXRT_LPI2C1.MFSR;
+    st.mcfgr1 = IMXRT_LPI2C1.MCFGR1;
+    // The Wire driver muxes both pins with SION set (the 0x10 in its pin
+    // table), so the GPIO input path, which digitalRead() uses, sees the pads.
+    st.sda = digitalRead(18);
+    st.scl = digitalRead(19);
+#endif
+    return st;
+}
+
+static void printHostI2c(const HostI2cState& st, const __FlashStringHelper* when)
+{
+    Serial.print(F("[l] Host I2C "));
+    Serial.print(when);
+    if (!st.available) {
+        Serial.println(F(": not available on this board"));
+        return;
+    }
+    Serial.print(F(": LPI2C1 MSR="));
+    printHex32(st.msr);
+    Serial.print(F(" MCR="));
+    printHex32(st.mcr);
+    Serial.print(F(" MFSR="));
+    printHex32(st.mfsr);
+    Serial.print(F(" MCFGR1="));
+    printHex32(st.mcfgr1);
+    Serial.print(F(" SDA="));
+    Serial.print(st.sda);
+    Serial.print(F(" SCL="));
+    Serial.println(st.scl);
+}
+
+/// One MODE read made directly on Wire, so that the error code is visible.
+/// Returns 0 when it succeeded; otherwise the endTransmission() code (1 to 4),
+/// or 100 plus the bytes received for a short read.
+static int probeMode(char modeOut[5])
+{
+    const uint8_t addr = TPS25751_I2CT_ADDRESS_IDX[0];
+    Wire.beginTransmission(addr);
+    Wire.write(static_cast<uint8_t>(0x03));
+    const uint8_t code = Wire.endTransmission(false);
+    if (code != 0) {
+        return code;
+    }
+    const size_t got = Wire.requestFrom(addr, static_cast<uint8_t>(5));
+    if (got != 5) {
+        while (Wire.available() > 0) {
+            Wire.read();
+        }
+        return 100 + static_cast<int>(got);
+    }
+    Wire.read();  // the length byte
+    for (int i = 0; i < 4; ++i) {
+        modeOut[i] = static_cast<char>(Wire.read());
+    }
+    modeOut[4] = '\0';
+    return 0;
+}
+
+static void printProbeCode(int code)
+{
+    if (code >= 100) {
+        Serial.print(F("short read, "));
+        Serial.print(code - 100);
+        Serial.print(F(" of 5 bytes"));
+    } else {
+        Serial.print(F("endTransmission() = "));
+        Serial.print(code);
+        if (code == 2) {
+            Serial.print(F(" (address NACK)"));
+        } else if (code == 4) {
+            Serial.print(F(" (other error)"));
+        }
+    }
+}
+
+/// After a MODE read that failed: spaced retries for 5 s, then Wire.begin()
+/// and one more try. Prints what happened and returns true when a read
+/// succeeded.
+static bool recoverHostI2c(int firstCode)
+{
+    const uint32_t start = millis();
+    Serial.print(F("[l] MODE read failed: "));
+    printProbeCode(firstCode);
+    Serial.println();
+
+    int lastCode = firstCode;
+    char mode[5] = {};
+    while (millis() - start < 5000) {
+        delay(10);
+        const int code = probeMode(mode);
+        if (code == 0) {
+            Serial.print(F("[l] MODE read succeeded "));
+            Serial.print(millis() - start);
+            Serial.print(F(" ms after the first failure: '"));
+            Serial.print(mode);
+            Serial.println(F("'"));
+            Serial.println(F("[l] Communication restored by: spaced retries"));
+            return true;
+        }
+        if (code != lastCode) {
+            Serial.print(F("[l] At "));
+            Serial.print(millis() - start);
+            Serial.print(F(" ms the error changed to "));
+            printProbeCode(code);
+            Serial.println();
+            lastCode = code;
+        }
+    }
+    Serial.print(F("[l] No MODE read succeeded in 5000 ms; last error "));
+    printProbeCode(lastCode);
+    Serial.println();
+    printHostI2c(captureHostI2c(), F("after 5 s of retries"));
+
+    // Wire.begin() re-initializes LPI2C1 and sets its default 100 kHz rate.
+    // This example never calls setClock(), so the bus speed does not change.
+    Wire.begin();
+    const int code = probeMode(mode);
+    Serial.print(F("[l] After Wire.begin(): "));
+    if (code == 0) {
+        Serial.print(F("MODE reads '"));
+        Serial.print(mode);
+        Serial.println(F("'"));
+        Serial.println(F("[l] Communication restored by: Wire.begin()"));
+        return true;
+    }
+    printProbeCode(code);
+    Serial.println();
+    Serial.println(F("[l] Communication restored by: nothing. Restart the Teensy (not the controller), then send r."));
+    return false;
+}
+
 static void cmdLoadPatch()
 {
     const EepromUpdateStatus image = imageStatus();
@@ -1726,6 +1888,8 @@ static void cmdLoadPatch()
 
     const uint32_t started = millis();
     const PatchLoadStatus s = loader.loadPatchBundle(IMAGE, IMAGE_SIZE);
+    // Captured before any other Wire call.
+    const HostI2cState afterLoad = captureHostI2c();
     const uint32_t elapsed = millis() - started;
 
     Serial.print(F("[l] Result: "));
@@ -1733,18 +1897,23 @@ static void cmdLoadPatch()
     Serial.print(F("[l] Elapsed: "));
     Serial.print(elapsed);
     Serial.println(F(" ms"));
-    printMode();
-    printVersion();
-    printBootFlags();
+    printHostI2c(afterLoad, F("right after loadPatchBundle()"));
+
+    char probed[5] = {};
+    const int code = probeMode(probed);
+    const bool reachable = (code == 0) || recoverHostI2c(code);
+    if (reachable) {
+        printMode();
+        printVersion();
+        printBootFlags();
+    }
     if (s == PatchLoadStatus::Success) {
         Serial.println(F("[l] The controller runs the image from RAM. The EEPROM is unchanged: send pb to program it when no region pointer is valid, or r to inspect it first."));
-    } else {
-        Serial.println(F("[l] loadPatchBundle() did not report Success. Nothing was written to the EEPROM."));
-        if (s == PatchLoadStatus::I2cError) {
-            Serial.println(F("[l] In hardware stage 5 this board reported I2cError although the patch loaded, and the Teensy's I2C then failed with an address NACK until the Teensy was restarted; the cause is not established. Restart the Teensy (not the controller), then send r: MODE APP with Patch Config Source I2C Loaded means the load took."));
-        } else {
-            Serial.println(F("[l] MODE above shows where the controller stands."));
-        }
+        return;
+    }
+    Serial.println(F("[l] loadPatchBundle() did not report Success. Nothing was written to the EEPROM."));
+    if (reachable) {
+        Serial.println(F("[l] MODE and BOOT_FLAGS above show where the controller stands: MODE APP with Patch Config Source I2C Loaded means the patch loaded although the call failed."));
     }
 }
 

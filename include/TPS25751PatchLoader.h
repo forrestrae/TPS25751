@@ -58,9 +58,14 @@ constexpr uint32_t PATCH_APPLY_DELAY_MS = 20;
 /// the INT_CLEAR1 write of step 11 in IRQ mode and the PBMc COMMAND write
 /// otherwise. TRM SLVUCR8B Figure 5-1 (page 88) has one box, "Delay at least
 /// 500us", between "Entire Patch Bundle has been written? Yes" and "Write
-/// CMD1='PBMc'", and SLVAFV8A step 10 (page 10) adds 500 us after its final
-/// burst. Neither puts a delay between the chunks of one burst. Hardware stage
-/// 5 of the EEPROM-update plan loaded an image without this delay.
+/// CMD1='PBMc'", and no delay between burst transactions. SLVAFV8A step 10
+/// (page 10) and its code (pages 17 and 18) send the image as separate I2C
+/// transactions of up to 4095 bytes with 500 us after each one, the last
+/// included. The loader's 32-byte chunks are the same kind of separate
+/// transaction to 0x30, and it sends them back to back, as it did in hardware
+/// stage 5 of the EEPROM-update plan, which loaded an image with no delay at
+/// all. Whether to space the chunks is an open decision; see
+/// docs/engineering/CONSTRAINTS.md, Patch Burst Mode.
 constexpr uint32_t PBM_PRE_COMMIT_DELAY_US = 500;
 
 /// Interval (ms) between DATA read attempts and between MODE reads after PBMc.

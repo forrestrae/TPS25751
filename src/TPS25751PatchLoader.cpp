@@ -249,9 +249,12 @@ PatchLoadStatus TPS25751PatchLoader::loadPatchBundle(const uint8_t* image, size_
 
     // At least 500 us between the end of the burst and the next transaction,
     // directly after the burst so that both modes get it: TRM Figure 5-1 (page
-    // 88) has "Delay at least 500us" before writing PBMc, and SLVAFV8A step 10
-    // (page 10) adds 500 us after its final burst. Neither delays between the
-    // chunks of one burst. Hardware stage 5 loaded an image without this delay.
+    // 88) has "Delay at least 500us" before writing PBMc and no delay between
+    // burst transactions. SLVAFV8A step 10 (page 10) and its code (pages 17
+    // and 18) wait 500 us after each of its separate burst transactions. The
+    // 32-byte chunks are separate transactions too, sent back to back, as in
+    // hardware stage 5, which loaded an image with no delay at all. Whether to
+    // space them is an open decision (CONSTRAINTS.md, Patch Burst Mode).
     delayMicroseconds(PBM_PRE_COMMIT_DELAY_US);
     TPS_DEBUG_INFO(DEBUG_CAT_TASK, "PBM: step 10: burst complete");
 

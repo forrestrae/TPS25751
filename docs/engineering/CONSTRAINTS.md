@@ -393,14 +393,16 @@ The current sequence has not run on hardware.
 #### 500 µs before PBMc
 
 TRM Figure 5-1 (page 88) has one delay box, "Delay at least 500us", between "Entire Patch
-Bundle has been written? Yes" and the `PBMc` write; it has none between bursts. SLVAFV8A
-step 10 (page 10) puts 500 µs between its bursts and before `PBMc` as a description of its
-example, which sends three bursts of up to 4095 bytes. The loader waits
-`PBM_PRE_COMMIT_DELAY_US` (500 µs) once, directly after `burstWrite()` returns, so that the
-next transaction is at least 500 µs after the last chunk: the INT_CLEAR1 write of step 11 in
-IRQ mode, the `PBMc` COMMAND write otherwise. `burstWrite()` sends its 32-byte chunks back
-to back; the loader leaves `interChunkDelayUs` at 0. Hardware stage 5 loaded an image with
-no delay at all.
+Bundle has been written? Yes" and the `PBMc` write; it has none between burst
+transactions. SLVAFV8A step 10 (page 10) and its code (pages 17 and 18) send the image as
+three separate I2C transactions of up to 4095 bytes, with 500 µs after each one, the last
+included. The loader waits `PBM_PRE_COMMIT_DELAY_US` (500 µs) once, directly after
+`burstWrite()` returns, so that the next transaction is at least 500 µs after the last
+chunk: the INT_CLEAR1 write of step 11 in IRQ mode, the `PBMc` COMMAND write otherwise.
+Each 32-byte chunk of `burstWrite()` is a separate transaction to 0x30, the same kind of
+transaction as the app note's bursts, and the loader sends them back to back
+(`interChunkDelayUs` stays 0), as it did in hardware stage 5, which loaded an image with no
+delay at all. Whether to add the spacing is an open decision.
 
 #### Where the loader departs from the documented flow
 
@@ -415,6 +417,16 @@ observed to cause a failure.
 - DATA before `PBMs`. SLVAFV8A step 5 (page 8) reads DATA back 500 µs after writing it and
   rewrites it until it matches; Figure 5-1 asks "DATA1 write completed successfully?". The
   loader writes DATA once and does not read it back.
+- Transaction spacing. SLVAFV8A sends its 11392-byte example image as three burst
+  transactions with 500 µs after each (step 10, page 10; code, pages 17 and 18). The
+  loader sends the test board's 14336-byte image as 448 transactions of 32 bytes, back to
+  back. TRM Figure 5-1 shows no spacing between burst transactions. Whether to add it is
+  open (see above).
+- IRQ mode. With an IRQ pin, the loader enables CMD1 Complete in INT_MASK1 and clears
+  INT_CLEAR1 (step 3), and clears INT_CLEAR1 again after the burst (step 11), but it reads
+  the I2Ct_IRQ pin only in step 1. After `PBMs` and `PBMc` it polls COMMAND every 5 ms, as
+  in polling mode. SLVAFV8A waits for I2Ct_IRQ low before it reads CMD1 (steps 7 and 13,
+  pages 9 and 11; code, pages 17 and 18).
 - COMMAND poll interval. Figure 5-1 polls CMD1 with a 10 ms delay. `waitForCommandClear()`,
   used for `PBMs` and `PBMc`, polls every 5 ms.
 - PBMe. Figure 5-1 issues `PBMe` after a burst that is not acknowledged and after `PBMc`
@@ -1553,6 +1565,7 @@ void foo() {
 | 1.21 | 2026-11-23 | Claude Code | PBM: 20 ms between `PBMc` completing and the DATA read, `issueCommand()`, the stage 5 evidence and what it does not establish, the 500 µs burst spacing the figures show (Patch Burst Mode section) |
 | 1.22 | 2026-11-23 | Claude Code | The MODE read after a failed `GAID` poll failed with error 4, not a NACK (Cold reset section) |
 | 1.23 | 2026-11-23 | Claude Code | PBM: TRM Figure 5-1 has one 500 µs delay, before `PBMc`, which the loader now gives; the points where the loader departs from the documented flow; the `PBMs` timeout byte. Error 4 lists every source in the Teensy 4 driver (Cold reset section) |
+| 1.24 | 2026-11-23 | Claude Code | PBM: the app note spaces its separate burst transactions by 500 µs and the loader does not, an open decision; the loader's IRQ mode polls COMMAND instead of waiting for I2Ct_IRQ |
 
 ---
 

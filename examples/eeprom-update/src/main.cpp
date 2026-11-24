@@ -69,15 +69,23 @@
 //        words to 0 first, then the image and the pointer of the Low region,
 //        then those of the High region, the layout of the full-flash binary.
 //        Only when MODE reads APP and no region pointer is valid, which is the
-//        state after l on a blank or corrupt EEPROM. Its plan
+//        state after l on a blank or corrupt EEPROM, or after zero. Its plan
 //        adds both AppConfigOffset words. When it refuses because a pointer is
 //        valid, and after a stop in its High pass, it prints both words: u and
 //        b do not write them, so do not run u or b while the word of the
 //        region they would write is not 0.
+//   zero Writes both region pointers to 0, Low then High, each with a
+//        read-back, and prints the 16-byte rows at both pointers afterwards.
+//        Leaves the bundles and the AppConfigOffset words as they are. After
+//        it the EEPROM has no valid pointer: the starting state of hardware
+//        stage 5 without a teardown. Run pb next, before any reset. Refused
+//        while src/patch_bundle.h is the placeholder, so that pb can follow.
 //
 // RECOVERY OF AN EEPROM THAT DOES NOT BOOT (hardware stage 5)
 //   The controller comes up in PTCH. Send l, then pb, then x: the controller
-//   restarts from the EEPROM pb wrote. r at start-up and on request says so
+//   restarts from the EEPROM pb wrote. Stage 5 reaches an EEPROM with no valid
+//   pointer with zero instead of a teardown and minipro; pb then runs at once,
+//   before any reset. r at start-up and on request says so
 //   when MODE reads PTCH. SLVAFL1 (Recovering From EEPROM Failure, page 13)
 //   notes that this boot flow needs a host that can run and correct the
 //   EEPROM while the controller sits in PTCH; if the system needs the sink
@@ -105,7 +113,7 @@
 //
 // OUTPUT
 //   Every line starts with a tag in brackets. A command ends with "[done] <cmd>"
-//   followed by "[ready] ...". After p, p2, u, b, v, x, pb, and the c commands a
+//   followed by "[ready] ...". After p, p2, u, b, v, x, pb, zero, and the c commands a
 //   "[timing]" table gives, per 4CC task, the calls, total time, average, and
 //   maximum, measured around each executor call, then the calls the executor
 //   did not complete (not_success), the completed calls that returned a
@@ -1781,12 +1789,88 @@ static void cmdProgramBlank()
 }
 
 // ---------------------------------------------------------------------------
+// zero: write both region pointers to 0 (the starting state of hardware stage
+// 5 without a teardown). Built from writeRegionPointer(); no library call
+// erases both pointers.
+// ---------------------------------------------------------------------------
+
+static void printPointerRows()
+{
+    for (EepromRegion r : {EepromRegion::Low, EepromRegion::High}) {
+        const uint32_t addr = TPS25751EepromUpdater::regionPointerAddress(r);
+        uint8_t row[TPS25751EepromUpdater::kFlashReadBytes];
+        const EepromUpdateStatus s = updater.readFlash(addr, row);
+        if (s == EepromUpdateStatus::Success) {
+            printRow(addr, row);
+        } else {
+            Serial.print(F("[zero] Read of the row at "));
+            printHex32(addr);
+            Serial.print(F(" failed: "));
+            Serial.println(TPS25751EepromUpdater::toString(s));
+        }
+    }
+}
+
+static void cmdZeroPointers()
+{
+    pointerTestLeftHighErased = false;  // another writing command has started
+    // writeAllowed() also refuses the placeholder image, so that pb, the
+    // intended next step, can run.
+    if (!writeAllowed()) {
+        return;
+    }
+
+    Serial.println(F("[plan] Action: zero: writes the Low pointer and then the High pointer to 0, each with a read-back. The bundles and the AppConfigOffset words are not written."));
+    Serial.print(F("[plan] Image for pb afterwards: "));
+    Serial.print(IMAGE_SIZE);
+    Serial.print(F(" bytes, version "));
+    printHex32(TPS25751EepromUpdater::imageVersion(IMAGE, IMAGE_SIZE));
+    Serial.println();
+    Serial.print(F("[plan] Current VERSION: "));
+    uint32_t version = 0;
+    if (readVersion(version)) {
+        printHex32(version);
+        Serial.println();
+    } else {
+        Serial.println(F("read failed"));
+    }
+    printPointers();
+    printAppConfigOffsets();
+    Serial.println(F("[plan] After this the EEPROM has no valid region pointer."));
+    Serial.println(F("[plan] The controller keeps running the firmware it already loaded until the next reset or power cycle."));
+    Serial.println(F("[plan] After a reset it is expected to start in PTCH (SLVAFL1 page 2; not yet observed on this board) and to stay there until a host loads a patch (l here, or examples/load-patch-bundle) or the EEPROM is restored."));
+    Serial.println(F("[plan] pb can run now, before any reset, and is the intended next step. The SOIC8 clip (write-flash.zsh) is the fallback."));
+    Serial.println(F("[plan] This command writes the EEPROM."));
+    if (!confirm()) {
+        return;
+    }
+
+    exec.reset();
+    const EepromUpdateStatus low = updater.writeRegionPointer(EepromRegion::Low, 0);
+    Serial.print(F("[zero] writeRegionPointer(Low, 0x00000000): "));
+    Serial.println(TPS25751EepromUpdater::toString(low));
+    if (low != EepromUpdateStatus::Success) {
+        Serial.println(F("[zero] The Low pointer write did not report Success; the High pointer was not written."));
+    } else {
+        const EepromUpdateStatus high = updater.writeRegionPointer(EepromRegion::High, 0);
+        Serial.print(F("[zero] writeRegionPointer(High, 0x00000000): "));
+        Serial.println(TPS25751EepromUpdater::toString(high));
+    }
+    Serial.println(F("[zero] The 16 bytes at each pointer now read:"));
+    printPointerRows();
+    printPointers();
+    printAppConfigOffsets();
+    printTiming();
+    Serial.println(F("[zero] Unless a pointer above reads valid, send pb next, before any reset."));
+}
+
+// ---------------------------------------------------------------------------
 // Command loop
 // ---------------------------------------------------------------------------
 
 static void printReady()
 {
-    Serial.println(F("[ready] Commands: r p p2 u b x c1 c2 c3 c4 v l pb"));
+    Serial.println(F("[ready] Commands: r p p2 u b x c1 c2 c3 c4 v l pb zero"));
 }
 
 static void runCommand(const char* line)
@@ -1817,6 +1901,8 @@ static void runCommand(const char* line)
         cmdLoadPatch();
     } else if (strcmp(line, "pb") == 0) {
         cmdProgramBlank();
+    } else if (strcmp(line, "zero") == 0) {
+        cmdZeroPointers();
     } else {
         Serial.print(F("[error] Unknown command: "));
         Serial.println(line);
@@ -1843,7 +1929,7 @@ void setup()
     updater.setProgressCallback(onProgress, nullptr);
 
     Serial.println(F("[setup] TPS25751 EEPROM update example"));
-    Serial.println(F("[setup] r reads. x restarts the controller. l loads the image into the controller's RAM in PTCH mode. p p2 u b c1 c2 c3 c4 v pb write the EEPROM. l and each command that writes wait for a typed yes."));
+    Serial.println(F("[setup] r reads. x restarts the controller. l loads the image into the controller's RAM in PTCH mode. p p2 u b c1 c2 c3 c4 v pb zero write the EEPROM. l and each command that writes wait for a typed yes."));
     printImage();
     printStatus();
     printReady();

@@ -769,17 +769,28 @@ EepromUpdateStatus TPS25751EepromUpdater::coldReset(uint32_t waitForAppMs)
     // an APP read proves nothing by itself: a GAID the controller accepted
     // without restarting, or rejected in a way the executor reports as
     // success, would look like a completed restart, and the caller would trust
-    // an EEPROM boot that never happened. Success therefore needs evidence
-    // that the controller went away: an I2CError on the GAID task, or a failed
-    // MODE read below.
+    // an EEPROM boot that never happened. The TRM describes no such GAID; the
+    // rule is a precaution. Success therefore needs evidence that the
+    // controller went away: an I2CError on the GAID task, or a failed MODE
+    // read below.
     //
-    // Evidence for the rule: hardware stages 3 and 4, one board, firmware
-    // F8091166, saw I2CError on the GAID poll 1276 to 1277 ms after GAID and
-    // APP 1938 to 1939 ms after it, every time.
-    // Cost: a restart that fits between two MODE reads, or a firmware that
-    // finishes the GAID handshake before resetting and is back before the
-    // first read, is reported as ResetNotObserved although it happened. If
-    // that is ever seen, revisit GAID_SETTLE_MS and GAID_MODE_POLL_MS or add a
+    // Not evidence, deliberately: COMMAND returning to 0. TRM Table 4-3 (page
+    // 62) says the registers return to 0 on reboot, which marks GAID complete,
+    // and that the controller can momentarily NAK while rebooting. A COMMAND
+    // of 0 also follows any task that finished without a restart, so it cannot
+    // separate the two cases. Nor is a MODE read that succeeds and is not APP:
+    // this call does not read MODE before GAID, so it does not know the
+    // controller was in APP then.
+    //
+    // Evidence for the rule: hardware stages 3 and 4, one board, with the
+    // F8091164 and the F8091166 bundle running (whether they differ in
+    // firmware is not recorded), saw I2CError on the GAID poll 1276 to 1277 ms
+    // after GAID and APP 1938 to 1939 ms after it, every time.
+    // Cost, two false-negative paths reported as ResetNotObserved although the
+    // restart happened: the documented completion (executor Success on GAID,
+    // no NAK caught, every MODE read succeeds), and timing (a restart that
+    // fits between two MODE reads or is over before the first). If either is
+    // ever seen, revisit GAID_SETTLE_MS and GAID_MODE_POLL_MS or add a
     // timing-independent witness. Decision of 2026-11-23, recorded in the
     // coldReset section of docs/plans/feature/eeprom-update.md.
     bool sawRestart = (result.status == TPS25751TaskStatus::I2CError);

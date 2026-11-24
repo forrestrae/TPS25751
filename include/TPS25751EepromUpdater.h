@@ -894,6 +894,15 @@ public:
      * from three start states and finds no valid pointer over a region that
      * does not hold the image. No TI document describes either behaviour.
      *
+     * One FLad is outside that sweep's reach: the first of the call, for the
+     * Low word. Without effect, its four zero bytes go wherever the write
+     * address stood before the call: straight after the example's zero
+     * command that is 0x0404, the four unused bytes after the High pointer
+     * word; after a PBM load it is not documented. The word's read-back then
+     * stops the call unless the word already read 0. The fake starts with no
+     * write address and rejects that FLwd with 0x03, so no sweep shows where
+     * the bytes would land.
+     *
      * The progress callback runs as for updateRegion(), once per pass;
      * lastTarget() names the region in progress. The word writes make no
      * call.
@@ -981,20 +990,37 @@ public:
      * alone cannot tell a completed restart from a GAID the controller
      * accepted without restarting, or rejected in a way the executor reports
      * as success. Without the rule the caller would trust an EEPROM boot that
-     * never happened.
+     * never happened. The TRM describes no GAID that clears COMMAND without a
+     * restart; the rule is a precaution, not a response to a documented
+     * behaviour.
      *
-     * Evidence. Hardware stages 3 and 4 of the plan, on one board with
-     * firmware F8091166, saw the same sequence on every reset: the executor's
-     * COMMAND poll returned I2CError 1276 to 1277 ms after GAID, and MODE read
-     * APP 1938 to 1939 ms after it. That is one board and one firmware.
+     * What the TRM says (Table 4-3, page 62): GAID never completes because the
+     * processor restarts, but all CMDx and DATAx registers return to 0 on
+     * reboot, "which will mark this Task as complete", and the controller can
+     * momentarily NAK I2C transactions while rebooting. The rule deliberately
+     * does not accept that COMMAND clear as evidence: COMMAND reading 0 is
+     * also what a task that ran and finished without a restart looks like, so
+     * it cannot tell the two cases apart.
      *
-     * Cost. A restart that completes between two MODE reads without failing
-     * the GAID poll, or a firmware that completes the GAID handshake before it
-     * resets and is back before the first MODE read, is reported as
-     * ResetNotObserved although it happened. The caller then confirms with
-     * VERSION (0x0F) and BOOT_FLAGS (0x2D). If that false negative is ever
-     * seen, revisit GAID_SETTLE_MS and GAID_MODE_POLL_MS, or add a restart
-     * witness that does not depend on timing.
+     * Evidence. Hardware stages 3 and 4 of the plan, on one board, saw the
+     * same sequence on every reset, with the F8091164 and the F8091166 bundle
+     * running: the executor's COMMAND poll returned I2CError 1276 to 1277 ms
+     * after GAID, and MODE read APP 1938 to 1939 ms after it. Whether the two
+     * bundles differ in firmware is not recorded.
+     *
+     * Cost: two false-negative paths, each reported as ResetNotObserved
+     * although the restart happened. First, the documented completion itself:
+     * the executor sees COMMAND return to 0 (Success on GAID) without catching
+     * a NAK, and every MODE read succeeds. Second, timing: a restart that fits
+     * between two MODE reads, or one that is over before the first read after
+     * GAID_SETTLE_MS. The caller then confirms with VERSION (0x0F) and
+     * BOOT_FLAGS (0x2D). If either path is ever seen, revisit GAID_SETTLE_MS
+     * and GAID_MODE_POLL_MS, or add a restart witness that does not depend on
+     * timing.
+     *
+     * A MODE read that succeeds and is not APP does not count as evidence.
+     * The call does not read MODE before GAID, so it does not know that the
+     * controller was in APP when GAID was issued.
      *
      * Remaining limit. An I2C failure that kept GAID from reaching the
      * controller looks the same as a NAK during the reboot, so Success does

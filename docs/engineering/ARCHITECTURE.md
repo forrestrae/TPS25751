@@ -1306,6 +1306,20 @@ from the host failed with error 2, for a cause not established on either side of
   TwoWire fake, and `test_TPS25751PatchLoader` pins the transaction order and the 20 ms.
   The new sequence has not run on hardware.
 
+Amendment, 2026-11-24: three more steps follow TRM Figure 5-1 (page 88) and SLVAFV8A,
+by the user's decision recorded in the EEPROM-update plan.
+- Step 1 in polling mode polls INT_EVENT1 bit 81 (Ready for Patch) every 10 ms for up to
+  5 s, so the IRQ pin is no longer the only ready signal. Step 2 polls MODE every 10 ms
+  for up to 5 s until PTCH, in both modes.
+- The `PBMs` configuration is staged with the new `TPS25751::writeCommandData()`, read
+  back 500 µs later, and compared, for up to 3 attempts; `PBMs` then goes through
+  `executeCommand()` with no input. The loader now uses the core class for one more
+  primitive, an exact-length DATA write, which `issueCommand()` also uses.
+- After a burst chunk that is not acknowledged, or "!CMD" on `PBMc`, the loader issues
+  `PBMe` through `executeCommand()` and still returns `BurstFailed` or `PbmcRejected`.
+- `PatchLoadStatus::PbmsConfigMismatch` is appended after `I2cError`, so the earlier
+  values keep their numbers. These steps have not run on hardware.
+
 
 ### ADR-012: 16-Bit Bit Positions in the Register Base Class
 **Status:** Accepted

@@ -428,24 +428,30 @@ TPS26750").
 When the TPS25751 boots without an EEPROM it powers up in **PTCH** mode and waits
 for the host to push the firmware+configuration image over I2Ct.  The 17-step flow:
 
-1. (Optional) Wait for `I2Ct_IRQ` low.
-2. Read MODE — confirm PTCH.
+1. Wait for ready-for-patch, up to 5 s: `I2Ct_IRQ` low in IRQ mode, INT_EVENT1 bit 81
+   polled every 10 ms in polling mode (TRM Figure 5-1).
+2. Poll MODE every 10 ms until PTCH, up to 5 s; APP ends the load at once.
 3. (IRQ mode) Configure `INT_MASK1` / clear `INT_CLEAR1`.
-4-9. `executeCommand(PBMs, config[6])` — `config` = `bundleSize[4, LE] + 0x30 + 0x31`.
+4-5. `writeCommandData(config[6])`, wait 500 us, read DATA back, and compare; up to 3
+   attempts (SLVAFV8A step 5). `config` = `bundleSize[4, LE] + 0x30 + 0x32`.
+6-9. `executeCommand(PBMs)` with no input.
 10. `burstWrite(0x30, image, length)`: raw chunked burst (no reg number, no length byte),
-   then at least 500 us before the next transaction (TRM Figure 5-1).
+   then at least 500 us before the next transaction (TRM Figure 5-1). A chunk that is
+   not acknowledged ends the load with `BurstFailed` after `PBMe`.
 11. (IRQ mode) Clear `INT_CLEAR1`.
 12-14. `issueCommand(PBMc)`: commit the bundle and wait for COMMAND to clear, without
-   reading DATA.
+   reading DATA. "!CMD" ends the load with `PbmcRejected` after `PBMe`.
 15. `delay(20)` ms (SLVAFV8A step 15; TRM Figure 5-1).
 16. Read DATA, retried every 10 ms on a failed read for up to 5 s; `DATA[0]` must be 0.
 17. Poll MODE every 10 ms until APP, tolerating failed reads, for up to 5 s.
 
-Steps 4-9 are a single `executeCommand()` call and steps 12-14 a single `issueCommand()`
+Steps 6-9 are a single `executeCommand()` call and steps 12-14 a single `issueCommand()`
 call, which writes DATA and COMMAND and polls COMMAND but reads no DATA; step 10 uses
 `TPS25751::burstWrite()`. An earlier version read DATA as soon as `PBMc` cleared COMMAND;
 in hardware stage 5 that read returned 28 of 65 bytes and the load reported `I2cError`
-although the patch had loaded. The current sequence has not run on hardware.
+although the patch had loaded. Hardware stages 6 and 7 ran the 20 ms sequence, ten loads,
+all Success. Steps 1, 2, 4, and 5 as described here and the `PBMe` paths date from
+2026-11-24 and have not run on hardware.
 `PatchLoadStatus` provides one distinct enumerator per failure point.
 
 See ADR-011 in [ARCHITECTURE.md](docs/engineering/ARCHITECTURE.md) and the PBM

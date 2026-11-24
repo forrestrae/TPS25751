@@ -842,10 +842,9 @@ Fix design, implemented in `62330f9` to `48332f0` and reviewed (results below):
 - `loadPatchBundle()` issues `PBMc` through the new call, waits 20 ms, reads DATA with
   retries every 10 ms, then polls MODE every 10 ms until APP, tolerating failed reads,
   each with a cap of about 5 s. The documents give no upper bound; 5 s is a choice.
-- The example's `l` prints the host LPI2C1 registers (MSR, MCR, MFSR) and the SDA and
-  SCL levels right after a failed load, then retries MODE with spacing, then calls
-  `Wire.begin()` and retries, so that a repeat of the fault on hardware shows which
-  side it is on.
+- The example's `l` prints the host LPI2C1 registers (MSR, MCR, MFSR) right after a failed
+  load, then retries MODE with spacing, then calls `Wire.begin()` and retries, so that a
+  repeat of the fault on hardware shows which side it is on.
 - Decided 2026-11-23: the fix adds a Wire fake to the native test support, so that
   `TPS25751.cpp` and `TPS25751PatchLoader.cpp` compile natively and the loader gets a
   suite. The suite pins the order and timing of the transactions after `PBMc`. The
@@ -916,11 +915,11 @@ Decisions of 2026-11-24 on these points and on the other open items:
 | Spacing between burst transactions | Leave as is, back to back |
 | `coldReset()` evidence rule (a MODE read that is not APP, then APP) | Leave as is: only a failed I2C transaction counts |
 | Is the branch finished | Not yet. `scripts/integrate.py` stays unrun until the user confirms |
-| SDA and SCL readout of the `l` diagnostic; `PBMs` timeout byte; `PBMe`, DATA read-back, and ReadyForPatch; coverage of `TPS25751.cpp`; `Wire2` dump; `Wire2` restore sketch; stage 4 with a power cycle | Deferred by the user to later sessions, each to be decided there |
+| `PBMs` timeout byte; `PBMe`, DATA read-back, and ReadyForPatch; coverage of `TPS25751.cpp`; `Wire2` dump; `Wire2` restore sketch; stage 4 with a power cycle | Deferred by the user to later sessions, each to be decided there |
 
-Still unverified, and marked so in the code: the new sequence on hardware; that
-`digitalRead()` sees SDA and SCL while the pins belong to LPI2C1; which pins the
-driver's pin-low flag covers.
+Still unverified, and marked so in the code: the new sequence on hardware; which pins the
+driver's pin-low flag covers. The SDA and SCL readout was removed from the `l` diagnostic
+on 2026-11-24 (see the stage 6 result).
 
 ## Tests
 
@@ -1251,9 +1250,8 @@ Ordered from safe to destructive. Each stage states its recovery.
       words 0.
    2. `x`. Expected as in stage 5: `ResetTimeout`, MODE PTCH, VERSION 0xF8091100,
       BOOT_FLAGS `F8 00 60 02 C1`.
-   3. `l`. Expected: Success; the host I2C line prints SDA=1 SCL=1, which also checks
-      that the pins can be read; MODE APP; BOOT_FLAGS `F8 00 F0 C2 C1`. Record the
-      elapsed time and the register line.
+   3. `l`. Expected: Success; the host I2C line prints the LPI2C1 registers; MODE APP;
+      BOOT_FLAGS `F8 00 F0 C2 C1`. Record the elapsed time and the register line.
    4. Repeat steps 2 and 3 four more times. `x` returns the controller to PTCH because
       no pointer is valid, and `l` writes nothing to the EEPROM, so the repeats cost no
       EEPROM write. Five loads, because `load-patch-bundle` ran on this board with
@@ -1316,9 +1314,9 @@ Ordered from safe to destructive. Each stage states its recovery.
    In all five rounds it printed SDA=0 SCL=0 on a bus that was idle and working: MSR
    bits 24 and 25 (master busy, bus busy) were clear and the next reads succeeded. The
    pin reads therefore do not reflect the pad levels while pins 18 and 19 belong to
-   LPI2C1, so the pin read the plan marked as unverified failed its check. Open item:
-   the SDA and SCL part of that diagnostic needs to be fixed or removed. No code was
-   changed in this stage.
+   LPI2C1, so the pin read the plan marked as unverified failed its check. Open item,
+   done 2026-11-24: the SDA and SCL part of that diagnostic was removed; the LPI2C1
+   register values stay. No code was changed in stage 6 itself.
 
 Two physical points were confirmed on 2026-11-22. First, the EEPROM can be reprogrammed
 in place with a SOIC8 clip, so `write-flash.zsh` (`24LC256@SOIC8`) is a recovery path

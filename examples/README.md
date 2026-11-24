@@ -58,7 +58,7 @@ leaves out. Hardware stage 5, on one board, ran an earlier sequence, which read 
 once: `l` reported `I2cError` although the patch loaded, and every later read from the
 Teensy failed with error 2 (a NACK) until the Teensy was restarted. The current sequence
 has not run on hardware, and the cause of those failed reads is not established. `l`
-prints the Teensy's LPI2C1 registers and the SDA and SCL levels right after the load; if MODE
+prints the Teensy's LPI2C1 registers right after the load; if MODE
 cannot be read, it retries every 10 ms for 5 s, then calls `Wire.begin()` and tries again,
 and reports when a read succeeded. Restart the Teensy, not the controller, only if no read
 succeeded.

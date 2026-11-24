@@ -49,12 +49,13 @@
 //        reads is not established.
 //        Diagnostics, so that a repeat shows which side the fault is on: right
 //        after the load, l prints the Teensy's LPI2C1 registers (MSR, MCR,
-//        MFSR, MCFGR1) and the SDA and SCL levels. If MODE cannot be read, it
+//        MFSR, MCFGR1). If MODE cannot be read, it
 //        retries every 10 ms for 5 s and reports each error code, prints the
 //        registers again, calls Wire.begin(), and tries once more, and
 //        reports when a read succeeded. Restart the Teensy only if no read
-//        succeeded. Reading SDA and SCL with digitalRead() while the pins
-//        belong to LPI2C1 is not verified; an idle bus must print SDA=1 SCL=1.
+//        succeeded. The line has no SDA and SCL levels: digitalRead() on pins
+//        18 and 19 printed 0 on an idle, working bus (hardware stage 6),
+//        because the pins belong to LPI2C1.
 //
 // COMMANDS THAT WRITE THE EEPROM
 //   p    Pointer test: writes the High pointer to 0 and back to 0x4400, and
@@ -1716,8 +1717,6 @@ struct HostI2cState {
     uint32_t mcr = 0;
     uint32_t mfsr = 0;
     uint32_t mcfgr1 = 0;
-    int sda = -1;
-    int scl = -1;
 };
 
 static HostI2cState captureHostI2c()
@@ -1729,12 +1728,8 @@ static HostI2cState captureHostI2c()
     st.mcr = IMXRT_LPI2C1.MCR;
     st.mfsr = IMXRT_LPI2C1.MFSR;
     st.mcfgr1 = IMXRT_LPI2C1.MCFGR1;
-    // The Wire driver muxes both pins to LPI2C1 with SION set (the 0x10 in
-    // its pin table). Reading them through digitalRead() relies on SION
-    // routing the pads to the GPIO input path; that is not verified. An idle
-    // bus must print SDA=1 SCL=1, which the first run checks.
-    st.sda = digitalRead(18);
-    st.scl = digitalRead(19);
+    // The pin levels are not read: digitalRead() on pins 18 and 19 printed 0
+    // on an idle, working bus while the pins belong to LPI2C1.
 #endif
     return st;
 }
@@ -1755,10 +1750,7 @@ static void printHostI2c(const HostI2cState& st, const __FlashStringHelper* when
     printHex32(st.mfsr);
     Serial.print(F(" MCFGR1="));
     printHex32(st.mcfgr1);
-    Serial.print(F(" SDA="));
-    Serial.print(st.sda);
-    Serial.print(F(" SCL="));
-    Serial.println(st.scl);
+    Serial.println();
 }
 
 /// One MODE read made directly on Wire, so that the error code is visible.

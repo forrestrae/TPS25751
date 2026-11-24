@@ -233,7 +233,8 @@ levels the tests set. The poll counts, the 0xFF padding of a long read, and the 
 time MODE switches are choices of the fake, not documented behaviour.
 
 Two suites use it. `test_TPS25751Core` covers the register read and write with the
-length byte and their failures, `executeCommand()` and `issueCommand()` (the handshake,
+length byte and their failures, `writeCommandData()` (the exact-length DATA write and the
+lengths it refuses), `executeCommand()` and `issueCommand()` (the handshake,
 DATA read at the instant COMMAND clears or not at all, rejected, the timeout at its exact
 bound, a COMMAND poll across a `millis()` wrap, and an I2C failure at each transaction),
 `burstWrite()`, and the fake's own match to the driver. `test_TPS25751PatchLoader` covers
@@ -244,7 +245,16 @@ at least 500 µs between the last burst chunk and the next transaction in both m
 DATA retry and its cap, the MODE poll through failed and PTCH reads and both outcomes at
 its cap, both caps and the IRQ ready wait across a `millis()` wrap, a `PBMs` and a `PBMc`
 that each take longer than the 200 ms default timeout, every `PatchLoadStatus`, `debugPrint()`, the PBMs configuration bytes,
-and IRQ mode.
+and IRQ mode. Since 2026-11-24 it also covers the steps added from TRM Figure 5-1 and
+SLVAFV8A step 5: the INT_EVENT1 Ready for Patch poll of polling mode (10 ms interval,
+failed reads, its cap, and none in IRQ mode), the MODE poll until PTCH through BOOT and
+failed reads in both modes and its cap, both caps across a `millis()` wrap, the PBMs
+configuration read back 500 µs after its write (a dropped write rewritten, three
+mismatches, and failed writes and read-backs), and `PBMe` after a burst chunk that is not
+acknowledged and after "!CMD" on `PBMc`, with its own failures and the failures that must
+not issue it. The fake models a dropped write as a fault with `writeError` 0, matches
+faults by a minimum write length, holds INT_EVENT1 with bit 81 set, and runs a
+`beforeRead` hook so a test can change a register over time.
 
 ### Sequencer Tests: the EEPROM Updater
 
@@ -816,6 +826,14 @@ branches after a full-length read are not, and no test calls them only to count 
 `TPS25751EepromUpdater.cpp` stays at 100% (527 of 527 lines, 155 tests). Every other
 file is at 93% or more.
 
+Fifth measurement, 2026-11-24 (1348 tests), after the loader gained the Ready for Patch
+and MODE polls, the PBMs configuration read-back, and `PBMe`: 93% of lines overall (5673
+of 6078). `TPS25751PatchLoader.cpp` is at 99% (217 of 218 lines, 30 tests), still missing
+only the `default:` of `mapTaskStatus()`. `TPS25751.cpp` is at 34% (178 of 521 lines, 15
+tests in `test_TPS25751Core`); the new `writeCommandData()` is covered, and the missed
+lines are the same wrappers as in the fourth measurement. `TPS25751EepromUpdater.cpp`
+stays at 100%, and every other file is at 93% or more.
+
 ### Regression Testing
 
 Maintain a regression test suite:
@@ -864,6 +882,7 @@ Tests are successful when:
 | 1.8 | 2026-11-23 | Claude Code | The Wire fake, the core and patch-loader suites, `TPS25751.cpp` and `TPS25751PatchLoader.cpp` in the native build, and the fourth coverage measurement |
 | 1.9 | 2026-11-23 | Claude Code | The Wire fake follows the Teensy 4 driver's codes and limits, with what it does not model; the new core and loader tests; the fourth measurement rerun (1334 tests) |
 | 1.10 | 2026-11-23 | Claude Code | Loader tests of a slow `PBMs` and of the IRQ ready wait across a `millis()` wrap; the fourth measurement rerun (1336 tests) |
+| 1.11 | 2026-11-24 | Claude Code | Core test of `writeCommandData()`; loader tests of the Ready for Patch and MODE polls, the PBMs configuration read-back, and `PBMe`; the fake's additions; the fifth measurement (1348 tests) |
 
 ---
 

@@ -192,6 +192,28 @@ void test_a_controller_off_the_bus_for_20_ms_after_pbmc()
     ASSERT_LOAD(PatchLoadStatus::Success, r.load());
 }
 
+void test_500_us_after_the_burst_before_the_next_transaction()
+{
+    // TRM Figure 5-1 (page 88): "Delay at least 500us" between the last burst
+    // and PBMc; SLVAFV8A step 10 (page 10) likewise. No delay between chunks.
+    for (int irq = 0; irq < 2; ++irq) {
+        Rig r;
+        if (irq) fake_arduino::g_pinLevel[5] = LOW;
+        ASSERT_LOAD(PatchLoadStatus::Success, r.load(irq ? 5 : -1));
+        std::vector<size_t> bursts;
+        for (size_t i = 0; i < r.dev.log.size(); ++i)
+            if (r.dev.log[i].addr == 0x30) bursts.push_back(i);
+        TEST_ASSERT_EQUAL_size_t(4, bursts.size());
+        for (size_t i = 1; i < bursts.size(); ++i)
+            TEST_ASSERT_EQUAL_UINT64(r.dev.log[bursts[0]].timeUs, r.dev.log[bursts[i]].timeUs);
+        const Txn &next = r.dev.log[bursts.back() + 1];
+        TEST_ASSERT_TRUE(next.timeUs >= r.dev.log[bursts.back()].timeUs + PBM_PRE_COMMIT_DELAY_US);
+        TEST_ASSERT_EQUAL_UINT32(500, PBM_PRE_COMMIT_DELAY_US);
+        // The next transaction is INT_CLEAR1 in IRQ mode and PBMc otherwise.
+        TEST_ASSERT_TRUE(r.dev.isRegWrite(next, irq ? FakeTps25751Target::kRegIntClear1 : REG_COMMAND));
+    }
+}
+
 // --- DATA after PBMc -----------------------------------------------------------------
 
 void test_data_read_is_retried_every_10_ms()
@@ -435,6 +457,7 @@ int main(int, char **)
     RUN_TEST(test_load_follows_the_documented_sequence);
     RUN_TEST(test_no_data_read_within_20_ms_of_pbmc_completing);
     RUN_TEST(test_a_controller_off_the_bus_for_20_ms_after_pbmc);
+    RUN_TEST(test_500_us_after_the_burst_before_the_next_transaction);
     RUN_TEST(test_data_read_is_retried_every_10_ms);
     RUN_TEST(test_data_read_gives_up_at_its_cap);
     RUN_TEST(test_nonzero_data_byte_0_is_patch_apply_failed);

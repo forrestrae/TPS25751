@@ -246,7 +246,13 @@ PatchLoadStatus TPS25751PatchLoader::loadPatchBundle(const uint8_t* image, size_
         return _lastStatus;
     }
 
-    TPS_DEBUG_INFO(DEBUG_CAT_TASK, "PBM: step 10 — burst complete");
+    // At least 500 us between the end of the burst and the next transaction,
+    // directly after the burst so that both modes get it: TRM Figure 5-1 (page
+    // 88) has "Delay at least 500us" before writing PBMc, and SLVAFV8A step 10
+    // (page 10) adds 500 us after its final burst. Neither delays between the
+    // chunks of one burst. Hardware stage 5 loaded an image without this delay.
+    delayMicroseconds(PBM_PRE_COMMIT_DELAY_US);
+    TPS_DEBUG_INFO(DEBUG_CAT_TASK, "PBM: step 10: burst complete");
 
     // Step 11: clear interrupts again (IRQ mode only)
     clearInterrupts();

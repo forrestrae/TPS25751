@@ -51,6 +51,15 @@ constexpr TPS25751FourCC CMD_PBMC = TPS25751FourCC::of("PBMc");
 /// image.
 constexpr uint32_t PATCH_APPLY_DELAY_MS = 20;
 
+/// Delay (us) between the end of the burst and the next transaction, which is
+/// the INT_CLEAR1 write of step 11 in IRQ mode and the PBMc COMMAND write
+/// otherwise. TRM SLVUCR8B Figure 5-1 (page 88) has one box, "Delay at least
+/// 500us", between "Entire Patch Bundle has been written? Yes" and "Write
+/// CMD1='PBMc'", and SLVAFV8A step 10 (page 10) adds 500 us after its final
+/// burst. Neither puts a delay between the chunks of one burst. Hardware stage
+/// 5 of the EEPROM-update plan loaded an image without this delay.
+constexpr uint32_t PBM_PRE_COMMIT_DELAY_US = 500;
+
 /// Interval (ms) between DATA read attempts and between MODE reads after PBMc.
 /// SLVAFV8A polls MODE every 10 ms (code, page 18).
 constexpr uint32_t PBM_POLL_INTERVAL_MS = 10;
@@ -120,7 +129,8 @@ enum class PatchLoadStatus : uint8_t {
  *   3.  (IRQ mode) Configure INT_MASK1 / clear INT_CLEAR1.
  *   4-9. executeCommand(PBMs, config[6]) — start the burst session.
  *        config = bundleSize[4, LE] + targetAddr(0x30) + timeout(0x31).
- *  10.  burstWrite(0x30, image, length) — stream the image in Wire-sized chunks.
+ *  10.  burstWrite(0x30, image, length): stream the image in Wire-sized chunks,
+ *       then wait PBM_PRE_COMMIT_DELAY_US (500 us) before the next transaction.
  *  11.  (IRQ mode) Clear INT_CLEAR1 again.
  *  12-14. issueCommand(PBMc): commit the bundle and wait for COMMAND to
  *        clear, without reading DATA.

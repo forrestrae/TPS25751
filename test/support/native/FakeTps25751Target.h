@@ -27,7 +27,8 @@
 //
 // Faults: a rule matches a transaction by its index in the log, by a time
 // window on the stub clock, by address, by register (the register pointer for
-// reads), and by kind. A matching write returns writeError without effect; a
+// reads), and by kind. A matching write returns writeError (2 NACK, 4, or 5,
+// the codes the Teensy driver returns) without effect; a
 // matching read returns only readBytes of the normal response. A task's
 // onDone hook can add rules, for example a window that starts when the task
 // completes.
@@ -77,7 +78,7 @@ public:
         int addr = -1;            // -1 for any
         int reg = -1;             // -1 for any
         int kind = -1;            // 0 write, 1 read, -1 any
-        uint8_t writeError = 2;   // endTransmission code for a matched write
+        uint8_t writeError = 2;   // endTransmission code for a matched write: 2, 4, or 5, as the Teensy driver returns
         size_t readBytes = 0;     // bytes a matched read returns
         int remaining = -1;       // matches left, -1 for unlimited
     };

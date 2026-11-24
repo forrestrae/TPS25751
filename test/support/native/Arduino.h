@@ -41,8 +41,10 @@ inline void reset()
 }
 }  // namespace fake_arduino
 
-inline unsigned long millis() { return static_cast<unsigned long>(fake_arduino::g_nowUs / 1000); }
-inline unsigned long micros() { return static_cast<unsigned long>(fake_arduino::g_nowUs); }
+// 32-bit and wrapping, as on the Teensy 4, where both return uint32_t. A test
+// can start the clock just below a wrap to check elapsed-time arithmetic.
+inline uint32_t millis() { return static_cast<uint32_t>(fake_arduino::g_nowUs / 1000); }
+inline uint32_t micros() { return static_cast<uint32_t>(fake_arduino::g_nowUs); }
 inline void delay(unsigned long ms) { fake_arduino::g_nowUs += static_cast<uint64_t>(ms) * 1000; }
 inline void delayMicroseconds(unsigned int us) { fake_arduino::g_nowUs += us; }
 

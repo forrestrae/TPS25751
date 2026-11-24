@@ -318,7 +318,35 @@ void test_mode_poll_cap_outcomes()
     }
 }
 
-// --- Every other status --------------------------------------------------------------
+void test_caps_across_a_millis_wrap()
+{
+    // millis() wraps at 2^32 ms, as on the Teensy 4. Both caps measure elapsed
+    // time by unsigned subtraction, so each gives up after the same number of
+    // reads when the wrap falls inside its window.
+    const uint64_t startUs = (0x100000000ull - 2000) * 1000;  // 2 s before the wrap
+    {
+        Rig r;
+        fake_arduino::g_nowUs = startUs;
+        r.dev.tasks["PBMc"].onDone = [](FakeTps25751Target &d) {
+            Fault f;
+            f.kind = 1;
+            f.reg = REG_DATA;
+            f.fromUs = d.lastCompletedUs;
+            f.toUs = d.lastCompletedUs + 1000000000ull;
+            d.faults.push_back(f);
+        };
+        ASSERT_LOAD(PatchLoadStatus::I2cError, r.load());
+        TEST_ASSERT_EQUAL_size_t(PBM_DATA_READ_CAP_MS / 10 + 1, r.reads(REG_DATA, r.commandWrite("PBMc")).size());
+        TEST_ASSERT_TRUE(millis() < 10000);  // wrapped
+    }
+    {
+        Rig r;
+        fake_arduino::g_nowUs = startUs;
+        r.dev.modeAppDelayMs = 1000000;
+        ASSERT_LOAD(PatchLoadStatus::NotInAppMode, r.load());
+        TEST_ASSERT_EQUAL_size_t(PBM_MODE_POLL_CAP_MS / 10 + 1, r.reads(REG_MODE, r.commandWrite("PBMc")).size());
+    }
+}
 
 void test_not_in_patch_mode()
 {
@@ -449,6 +477,7 @@ void test_to_string_and_debug_print()
                            "PatchApplyFailed", "NotInAppMode",   "CommandTimeout", "I2cError"};
     for (size_t i = 0; i < 12; ++i) TEST_ASSERT_EQUAL_STRING(names[i], TPS25751PatchLoader::toString(all[i]));
     TEST_ASSERT_EQUAL_STRING("Unknown", TPS25751PatchLoader::toString(static_cast<PatchLoadStatus>(200)));
+
 }
 
 int main(int, char **)
@@ -463,6 +492,7 @@ int main(int, char **)
     RUN_TEST(test_nonzero_data_byte_0_is_patch_apply_failed);
     RUN_TEST(test_mode_poll_through_failed_reads_and_ptch_to_app);
     RUN_TEST(test_mode_poll_cap_outcomes);
+    RUN_TEST(test_caps_across_a_millis_wrap);
     RUN_TEST(test_not_in_patch_mode);
     RUN_TEST(test_pbms_outcomes);
     RUN_TEST(test_burst_failure);

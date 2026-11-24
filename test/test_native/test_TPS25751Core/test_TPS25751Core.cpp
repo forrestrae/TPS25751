@@ -141,10 +141,11 @@ void test_write_register_failures()
 {
     const uint8_t data[4] = {1, 2, 3, 4};
     {
-        // Not acknowledged.
+        // Failed with code 4 (lost arbitration, a pin held low, or a timeout in
+        // the Teensy driver).
         Rig r;
         Fault f;
-        f.writeError = 3;
+        f.writeError = 4;
         r.dev.faults.push_back(f);
         TEST_ASSERT_FALSE(r.pd.writeRegister(TPS25751Registers::Address::COMMAND, data, sizeof(data)));
     }
@@ -270,6 +271,49 @@ void test_issue_command_does_not_read_data()
     TEST_ASSERT_EQUAL(TPS25751TaskStatus::I2CError, t.pd.issueCommand(TPS25751FourCC::of("TEST"), in, sizeof(in)));
 }
 
+void test_command_poll_across_a_millis_wrap()
+{
+    // millis() is 32-bit and wraps, as on the Teensy 4. The COMMAND poll
+    // measures its timeout by unsigned subtraction, so it ends after the same
+    // elapsed time when the wrap falls inside it.
+    const uint64_t startUs = (0x100000000ull - 100) * 1000;  // 100 ms before the wrap
+    {
+        Rig r;
+        fake_arduino::g_nowUs = startUs;
+        r.dev.tasks["SLOW"] = FakeTps25751Target::TaskScript{1000, false, {}, nullptr};
+        TEST_ASSERT_EQUAL(TPS25751TaskStatus::Timeout,
+                          r.pd.issueCommand(TPS25751FourCC::of("SLOW"), nullptr, 0, 200));
+        TEST_ASSERT_EQUAL_UINT64(startUs + 205000, fake_arduino::g_nowUs);
+        TEST_ASSERT_TRUE(millis() < 1000);  // the 32-bit clock has wrapped
+    }
+    {
+        Rig r;
+        fake_arduino::g_nowUs = startUs;
+        r.dev.tasks["SLOW"] = FakeTps25751Target::TaskScript{30, false, {0x00}, nullptr};
+        TEST_ASSERT_EQUAL(TPS25751TaskStatus::Success,
+                          r.pd.issueCommand(TPS25751FourCC::of("SLOW"), nullptr, 0, 200));
+    }
+}
+
+void test_wire_fake_matches_the_teensy_driver()
+{
+    // The limits of WireIMXRT.cpp the fake reproduces.
+    Rig r;
+    TwoWire w;
+    w.target = &r.dev;
+    // No transmission begun: write() takes nothing and endTransmission() returns 4.
+    TEST_ASSERT_EQUAL_size_t(0, w.write(static_cast<uint8_t>(0x03)));
+    TEST_ASSERT_EQUAL_UINT8(4, w.endTransmission());
+    TEST_ASSERT_EQUAL_size_t(0, r.dev.log.size());
+    // 136 data bytes fit after the address; the 137th does not.
+    w.beginTransmission(0x20);
+    std::vector<uint8_t> big(140, 0);
+    TEST_ASSERT_EQUAL_size_t(136, w.write(big.data(), big.size()));
+    // A read is at most 136 bytes, and asking for 0 asks for 1.
+    TEST_ASSERT_EQUAL_UINT8(136, w.requestFrom(0x20, 200));
+    TEST_ASSERT_EQUAL_UINT8(1, w.requestFrom(0x20, 0));
+}
+
 // --- Raw burst -----------------------------------------------------------------------
 
 void test_burst_write_chunks_without_register_or_length_byte()
@@ -336,6 +380,8 @@ int main(int, char **)
     RUN_TEST(test_execute_command_rejected_and_timeout);
     RUN_TEST(test_execute_command_i2c_failure_at_each_transaction);
     RUN_TEST(test_issue_command_does_not_read_data);
+    RUN_TEST(test_command_poll_across_a_millis_wrap);
+    RUN_TEST(test_wire_fake_matches_the_teensy_driver);
     RUN_TEST(test_burst_write_chunks_without_register_or_length_byte);
     RUN_TEST(test_burst_write_failures);
     return UNITY_END();

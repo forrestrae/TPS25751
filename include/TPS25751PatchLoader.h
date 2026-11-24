@@ -74,9 +74,21 @@ constexpr uint32_t PATCH_APPLY_DELAY_MS = 20;
 /// docs/engineering/CONSTRAINTS.md, Patch Burst Mode.
 constexpr uint32_t PBM_PRE_COMMIT_DELAY_US = 500;
 
-/// Interval (ms) between DATA read attempts and between MODE reads after PBMc.
-/// SLVAFV8A polls MODE every 10 ms (code, page 18).
+/// Interval (ms) between INT_EVENT1 reads and MODE reads before the load, and
+/// between DATA read attempts and MODE reads after PBMc. TRM Figure 5-1 (page
+/// 88) polls every 10 ms before the load; SLVAFV8A polls MODE every 10 ms after
+/// it (code, page 18).
 constexpr uint32_t PBM_POLL_INTERVAL_MS = 10;
+
+/// Longest wait (ms) for the controller to signal ready-for-patch in step 1: the
+/// I2Ct_IRQ pin low in IRQ mode, INT_EVENT1 bit 81 (Ready for Patch, TRM Table
+/// 3-8, page 19) in polling mode. TRM Figure 5-1 waits without a bound; 5000 ms
+/// is a choice.
+constexpr uint32_t PBM_READY_WAIT_CAP_MS = 5000;
+
+/// Longest time (ms), from the first MODE read of step 2, that MODE is polled
+/// for PTCH. TRM Figure 5-1 polls without a bound; 5000 ms is a choice.
+constexpr uint32_t PBM_PTCH_POLL_CAP_MS = 5000;
 
 /// Longest time (ms), from the first DATA read after PBMc, that failed DATA
 /// reads are retried. Neither TI document bounds this wait; 5000 ms is a
@@ -131,7 +143,8 @@ constexpr uint32_t PBMC_CMD_TIMEOUT_MS = 5000;
  */
 enum class PatchLoadStatus : uint8_t {
     Success,            ///< All 17 steps completed; MODE read APP
-    NotInPatchMode,     ///< Step 2: the MODE read before the load failed or did not read PTCH
+    NotInPatchMode,     ///< Step 2: MODE read APP, or did not read PTCH within
+                        ///< PBM_PTCH_POLL_CAP_MS (failed reads included)
     PbmsRejected,       ///< The controller rejected PBMs ("!CMD"), or PatchStartStatus was
                         ///< a value other than 0x00, 0x04, 0x05, or 0x06
     BadBundleSize,      ///< PatchStartStatus 0x04: bundle size out of range (TRM Table 4-15)
@@ -146,8 +159,9 @@ enum class PatchLoadStatus : uint8_t {
     NotInAppMode,       ///< Step 17: at least one MODE read succeeded within
                         ///< PBM_MODE_POLL_CAP_MS, and none read APP. The patch may still
                         ///< be loading or may have failed.
-    CommandTimeout,     ///< Step 1: the I2Ct_IRQ pin did not go low within 5 s (IRQ mode
-                        ///< only); or COMMAND did not clear and did not read "!CMD" within
+    CommandTimeout,     ///< Step 1: within PBM_READY_WAIT_CAP_MS, the I2Ct_IRQ pin did not go
+                        ///< low (IRQ mode) or no INT_EVENT1 read showed Ready for Patch
+                        ///< (polling mode; a controller in APP ends here); or COMMAND did not clear and did not read "!CMD" within
                         ///< PBMS_CMD_TIMEOUT_MS after PBMs or PBMC_CMD_TIMEOUT_MS after PBMc.
                         ///< After a PBMc timeout the patch may have loaded.
     I2cError,           ///< An I2C transaction failed in the PBMs or PBMc handshake; or no
@@ -173,8 +187,11 @@ enum class PatchLoadStatus : uint8_t {
  * over the I2Ct bus.  This class sequences the 17-step PBM handshake from TI
  * application note SLVAFV8A §4.1:
  *
- *   1.  (Optional) Wait for I2Ct_IRQ low — device signals "Ready-for-Patch".
- *   2.  Read MODE — confirm PTCH via readModeRegister().
+ *   1.  Wait for ready-for-patch, up to PBM_READY_WAIT_CAP_MS: I2Ct_IRQ low in
+ *       IRQ mode; INT_EVENT1 bit 81 every PBM_POLL_INTERVAL_MS in polling mode
+ *       (TRM Figure 5-1, page 88).
+ *   2.  Read MODE every PBM_POLL_INTERVAL_MS until PTCH, up to
+ *       PBM_PTCH_POLL_CAP_MS; APP ends the load at once.
  *   3.  (IRQ mode) Configure INT_MASK1 / clear INT_CLEAR1.
  *   4-5. writeCommandData(config[6]), wait PBMS_DATA_VERIFY_DELAY_US, read DATA,
  *        and compare the 6 bytes; up to PBMS_DATA_ATTEMPTS attempts.
@@ -217,8 +234,9 @@ public:
      * @brief Construct a patch loader bound to a TPS25751 host
      * @param pd     The TPS25751 instance to drive (must outlive this object)
      * @param irqPin Arduino pin wired to I2Ct_IRQ, or -1 for pure polling mode.
-     *               In polling mode the loader relies solely on executeCommand()'s
-     *               built-in COMMAND polling; the IRQ pin is never read.
+     *               In polling mode the loader polls INT_EVENT1 for Ready for
+     *               Patch in step 1 and COMMAND for task completion; the IRQ pin
+     *               is never read.
      */
     explicit TPS25751PatchLoader(TPS25751& pd, int irqPin = -1);
 
@@ -258,11 +276,13 @@ private:
 
     // --- Step helpers ---
 
-    /// Step 1: if irqPin >= 0, wait for the pin to go LOW (ready-for-patch).
+    /// Step 1: wait for ready-for-patch: the IRQ pin low if irqPin >= 0,
+    /// otherwise INT_EVENT1 bit 81. False at PBM_READY_WAIT_CAP_MS.
     bool waitReadyForPatch() const;
 
-    /// Step 2: read MODE and confirm isPatchMode().
-    bool confirmPatchMode() const;
+    /// Step 2: poll MODE until PTCH. False at once on APP, or at
+    /// PBM_PTCH_POLL_CAP_MS.
+    bool waitForPatchMode() const;
 
     /// Steps 4 and 5: write the PBMs configuration to DATA and read it back;
     /// Success, PbmsConfigMismatch, or I2cError (no read-back succeeded).

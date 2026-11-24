@@ -35,21 +35,36 @@ PatchLoadStatus TPS25751PatchLoader::mapTaskStatus(TPS25751TaskStatus ts,
 
 bool TPS25751PatchLoader::waitReadyForPatch() const
 {
+    const uint32_t start = millis();
     if (_irqPin < 0) {
-        TPS_DEBUG_TRACE(DEBUG_CAT_TASK, "PBM: step 1 skipped (pure-polling mode)");
-        return true;
+        // TRM Figure 5-1 (page 88) polls INT_EVENT1.ReadyForPatch every 10 ms.
+        // The TRM shows an INT_EVENT1 bit only while its INT_MASK1 bit is set
+        // (Table 3-8, page 19); SLVAFV8A says Ready for Patch is the one
+        // interrupt enabled at a cold boot into PTCH (step 1, page 6). Not yet
+        // read on hardware. Failed reads are tolerated.
+        for (;;) {
+            auto ev = _pd.readInterruptEventRegister(/*validate=*/false);
+            if (ev && ev->readyForPatch()) {
+                TPS_DEBUG_INFO(DEBUG_CAT_TASK, "PBM: step 1: INT_EVENT1 reads Ready for Patch");
+                return true;
+            }
+            if (millis() - start >= PBM_READY_WAIT_CAP_MS) {
+                TPS_DEBUG_WARN(DEBUG_CAT_TASK, "PBM: step 1: no Ready for Patch in INT_EVENT1 within %u ms",
+                               (unsigned)PBM_READY_WAIT_CAP_MS);
+                return false;
+            }
+            delay(PBM_POLL_INTERVAL_MS);
+        }
     }
 
-    constexpr uint32_t READY_TIMEOUT_MS = 5000;
-    uint32_t start = millis();
     TPS_DEBUG_TRACE(DEBUG_CAT_TASK,
         "PBM: step 1 — waiting for IRQ low on pin %d (timeout %u ms)",
-        _irqPin, READY_TIMEOUT_MS);
+        _irqPin, (unsigned)PBM_READY_WAIT_CAP_MS);
 
     while (digitalRead(_irqPin) != LOW) {
-        if (millis() - start > READY_TIMEOUT_MS) {
+        if (millis() - start > PBM_READY_WAIT_CAP_MS) {
             TPS_DEBUG_WARN(DEBUG_CAT_TASK,
-                "PBM: step 1 timeout — IRQ did not go low within %u ms", READY_TIMEOUT_MS);
+                "PBM: step 1 timeout — IRQ did not go low within %u ms", (unsigned)PBM_READY_WAIT_CAP_MS);
             return false;
         }
         delay(1);
@@ -59,20 +74,29 @@ bool TPS25751PatchLoader::waitReadyForPatch() const
     return true;
 }
 
-bool TPS25751PatchLoader::confirmPatchMode() const
+bool TPS25751PatchLoader::waitForPatchMode() const
 {
-    auto mode = _pd.readModeRegister(/*validate=*/false);
-    if (!mode) {
-        TPS_DEBUG_ERROR(DEBUG_CAT_TASK, "PBM: step 2 — failed to read MODE register");
-        return false;
+    // TRM Figure 5-1 (page 88) polls MODE every 10 ms until PTCH. Failed reads
+    // are tolerated. APP ends the wait at once: the controller does not leave
+    // APP on its own, and PBMs is rejected there (TRM Table 4-15).
+    const uint32_t start = millis();
+    for (;;) {
+        auto mode = _pd.readModeRegister(/*validate=*/false);
+        if (mode && mode->isPatchMode()) {
+            TPS_DEBUG_INFO(DEBUG_CAT_TASK, "PBM: step 2: MODE reads PTCH");
+            return true;
+        }
+        if (mode && mode->isApplicationMode()) {
+            TPS_DEBUG_ERROR(DEBUG_CAT_TASK, "PBM: step 2: MODE reads APP, no patch load possible");
+            return false;
+        }
+        if (millis() - start >= PBM_PTCH_POLL_CAP_MS) {
+            TPS_DEBUG_ERROR(DEBUG_CAT_TASK, "PBM: step 2: MODE did not read PTCH within %u ms",
+                            (unsigned)PBM_PTCH_POLL_CAP_MS);
+            return false;
+        }
+        delay(PBM_POLL_INTERVAL_MS);
     }
-    if (!mode->isPatchMode()) {
-        TPS_DEBUG_ERROR(DEBUG_CAT_TASK,
-            "PBM: step 2 — device not in PTCH mode (got '%s')", mode->modeString());
-        return false;
-    }
-    TPS_DEBUG_INFO(DEBUG_CAT_TASK, "PBM: step 2 — confirmed PTCH mode");
-    return true;
 }
 
 PatchLoadStatus TPS25751PatchLoader::stagePbmsConfig(const uint8_t* config, size_t length) const
@@ -208,15 +232,15 @@ PatchLoadStatus TPS25751PatchLoader::loadPatchBundle(const uint8_t* image, size_
         "PBM: loadPatchBundle start — image=%p length=%u irqPin=%d",
         image, (unsigned)length, _irqPin);
 
-    // Step 1: optional IRQ wait (device signals ready-for-patch)
+    // Step 1: wait for ready-for-patch (IRQ pin, or INT_EVENT1 bit 81)
     if (!waitReadyForPatch()) {
         _lastStatus = PatchLoadStatus::CommandTimeout;
-        TPS_DEBUG_ERROR(DEBUG_CAT_TASK, "PBM: failed at step 1 (IRQ wait)");
+        TPS_DEBUG_ERROR(DEBUG_CAT_TASK, "PBM: failed at step 1 (ready-for-patch wait)");
         return _lastStatus;
     }
 
-    // Step 2: confirm PTCH mode
-    if (!confirmPatchMode()) {
+    // Step 2: wait for PTCH mode
+    if (!waitForPatchMode()) {
         _lastStatus = PatchLoadStatus::NotInPatchMode;
         TPS_DEBUG_ERROR(DEBUG_CAT_TASK, "PBM: failed at step 2 (mode check)");
         return _lastStatus;

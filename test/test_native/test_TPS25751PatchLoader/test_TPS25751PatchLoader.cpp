@@ -33,6 +33,7 @@ using TaskScript = FakeTps25751Target::TaskScript;
 constexpr uint8_t REG_MODE = FakeTps25751Target::kRegMode;
 constexpr uint8_t REG_COMMAND = FakeTps25751Target::kRegCommand;
 constexpr uint8_t REG_DATA = FakeTps25751Target::kRegData;
+constexpr uint8_t REG_INT_EVENT1 = FakeTps25751Target::kRegIntEvent1;
 
 std::vector<uint8_t> makeImage(size_t len = 100)
 {
@@ -124,20 +125,23 @@ void test_load_follows_the_documented_sequence()
     ASSERT_LOAD(PatchLoadStatus::Success, r.load());
     const std::vector<Txn> &log = r.dev.log;
 
+    // Step 1, polling mode: INT_EVENT1 reads Ready for Patch (TRM Figure 5-1).
+    TEST_ASSERT_TRUE(r.dev.isRead(log[1], REG_INT_EVENT1));
+    TEST_ASSERT_EQUAL_size_t(12, log[1].requested);
     // Step 2: MODE reads PTCH.
-    TEST_ASSERT_TRUE(r.dev.isRead(log[1], REG_MODE));
+    TEST_ASSERT_TRUE(r.dev.isRead(log[3], REG_MODE));
     // Step 4: the PBMs configuration in DATA, little-endian bundle size,
     // target 0x30, timeout 0x32 (TRM Table 4-15; hardware stage 7).
     const uint8_t config[] = {0x09, 6, 100, 0, 0, 0, 0x30, 0x32};
-    TEST_ASSERT_TRUE(r.dev.isRegWrite(log[2], REG_DATA));
-    TEST_ASSERT_EQUAL_HEX8_ARRAY(config, log[2].bytes.data(), sizeof(config));
+    TEST_ASSERT_TRUE(r.dev.isRegWrite(log[4], REG_DATA));
+    TEST_ASSERT_EQUAL_HEX8_ARRAY(config, log[4].bytes.data(), sizeof(config));
     // Step 5: DATA read back 500 us after the write (SLVAFV8A page 8).
-    TEST_ASSERT_TRUE(r.dev.isRead(log[4], REG_DATA));
-    TEST_ASSERT_EQUAL_UINT64(log[2].timeUs + 500, log[3].timeUs);
+    TEST_ASSERT_TRUE(r.dev.isRead(log[6], REG_DATA));
+    TEST_ASSERT_EQUAL_UINT64(log[4].timeUs + 500, log[5].timeUs);
     // Steps 6 to 9: PBMs with no DATA write of its own, its COMMAND poll, and
     // DATA read at once (steps 8 and 9 read DATA right after the COMMAND clear).
     const long pbms = r.commandWrite("PBMs");
-    TEST_ASSERT_EQUAL_INT(5, pbms);
+    TEST_ASSERT_EQUAL_INT(7, pbms);
     TEST_ASSERT_EQUAL_size_t(1, r.dev.count([&](const Txn &t) { return r.dev.isRegWrite(t, REG_DATA) && t.bytes.size() > 1; }));
     const long pbmsClear = r.commandClear(pbms);
     TEST_ASSERT_TRUE(pbmsClear > pbms);
@@ -351,6 +355,24 @@ void test_caps_across_a_millis_wrap()
         ASSERT_LOAD(PatchLoadStatus::NotInAppMode, r.load());
         TEST_ASSERT_EQUAL_size_t(PBM_MODE_POLL_CAP_MS / 10 + 1, r.reads(REG_MODE, r.commandWrite("PBMc")).size());
     }
+    {
+        // The Ready for Patch poll before the load.
+        Rig r;
+        fake_arduino::g_nowUs = startUs;
+        r.dev.setReadyForPatch(false);
+        ASSERT_LOAD(PatchLoadStatus::CommandTimeout, r.load());
+        TEST_ASSERT_EQUAL_size_t(PBM_READY_WAIT_CAP_MS / 10 + 1, r.reads(REG_INT_EVENT1).size());
+        TEST_ASSERT_TRUE(millis() < 10000);  // wrapped
+    }
+    {
+        // The PTCH poll before the load.
+        Rig r;
+        fake_arduino::g_nowUs = startUs;
+        r.dev.setMode("BOOT");
+        ASSERT_LOAD(PatchLoadStatus::NotInPatchMode, r.load());
+        TEST_ASSERT_EQUAL_size_t(PBM_PTCH_POLL_CAP_MS / 10 + 1, r.reads(REG_MODE).size());
+        TEST_ASSERT_TRUE(millis() < 10000);  // wrapped
+    }
 }
 
 void test_pbmc_that_takes_longer_than_200_ms()
@@ -395,22 +417,110 @@ void test_irq_ready_wait_across_a_millis_wrap()
     TEST_ASSERT_TRUE(millis() < 10000);  // wrapped
 }
 
-// --- Every other status --------------------------------------------------------------
+// --- Before the load: Ready for Patch and MODE (steps 1 and 2) ----------------------
+
+void test_ready_for_patch_is_polled_every_10_ms()
+{
+    // Polling mode, TRM Figure 5-1: INT_EVENT1 every 10 ms until bit 81 is
+    // set, which here happens at 30 ms; then MODE.
+    Rig r;
+    r.dev.setReadyForPatch(false);
+    r.dev.beforeRead = [](FakeTps25751Target &d) {
+        if (d.now() >= 30000) d.setReadyForPatch(true);
+    };
+    ASSERT_LOAD(PatchLoadStatus::Success, r.load());
+    const std::vector<size_t> ev = r.reads(REG_INT_EVENT1);
+    TEST_ASSERT_EQUAL_size_t(4, ev.size());
+    for (size_t i = 0; i < ev.size(); ++i) TEST_ASSERT_EQUAL_UINT64(10000 * i, r.dev.log[ev[i]].timeUs);
+    TEST_ASSERT_EQUAL_size_t(ev.back() + 2, r.reads(REG_MODE)[0]);
+}
+
+void test_ready_for_patch_poll_through_failed_reads()
+{
+    Rig r;
+    r.dev.faults.push_back(shortReads(REG_INT_EVENT1, 0, 25));
+    ASSERT_LOAD(PatchLoadStatus::Success, r.load());
+    TEST_ASSERT_EQUAL_size_t(4, r.reads(REG_INT_EVENT1).size());  // 0, 10, 20 fail; 30 succeeds
+}
+
+void test_ready_for_patch_never_set()
+{
+    // Bit 81 never set: CommandTimeout at PBM_READY_WAIT_CAP_MS, with nothing
+    // but INT_EVENT1 reads on the bus. A controller in APP ends here too.
+    Rig r;
+    r.dev.setReadyForPatch(false);
+    r.dev.setMode("APP ");
+    ASSERT_LOAD(PatchLoadStatus::CommandTimeout, r.load());
+    TEST_ASSERT_EQUAL_UINT32(5000, PBM_READY_WAIT_CAP_MS);
+    TEST_ASSERT_EQUAL_size_t(PBM_READY_WAIT_CAP_MS / 10 + 1, r.reads(REG_INT_EVENT1).size());
+    TEST_ASSERT_EQUAL_size_t(2 * (PBM_READY_WAIT_CAP_MS / 10 + 1), r.dev.log.size());
+    TEST_ASSERT_EQUAL_UINT32(PBM_READY_WAIT_CAP_MS, millis());
+}
+
+void test_irq_mode_does_not_read_int_event1()
+{
+    // In IRQ mode step 1 is the pin; INT_EVENT1 is not read, even with bit 81 clear.
+    Rig r;
+    r.dev.setReadyForPatch(false);
+    fake_arduino::g_pinLevel[5] = LOW;
+    ASSERT_LOAD(PatchLoadStatus::Success, r.load(5));
+    TEST_ASSERT_EQUAL_size_t(0, r.reads(REG_INT_EVENT1).size());
+}
+
+void test_mode_is_polled_until_ptch()
+{
+    // TRM Figure 5-1: MODE every 10 ms until PTCH, through failed reads, in
+    // both modes. MODE reads BOOT, then fails between 10 and 25 ms, then reads
+    // PTCH from 30 ms.
+    for (int irq = 0; irq < 2; ++irq) {
+        Rig r;
+        if (irq) fake_arduino::g_pinLevel[5] = LOW;
+        r.dev.setMode("BOOT");
+        r.dev.beforeRead = [](FakeTps25751Target &d) {
+            if (d.now() >= 30000 && d.mode() == "BOOT") d.setMode("PTCH");
+        };
+        r.dev.faults.push_back(shortReads(REG_MODE, 10, 25));
+        ASSERT_LOAD(PatchLoadStatus::Success, r.load(irq ? 5 : -1));
+        const std::vector<size_t> modeReads = r.reads(REG_MODE, 0);
+        const long pbms = r.commandWrite("PBMs");
+        std::vector<size_t> before;
+        for (size_t i : modeReads)
+            if (static_cast<long>(i) < pbms) before.push_back(i);
+        TEST_ASSERT_EQUAL_size_t(4, before.size());
+        for (size_t i = 1; i < before.size(); ++i)
+            TEST_ASSERT_EQUAL_UINT64(10000, r.dev.log[before[i]].timeUs - r.dev.log[before[i - 1]].timeUs);
+    }
+}
 
 void test_not_in_patch_mode()
 {
     {
+        // APP ends the wait at the first read.
         Rig r;
         r.dev.setMode("APP ");
         ASSERT_LOAD(PatchLoadStatus::NotInPatchMode, r.load());
+        TEST_ASSERT_EQUAL_size_t(1, r.reads(REG_MODE).size());
         TEST_ASSERT_EQUAL_INT(-1, r.commandWrite("PBMs"));
     }
     {
+        // MODE stays BOOT: NotInPatchMode at PBM_PTCH_POLL_CAP_MS, no DATA write.
+        Rig r;
+        r.dev.setMode("BOOT");
+        ASSERT_LOAD(PatchLoadStatus::NotInPatchMode, r.load());
+        TEST_ASSERT_EQUAL_UINT32(5000, PBM_PTCH_POLL_CAP_MS);
+        TEST_ASSERT_EQUAL_size_t(PBM_PTCH_POLL_CAP_MS / 10 + 1, r.reads(REG_MODE).size());
+        TEST_ASSERT_EQUAL_size_t(0, r.dev.count([&](const Txn &t) { return r.dev.isRegWrite(t, REG_DATA) && t.bytes.size() > 1; }));
+    }
+    {
+        // No MODE read succeeds: NotInPatchMode at the cap.
         Rig r;
         r.dev.faults.push_back(shortReads(REG_MODE, 0, 1000000));
         ASSERT_LOAD(PatchLoadStatus::NotInPatchMode, r.load());
+        TEST_ASSERT_EQUAL_size_t(PBM_PTCH_POLL_CAP_MS / 10 + 1, r.reads(REG_MODE).size());
     }
 }
+
+// --- Every other status --------------------------------------------------------------
 
 void test_pbms_outcomes()
 {
@@ -535,10 +645,10 @@ void test_pbms_config_write_or_read_back_fails()
         Rig r;
         r.dev.faults.push_back(dataWrites(0, 1));
         Fault rd = shortReads(REG_DATA, 0, 1000000, 10);
-        rd.index = 7;  // the second read-back: MODE 0-1, write 2, read 3-4, write 5, read 6-7
+        rd.index = 9;  // the second read-back: INT_EVENT1 0-1, MODE 2-3, write 4, read 5-6, write 7, read 8-9
         r.dev.faults.push_back(rd);
         Fault wr = dataWrites(2, -1);
-        wr.index = 8;  // the third write
+        wr.index = 10;  // the third write
         r.dev.faults.push_back(wr);
         ASSERT_LOAD(PatchLoadStatus::PbmsConfigMismatch, r.load());
         TEST_ASSERT_EQUAL_size_t(3, configWrites(r));
@@ -763,6 +873,11 @@ int main(int, char **)
     RUN_TEST(test_pbmc_that_takes_longer_than_200_ms);
     RUN_TEST(test_pbms_that_takes_longer_than_200_ms);
     RUN_TEST(test_irq_ready_wait_across_a_millis_wrap);
+    RUN_TEST(test_ready_for_patch_is_polled_every_10_ms);
+    RUN_TEST(test_ready_for_patch_poll_through_failed_reads);
+    RUN_TEST(test_ready_for_patch_never_set);
+    RUN_TEST(test_irq_mode_does_not_read_int_event1);
+    RUN_TEST(test_mode_is_polled_until_ptch);
     RUN_TEST(test_not_in_patch_mode);
     RUN_TEST(test_pbms_outcomes);
     RUN_TEST(test_pbms_config_rewritten_after_a_dropped_write);

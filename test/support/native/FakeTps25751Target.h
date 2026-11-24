@@ -20,6 +20,9 @@
 //     "APP " modeAppDelayMs after it completes. PBMe (TRM Table 4-17)
 //     answers DATA[0] = 0 and closes the burst port; MODE stays as it is.
 //     The burst port acknowledges only while open and records every byte.
+//   - INT_EVENT1 (0x14, 11 bytes) starts with only bit 81, Ready for Patch,
+//     set: the one event SLVAFV8A says is enabled at a cold boot into PTCH
+//     (step 1, page 6). The fake does not apply INT_MASK1 to it.
 //   - Unknown 4CC codes, and any task with reject set, complete as "!CMD".
 //
 // Choices the documents do not make, which a test that relies on them pins
@@ -35,6 +38,9 @@
 // matching read returns only readBytes of the normal response. A task's
 // onDone hook can add rules, for example a window that starts when the task
 // completes.
+//
+// beforeRead, when set, runs before each read at the unique address answers,
+// so a test can change a register at a given time on the stub clock.
 //
 // Every transaction goes to the log with the stub clock's time.
 
@@ -55,6 +61,7 @@ public:
     static constexpr uint8_t kRegMode = 0x03;
     static constexpr uint8_t kRegCommand = 0x08;
     static constexpr uint8_t kRegData = 0x09;
+    static constexpr uint8_t kRegIntEvent1 = 0x14;
     static constexpr uint8_t kRegIntMask1 = 0x16;
     static constexpr uint8_t kRegIntClear1 = 0x18;
     static constexpr uint8_t kPbmAddress = 0x30;
@@ -100,6 +107,7 @@ public:
         setReg(kRegMode, {'P', 'T', 'C', 'H'});
         setReg(kRegCommand, {0, 0, 0, 0});
         setReg(kRegData, std::vector<uint8_t>(64, 0));
+        setReadyForPatch(true);
         tasks["PBMs"] = TaskScript{1, false, {0x00}, nullptr};
         tasks["PBMc"] = TaskScript{1, false, {0x00}, nullptr};
         tasks["PBMe"] = TaskScript{1, false, {0x00}, nullptr};
@@ -112,6 +120,7 @@ public:
     std::map<std::string, TaskScript> tasks;
     std::vector<Fault> faults;
     std::vector<Txn> log;
+    std::function<void(FakeTps25751Target &)> beforeRead;
 
     bool burstOpen = false;
     std::vector<uint8_t> burst;
@@ -123,6 +132,12 @@ public:
 
     void setReg(uint8_t reg, std::vector<uint8_t> bytes) { regs[reg] = std::move(bytes); }
     void setMode(const char (&m)[5]) { setReg(kRegMode, {uint8_t(m[0]), uint8_t(m[1]), uint8_t(m[2]), uint8_t(m[3])}); }
+    void setReadyForPatch(bool on)
+    {
+        std::vector<uint8_t> ev(11, 0);
+        if (on) ev[10] = 0x02;  // bit 81
+        setReg(kRegIntEvent1, ev);
+    }
     std::string mode() const { return std::string(regs.at(kRegMode).begin(), regs.at(kRegMode).end()); }
 
     // --- Queries -----------------------------------------------------------------
@@ -161,6 +176,7 @@ public:
     {
         Txn t{now(), Kind::Read, addr, addr == address ? _pointer : -1, {}, true, 0, quantity};
         std::vector<uint8_t> response;
+        if (addr == address && beforeRead) beforeRead(*this);
         if (addr == address) response = readResponse(_pointer, quantity);
         if (Fault *f = match(t)) {
             if (response.size() > f->readBytes) response.resize(f->readBytes);

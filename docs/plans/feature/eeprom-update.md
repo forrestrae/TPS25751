@@ -457,8 +457,22 @@ example after `TPS25751PatchLoader::loadPatchBundle()`):
 
 1. Pre-flight as above, except that check 4 is replaced by "no pointer is valid", so
    the call cannot be used to overwrite a working EEPROM by mistake.
-2. For Low, then High: write the pointer to 0, write the AppConfigOffset word to 0,
-   write the bundle, `FLvy`, compare, write the pointer to the bundle start.
+2. Write the Low AppConfigOffset word to 0, then the High word, each with its
+   read-back.
+3. For Low, then High: write the pointer to 0, write the bundle, `FLvy`, compare, read
+   the region's AppConfigOffset word and require 0, write the pointer to the bundle
+   start.
+
+Decided 2026-11-23: the order above replaces the original one, which wrote each word
+inside its pass, between the pointer erase and the bundle. With both words written
+first, the last write before each bundle `FLad` is the pointer erase, so the
+pointer-row check of step 2 of `updateRegion()` looks where a misplaced chunk would
+land. The Batch 3 review's sweep found no bad outcome for this order (see the notes
+under Batch 3). A failure writing either word ends the call before any pointer is
+written. A word that does not read 0 before its pointer write stops the pass with
+`CompareMismatch`, `lastStep()` `CheckAppConfigOffset`, and the pointer still 0. For a
+14336-byte image the call runs 2732 tasks: 1818 `FLrd`, 902 `FLwd`, 10 `FLad`, and 2
+`FLvy`.
 
 Writing the AppConfigOffset words uses the same four-byte write and neighbor check as
 the pointers. Whether BOOT_STATUS reports I2C EEPROM Present for a blank device after a
@@ -489,9 +503,18 @@ I2C: the executor's COMMAND poll failed and returned `I2CError`, and the MODE re
 100 ms later was not acknowledged either. MODE read APP 1938 ms after `GAID`. On this
 board the restart is therefore visible as a failed I2C transaction, and the cases
 feared above, a `Timeout` with COMMAND never clearing and a `Success` before the
-restart, did not occur. Open: whether `coldReset()` should require an observed I2C
-failure, from the executor or from a MODE read, before it accepts APP, and return
-`ResetTimeout` otherwise.
+restart, did not occur.
+
+Decided 2026-11-23: `coldReset()` returns `Success` only after it saw the controller
+go away, as an `I2CError` from the executor on `GAID` or as a failed MODE read, and
+then read APP. APP without that evidence returns the new status `ResetNotObserved`,
+because MODE reads APP before and after a restart and cannot tell the two apart. The
+cost is a false negative: a restart that completes between two MODE reads, or before
+the first one, is reported as not observed. The caller then confirms with VERSION and
+BOOT_FLAGS. If that false negative is seen on hardware, the first-read delay and the
+poll interval are the values to change. The Doxygen of `coldReset()` and a comment at
+the check record the hazard, the stage 3 evidence (one board, firmware F8091166), and
+this cost.
 
 ### Status values and the state each leaves
 
@@ -507,11 +530,12 @@ failure, from the executor or from a MODE read, before it accepts APP, and retur
 | `SetAddressFailed` | `FLad`, including the second `FLad` of step 2 and the `FLad` of a busy retry | Target pointer 0; other region boots (Figure 2-7) |
 | `WriteFailed`, `FlashBusy` | `FLwd` | Target region partly written, pointer 0; other region boots |
 | `VerifyFailed` | `FLvy` | Target written but not valid, pointer 0; other region boots (Figure 2-8) |
-| `CompareMismatch` | `compareRegion()` in step 3; the read-back of the first two chunks in step 2 | Step 3: same as `VerifyFailed`. Step 2: at most two chunks written, pointer 0; other region boots |
+| `CompareMismatch` | `compareRegion()` in step 3; the read-back of the first two chunks in step 2; in `programBlank()`, the read-back of an AppConfigOffset word and the check of that word before the pointer write | Step 3: same as `VerifyFailed`. Step 2: at most two chunks written, pointer 0; other region boots. `programBlank()` word write: no pointer written. `programBlank()` word check: region written and compared, pointer 0 |
 | `PointerRestoreFailed` | Step 3 pointer write | Target pointer uncertain; other region boots |
 | `OldPointerEraseFailed` | Step 4 | Both pointers may be valid; low boots first (Figure 2-9) |
 | `PointerNeighborsChanged` | Neighbor check of a pointer write; the two pointer-row checks in step 2 | Bytes 4 to 15 after a pointer changed; stop and dump. From step 2: the first chunks landed in the target's pointer row, or the trace of an earlier misplaced write was found there before any bundle write; other region boots |
 | `ResetTimeout` | `coldReset()` | Unchanged; controller did not return to APP |
+| `ResetNotObserved` | `coldReset()` | Unchanged; MODE read APP, but no I2C failure showed the controller restarting. Confirm with VERSION and BOOT_FLAGS |
 | `CommandRejected`, `CommandTimeout`, `I2cError` | Executor | Depends on the step; `lastStep()` reports it |
 
 `lastStep()` returns an enum naming the step in progress, so a caller can map an
@@ -639,15 +663,16 @@ updater suite has 131 tests. Two review nits are carried into Batch 3:
 - Gate: hardware stage 5.
 
 Status, 2026-11-23: implemented; the review found no blocker and its findings are
-fixed; a re-review and stage 5 are pending, and `programBlank()` has not run on
-hardware. `src/TPS25751EepromUpdater.cpp` has 100% line coverage (487 of 487 lines) and
-the updater suite has 146 tests. The example gained `l` (a PBM load while MODE reads
-PTCH; it loads the controller's RAM only) and `pb` (`programBlank()`); `r` now prints
-both AppConfigOffset words.
+fixed; four of the five decisions that followed it are implemented (see the table
+below); a re-review and stage 5 are pending, and `programBlank()` has not run on
+hardware. `src/TPS25751EepromUpdater.cpp` has 100% line coverage (506 of 506 lines) and
+the updater suite has 149 tests. The example gained `l` (a PBM load while MODE reads
+PTCH; it loads the controller's RAM only), `pb` (`programBlank()`), and `zero` (both
+pointers to 0, the start of stage 5); `r` now prints both AppConfigOffset words.
 
 Notes from the Batch 3 review, 2026-11-23. The reviewer read the app note in full and
-TRM pages 33, 60 to 62, and 79 to 82, and found no contradiction with this plan. Open
-points, none decided:
+TRM pages 33, 60 to 62, and 79 to 82, and found no contradiction with this plan. The
+review left six points open; the decisions taken on them follow the list.
 
 1. Step order of `programBlank()`. The programBlank section orders each pass as
    pointer, AppConfigOffset word, bundle. The last write before the bundle `FLad` is
@@ -689,6 +714,38 @@ points, none decided:
    while the controller sits in PTCH; a system that needs the sink path before it can
    boot must select a suitable dead-battery configuration through ADCINx. The board
    under test runs from its pack, so this does not affect the stages.
+
+Decisions on these points, 2026-11-23:
+
+| Point | Decision | State |
+|---|---|---|
+| 1 and 2 | `programBlank()` writes both AppConfigOffset words first, then runs each pass as in an update, and reads the word once more before each pointer write | Implemented in `75263b5`; see the programBlank section |
+| 3 | A region counts as bootable only if its pointer is valid and its AppConfigOffset word is 0 | Approved, not implemented: the rule as worded conflicts with `updateBothRegions()`; see below |
+| 4 | `coldReset()` requires an observed I2C failure before it accepts APP | Implemented in `36d58f4`; see the coldReset section |
+| 5 | Stage 5 starts from an example command that writes both pointers to 0, not from a `minipro` erase | Implemented in `518b98c` as `zero`; see stage 5 |
+| 6 | No change | Recorded in `CONSTRAINTS.md` and the example's notes |
+
+Conflict found while implementing point 3. `updateRegion()` never checks the
+AppConfigOffset word of its target. Take an EEPROM where Low is valid with word 0 and
+High has a valid pointer over a nonzero word. `updateBothRegions()` first writes High
+and erases the Low pointer; if the controller does not load a region whose word is not
+0 (inferred from the app note, page 2), nothing is bootable at that point. Today the
+second pass then rewrites Low and repairs the state. With the approved rule the second
+pass refuses with `NoBootableRegion`, because the region it would keep is High, and the
+EEPROM is left with no bootable region. `updateInactiveRegion()` alone leaves the same
+state with or without the rule. The rule therefore needs a companion check on the
+target's word, and where that check sits is not decided:
+
+- In the pre-flight: refuse a target whose word is not 0. Nothing is written.
+- Before the step 3 pointer write, as `programBlank()` now does. This also catches a
+  word changed during the update, but the bundle is already written when it fires.
+- Both.
+
+Under any of these, a region whose word is not 0 cannot be updated by `updateRegion()`.
+The repair is `writeRegionPointer()` to 0 for both regions followed by
+`programBlank()`, which is `zero` then `pb` in the example. A fourth option, having
+`updateRegion()` write the target's word to 0 itself, would add a write that starts in
+the middle of a page to every update and departs from the four steps of Figure 2-3.
 
 Stage 5 should also read 0x03C0 to 0x03FF and 0x07C0 to 0x07FF in its dump. The two
 AppConfigOffset writes are the first `FLwd` calls that start in the middle of a page,
@@ -784,7 +841,7 @@ Ordered from safe to destructive. Each stage states its recovery.
 
    Result, 2026-11-23, branch commit `8f599d5`, `examples/eeprom-update` built with the
    F8091166 low-region image (14336 bytes, SHA-256 `60c6cdd8...add77772c`), Teensy 4.0:
-   passed. Which supply powered the board was not recorded.
+   passed. The board ran from the 18650 pack.
 
    | Step | Result |
    |---|---|
@@ -830,9 +887,8 @@ Ordered from safe to destructive. Each stage states its recovery.
    3, check the SHA-256 that `bin_to_header.py` prints against the TI export.
 
    Result, 2026-11-23, branch commit `e91707c`, Teensy 4.0: passed, and the board is
-   back in its starting state. Which supply powered the board was not recorded. Both
-   low-region binaries were first checked against TI's C exports of the same builds
-   and are equal (F8091164: 14272 bytes, SHA-256 `15019eac...6f81ec59`; F8091166:
+   back in its starting state. The board ran from the 18650 pack. Both low-region
+   binaries were first checked against TI's C exports of the same builds and are equal (F8091164: 14272 bytes, SHA-256 `15019eac...6f81ec59`; F8091166:
    14336 bytes, SHA-256 `60c6cdd8...add77772c`).
 
    | Step | Result |
@@ -867,9 +923,9 @@ Ordered from safe to destructive. Each stage states its recovery.
 
    Result, 2026-11-23, branch commit `55ed165`, Teensy 4.0: passed with one deviation
    that I asked for. Each cut was followed by a `GAID` cold reset (`x`), not by a power
-   cycle, because a power cycle needs the stack apart while the pack is fitted. Which
-   supply powered the board was not recorded. The cuts used the F8091164 image on a
-   board that ran F8091166, so VERSION shows which bundle booted. Before each reset a
+   cycle, because a power cycle needs the stack apart while the pack is fitted. The
+   board ran from the 18650 pack. The cuts used the F8091164 image on a board that ran
+   F8091166, so VERSION shows which bundle booted. Before each reset a
    full `FLrd` dump was compared with the contents the cut should leave; all four were
    equal, with no byte changed outside the expected ranges.
 
@@ -906,6 +962,45 @@ Ordered from safe to destructive. Each stage states its recovery.
    bundle with `TPS25751PatchLoader`, run `programBlank()`, `coldReset()`, and compare a
    dump with `..._fullFlash.bin`. Recovery: `write-flash.zsh`.
 
+   Procedure, set on 2026-11-23. The stage does not use `minipro`, which needs the
+   stack apart. It starts from the example's `zero` command, which writes both
+   pointers to 0 and leaves the bundles and the AppConfigOffset words in place. The
+   stage therefore tests an EEPROM with no valid pointer, not an erased one:
+   `programBlank()` does not write onto 0xFF bytes, and both AppConfigOffset writes
+   write 0 over 0. It runs in two parts, so that the first `programBlank()` on the
+   device runs while the controller is still in APP.
+
+   Part A, without leaving APP, with the F8091164 image so that the bundle bytes
+   change:
+
+   1. `zero`, then `r`: the dump must equal the full-flash image with both pointer
+      words 0 and nothing else changed.
+   2. `pb`, then `r`: the dump must show both pointers valid, both words 0, the
+      F8091164 bundle in both regions, the last 64 bytes of each old bundle unchanged,
+      and 0x03C0 to 0x03FF and 0x07C0 to 0x07FF unchanged apart from the two words.
+      Record the task counts and times.
+   3. `x`: VERSION must read 0xF8091164 with Patch Config Source EEPROM Loaded.
+
+   Part B, through PTCH, with the F8091166 image, which also returns the board to its
+   starting state:
+
+   1. `zero`, then `x`. Expected: the controller comes up in PTCH and `coldReset()`
+      returns `ResetTimeout`. That a controller with no valid pointer starts in PTCH
+      is inferred from the app note (page 2) until this step.
+   2. `l`: a PBM load of the embedded image. MODE must read APP. Record BOOT_FLAGS, in
+      particular whether I2C EEPROM Present is set after a PBM boot.
+   3. `pb`, then `r`: the dump must be identical to `..._F8091166_fullFlash.bin`.
+   4. `x`: VERSION 0xF8091166 and BOOT_FLAGS `18 00 F0 A2 C1`, as in stage 1.
+
+   If I2C EEPROM Present is not set after the PBM boot, `pb` refuses with
+   `NoEepromPresent` and nothing is written. The programBlank section then applies:
+   pre-flight check 2 is dropped for that call, which is a code change. The Teensy can
+   be reflashed without resetting the controller, so the controller stays in APP
+   meanwhile.
+
+   Recovery, in order: `l` then `pb` from PTCH; `examples/load-patch-bundle` followed
+   by `pb`; `write-flash.zsh` with the clip, which needs the stack apart.
+
 Two physical points were confirmed on 2026-11-22. First, the EEPROM can be reprogrammed
 in place with a SOIC8 clip, so `write-flash.zsh` (`24LC256@SOIC8`) is a recovery path
 that needs no rework. Second, the board runs from the 18650 battery pack, so the Teensy
@@ -934,12 +1029,12 @@ needs a qualification:
   inferred; stage 5 confirms it.
 - The EEPROM is reachable from the Teensy directly on `Wire2`.
 
-Open, not decided: which supply the write stages use (the paragraph above says the
-pack); a direct `Wire2` dump as an independent read-only check after `p`, `p2`, and
-`u`; and a direct `Wire2` restore sketch as a recovery that needs no clip. The restore
-sketch is outside this plan and writes the EEPROM on a bus the controller also
-masters, at boot, for the BQ25798, and during every flash task, so it needs its own
-decision, review, and go-ahead.
+Stages 2, 3, and 4 ran from the 18650 pack. Open, not decided: a direct `Wire2` dump
+as an independent read-only check after `p`, `p2`, and `u`; and a direct `Wire2`
+restore sketch as a recovery that needs no clip. The restore sketch is outside this
+plan and writes the EEPROM on a bus the controller also masters, at boot, for the
+BQ25798, and during every flash task, so it needs its own decision, review, and
+go-ahead.
 
 ## Risks
 

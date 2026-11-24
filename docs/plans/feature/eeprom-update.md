@@ -917,7 +917,7 @@ Decisions of 2026-11-24 on these points and on the other open items:
 | `PBMs` timeout byte | Changed to 0x32 on 2026-11-24 (session 2). Checked against TRM Table 4-15 (page 76: "recommended to always use 0x32 ... 5 seconds, LSB of 100 ms") and SLVAFV8A (Table 4-1 lists 0x31 as "3.1 seconds"; the byte listings of steps 4 and 5 send 0x32; the step 9 read-back shows 0x31). Retested on hardware the same day, see stage 7 |
 | Is the branch finished | Not yet. `scripts/integrate.py` stays unrun until the user confirms |
 | `PBMe`, DATA read-back, and ReadyForPatch | Decided in session 3, see below |
-| Coverage of `TPS25751.cpp`; `Wire2` dump; `Wire2` restore sketch; stage 4 with a power cycle | Deferred by the user to later sessions, each to be decided there |
+| Coverage of `TPS25751.cpp`; `Wire2` dump; `Wire2` restore sketch; stage 4 with a power cycle | Deferred by the user to later sessions, each to be decided there. The `Wire2` dump was taken up on 2026-11-24; its design is in the section "Direct `Wire2` dump", awaiting approval |
 
 Decisions of 2026-11-24, session 3, on three of the loader's departures from TI's flow.
 Burst transaction spacing and the 500 us before `PBMc` stay out of scope by the user's
@@ -1459,7 +1459,211 @@ as an independent read-only check after `p`, `p2`, and `u`; and a direct `Wire2`
 restore sketch as a recovery that needs no clip. The restore sketch is outside this
 plan and writes the EEPROM on a bus the controller also masters, at boot, for the
 BQ25798, and during every flash task, so it needs its own decision, review, and
-go-ahead.
+go-ahead. The dump is designed in the next section, awaiting the user's approval.
+
+## Direct `Wire2` dump: design, 2026-11-24, awaiting approval
+
+The user asked on 2026-11-24 for a read-only dump of the 24LC256 over the Teensy's
+`Wire2`, as a check of the EEPROM that does not go through the controller. This
+section proposes it. Nothing below is implemented, and nothing runs on the board without
+the user's go-ahead for that step.
+
+### Conclusion first: TI does not support a second controller on I2Cc
+
+The datasheet's I2C summary (SLVSH93A, Table 8-4, page 42) says of I2Cc: "Multi-controller
+configuration is not supported." The TRM says nothing about arbitration on I2Cc. So no
+design can make a Teensy read on that bus safe by protocol. The design below can only
+keep the Teensy off the bus whenever it knows the controller is using it, keep the
+Teensy's transactions few, short, and unable to form an EEPROM write, detect corruption
+of its own reads, and measure how much the controller used the bus while the dump ran.
+
+The worst credible outcome is not a bad dump, which the checks below catch. It is a
+corrupted controller transaction to the BQ25798, which the Teensy cannot see on the bus.
+I2C lines are wired-AND, so a collision can only pull bits to 0. A corrupted register
+address byte in a controller write can therefore send that write to a lower-numbered
+register, and REG01 (Charge Voltage Limit) is one of them, on a 4S pack. This is
+inferred from the bus mechanics, not observed; it is the reason for the charger
+snapshot below and for the go-ahead question at the end. The read of 2026-11-23
+(stage 1, "Independent read") ran without any of these measures and changed nothing that
+the dump or the boot flags showed; one run is little evidence either way.
+
+### When the controller masters I2Cc
+
+| Case | Source | Can the Teensy exclude it? |
+|---|---|---|
+| Boot: EEPROM load after power-up or `GAID` | Datasheet, Pin Strapping section, page 44; SLVAFL1 page 2 | Yes. Run only when MODE reads `APP ` before and after the dump; any reset in between shows as a changed MODE, VERSION, or BOOT_FLAGS, or as a long busy period on the bus |
+| Flash tasks (`FLrd`, `FLad`, `FLwd`, `FLvy`) and `I2Cr`, `I2Cw` | TRM pages 81, 82, 85 | Yes. The example is single-threaded and issues no task while a `Wire2` transaction is open |
+| Charger events: "I2C controller events" configured in the bundle, such as a new contract or I2Cc_IRQ from the BQ25798 | Datasheet, Application Information, page 47; TRM Table 4-26 (the controller keeps a queue of event transactions) | No. The Teensy cannot predict them. It can only measure them, and keep the USB-C port state unchanged during the dump to avoid contract events |
+
+Whether the controller checks for a busy bus before a START is not documented. The
+design assumes it does not.
+
+### Bus monitor
+
+`Wire2` is LPI2C4 on pins 25 (SDA) and 24 (SCL) of the Teensy 4.0. Once `Wire2.begin()`
+has enabled the LPI2C master, MSR bit 25, Bus Busy (BBF), follows START and STOP
+conditions from any controller on the bus. That BBF also sees the TPS25751's START
+conditions while the Teensy is idle is inferred from the i.MX RT1060 reference manual's
+description of the flag; the self-test below verifies it before any Teensy transmission.
+
+A 20 kHz `IntervalTimer` interrupt samples MSR and counts each period of BBF set while
+the Teensy has no transaction open (a flag the main loop sets around each `Wire2` call),
+with its length. At 100 kHz the shortest transaction lasts about 100 us, so a 50 us
+sample interval sees every one. The command reports these counts as controller bus
+episodes: during the listen window, between the dump's transactions, and their longest
+duration.
+
+Self-test: during the listen window the command issues one `FLrd` at 0x0000 over I2Ct.
+The controller then reads the EEPROM on I2Cc, and the monitor must record at least one
+episode in that `FLrd`'s time window. If it records none, the monitor is blind, and the
+command stops before any `Wire2` transmission.
+
+### When the Teensy transmits
+
+All of these must hold, or the command transmits nothing on `Wire2`:
+
+1. MODE reads `APP ` over I2Ct. VERSION and BOOT_FLAGS are recorded for the after-check.
+2. The monitor's self-test passed.
+3. The listen window (default 5 s) recorded no controller episode other than the
+   self-test's. If it recorded any, the command prints their count and longest duration
+   and waits for the line `yes`, under the same rule as the write commands: input queued
+   before the prompt is discarded.
+4. Before each transaction, BBF has read clear for at least 1 ms continuously. If the
+   bus does not stay idle that long within 200 ms, the command stops with "bus not idle".
+
+Condition 4 also keeps the Teensy driver's recovery path out of reach. `wait_idle()` in
+`WireIMXRT.cpp` (framework 1.162.0), after 16 ms of busy bus, calls `force_clock()`, which
+takes both pins as push-pull GPIO outputs and toggles SCL up to nine times. On a shared
+bus that would clock into a controller transaction and could drive SDA high against a
+device holding it low. With condition 4, `wait_idle()` is entered on an idle bus; it
+reaches `force_clock()` only if a controller transaction starts within microseconds of
+the check and lasts 16 ms, about 170 bytes at 100 kHz. That residual is accepted; the
+alternative, driving LPI2C4 registers directly in place of `Wire2`, removes it at the
+cost of a second I2C driver in the example.
+
+### Transaction shape: no write can be formed
+
+The 24LC256 starts an internal write cycle only on a STOP that follows its control byte
+with R/W 0, two address bytes, and at least one data byte (Microchip DS20001203W, Byte
+Write and Page Write, page 11). A START after the two address bytes ends the write
+operation after setting the address pointer, without a write cycle (Random Read, page
+13). The dump uses two transaction types:
+
+| Transaction | Bytes on the bus | Used |
+|---|---|---|
+| Set address and read | START, 0xA0, 0x00, 0x00, repeated START, 0xA1, 16 bytes read, NACK, STOP | Once per pass, at 0x0000 |
+| Current address read | START, 0xA1, 16 bytes read, NACK, STOP | For each of the other 1983 rows |
+
+The current address read continues from the address after the last byte read (Current
+Address Read and Sequential Read, page 13). The R/W bit is 1 in every control byte
+except the one per pass, so the Teensy sends 0xA0 twice per dump, each time followed by
+exactly two bytes and a repeated START, never by a data byte or a STOP. The code sends no
+byte to any other address. All `Wire2` calls sit in one file of the example, so a
+review can check this property in one place.
+
+Clock: 100 kHz, which the read of 2026-11-23 used. The 24LC256 allows 400 kHz at 2.5 to
+5.5 V (Table 1-2), which would cut the Teensy's bus time by four; it is not proposed
+until 100 kHz has run.
+
+### How a collision is detected and reported
+
+Detection works at three levels. Any failure at any level stops the dump at once, with
+no retry and no further `Wire2` transmission. A failure is evidence of a collision,
+and a retry adds exposure.
+
+1. Driver result. `endTransmission(false)` returns 2 (NACK), 4 (arbitration lost, pin
+   low timeout, or the 50 ms timeout), or 5 (FIFO error); `requestFrom()` returns fewer
+   than 16 bytes. Right after a failure the command reads LPI2C4 MSR, before any other
+   `Wire2` call clears it, and prints its flags: ALF (arbitration lost), NDF (NACK), PLTF
+   (pin low timeout), FEF, BBF, MBF. A NACK of 0xA1 or 0xA0 is reported separately: the
+   24LC256 does not acknowledge during an internal write cycle (page 8), so it would mean
+   a write cycle that nothing in this example started.
+2. Silent corruption. While the Teensy only receives, it drives SDA on ACK bits alone, so
+   a controller pulling SDA low corrupts data without an arbitration loss. The dump
+   therefore runs two full passes. Pass 1 goes into a 31744-byte RAM buffer; pass 2 is
+   compared row by row. Rows that differ are printed in both versions, up to 16 rows.
+3. The reference. The printed dump must equal the `FLrd` dump of `r` and the full-flash
+   image (next subsection).
+
+After the dump, pass or fail, the command reads MODE, VERSION, and BOOT_FLAGS over I2Ct
+and compares them with the values before. It then prints one verdict line: PASS (two
+identical passes, no driver error, no reset seen), STOPPED (with the row address, the
+call, its code, and the MSR flags), or MISMATCH (with the differing rows), followed by
+the episode counts and the elapsed time.
+
+Charger snapshot. The command reads BQ25798 registers 0x00 to 0x18 (charge voltage,
+charge current, input limits, timers, charger control 0 to 5, and NTC control) through
+the controller's `I2Cr` before the listen window and again after the dump, at least 5 s
+apart, the TRM's spacing for consecutive `I2Cr` tasks, through
+`TPS25751DownstreamDevice`. The
+controller masters these reads, so they cannot collide with the Teensy. A changed byte
+is printed as "changed during the dump window, cause unknown": the controller may also
+have written it for a legitimate event. This is the only check that can show a
+corrupted controller write. `I2Cr` writes the register offset to the BQ25798 and no
+register.
+
+I2C Controller NACKed, INT_EVENT1 bit 82 (TRM page 19), would report a controller
+transaction that a collision turned into a NACK. The board's configuration does not
+enable it in INT_MASK1 (CONSTRAINTS.md, Read/Write Registers), and an event bit shows
+only while its mask bit is set. The command reads INT_MASK1 and INT_EVENT1 before and
+after and says whether bit 82 was observable. Setting the mask bit is a controller
+register write and is not proposed.
+
+### How the dump is compared with the `FLrd` dump of `r`
+
+The command prints pass 1 in the line format of `r` (`xxxxxxxx: xx ... xx`), between
+`-----BEGIN WIRE2 EEPROM DUMP 0x00000000-0x00007C00-----` and
+`-----END WIRE2 EEPROM DUMP-----`, followed by the CRC-32 of the 31744 bytes. The
+comparison runs on the host:
+
+1. Send `r`, then `w2`, with no write command between them, and capture both into one
+   log.
+2. Extract the `FLrd` dump, the lines between the `r` markers, and convert it:
+   `awk '/BEGIN EEPROM DUMP/{f=1;next}/END EEPROM DUMP/{f=0}f' serial.log | grep -aE '^[0-9a-f]{8}:( [0-9a-f]{2}){16}\r?$' | xxd -r > flrd.bin`.
+3. Extract the `Wire2` dump the same way, with the `WIRE2` markers, into `wire2.bin`.
+4. Both files must be 31744 bytes, and `cmp flrd.bin wire2.bin` and
+   `cmp wire2.bin <image>_fullFlash.bin` must print nothing. `cmp -l` lists the
+   differing offsets otherwise.
+
+`r`'s `FLrd` reads and the `Wire2` reads never overlap, because the example runs one
+command at a time. An on-board comparison against `FLrd` in the same command is
+possible but not proposed: it adds 1984 tasks to every run, and `r` already gives the
+reference.
+
+### Where it lives
+
+Two commands in `examples/eeprom-update`, with all `Wire2` code in a new
+`src/direct_eeprom.h` and `src/direct_eeprom.cpp`:
+
+- `w2l`: listen only. `Wire2.begin()`, the monitor, the `FLrd` self-test, and a 60 s
+  listen; reports the controller's episodes. Sends nothing on `Wire2`.
+- `w2`: the dump, as above.
+
+Neither writes the EEPROM, and neither asks for `yes` unless condition 3 above applies.
+A command in this example, not a separate sketch, because the check is meant to follow
+`p`, `p2`, and `u` in the same session, without reflashing the Teensy between them.
+`Wire2.begin()` leaves the Teensy's 22 kOhm pad pull-ups on SDA and SCL until the Teensy
+restarts; the read of 2026-11-23 ran in that state. The example is not built natively,
+so the transaction shape is checked by review; no library code changes.
+
+### Hardware steps, each needing the user's go-ahead
+
+1. H1, listen. Flash the build, `r` (to confirm the starting state), then `w2l`. Record
+   the self-test result and the episodes per minute. No `Wire2` transmission.
+2. H2, dump. `r`, then `w2`, then the host comparison. Pass: verdict PASS, both `cmp`
+   silent, MODE, VERSION, and BOOT_FLAGS unchanged, no charger register changed.
+3. Later, by separate decision: `w2` after `p`, `p2`, or `u`, the use the open item
+   above names.
+
+### Decisions for the user
+
+| Item | Recommendation |
+|---|---|
+| Proceed, given TI's "not supported" and the charger-write risk | The user's call. If yes, run H1 first and decide on H2 from its episode rate |
+| Listen window with controller traffic | Ask for `yes`, as written; the alternative is to refuse |
+| Charger snapshot through `I2Cr` | Include |
+| `force_clock()` residual | Accept, with condition 4; the alternative is a direct LPI2C4 driver |
+| Clock | 100 kHz |
 
 ## Risks
 

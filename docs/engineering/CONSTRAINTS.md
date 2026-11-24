@@ -417,8 +417,9 @@ observed to cause a failure.
   does not read INT_EVENT1. Both waits end at `PBM_READY_WAIT_CAP_MS` (5 s) with
   `CommandTimeout`. The TRM shows an INT_EVENT1 bit only while its INT_MASK1 bit is set
   (Table 3-8, page 19), and SLVAFV8A says Ready for Patch is the one interrupt enabled at a
-  cold boot into PTCH (step 1, page 6). Bit 81 has not been read in PTCH on the test
-  board. In APP with the board's configuration INT_EVENT1 read all zero (Read/Write
+  cold boot into PTCH (step 1, page 6). On the test board, in PTCH after `GAID` with no
+  valid region pointer, the wait found bit 81 set in five of five loads (hardware stage 8
+  of the EEPROM-update plan, 2026-11-24). In APP with the board's configuration INT_EVENT1 read all zero (Read/Write
   Registers section), so a polling-mode load on a controller in APP ends at this step after
   5 s, not at the MODE check.
 - MODE before the load. Figure 5-1 polls MODE every 10 ms until it reads PTCH, without a

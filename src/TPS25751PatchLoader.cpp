@@ -40,8 +40,9 @@ bool TPS25751PatchLoader::waitReadyForPatch() const
         // TRM Figure 5-1 (page 88) polls INT_EVENT1.ReadyForPatch every 10 ms.
         // The TRM shows an INT_EVENT1 bit only while its INT_MASK1 bit is set
         // (Table 3-8, page 19); SLVAFV8A says Ready for Patch is the one
-        // interrupt enabled at a cold boot into PTCH (step 1, page 6). Not yet
-        // read on hardware. Failed reads are tolerated.
+        // interrupt enabled at a cold boot into PTCH (step 1, page 6). Hardware
+        // stage 8 (2026-11-24, one board): set in PTCH after GAID in five of five
+        // loads. Failed reads are tolerated.
         for (;;) {
             auto ev = _pd.readInterruptEventRegister(/*validate=*/false);
             if (ev && ev->readyForPatch()) {

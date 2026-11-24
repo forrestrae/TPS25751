@@ -35,18 +35,20 @@
 //        Burst Mode image, SLVAFV8A), then MODE, VERSION, and BOOT_FLAGS. The
 //        controller runs the image from RAM; the EEPROM is not written. Waits
 //        for the line "yes" first. Refused in any other mode.
-//        The loader follows the documented timing before and after PBMc: at
-//        least 500 us between the burst and PBMc (TRM Figure 5-1), and 20 ms
-//        after PBMc completes, then DATA, then MODE polled until APP (SLVAFV8A
-//        pages 11 and 18; TRM Figure 5-1). It does not follow every step of
-//        the documented flow; docs/engineering/CONSTRAINTS.md lists the steps
-//        it leaves out. Hardware stage 5 (2026-11-23, one board) ran an earlier
+//        The loader runs in polling mode here: it polls INT_EVENT1 for Ready
+//        for Patch and MODE for PTCH, writes the PBMs configuration to DATA
+//        and reads it back, and issues PBMe if the burst or PBMc fails (TRM
+//        Figure 5-1; SLVAFV8A step 5). It gives at least 500 us between the
+//        burst and PBMc, and 20 ms after PBMc completes, then reads DATA, then
+//        polls MODE until APP (SLVAFV8A pages 11 and 18). docs/engineering/
+//        CONSTRAINTS.md lists where it still differs from the documented
+//        flow. Hardware stage 5 (2026-11-23, one board) ran an earlier
 //        sequence, which read DATA as soon as COMMAND cleared: that read
 //        returned 28 of 65 bytes, the load reported I2cError although the
 //        patch had loaded, and every later read from the Teensy failed with
-//        error 2 (a NACK) until the Teensy was restarted. The current
-//        sequence has not run on hardware, and the cause of the unacknowledged
-//        reads is not established.
+//        error 2 (a NACK) until the Teensy was restarted. The cause is not
+//        established. Stages 6 to 8 ran the later sequences: fifteen loads,
+//        all Success.
 //        Diagnostics, so that a repeat shows which side the fault is on: right
 //        after the load, l prints the Teensy's LPI2C1 registers (MSR, MCR,
 //        MFSR, MCFGR1). If MODE cannot be read, it

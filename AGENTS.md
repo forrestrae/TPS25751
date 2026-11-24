@@ -450,8 +450,8 @@ call, which writes DATA and COMMAND and polls COMMAND but reads no DATA; step 10
 `TPS25751::burstWrite()`. An earlier version read DATA as soon as `PBMc` cleared COMMAND;
 in hardware stage 5 that read returned 28 of 65 bytes and the load reported `I2cError`
 although the patch had loaded. Hardware stages 6 and 7 ran the 20 ms sequence, ten loads,
-all Success. Steps 1, 2, 4, and 5 as described here and the `PBMe` paths date from
-2026-11-24 and have not run on hardware.
+all Success. Steps 1, 2, 4, and 5 as described here date from 2026-11-24; stage 8 ran
+them, five loads, all Success. The `PBMe` paths have not run on hardware.
 `PatchLoadStatus` provides one distinct enumerator per failure point.
 
 See ADR-011 in [ARCHITECTURE.md](docs/engineering/ARCHITECTURE.md) and the PBM

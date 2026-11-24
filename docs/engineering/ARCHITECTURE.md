@@ -1318,7 +1318,8 @@ by the user's decision recorded in the EEPROM-update plan.
 - After a burst chunk that is not acknowledged, or "!CMD" on `PBMc`, the loader issues
   `PBMe` through `executeCommand()` and still returns `BurstFailed` or `PbmcRejected`.
 - `PatchLoadStatus::PbmsConfigMismatch` is appended after `I2cError`, so the earlier
-  values keep their numbers. These steps have not run on hardware.
+  values keep their numbers. Hardware stage 8 of the EEPROM-update plan (2026-11-24) ran
+  steps 1, 2, and 5 in five loads, all Success; neither `PBMe` path has run on hardware.
 
 
 ### ADR-012: 16-Bit Bit Positions in the Register Base Class

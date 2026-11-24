@@ -40,8 +40,8 @@ constexpr uint8_t PBM_I2C_TARGET = 0x30;
 /// listings in steps 4 and 5 (page 8) send 0x32, and its DATA read-back in
 /// step 9 (page 10) shows 0x31. TRM SLVUCR8B Table 4-15 gives the byte in
 /// 100 ms units, which makes 0x31 4.9 s, and recommends 0x32 (5 s), the value
-/// used here since 2026-11-24. NOT YET RUN ON HARDWARE: every load so far
-/// sent 0x31.
+/// used here since 2026-11-24. Hardware stage 7 (2026-11-24): five loads with
+/// 0x32 returned Success. Loads before it sent 0x31.
 constexpr uint8_t PBM_TIMEOUT = 0x32;
 
 /// 4CC command code to start a Patch Burst Mode session.

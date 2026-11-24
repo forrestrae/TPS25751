@@ -362,8 +362,8 @@ config[5] = 0x32                   // PBM_TIMEOUT
 The timeout byte is in 100 ms units (TRM Table 4-15), so 0x31 is 4.9 s, and the TRM
 recommends 0x32 (5 s). SLVAFV8A is inconsistent: Table 4-1 (page 8) lists 0x31 as "3.1
 seconds", the byte listings of steps 4 and 5 (page 8) send 0x32, and the DATA read-back of
-step 9 (page 10) shows 0x31. The loader sends 0x32 since 2026-11-24. That value has not run on hardware; every load
-before it sent 0x31.
+step 9 (page 10) shows 0x31. The loader sends 0x32 since 2026-11-24. Five loads on hardware with 0x32 (stage 7 of the
+plan, 2026-11-24) all returned Success; every load before it sent 0x31.
 
 **PatchStartStatus** (DATA byte 0 after PBMs / PBMc, i.e. `result.returnCode`):
 `0x00` = success; `0x04` = bad bundle size; `0x05` = bad target address; `0x06` =
@@ -446,7 +446,7 @@ observed to cause a failure.
   footnote 2 calls the delay optional but recommended. The loader reads MODE right after
   the DATA check, then polls every 10 ms until APP (SLVAFV8A code, page 18).
 - The `PBMs` timeout byte is 0x32, as TRM Table 4-15 recommends (see the configuration
-  layout above). It has not run on hardware; every load so far sent 0x31.
+  layout above). Five loads on hardware with it returned Success (plan, stage 7); earlier loads sent 0x31.
 
 See `TPS25751PatchLoader` (`include/TPS25751PatchLoader.h`, `src/TPS25751PatchLoader.cpp`)
 for the complete 17-step implementation, and ADR-011 in ARCHITECTURE.md for the

@@ -914,7 +914,7 @@ Decisions of 2026-11-24 on these points and on the other open items:
 | 500 us before `PBMc` | Keep |
 | Spacing between burst transactions | Leave as is, back to back |
 | `coldReset()` evidence rule (a MODE read that is not APP, then APP) | Leave as is: only a failed I2C transaction counts |
-| `PBMs` timeout byte | Changed to 0x32 on 2026-11-24 (session 2). Checked against TRM Table 4-15 (page 76: "recommended to always use 0x32 ... 5 seconds, LSB of 100 ms") and SLVAFV8A (Table 4-1 lists 0x31 as "3.1 seconds"; the byte listings of steps 4 and 5 send 0x32; the step 9 read-back shows 0x31). **0x32 has not run on hardware; every load so far, stages 5 and 6 included, sent 0x31.** A retest needs the user's go-ahead |
+| `PBMs` timeout byte | Changed to 0x32 on 2026-11-24 (session 2). Checked against TRM Table 4-15 (page 76: "recommended to always use 0x32 ... 5 seconds, LSB of 100 ms") and SLVAFV8A (Table 4-1 lists 0x31 as "3.1 seconds"; the byte listings of steps 4 and 5 send 0x32; the step 9 read-back shows 0x31). Retested on hardware the same day, see stage 7 |
 | Is the branch finished | Not yet. `scripts/integrate.py` stays unrun until the user confirms |
 | `PBMe`, DATA read-back, and ReadyForPatch; coverage of `TPS25751.cpp`; `Wire2` dump; `Wire2` restore sketch; stage 4 with a power cycle | Deferred by the user to later sessions, each to be decided there |
 
@@ -1318,6 +1318,28 @@ Ordered from safe to destructive. Each stage states its recovery.
    LPI2C1, so the pin read the plan marked as unverified failed its check. Open item,
    done 2026-11-24: the SDA and SCL part of that diagnostic was removed; the LPI2C1
    register values stay. No code was changed in stage 6 itself.
+
+Stage 7, the `PBMs` timeout byte 0x32 on hardware, 2026-11-24, branch commit `91e1474`
+(`fix(patch-loader): send the recommended 0x32 PBMs timeout byte`), Teensy 4.0, board on
+the 18650 pack, user's go-ahead for the retest and its EEPROM writes (`zero`, `pb`).
+Procedure: stage 6 part B. The example was built with the real low-region image
+(`..._F8091166_lowRegion.bin`, SHA-256 `60c6cdd8...77772c`), the checked-in placeholder
+header restored afterwards. Result: passed.
+
+| Step | Result |
+|---|---|
+| Start, `r` | MODE APP; VERSION 0xF8091166; BOOT_FLAGS `18 00 F0 A2 C1`; both pointers valid; both `[offset]` words 0; `FLvy` Success on both regions |
+| `zero` | Both pointer writes Success; both pointers read 0 |
+| `x`, rounds 1 to 5 | Each: `ResetTimeout` (6326 or 6327 ms); MODE `PTCH`; VERSION 0xF8091100; BOOT_FLAGS `F8 00 60 02 C1` |
+| `l`, rounds 1 to 5 | Each: Success in 1454 or 1455 ms; MODE `APP `; VERSION 0xF8091166; BOOT_FLAGS `F8 00 F0 C2 C1`. Host I2C line, identical in all five: `LPI2C1 MSR=0x00000301 MCR=0x00000001 MFSR=0x00000000 MCFGR1=0x00000001` |
+| `pb` | Success in 52120 ms, last target High; `FLwd` 902 at 20.6 ms; no failed call |
+| `r` | Dump identical to `..._F8091166_fullFlash.bin` (31744 bytes); both pointers valid; `FLvy` Success |
+| `x` | `coldReset()` Success; APP after 1938 ms; VERSION 0xF8091166; BOOT_FLAGS `18 00 F0 A2 C1` |
+
+Verified: the controller accepts 0x32 in `PBMs` (no `PatchStartStatus` 0x06, "Invalid
+timeout value") and loads the patch; five of five loads, with timing and register values
+matching the five loads of stage 6 with 0x31. Not shown: any benefit of 0x32 over 0x31;
+both work on this board. The board is back in its starting state.
 
 Two physical points were confirmed on 2026-11-22. First, the EEPROM can be reprogrammed
 in place with a SOIC8 clip, so `write-flash.zsh` (`24LC256@SOIC8`) is a recovery path

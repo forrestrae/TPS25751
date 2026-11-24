@@ -127,7 +127,7 @@ void test_load_follows_the_documented_sequence()
     // Step 2: MODE reads PTCH.
     TEST_ASSERT_TRUE(r.dev.isRead(log[1], REG_MODE));
     // Steps 4 to 9: the PBMs configuration in DATA, little-endian bundle size,
-    // target 0x30, timeout 0x32 (TRM Table 4-15; not yet run on hardware), then PBMs, its COMMAND
+    // target 0x30, timeout 0x32 (TRM Table 4-15; hardware stage 7), then PBMs, its COMMAND
     // poll, and DATA read at once (steps 8 and 9 read DATA right after the
     // COMMAND clear).
     const uint8_t config[] = {0x09, 6, 100, 0, 0, 0, 0x30, 0x32};

@@ -187,7 +187,7 @@ PatchLoadStatus TPS25751PatchLoader::loadPatchBundle(const uint8_t* image, size_
     config[2] = static_cast<uint8_t>((length >> 16) & 0xFF);
     config[3] = static_cast<uint8_t>((length >> 24) & 0xFF);  // bundleSize MSB
     config[4] = PBM_I2C_TARGET;  // 0x30
-    config[5] = PBM_TIMEOUT;     // 0x32 (not yet run on hardware)
+    config[5] = PBM_TIMEOUT;     // 0x32 (five loads on hardware, stage 7)
 
     TPS_DEBUG_INFO(DEBUG_CAT_TASK,
         "PBM: step 4-9 — issuing PBMs (bundleSize=%u, target=0x%02X, timeout=0x%02X)",

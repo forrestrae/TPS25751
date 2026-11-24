@@ -242,8 +242,8 @@ bound, a COMMAND poll across a `millis()` wrap, and an I2C failure at each trans
 it fails against the earlier loader), a controller modelled off the bus for those 20 ms,
 at least 500 µs between the last burst chunk and the next transaction in both modes, the
 DATA retry and its cap, the MODE poll through failed and PTCH reads and both outcomes at
-its cap, both caps across a `millis()` wrap, a `PBMc` that takes longer than the 200 ms
-default timeout, every `PatchLoadStatus`, `debugPrint()`, the PBMs configuration bytes,
+its cap, both caps and the IRQ ready wait across a `millis()` wrap, a `PBMs` and a `PBMc`
+that each take longer than the 200 ms default timeout, every `PatchLoadStatus`, `debugPrint()`, the PBMs configuration bytes,
 and IRQ mode.
 
 ### Sequencer Tests: the EEPROM Updater
@@ -804,9 +804,9 @@ Third measurement, 2026-11-23 (1303 tests), the first recorded here with
 `updateRegion()`: 98% of lines overall, every file at 93% or more, and the updater
 at 100% (527 of 527 lines, 155 tests in its suite).
 
-Fourth measurement, 2026-11-23 (1334 tests), with `TPS25751.cpp` and
+Fourth measurement, 2026-11-23 (1336 tests), with `TPS25751.cpp` and
 `TPS25751PatchLoader.cpp` in the native build: 93% of lines overall (5614 of 6026).
-`TPS25751PatchLoader.cpp` is at 99% (171 of 172 lines, 17 tests); it misses only the
+`TPS25751PatchLoader.cpp` is at 99% (171 of 172 lines, 19 tests); it misses only the
 `default:` of `mapTaskStatus()`, which no caller reaches.
 `TPS25751.cpp` is at 32% (165 of 515 lines, 14 tests in `test_TPS25751Core`): the
 register read and write, the task calls, and the burst are covered; the typed
@@ -863,6 +863,7 @@ Tests are successful when:
 | 1.7 | 2026-11-23 | Claude Code | Tests of the AppConfigOffset checks of `updateRegion()`, and the coverage numbers after them |
 | 1.8 | 2026-11-23 | Claude Code | The Wire fake, the core and patch-loader suites, `TPS25751.cpp` and `TPS25751PatchLoader.cpp` in the native build, and the fourth coverage measurement |
 | 1.9 | 2026-11-23 | Claude Code | The Wire fake follows the Teensy 4 driver's codes and limits, with what it does not model; the new core and loader tests; the fourth measurement rerun (1334 tests) |
+| 1.10 | 2026-11-23 | Claude Code | Loader tests of a slow `PBMs` and of the IRQ ready wait across a `millis()` wrap; the fourth measurement rerun (1336 tests) |
 
 ---
 

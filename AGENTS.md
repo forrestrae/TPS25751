@@ -846,7 +846,7 @@ The first run, on 2026-11-19, measured 84% of lines, with 18 files under the
 >90% target. After nine new suites and additions to eleven more, the same day's
 run measured 98% (1063 tests), with every file at 93% or more. On 2026-11-23,
 with `TPS25751.cpp` and `TPS25751PatchLoader.cpp` added to the native build, it
-measured 93% (1334 tests): the patch loader at 99%, the EEPROM updater at 100%,
+measured 93% (1336 tests): the patch loader at 99%, the EEPROM updater at 100%,
 and `TPS25751.cpp` at 32%, because its typed register wrappers have no tests of
 their own. The verify gate and CI do not run it.
 

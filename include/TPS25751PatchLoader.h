@@ -35,8 +35,11 @@ class TPS25751;  ///< forward declaration — full type included by TPS25751Patc
 /// NO length byte — unlike every other TPS25751 write (see burstWrite docs).
 constexpr uint8_t PBM_I2C_TARGET = 0x30;
 
-/// Timeout value written to the PBMs session-config byte (SLVAFV8A Table 4-2,
-/// ~3.1 s per the app note).
+/// Timeout value written to the PBMs session-config byte. SLVAFV8A Table 4-1
+/// (page 8) lists 0x31 as "3.1 seconds", but its byte trace below the table
+/// sends 0x32. TRM SLVUCR8B Table 4-15 gives the byte in 100 ms units, which
+/// makes 0x31 4.9 s, and recommends 0x32 (5 s). The value is unchanged from
+/// the first release of the loader.
 constexpr uint8_t PBM_TIMEOUT = 0x31;
 
 /// 4CC command code to start a Patch Burst Mode session.
@@ -169,7 +172,7 @@ public:
     explicit TPS25751PatchLoader(TPS25751& pd, int irqPin = -1);
 
     /**
-     * @brief Execute the full 17-step PBM sequence (SLVAFV8A §4.1)
+     * @brief Execute the full 17-step PBM sequence (SLVAFV8A section 4.1)
      *
      * @param image  Pointer to the patch-bundle byte array (low-region binary
      *               produced by TI's USBCPD Application Customization Tool —
@@ -179,7 +182,8 @@ public:
      * @return Detailed per-step outcome; inspect PatchLoadStatus for the
      *         precise failure point.
      *
-     * @see SLVAFV8A §4.1 (17-step PBM sequence, SLVAFV8A Tables 4-1 / 4-2)
+     * @see SLVAFV8A section 4.1 (the 17-step PBM sequence) and Table 4-1 (the
+     *      PBMs configuration); TRM SLVUCR8B Table 4-15 (PBMs) and Table 4-16 (PBMc)
      */
     PatchLoadStatus loadPatchBundle(const uint8_t* image, size_t length);
 

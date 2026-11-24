@@ -206,7 +206,8 @@ PatchLoadStatus TPS25751PatchLoader::loadPatchBundle(const uint8_t* image, size_
         return _lastStatus;
     }
 
-    // PatchStartStatus is DATA byte 0 = result.returnCode (SLVAFV8A Table 4-2)
+    // PatchStartStatus is DATA byte 0 = result.returnCode (TRM SLVUCR8B Table
+    // 4-15; SLVAFV8A step 9, page 10)
     TPS_DEBUG_INFO(DEBUG_CAT_TASK,
         "PBM: PBMs complete, PatchStartStatus=0x%02X", pbmsResult.returnCode);
 

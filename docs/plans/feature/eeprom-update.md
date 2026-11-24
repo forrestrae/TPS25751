@@ -475,9 +475,9 @@ written. A word that does not read 0 before its pointer write stops the pass wit
 `FLvy`.
 
 Writing the AppConfigOffset words uses the same four-byte write and neighbor check as
-the pointers. Whether BOOT_STATUS reports I2C EEPROM Present for a blank device after a
-PBM boot is inferred; stage 5 confirms it. If it does not, pre-flight check 2 is dropped
-for this call only.
+the pointers. BOOT_STATUS reports I2C EEPROM Present after a PBM boot: verified in
+stage 5 on an EEPROM with both pointers 0, so pre-flight check 2 stays. An erased
+EEPROM was not tested.
 
 ### `coldReset()`
 
@@ -671,7 +671,7 @@ updater suite has 131 tests. Two review nits are carried into Batch 3:
 Status, 2026-11-23: implemented; the review found no blocker and its findings are
 fixed; three of the four decisions that followed it are implemented (see the table
 below); the re-review of `c5c5376..85bab56` found the range clean and ready for stage
-5; stage 5 is pending, and `programBlank()` has not run on hardware.
+5; stage 5 passed on 2026-11-23 with one deviation (see its result).
 `src/TPS25751EepromUpdater.cpp` has 100% line coverage (506 of 506 lines), the updater
 suite has 149 tests, and the native run has 1297. The example gained `l` (a PBM load while MODE reads
 PTCH; it loads the controller's RAM only), `pb` (`programBlank()`), and `zero` (both
@@ -771,6 +771,11 @@ open:
    holds only if an `FLrd` leaves the write address alone and a 4-byte `FLwd` advances
    it by four; with an `FLrd` that moves the address it is 0x040C. The sentence should
    be worded as conditional with the next change to that file.
+
+Open after stage 5, 2026-11-23: the plan text of `zero` and the notes of the example
+still say that PTCH after a reset with no valid pointer is "not yet observed on this
+board"; stage 5 observed it. The example's notes on `l` do not yet say that the load
+reports `I2cError` and that the Teensy needs a restart before `pb`.
 
 Stage 5 should also read 0x03C0 to 0x03FF and 0x07C0 to 0x07FF in its dump. The two
 AppConfigOffset writes are the first `FLwd` calls that start in the middle of a page,
@@ -1032,6 +1037,56 @@ Ordered from safe to destructive. Each stage states its recovery.
    Recovery, in order: `l` then `pb` from PTCH; `examples/load-patch-bundle` followed
    by `pb`; `write-flash.zsh` with the clip, which needs the stack apart.
 
+   Result, 2026-11-23, branch commit `94faab3`, Teensy 4.0, board on the 18650 pack:
+   passed with one deviation, and the board is back in its starting state. The
+   deviation: `l` loaded the patch but reported `I2cError`, and the Teensy had to be
+   restarted before the controller could be read again (see below).
+
+   | Step | Result |
+   |---|---|
+   | Start | Dump identical to `..._F8091166_fullFlash.bin`; both pointers valid; VERSION 0xF8091166 |
+   | A1, `zero` (F8091164 build) | Both pointer writes Success; rows at 0x0000 and 0x0400 read `00 00 00 00` then 0xFF; 2 `FLad`, 2 `FLwd`, 10 `FLrd`, 17.7 ms each, every return code 0x00 |
+   | A1, `r` | Dump equals the full-flash image with both pointer words 0; no other byte changed; `selectTargetRegion()` returned `NoBootableRegion` |
+   | A2, `pb` with F8091164 | Success in 51943 ms; both pointers valid, both words 0; `FLrd` 1814 at 17.7 ms (1810 by `programBlank()`, 4 by the example afterwards), `FLad` 10, `FLwd` 898 at 20.7 ms (maximum 20.7 ms), `FLvy` 2 at 595 ms; no busy result, every return code 0x00 |
+   | A2, `r` | Whole dump equals the expected image: F8091164 at 0x0800 and 0x4400, the last 64 bytes of each old bundle unchanged, no other byte changed |
+   | A3, `x` | `coldReset()` Success; `GAID` `I2CError` after 1276 ms; APP after 1938 ms; VERSION 0xF8091164; BOOT_FLAGS `18 00 F0 A2 C1`, EEPROM Loaded from Low |
+   | B1, `zero` (F8091166 build) | As A1 |
+   | B1, `x` | `GAID` `I2CError` after 1275 ms; `coldReset()` returned `ResetTimeout` after 6325 ms; MODE `PTCH`; VERSION 0xF8091100; BOOT_FLAGS `F8 00 60 02 C1`: Patch Config Source None Loaded, I2C EEPROM Present 1, Region 0 and Region 1 Attempted 1 and Invalid 1 |
+   | B2, `l` | `loadPatchBundle()` returned `I2cError` after 1431 ms: COMMAND cleared after `PBMc`, then the DATA read that `executeCommand()` makes on completion returned 28 of 65 bytes. Every later read from the Teensy failed with an address NACK, in three `r` runs over 47 s |
+   | B2, after restarting the Teensy | MODE `APP`; VERSION 0xF8091166; BOOT_FLAGS `F8 00 F0 C2 C1`: Patch Config Source I2C Loaded, I2C EEPROM Present 1, both region flags as before; dump unchanged, with both pointers 0 |
+   | B3, `pb` with F8091166 | Success in 52118 ms; `FLrd` 1822 (1818 by `programBlank()`), `FLad` 10, `FLwd` 902, `FLvy` 2 at 598 ms; no busy result |
+   | B3, `r` | Dump identical to `..._F8091166_fullFlash.bin` (31744 bytes, SHA-256 `a3e549ca...3096fdaec3`) |
+   | B4, `x` | `coldReset()` Success; `GAID` `I2CError` after 1276 ms; APP after 1939 ms; VERSION 0xF8091166; BOOT_FLAGS `18 00 F0 A2 C1`, as in stage 1 |
+
+   Verified by this stage: `programBlank()` on the device, in the order decided on
+   2026-11-23 and with the task counts given in the programBlank section, once with
+   the controller running from an EEPROM boot and once after a PBM load; a controller
+   that finds no valid pointer at a restart comes up in PTCH and marks both regions
+   Invalid; BOOT_FLAGS reports I2C EEPROM Present in PTCH and after the PBM load, so
+   pre-flight check 2 stays; the flash tasks work in APP after a PBM load; a PBM load
+   followed by `programBlank()` and a restart returns the board to the full-flash
+   layout; `coldReset()` under the observed-restart rule returned Success for each
+   restart into APP and `ResetTimeout` for the restart into PTCH.
+
+   Defect found, not fixed: the PBM load reports failure although it succeeded. The
+   controller left the bus while `executeCommand()` read DATA after `PBMc`, before the
+   20 ms delay of the app note's step 15, so `loadPatchBundle()` returned at that point
+   and skipped its own checks of DATA and MODE. `l` then printed that the load did not
+   complete. The code is `TPS25751PatchLoader` and `TPS25751::executeCommand()`, both
+   outside the batches of this plan, but `l` is the first recovery this plan names for
+   PTCH.
+
+   Also found, cause not established: after that cut-off read no I2C transaction from
+   the Teensy was acknowledged until the Teensy restarted, while the controller was
+   in APP. That the fault is on the host side, in the Teensy's I2C driver or in how
+   the library leaves it after a short read, is inferred from the restart curing it;
+   the controller's state between the load and the restart was not observed. Until it
+   is understood, a PBM load from this example needs a Teensy restart before `pb`.
+
+   Not shown by this stage: programming an erased EEPROM, because the bundles and the
+   words were in place; that an AppConfigOffset write changes a value; a busy `FLwd`
+   or any failure code; a boot after a loss of power.
+
 Two physical points were confirmed on 2026-11-22. First, the EEPROM can be reprogrammed
 in place with a SOIC8 clip, so `write-flash.zsh` (`24LC256@SOIC8`) is a recovery path
 that needs no rework. Second, the board runs from the 18650 battery pack, so the Teensy
@@ -1056,8 +1111,9 @@ needs a qualification:
 - `load-patch-bundle` has run successfully on this board with the EEPROM fitted, so a
   PBM load is a recovery from PTCH that needs no teardown. After it, with the Low
   pointer 0 and the High pointer valid, `u` selects Low and passes pre-flight check 4.
-  Pre-flight check 2 (I2C EEPROM Present in BOOT_FLAGS after a PBM boot) is still
-  inferred; stage 5 confirms it.
+  Pre-flight check 2 (I2C EEPROM Present in BOOT_FLAGS after a PBM boot) was verified
+  in stage 5. Stage 5 also showed that the load reports `I2cError` although it
+  succeeds, and that the Teensy must be restarted afterwards; see the stage 5 result.
 - The EEPROM is reachable from the Teensy directly on `Wire2`.
 
 Stages 2, 3, and 4 ran from the 18650 pack. Open, not decided: a direct `Wire2` dump

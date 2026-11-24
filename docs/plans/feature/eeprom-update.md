@@ -838,13 +838,21 @@ Fix design, not yet implemented or reviewed:
   SCL levels right after a failed load, then retries MODE with spacing, then calls
   `Wire.begin()` and retries, so that a repeat of the fault on hardware shows which
   side it is on.
-- The loader and `TPS25751.cpp` are not compiled in the native environment, so the fix
-  has no native test unless a Wire fake is added; that choice is open.
+- Decided 2026-11-23: the fix adds a Wire fake to the native test support, so that
+  `TPS25751.cpp` and `TPS25751PatchLoader.cpp` compile natively and the loader gets a
+  suite. The suite pins the order and timing of the transactions after `PBMc`. The
+  target is above 90% line coverage of `TPS25751PatchLoader.cpp`; for `TPS25751.cpp`
+  the tests cover the task and burst paths this fix touches, and the measured figure
+  for the rest of that file is reported, not padded.
+- At the cap of the MODE poll the loader returns `NotInAppMode` if the last MODE read
+  that succeeded was not APP, and `I2cError` if no read succeeded.
+- The poll of INT_EVENT1.PatchLoaded in TRM Figure 5-1 is not added; the app note's
+  flow goes from DATA to MODE without it.
 - A hardware retest needs the controller in PTCH again, which means `zero`, a reset,
   `l`, and `pb`: EEPROM writes that need their own go-ahead.
 
 Review of the decision 3 range (`3a9b3f6..8e0de59`) was started and stopped before it
-reported; it must be rerun.
+reported; it was restarted on 2026-11-23.
 
 ## Tests
 

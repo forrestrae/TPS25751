@@ -746,9 +746,9 @@ maximum (for example `TPS25751Status.cpp` 220 and 227, `TPS25751TypeCState.cpp`
 second pass did not target, such as `TPS25751InterruptEvent.cpp` (93%) and
 `TPS25751ActivePDOContract.cpp` (95%), were left as they were.
 
-Third measurement, 2026-11-23 (1294 tests), the first recorded here with
+Third measurement, 2026-11-23 (1297 tests), the first recorded here with
 `TPS25751EepromUpdater.cpp` in the report: 98% of lines overall, every file at
-93% or more, and the updater at 100% (487 of 487 lines, 146 tests in its suite).
+93% or more, and the updater at 100% (506 of 506 lines, 149 tests in its suite).
 
 ### Regression Testing
 

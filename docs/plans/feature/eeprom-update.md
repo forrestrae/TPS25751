@@ -513,7 +513,7 @@ measurement.
 Measurement, stage 3, 2026-11-23, two resets with the same result. COMMAND kept
 reading nonzero for 1277 ms after `GAID`, then the controller stopped acknowledging
 I2C: the executor's COMMAND poll failed and returned `I2CError`, and the MODE read
-100 ms later was not acknowledged either. MODE read APP 1938 ms after `GAID`. On this
+100 ms later failed as well (error 4; see the investigation note of 2026-11-23). MODE read APP 1938 ms after `GAID`. On this
 board the restart is therefore visible as a failed I2C transaction, and the cases
 feared above, a `Timeout` with COMMAND never clearing and a `Success` before the
 restart, did not occur.
@@ -804,6 +804,47 @@ Stage 5 should also read 0x03C0 to 0x03FF and 0x07C0 to 0x07FF in its dump. The 
 AppConfigOffset writes are the first `FLwd` calls that start in the middle of a page,
 and an over-long write there would wrap to the start of the 24LC256 page, outside the
 16 bytes the read-back covers.
+
+Investigation of the PBM-load defect, 2026-11-23. The user decided to fix the defect
+on this branch. A read-only study of the app note SLVAFV8A, the TRM, the Teensy I2C
+driver (`WireIMXRT.cpp`, framework 1.162.0), and the stage 5 logs found:
+
+1. Established: `executeCommand()` reads DATA as soon as COMMAND clears, and both TI
+   documents put 20 ms between `PBMc` completing and the DATA read (SLVAFV8A page 11,
+   steps 13 to 15, and the code on page 18; TRM Figure 5-1, page 88). The loader's own
+   20 ms delay comes after that read. Neither document says the controller leaves the
+   bus after `PBMc`.
+2. Correction to the stage 5 notes: the driver source does not support a stuck Teensy.
+   Every later read failed with error 2, which the driver returns only for a NACK on a
+   free bus; each held-line or stuck-peripheral path it has returns 4. The Teensy
+   restart curing it is confounded with elapsed time, since nothing read the
+   controller between 47 s after the load and the restart. The cause stays unknown,
+   and a controller that did not acknowledge its address fits the codes as well.
+3. Correction to the coldReset measurement: the MODE read 100 ms after the failed
+   COMMAND poll returned error 4 (arbitration lost or SCL held low), not a NACK. The
+   observed-restart rule is unaffected, because it counts any failed read.
+4. Every failing episode was three reads within 1 ms. A retry spaced by milliseconds
+   and a `Wire.begin()` were never tried, so neither is ruled in or out.
+
+Fix design, not yet implemented or reviewed:
+
+- `TPS25751` gains a task call that writes DATA and COMMAND and waits for COMMAND to
+  clear without reading DATA; `executeCommand()` becomes that call plus the DATA read,
+  with no change for its other callers.
+- `loadPatchBundle()` issues `PBMc` through the new call, waits 20 ms, reads DATA with
+  retries every 10 ms, then polls MODE every 10 ms until APP, tolerating failed reads,
+  each with a cap of about 5 s. The documents give no upper bound; 5 s is a choice.
+- The example's `l` prints the host LPI2C1 registers (MSR, MCR, MFSR) and the SDA and
+  SCL levels right after a failed load, then retries MODE with spacing, then calls
+  `Wire.begin()` and retries, so that a repeat of the fault on hardware shows which
+  side it is on.
+- The loader and `TPS25751.cpp` are not compiled in the native environment, so the fix
+  has no native test unless a Wire fake is added; that choice is open.
+- A hardware retest needs the controller in PTCH again, which means `zero`, a reset,
+  `l`, and `pb`: EEPROM writes that need their own go-ahead.
+
+Review of the decision 3 range (`3a9b3f6..8e0de59`) was started and stopped before it
+reported; it must be rerun.
 
 ## Tests
 

@@ -1462,7 +1462,8 @@ host-run tests that inject a fault at every task, and `src/TPS25751.cpp`, which 
 - Hardware stages 1 to 4 verified the layout, the result offsets, a 4-byte `FLwd`, a full
   region update, `updateBothRegions()`, `GAID`, and the boot region after a cut at each
   step; the update sequence then had 1365 tasks for 14336 bytes. Stage 5 verified
-  `programBlank()` with its 2732 tasks, from an EEPROM boot and after a PBM load, the I2C
+  `programBlank()` from an EEPROM boot with a 14272-byte image (2720 tasks, 51943 ms) and
+  after a PBM load with a 14336-byte image (2732 tasks, 52118 ms), the I2C
   EEPROM Present flag after a PBM boot, and PTCH after a restart with no valid pointer.
   The three AppConfigOffset reads `updateRegion()` makes since 2026-11-23, which bring the
   update to 1368 tasks, have not run on hardware.

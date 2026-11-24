@@ -52,7 +52,8 @@
  * at each step of an update the controller boots the region the state table
  * predicts. Stage 5 ran programBlank() twice, once from an EEPROM boot and
  * once after a PBM load, on an EEPROM whose pointers zero had written to 0,
- * with the task counts its Doxygen gives; a controller that finds no valid
+ * with the task counts the sequence gives for each image length (2720 for
+ * 14272 bytes, 2732 for 14336); a controller that finds no valid
  * pointer at a restart came up in PTCH. Not observed: a busy FLwd, any FLad
  * or FLwd failure code, whether an FLrd moves the write address, programming
  * an erased EEPROM, and the three AppConfigOffset reads updateRegion() makes
@@ -866,8 +867,11 @@ public:
      * There is no step 4: both pointers stay valid. The first failure ends the
      * call, and nothing is written after it. With no retry, a 14336-byte image
      * issues 2732 tasks: 2 FLrd of pre-flight, 8 for the two words, and 1361
-     * per region. Hardware stage 5 ran exactly that sequence (1818 FLrd, 902
-     * FLwd, 10 FLad, 2 FLvy) in 51943 and 52118 ms.
+     * per region; 1818 FLrd, 902 FLwd, 10 FLad, and 2 FLvy. Hardware stage 5
+     * ran that sequence with the F8091166 image of 14336 bytes in 52118 ms,
+     * and with the F8091164 image of 14272 bytes (446 chunks, 892 compare
+     * reads per region, so 2720 tasks: 1810 FLrd, 898 FLwd, 10 FLad, 2 FLvy)
+     * in 51943 ms.
      *
      * Why both words first. The last write before each bundle FLad is then
      * the pointer erase, as in updateRegion(), so the pointer-row checks of
@@ -939,9 +943,10 @@ public:
      * advances it by four, the bytes land at 0x0404, the four unused bytes
      * after the High pointer word; if an FLrd moves the address to the
      * address it read plus 16, they land at 0x040C. Neither is documented,
-     * and after a PBM load the address is not documented either. The word's read-back then stops the call unless the
-     * word already read 0. The fake starts with no write address and rejects
-     * that FLwd with 0x03, so no sweep shows where the bytes would land.
+     * and after a PBM load the address is not documented either. The word's
+     * read-back then stops the call unless the word already read 0. The fake
+     * starts with no write address and rejects that FLwd with 0x03, so no
+     * sweep shows where the bytes would land.
      *
      * The progress callback runs as for updateRegion(), once per pass;
      * lastTarget() names the region in progress. The word writes make no

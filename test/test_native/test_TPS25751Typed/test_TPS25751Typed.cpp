@@ -391,6 +391,56 @@ void test_read_register_by_address_unknown_address_makes_no_bus_traffic()
     TEST_ASSERT_EQUAL_size_t(0, r.dev.log.size());
 }
 
+// A factory that knows no register, to reach the check in
+// readRegisterByAddress() for an address that has register info but no
+// decoder class. TPS25751RegisterFactoryImpl covers every address, so only an
+// injected factory can return null here. tearDown() restores the default.
+class NullFactory : public TPS25751RegisterFactory
+{
+public:
+    std::unique_ptr<TPS25751Register> createRegister(TPS25751Registers::Address) override { return nullptr; }
+    std::unique_ptr<TPS25751Register> createRegister(TPS25751Registers::Address, const uint8_t *, size_t) override
+    {
+        return nullptr;
+    }
+    std::unique_ptr<TPS25751Register> createRegister(const TPS25751Registers::RegisterInfo &) override
+    {
+        return nullptr;
+    }
+};
+
+void test_read_register_by_address_without_a_decoder_makes_no_bus_traffic()
+{
+    Rig r;
+    r.load(Address::MODE);
+    TPS25751Factory::setFactory(std::unique_ptr<TPS25751RegisterFactory>(new NullFactory()));
+    TEST_ASSERT_NULL(r.pd.readRegisterByAddress(Address::MODE).get());
+    TEST_ASSERT_NULL(r.pd.readModeRegister(false).get());
+    TEST_ASSERT_EQUAL_size_t(0, r.dev.log.size());
+}
+
+// requestFrom() reports the full size + 1 bytes but the buffer holds none:
+// the check before the length byte must refuse the read.
+void test_read_refuses_an_empty_buffer_after_a_full_count()
+{
+    Rig r;
+    r.load(Address::MODE);
+    Wire.rxMissing = TPS25751Registers::getRegisterSize(Address::MODE) + 1;
+    TEST_ASSERT_NULL(r.pd.readRegisterByAddress(Address::MODE).get());
+    assertRegisterRead(r.dev.log, Address::MODE, "empty buffer");
+}
+
+// The length byte arrives but the last data byte does not: the per-byte check
+// must refuse the read rather than return a half-filled register.
+void test_read_refuses_a_buffer_one_byte_short_of_the_count()
+{
+    Rig r;
+    r.load(Address::MODE);
+    Wire.rxMissing = 1;
+    TEST_ASSERT_NULL(r.pd.readRegisterByAddress(Address::MODE).get());
+    assertRegisterRead(r.dev.log, Address::MODE, "one byte short");
+}
+
 void test_read_register_as_returns_the_typed_object()
 {
     Rig r;
@@ -462,7 +512,11 @@ void test_debug_setters_reach_the_debug_state()
 }
 
 void setUp() {}
-void tearDown() {}
+void tearDown()
+{
+    // Drop any injected factory; getInstance() recreates the default.
+    TPS25751Factory::setFactory(nullptr);
+}
 
 #define RUN_READ(Name) RUN_TEST(test_typed_read_##Name)
 #define RUN_WRITE(Name) RUN_TEST(test_typed_write_##Name)
@@ -506,6 +560,9 @@ int main()
     RUN_TEST(test_write_round_trip_through_the_fake);
     RUN_TEST(test_read_register_by_address_covers_every_register);
     RUN_TEST(test_read_register_by_address_unknown_address_makes_no_bus_traffic);
+    RUN_TEST(test_read_register_by_address_without_a_decoder_makes_no_bus_traffic);
+    RUN_TEST(test_read_refuses_an_empty_buffer_after_a_full_count);
+    RUN_TEST(test_read_refuses_a_buffer_one_byte_short_of_the_count);
     RUN_TEST(test_read_register_as_returns_the_typed_object);
     RUN_TEST(test_address_keyed_read_rejects_a_wrong_length);
     RUN_TEST(test_address_keyed_write_rejects_a_wrong_length);

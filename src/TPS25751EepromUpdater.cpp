@@ -737,13 +737,41 @@ EepromUpdateStatus TPS25751EepromUpdater::coldReset(uint32_t waitForAppMs)
         return EepromUpdateStatus::CommandRejected;
     }
 
+    // Restart witness. The controller reads APP before and after a restart, so
+    // an APP read proves nothing by itself: a GAID the controller accepted
+    // without restarting, or rejected in a way the executor reports as
+    // success, would look like a completed restart, and the caller would trust
+    // an EEPROM boot that never happened. Success therefore needs evidence
+    // that the controller went away: an I2CError on the GAID task, or a failed
+    // MODE read below.
+    //
+    // Evidence for the rule: hardware stages 3 and 4, one board, firmware
+    // F8091166, saw I2CError on the GAID poll 1276 to 1277 ms after GAID and
+    // APP 1938 to 1939 ms after it, every time.
+    // Cost: a restart that fits between two MODE reads, or a firmware that
+    // finishes the GAID handshake before resetting and is back before the
+    // first read, is reported as ResetNotObserved although it happened. If
+    // that is ever seen, revisit GAID_SETTLE_MS and GAID_MODE_POLL_MS or add a
+    // timing-independent witness. Decision of 2026-11-23, recorded in the
+    // coldReset section of docs/plans/feature/eeprom-update.md.
+    bool sawRestart = (result.status == TPS25751TaskStatus::I2CError);
+
     const uint32_t start = _exec.nowMs();
     _exec.delayMs(GAID_SETTLE_MS);
 
     TPS25751Mode mode;
     for (;;) {
-        // A failed read is expected while the controller reboots.
-        if (_exec.readMode(mode) && mode.isApplicationMode()) {
+        // A failed read is expected while the controller reboots, and is the
+        // evidence the rule above needs.
+        if (!_exec.readMode(mode)) {
+            sawRestart = true;
+        } else if (mode.isApplicationMode()) {
+            if (!sawRestart) {
+                TPS_DEBUG_ERROR(DEBUG_CAT_TASK,
+                                "EEPROM: MODE reads APP %lu ms after GAID returned, but no restart was seen",
+                                static_cast<unsigned long>(_exec.nowMs() - start));
+                return EepromUpdateStatus::ResetNotObserved;
+            }
             _lastStep = EepromUpdateStep::Done;
             TPS_DEBUG_INFO(DEBUG_CAT_TASK, "EEPROM: MODE reads APP %lu ms after GAID returned",
                            static_cast<unsigned long>(_exec.nowMs() - start));
@@ -881,6 +909,7 @@ const char* TPS25751EepromUpdater::toString(EepromUpdateStatus s)
         case EepromUpdateStatus::OldPointerEraseFailed:   return "OldPointerEraseFailed";
         case EepromUpdateStatus::PointerNeighborsChanged: return "PointerNeighborsChanged";
         case EepromUpdateStatus::ResetTimeout:            return "ResetTimeout";
+        case EepromUpdateStatus::ResetNotObserved:        return "ResetNotObserved";
         case EepromUpdateStatus::CommandRejected:         return "CommandRejected";
         case EepromUpdateStatus::CommandTimeout:          return "CommandTimeout";
         case EepromUpdateStatus::I2cError:                return "I2cError";

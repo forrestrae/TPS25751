@@ -4311,12 +4311,13 @@ void test_cold_reset_times_out_when_mode_is_not_app()
 void test_cold_reset_wait_argument()
 {
     // The wait runs from the return of GAID, on the executor's clock, and one
-    // MODE read is always made, after the 100 ms settle time.
+    // MODE read is always made, after the 100 ms settle time. A 50 ms reboot
+    // is over by then, so that read is APP with no failure seen before it.
     {
         FakeCommandExecutor fake;
         fake.rebootDurationMs = 50;
         TPS25751EepromUpdater u(fake);
-        ASSERT_STATUS(EepromUpdateStatus::Success, u.coldReset(0));
+        ASSERT_STATUS(EepromUpdateStatus::ResetNotObserved, u.coldReset(0));
         TEST_ASSERT_EQUAL_size_t(1, fake.modeReads);
         TEST_ASSERT_EQUAL_UINT32(100, fake.nowMs());
     }
@@ -4397,6 +4398,80 @@ void test_cold_reset_cannot_tell_an_undelivered_gaid_from_a_nak()
     TEST_ASSERT_EQUAL_size_t(1, fake.modeReads);
 }
 
+void test_cold_reset_requires_an_observed_restart()
+{
+    // Success needs evidence that the controller went away after GAID: the
+    // executor's I2CError on GAID, or a failed MODE read. APP without either
+    // is ResetNotObserved, returned at the first APP read.
+
+    // GAID completes and MODE reads APP at once: no evidence. The fake scripts
+    // this with a reboot of 0 ms, so no MODE read fails.
+    {
+        FakeCommandExecutor fake;
+        fake.rebootDurationMs = 0;
+        TPS25751EepromUpdater u(fake);
+        ASSERT_STATUS(EepromUpdateStatus::ResetNotObserved, u.coldReset());
+        TEST_ASSERT_EQUAL_size_t(1, fake.resetCount);
+        TEST_ASSERT_EQUAL_size_t(1, fake.modeReads);
+        TEST_ASSERT_EQUAL_UINT32(100, fake.nowMs());
+        ASSERT_STEP(EepromUpdateStep::Reset, u.lastStep());
+    }
+    // A GAID the controller never acted on, with the executor reporting
+    // Success or Timeout: the hazard the rule exists for.
+    {
+        const Fault kinds[] = {Fault::returnCodeOnly(0x00), Fault::timeout()};
+        for (const Fault &kind : kinds) {
+            FakeCommandExecutor fake;
+            fake.failNth("GAID", 0, kind);
+            TPS25751EepromUpdater u(fake);
+            ASSERT_STATUS(EepromUpdateStatus::ResetNotObserved, u.coldReset());
+            TEST_ASSERT_EQUAL_size_t(0, fake.resetCount);
+            TEST_ASSERT_EQUAL_size_t(1, fake.modeReads);
+            ASSERT_STEP(EepromUpdateStep::Reset, u.lastStep());
+        }
+    }
+    // The cost of the rule, pinned: a restart shorter than the 100 ms settle
+    // time happened but is reported as not observed.
+    {
+        FakeCommandExecutor fake;
+        fake.rebootDurationMs = GAID_SETTLE_MS;
+        TPS25751EepromUpdater u(fake);
+        ASSERT_STATUS(EepromUpdateStatus::ResetNotObserved, u.coldReset());
+        TEST_ASSERT_EQUAL_size_t(1, fake.resetCount);
+    }
+    // One failed MODE read is enough evidence.
+    {
+        FakeCommandExecutor fake;
+        fake.rebootDurationMs = GAID_SETTLE_MS + 1;
+        TPS25751EepromUpdater u(fake);
+        ASSERT_STATUS(EepromUpdateStatus::Success, u.coldReset());
+        TEST_ASSERT_EQUAL_size_t(2, fake.modeReads);
+        ASSERT_STEP(EepromUpdateStep::Done, u.lastStep());
+    }
+    // So is an I2CError on GAID with every MODE read succeeding: the sequence
+    // stage 3 saw, when the controller was back before the first read.
+    {
+        FakeCommandExecutor fake;
+        fake.rebootDurationMs = 0;
+        Fault f = Fault::i2cError();
+        f.runTask = true;
+        fake.failNth("GAID", 0, f);
+        TPS25751EepromUpdater u(fake);
+        ASSERT_STATUS(EepromUpdateStatus::Success, u.coldReset());
+        TEST_ASSERT_EQUAL_size_t(1, fake.modeReads);
+    }
+    // A MODE that reads PTCH without ever failing is neither: the call waits
+    // for APP and times out.
+    {
+        FakeCommandExecutor fake;
+        fake.rebootDurationMs = 0;
+        fake.setModeAfterReset("PTCH");
+        TPS25751EepromUpdater u(fake);
+        ASSERT_STATUS(EepromUpdateStatus::ResetTimeout, u.coldReset(500));
+        TEST_ASSERT_EQUAL_UINT32(500, fake.nowMs());
+    }
+}
+
 void test_cold_reset_does_not_touch_the_eeprom()
 {
     Board b;
@@ -4431,13 +4506,14 @@ void test_to_string_covers_every_status()
         {EepromUpdateStatus::OldPointerEraseFailed, "OldPointerEraseFailed"},
         {EepromUpdateStatus::PointerNeighborsChanged, "PointerNeighborsChanged"},
         {EepromUpdateStatus::ResetTimeout, "ResetTimeout"},
+        {EepromUpdateStatus::ResetNotObserved, "ResetNotObserved"},
         {EepromUpdateStatus::CommandRejected, "CommandRejected"},
         {EepromUpdateStatus::CommandTimeout, "CommandTimeout"},
         {EepromUpdateStatus::I2cError, "I2cError"},
     };
     for (const auto &e : all) TEST_ASSERT_EQUAL_STRING(e.name, TPS25751EepromUpdater::toString(e.s));
-    TEST_ASSERT_EQUAL_UINT8(20, sizeof(all) / sizeof(all[0]));
-    TEST_ASSERT_EQUAL_UINT8(19, static_cast<uint8_t>(EepromUpdateStatus::I2cError));
+    TEST_ASSERT_EQUAL_UINT8(21, sizeof(all) / sizeof(all[0]));
+    TEST_ASSERT_EQUAL_UINT8(20, static_cast<uint8_t>(EepromUpdateStatus::I2cError));
     TEST_ASSERT_EQUAL_STRING("Unknown", TPS25751EepromUpdater::toString(static_cast<EepromUpdateStatus>(200)));
 }
 
@@ -4734,6 +4810,7 @@ int main(int, char **)
     RUN_TEST(test_cold_reset_wait_argument);
     RUN_TEST(test_cold_reset_is_safe_across_a_clock_wrap);
     RUN_TEST(test_cold_reset_cannot_tell_an_undelivered_gaid_from_a_nak);
+    RUN_TEST(test_cold_reset_requires_an_observed_restart);
     RUN_TEST(test_cold_reset_does_not_touch_the_eeprom);
 
     RUN_TEST(test_to_string_covers_every_status);

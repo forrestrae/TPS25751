@@ -180,6 +180,7 @@ enum class EepromUpdateStatus : uint8_t {
     OldPointerEraseFailed,    ///< Update step 4: the old region pointer could not be written to 0
     PointerNeighborsChanged,  ///< Bytes 4 to 15 after a pointer, or after an AppConfigOffset word in programBlank(), changed during its write; or the 16 bytes at the target pointer changed while the first chunks of an update were written; or those bytes already held the start of the image before the bundle write
     ResetTimeout,             ///< The controller did not return to APP after GAID
+    ResetNotObserved,         ///< coldReset(): MODE read APP, but the call never saw the controller go away (no I2CError on GAID, no failed MODE read), so it cannot tell a restart from no restart. Confirm with VERSION and BOOT_FLAGS; see coldReset()
     CommandRejected,          ///< The executor reported "!CMD" (task code not recognized)
     CommandTimeout,           ///< The executor saw neither clear nor "!CMD" before the timeout
     I2cError                  ///< An I2C transaction or a register read failed
@@ -960,26 +961,43 @@ public:
      * restarts. The executor result is read as follows:
      * - Success (COMMAND read 0, as it does after the reboot), Timeout, and
      *   I2CError (the controller can NAK while it reboots) all count as "reset
-     *   issued".
+     *   issued". I2CError also counts as having seen the controller go away.
      * - Rejected ("!CMD") returns CommandRejected at once; no reset happened.
      *
      * After a reset was issued the call waits GAID_SETTLE_MS, then reads MODE
      * every GAID_MODE_POLL_MS until it reads APP or @p waitForAppMs has
-     * passed since the GAID task returned. MODE read failures during the wait
-     * are expected and ignored. At least one MODE read is always made. The
+     * passed since the GAID task returned. A failed MODE read counts as having
+     * seen the controller go away. At least one MODE read is always made. The
      * time is taken from the executor's clock and is safe across its wrap.
      *
-     * Two limits follow from that reading. An I2C failure that kept GAID from
-     * reaching the controller looks the same as a NAK during the reboot. And
-     * a MODE read that returns APP before the controller has restarted counts
-     * as "back in APP"; GAID_CMD_TIMEOUT_MS is chosen to outlast the delay
-     * before the restart. Hardware stages 3 and 4 measured the same sequence
-     * every time: COMMAND answered for 1276 to 1277 ms after GAID, then the
-     * controller stopped acknowledging and the executor returned I2CError,
-     * and MODE read APP 1938 to 1939 ms after GAID. Neither limit occurred
-     * there, but the call does not require an observed I2C failure before it
-     * accepts APP. So confirm the restart after a Success: read VERSION (0x0F)
-     * and BOOT_FLAGS (0x2D), which show the bundle and the region that booted.
+     * The call returns Success only when MODE reads APP after it has seen the
+     * controller go away. APP without that evidence returns ResetNotObserved,
+     * and the call returns at that first APP read.
+     *
+     * Why (decided 2026-11-23; docs/plans/feature/eeprom-update.md, coldReset
+     * section). The controller reads APP before and after a restart, so MODE
+     * alone cannot tell a completed restart from a GAID the controller
+     * accepted without restarting, or rejected in a way the executor reports
+     * as success. Without the rule the caller would trust an EEPROM boot that
+     * never happened.
+     *
+     * Evidence. Hardware stages 3 and 4 of the plan, on one board with
+     * firmware F8091166, saw the same sequence on every reset: the executor's
+     * COMMAND poll returned I2CError 1276 to 1277 ms after GAID, and MODE read
+     * APP 1938 to 1939 ms after it. That is one board and one firmware.
+     *
+     * Cost. A restart that completes between two MODE reads without failing
+     * the GAID poll, or a firmware that completes the GAID handshake before it
+     * resets and is back before the first MODE read, is reported as
+     * ResetNotObserved although it happened. The caller then confirms with
+     * VERSION (0x0F) and BOOT_FLAGS (0x2D). If that false negative is ever
+     * seen, revisit GAID_SETTLE_MS and GAID_MODE_POLL_MS, or add a restart
+     * witness that does not depend on timing.
+     *
+     * Remaining limit. An I2C failure that kept GAID from reaching the
+     * controller looks the same as a NAK during the reboot, so Success does
+     * not prove a restart either. Read VERSION and BOOT_FLAGS after any
+     * result, which show the bundle and the region that booted.
      *
      * The call does not change the EEPROM. It sets lastStep() to Reset, and to
      * Done on Success.
@@ -988,8 +1006,10 @@ public:
      *                     the GAID task (default 5000 ms). The call can block
      *                     for up to GAID_CMD_TIMEOUT_MS more while GAID is
      *                     polled.
-     * @return Success when MODE read APP; ResetTimeout when it did not in
-     *         time; CommandRejected when the controller rejected GAID
+     * @return Success when MODE read APP after the controller was seen to go
+     *         away; ResetNotObserved when MODE read APP without that;
+     *         ResetTimeout when MODE did not read APP in time;
+     *         CommandRejected when the controller rejected GAID
      * @see TRM SLVUCR8B Table 4-3, p. 62
      * @see SLVAFL1 Figure 2-2
      */

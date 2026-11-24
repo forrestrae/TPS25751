@@ -20,7 +20,10 @@
 //
 // COMMAND THAT RESTARTS THE CONTROLLER (no EEPROM write)
 //   x    Prints both region pointers, then coldReset(): issues GAID, waits for
-//        APP, and prints the time to APP, MODE, VERSION, and BOOT_FLAGS. The
+//        APP, and prints the time to APP, MODE, VERSION, and BOOT_FLAGS.
+//        coldReset() reports Success only when it saw the controller go away
+//        (a failed I2C transaction) before APP; APP without that is reported
+//        as ResetNotObserved, and x then says to check VERSION and BOOT_FLAGS. The
 //        port disconnects during the restart. Runs at once when a pointer is
 //        valid. When neither is, the controller would come up in PTCH, so x
 //        warns and waits for the line "yes" first.
@@ -1619,6 +1622,11 @@ static void cmdColdReset()
         if (elapsed < 1000) {
             Serial.println(F("[x] Note: under 1000 ms. TRM Table 4-3 gives a typical 1-second delay before the restart, so MODE may have been read before it. Send r in a few seconds and compare."));
         }
+    } else if (s == EepromUpdateStatus::ResetNotObserved) {
+        Serial.print(F("[x] MODE read APP after "));
+        Serial.print(elapsed);
+        Serial.println(F(" ms, but no restart was observed: GAID did not fail and no MODE read failed."));
+        Serial.println(F("[x] The controller may not have restarted. Check VERSION and BOOT_FLAGS below before relying on the bundle in the EEPROM."));
     } else {
         Serial.print(F("[x] APP was not confirmed; coldReset() returned after "));
         Serial.print(elapsed);

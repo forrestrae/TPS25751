@@ -935,7 +935,8 @@ INT_EVENT1 bit only while its INT_MASK1 bit is set (Table 3-8, page 19), and SLV
 says ReadyForPatch is the one interrupt enabled at a cold boot into PTCH (step 1, page
 6). A controller whose mask or event was changed before the load fails the polling-mode
 wait after 5 s although it is ready. A read of INT_EVENT1 and INT_MASK1 in PTCH on the
-board settles it; that needs the user's go-ahead. One related fact is already recorded
+board settles it; that needs the user's go-ahead. Settled for a cold boot into PTCH by
+stage 8: bit 81 was set in all five loads. One related fact is already recorded
 (CONSTRAINTS.md, Read/Write Registers): in APP, the board's configuration sets INT_MASK1
 to `00 … 00 03`, which enables Ready for Patch and Patch Loaded, and INT_EVENT1 read all
 zero. So bit 81 is clear in APP, and a polling-mode load on a controller in APP now ends
@@ -956,10 +957,10 @@ decision record (`b882969`):
 Verification, native only: 1348 tests pass, 30 in the loader suite and 15 in the core
 suite; the three example environments build; line coverage of `TPS25751PatchLoader.cpp`
 is 99% (217 of 218, the unreachable `default:` of `mapTaskStatus()`), and of
-`TPS25751.cpp` 34% (178 of 521), with `writeCommandData()` covered. None of the three
-changes has run on hardware. A hardware retest needs the controller in PTCH, so it is
-stage 7's procedure (`zero`, `x`, `l`, `pb`, `x`) with its EEPROM writes, and needs the
-user's go-ahead.
+`TPS25751.cpp` 34% (178 of 521), with `writeCommandData()` covered. Stage 8, the same
+day, ran stage 7's procedure on hardware with the user's go-ahead: five of five loads
+returned Success, and the Ready for Patch poll, the MODE poll, and the DATA read-back ran
+on the board. Neither `PBMe` path ran, because nothing failed.
 
 Still unverified, and marked so in the code: the new sequence on hardware; which pins the
 driver's pin-low flag covers. The SDA and SCL readout was removed from the `l` diagnostic
@@ -1383,6 +1384,45 @@ Verified: the controller accepts 0x32 in `PBMs` (no `PatchStartStatus` 0x06, "In
 timeout value") and loads the patch; five of five loads, with timing and register values
 matching the five loads of stage 6 with 0x31. Not shown: any benefit of 0x32 over 0x31;
 both work on this board. The board is back in its starting state.
+
+Stage 8, the Ready for Patch poll, the `PBMs` DATA read-back, and `PBMe` on hardware,
+2026-11-24, branch commit `4fcee64` (the session 3 changes), Teensy 4.0 on
+`/dev/cu.usbmodem181764301`, board on the 18650 pack, user's go-ahead for a retest by
+stage 7's procedure with its EEPROM writes. The example was built with the real
+low-region image (SHA-256 `60c6cdd8...77772c`) and flashed through the Teensy Loader;
+the placeholder header was restored afterwards. The example drives `l` in polling mode,
+so steps 1 and 2 ran the INT_EVENT1 and MODE polls. Result: passed.
+
+| Step | Result |
+|---|---|
+| Start, `r` | Dump identical to `..._F8091166_fullFlash.bin` (SHA-256 `a3e549ca...3096fdaec3`); MODE APP; VERSION 0xF8091166; BOOT_FLAGS `18 00 F0 A2 C1`; both pointers valid; both `[offset]` words 0; `FLvy` Success on both regions |
+| `zero` | Both pointer writes Success; `FLrd` 10, `FLad` 2, `FLwd` 2, no failed call |
+| `r` | Dump differs from the full-flash image in bytes 0x0001 and 0x0401 only, the two pointer words, now 0; `FLvy` Success on both regions |
+| `x`, rounds 1 to 5 | Each: `ResetTimeout` (6325 to 6327 ms); `GAID` `I2CError` after 1275 to 1277 ms; MODE `PTCH`; VERSION 0xF8091100; BOOT_FLAGS `F8 00 60 02 C1` |
+| `l`, rounds 1 to 5 | Each: Success in 1465 or 1466 ms; MODE `APP `; VERSION 0xF8091166; BOOT_FLAGS `F8 00 F0 C2 C1`. No ERROR line from the loader. Host I2C line, identical in all five: `LPI2C1 MSR=0x00000301 MCR=0x00000001 MFSR=0x00000000 MCFGR1=0x00000001` |
+| `pb` | Success in 52093 ms, last target High; `FLrd` 1822, `FLad` 10, `FLwd` 902 at 20.6 ms (maximum 20.8 ms), `FLvy` 2 at 598 ms; no failed call |
+| `r` | Dump identical to `..._F8091166_fullFlash.bin`; both pointers valid; both `[offset]` words 0; `FLvy` Success |
+| `x` | `coldReset()` Success; APP after 1938 ms; VERSION 0xF8091166; BOOT_FLAGS `18 00 F0 A2 C1` |
+
+Verified: in PTCH after `GAID` with no valid pointer, the polling-mode wait for INT_EVENT1
+bit 81 ended without reaching its 5 s cap in all five loads, so Ready for Patch was set
+and visible on this board, which settles the open item recorded with the session 3
+decisions for this case. The controller accepted the 6-byte `PBMs` configuration staged
+and read back before `PBMs` with no input, and each load reached APP.
+
+Timing: each load took 10 to 12 ms longer than the 1454 to 1455 ms of stage 7. The
+example never calls `setClock()`, so the bus runs at the default 100 kHz, about 90 us a
+byte. The new transactions account for most of it: the INT_EVENT1 read is about 1.4 ms,
+and the DATA read-back is 500 us plus about 6 ms for 66 bytes; `PBMs` no longer writes
+DATA, which saves about 0.7 ms. That estimate is about 7 ms plus software overhead. One
+extra 10 ms poll in step 1 or 2 would have made the difference about 17 ms. So the
+evidence fits no retry in steps 1, 2, or 5, but the example logs only ERROR, so it does
+not show the count of INT_EVENT1 reads, MODE reads, or DATA attempts.
+
+Not shown by this stage: either `PBMe` path, because no burst chunk failed and `PBMc`
+was not rejected; a DATA read-back mismatch on hardware; a polling-mode load after the
+INT_MASK1 or INT_EVENT1 state was changed, the case in which the step 1 wait would fail
+on a controller that is ready. The native tests cover those paths.
 
 Two physical points were confirmed on 2026-11-22. First, the EEPROM can be reprogrammed
 in place with a SOIC8 clip, so `write-flash.zsh` (`24LC256@SOIC8`) is a recovery path

@@ -769,6 +769,24 @@ public:
     std::unique_ptr<TPS25751LiquidDetectionConfig> readLiquidDetectionConfigRegister(bool validate = true) const;
 
     /**
+     * @brief Write a 4CC task's input to DATA (0x09) at its own length
+     *
+     * One register write of @p length bytes, with @p length as the byte count:
+     * `[0x09, length, data...]`. The typed writeRegister(Address, ...) accepts
+     * DATA's full 64 bytes only; a task input such as the 6-byte PBMs
+     * configuration goes out at its own length, as SLVAFV8A step 4 (page 8)
+     * shows. issueCommand() and executeCommand() stage their input through
+     * this call. Use it on its own to stage DATA and check it before the
+     * COMMAND write, then issue the task with no input.
+     *
+     * @param data   Bytes for DATA from byte 0
+     * @param length 1 to 64
+     * @return true if the write was acknowledged; false for a null @p data, a
+     *         @p length of 0 or above 64 (no transaction), or a failed write
+     */
+    bool writeCommandData(const uint8_t* data, size_t length) const;
+
+    /**
      * @brief Start a 4CC task and wait for it to complete, without reading DATA
      *
      * Writes @p inData to DATA when @p inData is not nullptr and @p inLen is not

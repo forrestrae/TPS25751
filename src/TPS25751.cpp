@@ -837,17 +837,27 @@ TPS25751TaskStatus TPS25751::waitForCommandClear(uint32_t timeoutMs) const
     }
 }
 
+bool TPS25751::writeCommandData(const uint8_t* data, size_t length) const
+{
+    if (data == nullptr || length == 0 || length > TPS25751Registers::Registers::DATA.size) {
+        TPS_DEBUG_ERROR(DEBUG_CAT_TASK, "writeCommandData: length %u not in 1 to %u",
+                        (unsigned)length, (unsigned)TPS25751Registers::Registers::DATA.size);
+        return false;
+    }
+    // The private raw overload writes exactly length bytes; the public Address
+    // overload requires DATA's full 64 bytes.
+    return writeRegister(static_cast<uint8_t>(TPS25751Registers::Address::DATA), data, length);
+}
+
 TPS25751TaskStatus TPS25751::issueCommand(TPS25751FourCC cmd, const uint8_t* inData, size_t inLen,
                                           uint32_t timeoutMs) const
 {
     TPS_DEBUG_TRACE(DEBUG_CAT_TASK, "issueCommand: '%c%c%c%c' (inLen=%u)",
                     cmd.code[0], cmd.code[1], cmd.code[2], cmd.code[3], (unsigned)inLen);
 
-    // Stage the input payload in DATA first (if any). Uses the private raw
-    // overload (exact inLen) rather than the public Address overload, which
-    // requires length == DATA's full 64 bytes and would reject short payloads.
+    // Stage the input payload in DATA first (if any), at its own length.
     if (inData != nullptr && inLen > 0) {
-        if (!writeRegister(static_cast<uint8_t>(TPS25751Registers::Address::DATA), inData, inLen)) {
+        if (!writeCommandData(inData, inLen)) {
             TPS_DEBUG_ERROR(DEBUG_CAT_TASK, "executeCommand: failed to write DATA");
             return TPS25751TaskStatus::I2CError;
         }

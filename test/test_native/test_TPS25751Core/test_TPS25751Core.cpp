@@ -271,6 +271,44 @@ void test_issue_command_does_not_read_data()
     TEST_ASSERT_EQUAL(TPS25751TaskStatus::I2CError, t.pd.issueCommand(TPS25751FourCC::of("TEST"), in, sizeof(in)));
 }
 
+void test_write_command_data_at_its_own_length()
+{
+    {
+        // One write of [0x09, length, data...], and DATA reads it back.
+        Rig r;
+        const uint8_t cfg[6] = {0x80, 0x2C, 0x00, 0x00, 0x30, 0x32};
+        TEST_ASSERT_TRUE(r.pd.writeCommandData(cfg, sizeof(cfg)));
+        TEST_ASSERT_EQUAL_size_t(1, r.dev.log.size());
+        assertWrite(r.dev.log[0], 0x20, bytes({0x09, 6, 0x80, 0x2C, 0x00, 0x00, 0x30, 0x32}), true, "DATA write");
+        TEST_ASSERT_EQUAL_HEX8_ARRAY(cfg, r.dev.regs[0x09].data(), sizeof(cfg));
+    }
+    {
+        // The full 64 bytes are accepted.
+        Rig r;
+        std::vector<uint8_t> full(64, 0xA5);
+        TEST_ASSERT_TRUE(r.pd.writeCommandData(full.data(), full.size()));
+        TEST_ASSERT_EQUAL_size_t(66, r.dev.log[0].bytes.size());
+    }
+    {
+        // Null data, length 0, and length 65 are refused without a transaction.
+        Rig r;
+        std::vector<uint8_t> big(65, 0);
+        TEST_ASSERT_FALSE(r.pd.writeCommandData(nullptr, 6));
+        TEST_ASSERT_FALSE(r.pd.writeCommandData(big.data(), 0));
+        TEST_ASSERT_FALSE(r.pd.writeCommandData(big.data(), big.size()));
+        TEST_ASSERT_EQUAL_size_t(0, r.dev.log.size());
+    }
+    {
+        // A write that is not acknowledged.
+        Rig r;
+        Fault f;
+        f.writeError = 2;
+        r.dev.faults.push_back(f);
+        const uint8_t one[1] = {0x01};
+        TEST_ASSERT_FALSE(r.pd.writeCommandData(one, sizeof(one)));
+    }
+}
+
 void test_command_poll_across_a_millis_wrap()
 {
     // millis() is 32-bit and wraps, as on the Teensy 4. The COMMAND poll
@@ -400,6 +438,7 @@ int main(int, char **)
     RUN_TEST(test_execute_command_rejected_and_timeout);
     RUN_TEST(test_execute_command_i2c_failure_at_each_transaction);
     RUN_TEST(test_issue_command_does_not_read_data);
+    RUN_TEST(test_write_command_data_at_its_own_length);
     RUN_TEST(test_command_poll_across_a_millis_wrap);
     RUN_TEST(test_issue_command_honours_its_timeout);
     RUN_TEST(test_wire_fake_matches_the_teensy_driver);

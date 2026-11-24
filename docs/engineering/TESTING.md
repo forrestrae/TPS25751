@@ -250,11 +250,21 @@ What the suite covers:
   compare reads is thinned to the first, every 16th, and the last read of each pass);
 - the modelled misplaced bundle write, the trace check, and the stated limits of the step
   2 read-back, each pinned so that a limit is not mistaken for coverage;
-- the progress callback, `lastStep()`, `lastTarget()`, and `coldReset()`.
+- for `programBlank()`, a sweep of an `FLad` that reports success without taking effect at
+  each of its 10 `FLad` calls, from three start states, with and without the moving-address
+  model, asserting that no valid pointer leads to a region that does not hold the image;
+  against the step order used before 2026-11-23 the same sweep fails;
+- the progress callback, `lastStep()`, `lastTarget()`, and `coldReset()`, including both of
+  its APP outcomes. A `rebootDurationMs` of 0 scripts a controller that reads APP with no
+  failed MODE read, which `coldReset()` must report as `ResetNotObserved`.
 
 `TPS25751HostExecutor` is a pass-through to `TPS25751` and stays outside the native build.
 The example `examples/eeprom-update` is built by `pio run -e example-eeprom-update` and
-exercised on hardware only.
+exercised on hardware only. The hardware stages of `docs/plans/feature/eeprom-update.md` run
+its commands: `r` (stage 1 and every later check), `p` and `p2` (stage 2), `u`, `v`, `b`, and
+`x` (stage 3), `c1` to `c4` with `x` (stage 4), and for stage 5 `zero`, which writes both
+region pointers to 0 in place of an external erase, with `l`, `pb`, and `x`. The plan sets
+the order of each stage.
 
 ---
 
@@ -783,6 +793,7 @@ Tests are successful when:
 | 1.3 | 2026-11-19 | Claude Code | Second coverage measurement: 98% of lines, every file at 93% or more, and the kinds of line that remain unreachable |
 | 1.4 | 2026-11-23 | Claude Code | USB PD capture bundles and their generated headers |
 | 1.5 | 2026-11-23 | Claude Code | EEPROM updater suite and `FakeCommandExecutor` (what it models and which behaviours are assumptions), the updater in the native build and the coverage report, script tests for `bin_to_header.py` |
+| 1.6 | 2026-11-23 | Claude Code | The `programBlank()` `FLad` sweep, the two `coldReset()` APP outcomes, and the example commands the hardware stages run, including `zero` |
 
 ---
 

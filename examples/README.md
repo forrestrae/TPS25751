@@ -40,16 +40,24 @@ the line `yes` sent after its `[confirm]` prompt.
 | Command | What it does | Writes the EEPROM |
 |---|---|---|
 | `r` | Report: MODE, VERSION, BOOT_FLAGS, both region pointers, both AppConfigOffset words, the region an update would target, `FLvy` for each region, and a dump of 0x0000 to 0x7C00. In PTCH it says to recover with `l`, then `pb` | No |
-| `x` | `coldReset()`: `GAID`, then waits for APP; the port disconnects | No |
+| `x` | `coldReset()`: `GAID`, then waits for APP; the port disconnects. Reports `ResetNotObserved` when MODE reads APP without a failed I2C transaction first, and then asks for a check of VERSION and BOOT_FLAGS | No |
 | `l` | Only in PTCH: loads the embedded image into the controller's RAM with `TPS25751PatchLoader` (Patch Burst Mode) | No |
 | `p`, `p2` | Pointer tests of hardware stage 2: erase and restore the High pointer; show whether `FLwd` writes more than the bytes it is given | Yes |
 | `u`, `b` | `updateInactiveRegion()` and `updateBothRegions()` with the embedded image | Yes |
 | `c1` to `c4` | An update cut after step 1, 2, 3, or 4 of SLVAFL1 Figure 2-3 (hardware stage 4) | Yes |
 | `v` | The `FLvy` experiment of hardware stage 3: writes the image, corrupts one byte, and reports what `FLvy` and the compare say | Yes |
-| `pb` | `programBlank()`: both pointers, both AppConfigOffset words, and the image in both regions, for an EEPROM with no valid pointer. `u` and `b` do not write an AppConfigOffset word, so do not run them while the word of the region they would write reads other than 0 | Yes |
+| `pb` | `programBlank()`: both AppConfigOffset words first, then the image and the pointer of each region, Low first, for an EEPROM with no valid pointer. `u` and `b` do not write an AppConfigOffset word, so do not run them while the word of the region they would write reads other than 0 | Yes |
+| `zero` | Both region pointers to 0, Low then High, each with a read-back; the starting state of hardware stage 5 | Yes |
 
 To recover a board whose EEPROM does not boot, so that the controller sits in PTCH, send
 `l`, then `pb`, then `x`.
+
+`zero` writes both region pointers to 0, Low then High, each with a read-back, and leaves
+the bundles and the AppConfigOffset words alone. It is how hardware stage 5 reaches an
+EEPROM with no valid pointer without a teardown. The controller keeps running what it
+loaded until a reset; after a reset it is expected to start in PTCH (SLVAFL1 page 2, not
+yet observed on this board). Run `pb` straight after `zero`, before any reset; the SOIC8
+clip is the fallback.
 
 The example ships with a placeholder `src/patch_bundle.h` that is not a patch bundle, and
 refuses every command that writes, and `l`, while it is in place. Generate the real header

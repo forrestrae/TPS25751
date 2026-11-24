@@ -66,7 +66,8 @@ consumption and are not the primary build path used in this repo.
 - Sketches are **read-only / non-destructive** unless explicitly stated otherwise.
   `eeprom-update` is the exception: most of its commands write the TPS25751's
   configuration EEPROM, each only after a typed `yes`. Keep that confirmation on any
-  command added there that writes.
+  command added there that writes. `zero` leaves the EEPROM with no valid pointer on
+  purpose, for hardware stage 5; its plan names `pb` as the next step, before any reset.
 - Serial is 115200 baud; sketches wait briefly for the USB serial connection in
   `setup()`.
 - Debug output is configured via `TPS25751::setDebugLevel()` /

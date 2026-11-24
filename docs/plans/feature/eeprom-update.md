@@ -747,7 +747,7 @@ Decisions on these points, 2026-11-23:
 | Point | Decision | State |
 |---|---|---|
 | 1 and 2 | `programBlank()` writes both AppConfigOffset words first, then runs each pass as in an update, and reads the word once more before each pointer write | Implemented in `75263b5`; see the programBlank section |
-| 3 | A region counts as bootable only if its pointer is valid and its AppConfigOffset word is 0. `updateRegion()` also checks the target's word, in the pre-flight and again before the step 3 pointer write | Companion check decided on 2026-11-23: both points. Implemented in `dacced0`; the review of `3a9b3f6..8e0de59` found the code clean. The three new reads have not run on hardware; stage 6 part A covers them |
+| 3 | A region counts as bootable only if its pointer is valid and its AppConfigOffset word is 0. `updateRegion()` also checks the target's word, in the pre-flight and again before the step 3 pointer write | Companion check decided on 2026-11-23: both points. Implemented in `dacced0`; the review of `3a9b3f6..8e0de59` found the code clean. The three new reads ran on hardware in stage 6 part A, 2026-11-23 |
 | 4 | `coldReset()` requires an observed I2C failure before it accepts APP | Implemented in `36d58f4`; see the coldReset section |
 | 5 | Stage 5 starts from an example command that writes both pointers to 0, not from a `minipro` erase | Implemented in `518b98c` as `zero`; see stage 5 |
 | 6 | No change | Recorded in `CONSTRAINTS.md` and the example's notes |
@@ -1218,7 +1218,7 @@ Ordered from safe to destructive. Each stage states its recovery.
    Not shown by this stage: programming an erased EEPROM, because the bundles and the
    words were in place; that an AppConfigOffset write changes a value; a busy `FLwd`
    or any failure code; a boot after a loss of power.
-6. Retest after the changes of 2026-11-23. Added on 2026-11-23; not run. It needs its
+6. Retest after the changes of 2026-11-23. Added on 2026-11-23; run on 2026-11-23, result below. It needed its
    own go-ahead, and a go-ahead for one part does not cover the other. Both parts use
    the example built from the branch tip with the F8091166 image, start from an EEPROM
    identical to `..._F8091166_fullFlash.bin`, and end there. Run from the 18650 pack.
@@ -1265,6 +1265,49 @@ Ordered from safe to destructive. Each stage states its recovery.
 
    Recovery, in order: `l` then `pb` from PTCH; `examples/load-patch-bundle` followed
    by `pb`; `write-flash.zsh` with the clip, which needs the stack apart.
+
+   Result, 2026-11-23, branch commit `3a898ed`, Teensy 4.0, board on the 18650 pack:
+   passed, and the board is back in its starting state. Parts A and B ran in full. The
+   five PBM loads of part B all returned Success, with no loss of communication. The
+   Host I2C line printed SDA=0 SCL=0 in every round, so its pin levels cannot be used
+   (see below).
+
+   | Step | Result |
+   |---|---|
+   | Start | Dump identical to `..._F8091166_fullFlash.bin`; MODE APP; VERSION 0xF8091166; BOOT_FLAGS `18 00 F0 A2 C1`; both pointers valid; both `[offset]` words 0 |
+   | A1, first `b` | Cancelled by the script before any write: its expect string "both pointers valid" is not in the plan output. A script error in the brief; nothing written |
+   | A1, `b` | Success in 52271 ms, last target Low. `FLrd` 1824 at 17.7 ms (maximum 17.8 ms), `FLad` 9, `FLwd` 901 at 20.6 ms (maximum 20.8 ms), `FLvy` 2 at 598 ms; no call failed, no busy result. The `rc_nonzero` of 1518 and `rc_0xFF` of 48 in the `FLrd` row are memory bytes, not return codes |
+   | A2, `r` | Dump identical to `..._F8091166_fullFlash.bin`; both `[offset]` words 0 |
+   | A3, `x` | `coldReset()` Success; `GAID` `I2CError` after 1276 ms; APP after 1938 ms; VERSION 0xF8091166; BOOT_FLAGS `18 00 F0 A2 C1` |
+   | B1, `zero` | Both pointer writes Success; 10 `FLrd`, 2 `FLad`, 2 `FLwd`, every call Success. Dump identical to the full-flash image with both pointer words 0 |
+   | B2, `x`, rounds 1 to 5 | Each: `ResetTimeout` (coldReset returned after 6325 or 6326 ms); MODE `PTCH`; VERSION 0xF8091100; BOOT_FLAGS `F8 00 60 02 C1` |
+   | B3, `l`, rounds 1 to 5 | Each: Result Success in 1455 ms; MODE `APP `; VERSION 0xF8091166; BOOT_FLAGS `F8 00 F0 C2 C1`. Host I2C line, identical in all five: `LPI2C1 MSR=0x00000301 MCR=0x00000001 MFSR=0x00000000 MCFGR1=0x00000001 SDA=0 SCL=0` |
+   | B4, `pb` | Success in 52194 ms, last target High; `FLrd` 1822, `FLad` 10, `FLwd` 902 at 20.6 ms (maximum 20.8 ms), `FLvy` 2 at 598 ms; no failed call, no busy result |
+   | B4, `r` | Dump identical to `..._F8091166_fullFlash.bin` (31744 bytes, SHA-256 `a3e549ca...3096fdaec3`) |
+   | B5, `x` | `coldReset()` Success; APP after 1939 ms; VERSION 0xF8091166; BOOT_FLAGS `18 00 F0 A2 C1` |
+
+   Verified by this stage: the three AppConfigOffset reads of `updateRegion()` ran on
+   hardware in part A. `updateBothRegions()` with an image already in place returned
+   Success and left every other byte unchanged, so the reads did not refuse a region
+   whose word is 0. The reworked `loadPatchBundle()` returned Success in five of five
+   loads from PTCH, with MODE APP and Patch Config Source I2C Loaded each time, where
+   the old sequence reported `I2cError` in stage 5. Every read after each load was
+   acknowledged. `pb` after the loads restored the full-flash layout.
+
+   Not shown by this stage: the cause of the unacknowledged reads of stage 5. Five
+   clean loads do not establish it, because the fault did not recur, so the register
+   line and recovery steps meant to capture it were never exercised. The
+   `AppConfigOffsetNotZero` and `NoBootableRegion` refusals of `updateRegion()` are
+   untested on hardware, because both words were 0 throughout, and so is an
+   AppConfigOffset write that changes a value.
+
+   Deviations: the cancelled first `b` (script error, no write), and the Host I2C line.
+   In all five rounds it printed SDA=0 SCL=0 on a bus that was idle and working: MSR
+   bits 24 and 25 (master busy, bus busy) were clear and the next reads succeeded. The
+   pin reads therefore do not reflect the pad levels while pins 18 and 19 belong to
+   LPI2C1, so the pin read the plan marked as unverified failed its check. Open item:
+   the SDA and SCL part of that diagnostic needs to be fixed or removed. No code was
+   changed in this stage.
 
 Two physical points were confirmed on 2026-11-22. First, the EEPROM can be reprogrammed
 in place with a SOIC8 clip, so `write-flash.zsh` (`24LC256@SOIC8`) is a recovery path

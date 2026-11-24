@@ -794,7 +794,7 @@ open:
    restart in `coldReset()`, and a test pins that. It is a third false-negative path
    beside the two the comments list: such a sequence shows that a boot completed,
    whatever the mode was before `GAID`. The decision of 2026-11-23 names I2C failures
-   only, so the rule is unchanged.
+   only, so the rule is unchanged. The user confirmed that on 2026-11-24.
 2. The limits of `programBlank()` in the header give 0x0404 as the place where the
    first word write lands straight after `zero` if its `FLad` has no effect. That
    holds only if an `FLrd` leaves the write address alone and a 4-byte `FLwd` advances
@@ -882,7 +882,8 @@ of `c5cf1e8..48332f0` found nothing wrong.
 
 The 500 us before `PBMc` was added on my decision on 2026-11-23, not on the user's:
 TRM Figure 5-1 (page 88) and the app note (step 10, page 10) both have it, and the
-loader never did. Stage 5 loaded an image without it.
+loader never did. Stage 5 loaded an image without it. The user decided on 2026-11-24
+to keep it; stage 6 loaded five times with it.
 
 Native tests after the fix: 1336 in all, 19 in the loader suite and 14 in the core
 suite. Line coverage: `TPS25751PatchLoader.cpp` 99%, `TPS25751EepromUpdater.cpp` 100%,
@@ -906,6 +907,16 @@ each with its source. None is changed on this branch, and each is open for the u
 - In polling mode MODE is checked once for PTCH, with no ReadyForPatch poll.
 - No poll of INT_EVENT1.PatchLoaded; COMMAND is polled every 5 ms where the TRM figure
   shows 10 ms; DATA is read whole, 64 bytes, where the app note reads 40.
+
+Decisions of 2026-11-24 on these points and on the other open items:
+
+| Item | Decision |
+|---|---|
+| 500 us before `PBMc` | Keep |
+| Spacing between burst transactions | Leave as is, back to back |
+| `coldReset()` evidence rule (a MODE read that is not APP, then APP) | Leave as is: only a failed I2C transaction counts |
+| Is the branch finished | Not yet. `scripts/integrate.py` stays unrun until the user confirms |
+| SDA and SCL readout of the `l` diagnostic; `PBMs` timeout byte; `PBMe`, DATA read-back, and ReadyForPatch; coverage of `TPS25751.cpp`; `Wire2` dump; `Wire2` restore sketch; stage 4 with a power cycle | Deferred by the user to later sessions, each to be decided there |
 
 Still unverified, and marked so in the code: the new sequence on hardware; that
 `digitalRead()` sees SDA and SCL while the pins belong to LPI2C1; which pins the

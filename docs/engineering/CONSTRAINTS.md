@@ -360,8 +360,9 @@ config[5] = 0x31                   // PBM_TIMEOUT
 ```
 
 The timeout byte is in 100 ms units (TRM Table 4-15), so 0x31 is 4.9 s, and the TRM
-recommends 0x32 (5 s). SLVAFV8A Table 4-1 (page 8) lists 0x31 as "3.1 seconds", but the
-byte trace below that table sends 0x32. The loader sends 0x31.
+recommends 0x32 (5 s). SLVAFV8A is inconsistent: Table 4-1 (page 8) lists 0x31 as "3.1
+seconds", the byte listings of steps 4 and 5 (page 8) send 0x32, and the DATA read-back of
+step 9 (page 10) shows 0x31. The loader sends 0x31.
 
 **PatchStartStatus** (DATA byte 0 after PBMs / PBMc, i.e. `result.returnCode`):
 `0x00` = success; `0x04` = bad bundle size; `0x05` = bad target address; `0x06` =
@@ -1566,6 +1567,7 @@ void foo() {
 | 1.22 | 2026-11-23 | Claude Code | The MODE read after a failed `GAID` poll failed with error 4, not a NACK (Cold reset section) |
 | 1.23 | 2026-11-23 | Claude Code | PBM: TRM Figure 5-1 has one 500 µs delay, before `PBMc`, which the loader now gives; the points where the loader departs from the documented flow; the `PBMs` timeout byte. Error 4 lists every source in the Teensy 4 driver (Cold reset section) |
 | 1.24 | 2026-11-23 | Claude Code | PBM: the app note spaces its separate burst transactions by 500 µs and the loader does not, an open decision; the loader's IRQ mode polls COMMAND instead of waiting for I2Ct_IRQ |
+| 1.25 | 2026-11-23 | Claude Code | PBM: SLVAFV8A shows both 0x31 and 0x32 for the `PBMs` timeout byte |
 
 ---
 

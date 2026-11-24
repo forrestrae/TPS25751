@@ -35,11 +35,12 @@ class TPS25751;  ///< forward declaration — full type included by TPS25751Patc
 /// NO length byte — unlike every other TPS25751 write (see burstWrite docs).
 constexpr uint8_t PBM_I2C_TARGET = 0x30;
 
-/// Timeout value written to the PBMs session-config byte. SLVAFV8A Table 4-1
-/// (page 8) lists 0x31 as "3.1 seconds", but its byte trace below the table
-/// sends 0x32. TRM SLVUCR8B Table 4-15 gives the byte in 100 ms units, which
-/// makes 0x31 4.9 s, and recommends 0x32 (5 s). The value is unchanged from
-/// the first release of the loader.
+/// Timeout value written to the PBMs session-config byte. SLVAFV8A is
+/// inconsistent: Table 4-1 (page 8) lists 0x31 as "3.1 seconds", its byte
+/// listings in steps 4 and 5 (page 8) send 0x32, and its DATA read-back in
+/// step 9 (page 10) shows 0x31. TRM SLVUCR8B Table 4-15 gives the byte in
+/// 100 ms units, which makes 0x31 4.9 s, and recommends 0x32 (5 s). The value
+/// is unchanged from the first release of the loader.
 constexpr uint8_t PBM_TIMEOUT = 0x31;
 
 /// 4CC command code to start a Patch Burst Mode session.

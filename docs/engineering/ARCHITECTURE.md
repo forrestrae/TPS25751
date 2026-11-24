@@ -1408,10 +1408,15 @@ host-run tests that inject a fault at every task, and `src/TPS25751.cpp`, which 
   whole bundle across the other region, in the case the tests model: a write address left
   just past the pointer word.
 - `coldReset()` (`GAID`) is a separate call, so the application decides when the port
-  disconnects.
-- `programBlank()` runs steps 1 to 3 per region, Low first, with a checked write of the
-  AppConfigOffset word to 0 after step 1, and refuses while any pointer is valid. It is the
-  flash-task half of the recovery in SLVAFL1 Figure 4-1, after a PBM load.
+  disconnects. It returns `Success` only when MODE reads APP after the call saw the
+  controller go away (an `I2CError` on `GAID` or a failed MODE read), and
+  `ResetNotObserved` for APP without that evidence, because MODE reads APP before and
+  after a restart (decided 2026-11-23).
+- `programBlank()` writes both AppConfigOffset words to 0 first, then runs steps 1 to 3 of
+  `updateRegion()` per region, Low first, reading the region's word once more before its
+  final pointer write, and refuses while any pointer is valid (decided 2026-11-23). The last
+  write before each bundle `FLad` is then the pointer erase, as in `updateRegion()`. It is
+  the flash-task half of the recovery in SLVAFL1 Figure 4-1, after a PBM load.
 **Consequences:**
 - The updater builds in `[env:native]` and `test/coverage.sh` measures it. Its suite
   checks every call sequence against the plan and sweeps an executor failure and a wrong
@@ -1423,13 +1428,15 @@ host-run tests that inject a fault at every task, and `src/TPS25751.cpp`, which 
 - The read-back of step 2 has residual limits. The `FLad` after the read-back is not
   verified, a write address that goes wrong later shows only in step 3 and only inside the
   target region, and when the target already held the image, chunks misplaced outside the
-  pointer row go unseen. In `programBlank()` the last write before the bundle `FLad` is the
-  AppConfigOffset word, so the same modelled fault lands after that word, where the
-  read-back does not look. Whether an `FLrd` moves the write address is not documented and
-  has not been observed.
+  pointer row go unseen. `programBlank()` inherits these limits per pass; a sweep of an
+  `FLad` without effect at each of its 10 `FLad` calls, with and without an `FLrd` that
+  moves the write address, finds no valid pointer over a region that does not hold the
+  image. Whether an `FLrd` moves the write address is not documented and has not been
+  observed.
 - Hardware stages 1 to 4 verified the layout, the result offsets, a 4-byte `FLwd`, a full
   region update, `updateBothRegions()`, `GAID`, and the boot region after a cut at each
-  step. `programBlank()` and the I2C EEPROM Present flag after a PBM boot wait for stage 5.
+  step. `programBlank()`, the I2C EEPROM Present flag after a PBM boot, and the
+  `ResetNotObserved` rule against a second firmware wait for stage 5 or later.
 - A region update blocks for about 26 s and both regions for about 52 s (stage 3). An
   application with a watchdog services it from the progress callback.
 - `TPS25751PatchLoader` and `TPS25751DownstreamDevice` still call `TPS25751` directly.

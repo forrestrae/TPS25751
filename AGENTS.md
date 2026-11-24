@@ -457,16 +457,18 @@ through `TPS25751CommandExecutor`, so it compiles and is tested in `[env:native]
   first two; `FLvy` and an `FLrd` compare, then the pointer; erase the old pointer.
   `updateBothRegions()` leaves the new bundle in both regions with both pointers valid.
 - `programBlank()` is for an EEPROM with no valid pointer, after a PBM load: it writes both
-  pointers, both AppConfigOffset words, and the image in both regions (SLVAFL1 Figure 4-1).
+  AppConfigOffset words to 0 first, then the image and the pointer of each region, Low
+  first (SLVAFL1 Figure 4-1).
 - `readRegionPointer()`, `selectTargetRegion()`, `compareRegion()`, and `dump()` only read.
-  `coldReset()` issues `GAID` and waits for APP; the port disconnects.
+  `coldReset()` issues `GAID` and waits for APP; the port disconnects. It returns `Success`
+  only after it saw the controller go away, and `ResetNotObserved` for APP without that.
 
 Traps: choose the target from the region pointers first, because BOOT_FLAGS stays stale
 until a restart; never write a pointer before the region has been compared; `FLrd` data
 starts at `outData[0]` and has no return code. Hardware stages 1 to 4 verified the layout,
 the result offsets, a full region update, and the boot region after an update cut at each
-step; `programBlank()` waits for stage 5. The `eeprom-update` example drives every call over
-serial. See ADR-014 in [ARCHITECTURE.md](docs/engineering/ARCHITECTURE.md), the "Flash tasks
+step; `programBlank()` waits for stage 5, which starts from the example's `zero` command.
+The `eeprom-update` example drives every call over serial. See ADR-014 in [ARCHITECTURE.md](docs/engineering/ARCHITECTURE.md), the "Flash tasks
 and EEPROM update" subsection of [CONSTRAINTS.md](docs/engineering/CONSTRAINTS.md), and the
 plan.
 

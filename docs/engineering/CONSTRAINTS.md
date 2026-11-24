@@ -445,8 +445,10 @@ pointers first and read BOOT_FLAGS only when both pointers are valid, as
 
 The controller looks for a region's Header_ID at the region start plus that region's
 AppConfigOffset word (0x03FC and 0x07FC; SLVAFL1 page 2). Both words are 0 in the board's
-image. `programBlank()` writes them to 0; `updateRegion()` neither reads nor writes them, so
-a region it writes behind a word that is not 0 is not where the controller looks.
+image. `programBlank()` writes both to 0 before it writes any pointer or bundle, and reads
+each once more right before that region's pointer write. `updateRegion()` neither reads nor
+writes them, so a region it writes behind a word that is not 0 is not where the controller
+looks.
 
 #### Recovery from PTCH
 
@@ -492,10 +494,19 @@ in `executeCommand()` is the first optimization if the update must be faster.
 Recovery and restarts after a typical 1-second delay (Table 4-3), and the port disconnects.
 Stages 3 and 4 measured the same sequence on every reset: COMMAND kept answering for 1276
 to 1277 ms, then the controller stopped acknowledging and `executeCommand()` returned
-`I2CError`; MODE read APP 1938 to 1939 ms after `GAID`. `coldReset()` treats `Success`,
-`Timeout`, and `I2CError` alike as "reset issued" and does not require the I2C failure
-before it accepts APP, so a `GAID` that never reached the controller would look the same.
-Confirm a restart by VERSION and BOOT_FLAGS changing, not by the returned status alone.
+`I2CError`; MODE read APP 1938 to 1939 ms after `GAID`. That is one board and one firmware
+(F8091166).
+
+MODE reads APP before and after a restart, so it cannot by itself tell a restart from a
+`GAID` the controller accepted without restarting. `coldReset()` therefore returns `Success`
+only when it saw the controller go away first, through an `I2CError` on `GAID` or a failed
+MODE read, and returns `ResetNotObserved` when MODE reads APP without that evidence. The
+cost is a false negative: a restart that fits between two MODE reads, or a firmware that
+finishes the `GAID` handshake before resetting and is back before the first read, is
+reported as not observed. If that is ever seen, revisit `GAID_SETTLE_MS` and
+`GAID_MODE_POLL_MS` or add a timing-independent witness. An I2C failure that kept `GAID`
+from the controller still looks like a restart, so confirm any result by VERSION and
+BOOT_FLAGS.
 Table 4-3 calls `GAID` a cold restart in its Description and a warm restart in its
 Additional Information row.
 
@@ -1445,6 +1456,7 @@ void foo() {
 | 1.16 | 2026-11-22 | Claude Code | PDOs and RDOs decode through `TPS25751Pdo` and `TPS25751Rdo` (ADR-013): fixed-PDO flags only for PDO 1, SPR AVS Source decode, RDOs by kind, and validation of 0x30 to 0x34 per USB PD R3.3 (USB PD Specification Structures and PDO Parsing Strategy sections) |
 | 1.17 | 2026-11-23 | Claude Code | Flash tasks and EEPROM update section: result offsets, return-code compare, 32-byte chunks and the 24LC256 page, the `FLvy` limit, one-directional redundancy, the stale BOOT_FLAGS trap, DATA behaviour, timing, cold reset, and bus sharing, with the hardware results of stages 1 to 4 (ADR-014) |
 | 1.18 | 2026-11-23 | Claude Code | Flash tasks and EEPROM update section: what SLVAFL1 says about APP mode, AppConfigOffset words and recovery from PTCH (SLVAFL1 page 13) under their own headings, `FLwd` timing per run |
+| 1.19 | 2026-11-23 | Claude Code | `programBlank()` writes both AppConfigOffset words first; `coldReset()` requires an observed restart and returns `ResetNotObserved` otherwise (Flash tasks and EEPROM update section) |
 
 ---
 

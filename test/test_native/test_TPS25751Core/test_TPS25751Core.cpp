@@ -7,8 +7,8 @@
  *
  * Run with: pio test -e native -f "test_native/test_TPS25751Core"
  *
- * The typed read and write wrappers of TPS25751.cpp each forward to the paths
- * tested here and are not tested one by one.
+ * The typed read and write wrappers and the factory read functions of
+ * TPS25751.cpp are tested in test_TPS25751Typed.
  */
 
 #include <unity.h>

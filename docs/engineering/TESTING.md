@@ -203,7 +203,10 @@ int main(int, char **)
 `test/support/native/Wire.h` gives the native build a `TwoWire` class and a `Wire`
 object with the calls the library makes (`begin()`, `beginTransmission()`, `write()`,
 `endTransmission()`, `requestFrom()`, `available()`, `read()`). It hands each transaction
-to a target and has a 136-byte transmit buffer, as the Teensy 4 driver does.
+to a target and follows the Teensy 4 driver (`WireIMXRT.cpp`) where the library can see
+the difference: a 136-byte transmit buffer and receive buffer, `write()` returning 0
+until `beginTransmission()` has been called, `endTransmission()` returning 4 when no
+transmission was begun, and `requestFrom()` taking a `uint8_t` length of at least 1.
 `test/support/native/FakeTps25751Target.h` is that target, a scripted TPS25751:
 
 - the register protocol of the unique address: a pointer write, then a read of the count
@@ -213,24 +216,35 @@ to a target and has a 136-byte transmit buffer, as the Teensy 4 driver does.
 - PBMs opening the burst port at 0x30 on a PatchStartStatus of 0, the port recording the
   raw burst, and PBMc setting MODE to APP after a scripted delay;
 - faults by transaction index, time window, address, register, and kind: a write error
-  code (2 for an address NACK, 3, 4) or a read that returns only N bytes, and a hook on a
-  task's completion that can open a fault window then;
+  code the driver can return (2 for a NACK, of the address or of a data byte, which the
+  driver does not tell apart; 4; or 5) or a read that returns only N bytes, and a hook on
+  a task's completion that can open a fault window then;
 - a log of every transaction with the stub clock's time.
 
+The fake does not model the driver's bus-idle wait and the forced clocking it falls back
+to, clock stretching, the driver's 50 ms transaction timeouts, or `requestFrom()`
+returning 4 when the bus did not become idle, which a caller cannot tell from a 4-byte
+read.
+
 The Arduino stub's `millis()`, `micros()`, `delay()`, and `delayMicroseconds()` use a
-clock the tests set and read (`fake_arduino::g_nowUs`), and `digitalRead()` returns pin
+clock the tests set and read (`fake_arduino::g_nowUs`); `millis()` and `micros()` wrap at
+32 bits, as on the Teensy, and `digitalRead()` returns pin
 levels the tests set. The poll counts, the 0xFF padding of a long read, and the exact
 time MODE switches are choices of the fake, not documented behaviour.
 
 Two suites use it. `test_TPS25751Core` covers the register read and write with the
 length byte and their failures, `executeCommand()` and `issueCommand()` (the handshake,
-DATA read at the instant COMMAND clears or not at all, rejected, timeout, and an I2C
-failure at each transaction), and `burstWrite()`. `test_TPS25751PatchLoader` covers
+DATA read at the instant COMMAND clears or not at all, rejected, the timeout at its exact
+bound, a COMMAND poll across a `millis()` wrap, and an I2C failure at each transaction),
+`burstWrite()`, and the fake's own match to the driver. `test_TPS25751PatchLoader` covers
 `loadPatchBundle()`: the transaction order of SLVAFV8A section 4, no DATA read within
 20 ms of `PBMc` completing (the regression test for the defect hardware stage 5 found;
 it fails against the earlier loader), a controller modelled off the bus for those 20 ms,
-the DATA retry and its cap, the MODE poll through failed and PTCH reads and both outcomes
-at its cap, every `PatchLoadStatus`, the PBMs configuration bytes, and IRQ mode.
+at least 500 µs between the last burst chunk and the next transaction in both modes, the
+DATA retry and its cap, the MODE poll through failed and PTCH reads and both outcomes at
+its cap, both caps across a `millis()` wrap, a `PBMc` that takes longer than the 200 ms
+default timeout, every `PatchLoadStatus`, `debugPrint()`, the PBMs configuration bytes,
+and IRQ mode.
 
 ### Sequencer Tests: the EEPROM Updater
 
@@ -790,11 +804,11 @@ Third measurement, 2026-11-23 (1303 tests), the first recorded here with
 `updateRegion()`: 98% of lines overall, every file at 93% or more, and the updater
 at 100% (527 of 527 lines, 155 tests in its suite).
 
-Fourth measurement, 2026-11-23 (1328 tests), with `TPS25751.cpp` and
-`TPS25751PatchLoader.cpp` in the native build: 93% of lines overall.
-`TPS25751PatchLoader.cpp` is at 95% (163 of 171 lines, 14 tests); it misses
-`debugPrint()` and the `default:` of `mapTaskStatus()`, which no caller reaches.
-`TPS25751.cpp` is at 32% (165 of 515 lines, 11 tests in `test_TPS25751Core`): the
+Fourth measurement, 2026-11-23 (1334 tests), with `TPS25751.cpp` and
+`TPS25751PatchLoader.cpp` in the native build: 93% of lines overall (5614 of 6026).
+`TPS25751PatchLoader.cpp` is at 99% (171 of 172 lines, 17 tests); it misses only the
+`default:` of `mapTaskStatus()`, which no caller reaches.
+`TPS25751.cpp` is at 32% (165 of 515 lines, 14 tests in `test_TPS25751Core`): the
 register read and write, the task calls, and the burst are covered; the typed
 `read*()` and `write*()` wrappers and the factory-based `read*Register()` functions,
 which each forward to those paths, `begin()`, the debug setters, and two unreachable
@@ -848,6 +862,7 @@ Tests are successful when:
 | 1.6 | 2026-11-23 | Claude Code | The `programBlank()` `FLad` sweep, the two `coldReset()` APP outcomes, and the example commands the hardware stages run, including `zero` |
 | 1.7 | 2026-11-23 | Claude Code | Tests of the AppConfigOffset checks of `updateRegion()`, and the coverage numbers after them |
 | 1.8 | 2026-11-23 | Claude Code | The Wire fake, the core and patch-loader suites, `TPS25751.cpp` and `TPS25751PatchLoader.cpp` in the native build, and the fourth coverage measurement |
+| 1.9 | 2026-11-23 | Claude Code | The Wire fake follows the Teensy 4 driver's codes and limits, with what it does not model; the new core and loader tests; the fourth measurement rerun (1334 tests) |
 
 ---
 

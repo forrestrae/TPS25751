@@ -2836,18 +2836,23 @@ void test_update_region_refuses_a_kept_region_behind_a_nonzero_word()
     // Pre-flight check 4: the region being kept is bootable only if its
     // pointer is valid and its AppConfigOffset word reads 0. A valid pointer
     // over another word gives NoBootableRegion after two FLrd, nothing written.
+    // The words have a nonzero byte in each position, so a check that looks at
+    // only part of the word fails here.
+    const uint32_t words[] = {0x00000100, 0x00010000, 0x01000000};
     for (EepromRegion target : {EepromRegion::Low, EepromRegion::High}) {
-        const EepromRegion other = TPS25751EepromUpdater::otherRegion(target);
-        Board b;
-        b.fake.writeLe32(TPS25751EepromUpdater::appConfigOffsetAddress(other), 0x00000100);
-        b.snapshot();
-        TPS25751EepromUpdater u(b.fake);
+        for (uint32_t w : words) {
+            const EepromRegion other = TPS25751EepromUpdater::otherRegion(target);
+            Board b;
+            b.fake.writeLe32(TPS25751EepromUpdater::appConfigOffsetAddress(other), w);
+            b.snapshot();
+            TPS25751EepromUpdater u(b.fake);
 
-        assertRefusedBeforeAnyWrite(b, u, EepromUpdateStatus::NoBootableRegion,
-                                    u.updateRegion(target, b.newBundle.data(), b.newBundle.size()));
-        const std::vector<Expect> script = {flrd(TPS25751EepromUpdater::regionPointerAddress(other)),
-                                            flrd(TPS25751EepromUpdater::appConfigOffsetAddress(other))};
-        assertCalls(b.fake, script);
+            assertRefusedBeforeAnyWrite(b, u, EepromUpdateStatus::NoBootableRegion,
+                                        u.updateRegion(target, b.newBundle.data(), b.newBundle.size()));
+            const std::vector<Expect> script = {flrd(TPS25751EepromUpdater::regionPointerAddress(other)),
+                                                flrd(TPS25751EepromUpdater::appConfigOffsetAddress(other))};
+            assertCalls(b.fake, script);
+        }
     }
     // A kept pointer that is not valid is refused without reading its word.
     Board b;
@@ -2863,8 +2868,9 @@ void test_update_region_refuses_a_target_behind_a_nonzero_word()
 {
     // Pre-flight check 5: the target's word must read 0, because this call
     // does not write it. Otherwise AppConfigOffsetNotZero after three FLrd,
-    // nothing written. 0xFFFFFFFF is the erased value.
-    const uint32_t words[] = {0x00000001, 0xFFFFFFFF};
+    // nothing written. 0xFFFFFFFF is the erased value; the others put a nonzero
+    // byte in each position.
+    const uint32_t words[] = {0x00000001, 0x00010000, 0x01000000, 0xFFFFFFFF};
     for (EepromRegion target : {EepromRegion::Low, EepromRegion::High}) {
         for (uint32_t word : words) {
             Board b;
@@ -2931,12 +2937,15 @@ void test_update_region_checks_the_target_word_before_the_pointer_write()
     // (here a hook on FLvy sets it) returns CompareMismatch with lastStep()
     // CheckAppConfigOffset; the target pointer stays 0 and the other region's
     // pointer stays valid. The check runs with and without the compare.
+    const uint32_t values[] = {0x00000001, 0x00010000, 0x01000000};
+    for (uint32_t value : values)
     for (int compare = 0; compare < 2; ++compare) {
         for (EepromRegion target : {EepromRegion::Low, EepromRegion::High}) {
             const EepromRegion other = TPS25751EepromUpdater::otherRegion(target);
             const uint32_t word = TPS25751EepromUpdater::appConfigOffsetAddress(target);
             Board b;
-            b.fake.failNth("FLvy", 0, Fault::withHook([word](FakeCommandExecutor &f) { f.writeLe32(word, 1); }));
+            b.fake.failNth("FLvy", 0,
+                           Fault::withHook([word, value](FakeCommandExecutor &f) { f.writeLe32(word, value); }));
             TPS25751EepromUpdater u(b.fake);
             EepromUpdateOptions opt;
             opt.compareAfterWrite = (compare != 0);

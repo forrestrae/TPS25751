@@ -46,7 +46,7 @@ the line `yes` sent after its `[confirm]` prompt.
 | `u`, `b` | `updateInactiveRegion()` and `updateBothRegions()` with the embedded image | Yes |
 | `c1` to `c4` | An update cut after step 1, 2, 3, or 4 of SLVAFL1 Figure 2-3 (hardware stage 4) | Yes |
 | `v` | The `FLvy` experiment of hardware stage 3: writes the image, corrupts one byte, and reports what `FLvy` and the compare say | Yes |
-| `pb` | `programBlank()`: both AppConfigOffset words first, then the image and the pointer of each region, Low first, for an EEPROM with no valid pointer. `u` and `b` do not write an AppConfigOffset word, so do not run them while the word of the region they would write reads other than 0 | Yes |
+| `pb` | `programBlank()`: both AppConfigOffset words first, then the image and the pointer of each region, Low first, for an EEPROM with no valid pointer. `u` and `b` do not write an AppConfigOffset word, so do not run them while the word of the region they would write reads other than 0; `zero` followed at once by `pb` repairs such a word | Yes |
 | `zero` | Both region pointers to 0, Low then High, each with a read-back; the starting state of hardware stage 5 | Yes |
 
 To recover a board whose EEPROM does not boot, so that the controller sits in PTCH, send
@@ -56,8 +56,9 @@ To recover a board whose EEPROM does not boot, so that the controller sits in PT
 the bundles and the AppConfigOffset words alone. It is how hardware stage 5 reaches an
 EEPROM with no valid pointer without a teardown. The controller keeps running what it
 loaded until a reset; after a reset it is expected to start in PTCH (SLVAFL1 page 2, not
-yet observed on this board). Run `pb` straight after `zero`, before any reset; the SOIC8
-clip is the fallback.
+yet observed on this board). Run `pb` straight after `zero`, before any reset. The fallback
+is an external programmer on the EEPROM through a SOIC8 clip, which on this kind of board
+may need disassembly.
 
 The example ships with a placeholder `src/patch_bundle.h` that is not a patch bundle, and
 refuses every command that writes, and `l`, while it is in place. Generate the real header

@@ -73,7 +73,8 @@
 //        adds both AppConfigOffset words. When it refuses because a pointer is
 //        valid, and after a stop in its High pass, it prints both words: u and
 //        b do not write them, so do not run u or b while the word of the
-//        region they would write is not 0.
+//        region they would write is not 0. pb itself writes both words, so
+//        zero followed at once by pb repairs a word that is not 0.
 //   zero Writes both region pointers to 0, Low then High, each with a
 //        read-back, and prints the 16-byte rows at both pointers afterwards.
 //        Leaves the bundles and the AppConfigOffset words as they are. After
@@ -1634,7 +1635,7 @@ static void cmdColdReset()
     } else if (s == EepromUpdateStatus::ResetNotObserved) {
         Serial.print(F("[x] MODE read APP after "));
         Serial.print(elapsed);
-        Serial.println(F(" ms, but no restart was observed: GAID did not fail and no MODE read failed."));
+        Serial.println(F(" ms, but no restart was observed: the GAID task did not end in an I2C error (its status is in the GAID row of the [timing] table below) and every MODE read succeeded."));
         Serial.println(F("[x] The controller may not have restarted. Check VERSION and BOOT_FLAGS below before relying on the bundle in the EEPROM."));
     } else {
         Serial.print(F("[x] APP was not confirmed; coldReset() returned after "));
@@ -1708,7 +1709,8 @@ static void cmdLoadPatch()
 /// word, so a region they write behind a word that is not 0 would not load.
 static void printOffsetAdvice()
 {
-    Serial.println(F("[pb] Read [offset] High above. Do not run u or b while it, or the [offset] line of any region they would write, is not 0x00000000: u and b do not write that word, and no command of this example does."));
+    Serial.println(F("[pb] Read [offset] High above. Do not run u or b while it, or the [offset] line of any region they would write, is not 0x00000000: u and b do not write that word."));
+    Serial.println(F("[pb] pb writes both words. To repair a word that is not 0, send zero and then pb; zero leaves no valid pointer until pb completes, so run pb before any reset."));
 }
 
 static void cmdProgramBlank()
@@ -1781,7 +1783,7 @@ static void cmdProgramBlank()
         if (s == EepromUpdateStatus::PointerNeighborsChanged || updater.lastStep() == EepromUpdateStep::WriteBundle) {
             Serial.println(F("[pb] This stop means bytes may lie where they do not belong. Check the Low region with r (compare the dump with the image) before relying on it."));
         }
-        Serial.println(F("[pb] Both AppConfigOffset words were written before either pass. While [offset] High above reads 0x00000000, b finishes the layout: it writes High, then rewrites Low, and ends with both pointers valid. u alone would leave only High valid."));
+        Serial.println(F("[pb] Both AppConfigOffset words were written before either pass. While [offset] High above reads 0x00000000, b finishes the layout if it succeeds: it writes High and erases the Low pointer, then rewrites Low, and ends with both pointers valid. u alone would leave only High valid."));
         printOffsetAdvice();
     } else {
         Serial.println(F("[pb] The Low pass did not complete. Unless a pointer above reads valid, the controller has no region to load and comes up in PTCH at its next restart; l then pb recovers from there."));
@@ -1839,7 +1841,7 @@ static void cmdZeroPointers()
     Serial.println(F("[plan] After this the EEPROM has no valid region pointer."));
     Serial.println(F("[plan] The controller keeps running the firmware it already loaded until the next reset or power cycle."));
     Serial.println(F("[plan] After a reset it is expected to start in PTCH (SLVAFL1 page 2; not yet observed on this board) and to stay there until a host loads a patch (l here, or examples/load-patch-bundle) or the EEPROM is restored."));
-    Serial.println(F("[plan] pb can run now, before any reset, and is the intended next step. The SOIC8 clip (write-flash.zsh) is the fallback."));
+    Serial.println(F("[plan] pb can run now, before any reset, and is the intended next step. The fallback is an external programmer on the EEPROM through a SOIC8 clip, which on this kind of board may need disassembly."));
     Serial.println(F("[plan] This command writes the EEPROM."));
     if (!confirm()) {
         return;

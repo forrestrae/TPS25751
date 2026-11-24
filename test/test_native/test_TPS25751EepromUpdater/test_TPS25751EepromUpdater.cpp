@@ -3467,9 +3467,9 @@ void test_update_both_regions_executor_failure_at_every_call()
 namespace {
 
 // A board after a PBM load in front of an unusable EEPROM: every byte erased to
-// 0xFF, MODE reading APP, BOOT_FLAGS reporting the EEPROM. That the controller
-// reports the EEPROM after a PBM boot is inferred (hardware stage 5 checks it);
-// the tests take it as given. image is the bundle to program.
+// 0xFF, MODE reading APP, BOOT_FLAGS reporting the EEPROM. Hardware stage 5 saw
+// the controller report the EEPROM after a PBM boot, on an EEPROM with both
+// pointers 0; an erased one was not tested. image is the bundle to program.
 struct BlankBoard
 {
     FakeCommandExecutor fake;

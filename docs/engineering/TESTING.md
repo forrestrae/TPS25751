@@ -232,7 +232,15 @@ clock the tests set and read (`fake_arduino::g_nowUs`); `millis()` and `micros()
 levels the tests set. The poll counts, the 0xFF padding of a long read, and the exact
 time MODE switches are choices of the fake, not documented behaviour.
 
-Two suites use it. `test_TPS25751Core` covers the register read and write with the
+Three suites use it. `test_TPS25751Typed` covers the typed wrappers of `TPS25751.cpp`:
+each of the 32 `read*(T &)` functions, 15 `write*(const T &)` functions, and 33 factory
+`read*Register(validate)` functions is checked for the register address in the pointer
+write, the read of size + 1 bytes, the bytes the decoded object holds, the
+`[register, length, data...]` frame with a STOP for writes, and its failure paths (a NACKed
+pointer write or write, a length byte that is not the register size, an object of the wrong
+size); it also covers `readRegisterByAddress()` for all 37 addresses and an unknown one,
+`readRegisterAs<T>()`, the address-keyed and `RegisterInfo` forms, `begin()`, and the debug
+setters. `test_TPS25751Core` covers the register read and write with the
 length byte and their failures, `writeCommandData()` (the exact-length DATA write and the
 lengths it refuses), `executeCommand()` and `issueCommand()` (the handshake,
 DATA read at the instant COMMAND clears or not at all, rejected, the timeout at its exact
@@ -834,6 +842,16 @@ tests in `test_TPS25751Core`); the new `writeCommandData()` is covered, and the 
 lines are the same wrappers as in the fourth measurement. `TPS25751EepromUpdater.cpp`
 stays at 100%, and every other file is at 93% or more.
 
+Sixth measurement, 2026-11-24 (1441 tests), after `test_TPS25751Typed` (93 tests): 98%
+of lines overall (5987 of 6078). `TPS25751.cpp` is at 94% (492 of 521 lines), up from 34%.
+The 29 lines still missed are two kinds. Lines 42-43 and 61-62 test `available()` after a
+`requestFrom()` that returned the full count, which the fake and the driver never
+contradict. Lines 401-402 test a null factory result for an address that has register
+info, which cannot happen while the factory covers every address. The other 23 are the
+`return nullptr` after an `if (reg)` that cannot be false, one in each of 23 `read*Register()`
+functions. Changing `src/` to remove them is outside this
+change. `TPS25751PatchLoader.cpp` stays at 99% and `TPS25751EepromUpdater.cpp` at 100%.
+
 ### Regression Testing
 
 Maintain a regression test suite:
@@ -883,6 +901,7 @@ Tests are successful when:
 | 1.9 | 2026-11-23 | Claude Code | The Wire fake follows the Teensy 4 driver's codes and limits, with what it does not model; the new core and loader tests; the fourth measurement rerun (1334 tests) |
 | 1.10 | 2026-11-23 | Claude Code | Loader tests of a slow `PBMs` and of the IRQ ready wait across a `millis()` wrap; the fourth measurement rerun (1336 tests) |
 | 1.11 | 2026-11-24 | Claude Code | Core test of `writeCommandData()`; loader tests of the Ready for Patch and MODE polls, the PBMs configuration read-back, and `PBMe`; the fake's additions; the fifth measurement (1348 tests) |
+| 1.12 | 2026-11-24 | Claude Code | `test_TPS25751Typed`: the typed read and write wrappers and the factory read functions, and the sixth coverage measurement (1441 tests, `TPS25751.cpp` at 94%) |
 
 ---
 

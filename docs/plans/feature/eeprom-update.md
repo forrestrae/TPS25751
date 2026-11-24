@@ -242,6 +242,10 @@ return codes and of `FLwd` busy results.
 - `TPS25751BootFlags`: `region0Invalid()`, `region0EepromError()`, `i2cEepromPresent()`,
   and the Patch Config Source field.
 - `TPS25751PatchLoader` for the PTCH to APP step of blank programming (ADR-011).
+
+Changed on 2026-11-23, after stage 5: `executeCommand()` is now built on the new
+`issueCommand()`, with the same transactions, and `TPS25751PatchLoader` follows the
+documented timing around `PBMc`. See the investigation note under Batch 3.
 - `TPS_DEBUG_*` with `DEBUG_CAT_TASK`.
 
 ## Design
@@ -686,9 +690,11 @@ Status, 2026-11-23: implemented; the review found no blocker and its findings ar
 fixed; three of the four decisions that followed it are implemented (see the table
 below); the re-review of `c5c5376..85bab56` found the range clean and ready for stage
 5; stage 5 passed on 2026-11-23 with one deviation (see its result).
-`src/TPS25751EepromUpdater.cpp` has 100% line coverage (506 of 506 lines), the updater
-suite has 149 tests, and the native run has 1297. The example gained `l` (a PBM load while MODE reads
-PTCH; it loads the controller's RAM only), `pb` (`programBlank()`), and `zero` (both
+After stage 5 the branch gained decision 3 and the PBM-load fix (see the notes
+below); both are reviewed and neither has run on hardware.
+`src/TPS25751EepromUpdater.cpp` has 100% line coverage (527 of 527 lines), the updater
+suite has 155 tests, and the native run has 1336. The example gained `l` (a PBM load
+while MODE reads PTCH; it loads the controller's RAM only), `pb` (`programBlank()`), and `zero` (both
 pointers to 0, the start of stage 5); `r` now prints both AppConfigOffset words.
 
 Notes from the Batch 3 review, 2026-11-23. The reviewer read the app note in full and
@@ -741,7 +747,7 @@ Decisions on these points, 2026-11-23:
 | Point | Decision | State |
 |---|---|---|
 | 1 and 2 | `programBlank()` writes both AppConfigOffset words first, then runs each pass as in an update, and reads the word once more before each pointer write | Implemented in `75263b5`; see the programBlank section |
-| 3 | A region counts as bootable only if its pointer is valid and its AppConfigOffset word is 0. `updateRegion()` also checks the target's word, in the pre-flight and again before the step 3 pointer write | Companion check decided on 2026-11-23: both points; see below and the updateRegion section |
+| 3 | A region counts as bootable only if its pointer is valid and its AppConfigOffset word is 0. `updateRegion()` also checks the target's word, in the pre-flight and again before the step 3 pointer write | Companion check decided on 2026-11-23: both points. Implemented in `dacced0`; the review of `3a9b3f6..8e0de59` found the code clean. The three new reads have not run on hardware; stage 6 part A covers them |
 | 4 | `coldReset()` requires an observed I2C failure before it accepts APP | Implemented in `36d58f4`; see the coldReset section |
 | 5 | Stage 5 starts from an example command that writes both pointers to 0, not from a `minipro` erase | Implemented in `518b98c` as `zero`; see stage 5 |
 | 6 | No change | Recorded in `CONSTRAINTS.md` and the example's notes |
@@ -821,12 +827,14 @@ driver (`WireIMXRT.cpp`, framework 1.162.0), and the stage 5 logs found:
    controller between 47 s after the load and the restart. The cause stays unknown,
    and a controller that did not acknowledge its address fits the codes as well.
 3. Correction to the coldReset measurement: the MODE read 100 ms after the failed
-   COMMAND poll returned error 4 (arbitration lost or SCL held low), not a NACK. The
-   observed-restart rule is unaffected, because it counts any failed read.
+   COMMAND poll returned error 4, not a NACK. The driver returns 4 for lost
+   arbitration, a pin held low, a bus that never became idle, and its 50 ms timeout,
+   and the log does not say which. The observed-restart rule is unaffected, because it
+   counts any failed read.
 4. Every failing episode was three reads within 1 ms. A retry spaced by milliseconds
    and a `Wire.begin()` were never tried, so neither is ruled in or out.
 
-Fix design, not yet implemented or reviewed:
+Fix design, implemented in `62330f9` to `48332f0` and reviewed (results below):
 
 - `TPS25751` gains a task call that writes DATA and COMMAND and waits for COMMAND to
   clear without reading DATA; `executeCommand()` becomes that call plus the DATA read,
@@ -851,8 +859,57 @@ Fix design, not yet implemented or reviewed:
 - A hardware retest needs the controller in PTCH again, which means `zero`, a reset,
   `l`, and `pb`: EEPROM writes that need their own go-ahead.
 
-Review of the decision 3 range (`3a9b3f6..8e0de59`) was started and stopped before it
-reported; it was restarted on 2026-11-23.
+Results, 2026-11-23.
+
+Decision 3. The review of `3a9b3f6..8e0de59` found no defect. `programBlank()` issues
+the same calls, byte for byte, as the code stage 5 ran. A matrix of 108 runs over
+pointer validity and word values, and a sweep of 448 single faults, left no run without
+a bootable region and no valid pointer over a region that does not hold a whole
+bundle. Its four low findings are fixed: stage 5 task counts given per image length, a
+test for words whose low 16 bits are 0, the wording of the `AppConfigOffsetNotZero`
+advice, and one comment line.
+
+PBM-load fix. `TPS25751::issueCommand()` writes DATA and COMMAND and waits for COMMAND
+to clear without reading DATA. `executeCommand()` is that call plus the DATA read; the
+reviewer ran the old and the new code against the Wire fake for every outcome and
+found no differing transaction. After the burst the loader now waits 500 us, issues
+`PBMc`, polls COMMAND, waits 20 ms, reads DATA with retries every 10 ms for up to 5 s,
+and polls MODE every 10 ms for up to 5 s. The two regression tests fail on the old
+loader with the stage 5 symptom. The reviews of `8e0de59..94a9368` and
+`94a9368..c5cf1e8` found the code clean and no reason against a hardware retest; their
+findings were text, tests, and the fidelity of the fake, and are fixed. The final check
+of `c5cf1e8..48332f0` found nothing wrong.
+
+The 500 us before `PBMc` was added on my decision on 2026-11-23, not on the user's:
+TRM Figure 5-1 (page 88) and the app note (step 10, page 10) both have it, and the
+loader never did. Stage 5 loaded an image without it.
+
+Native tests after the fix: 1336 in all, 19 in the loader suite and 14 in the core
+suite. Line coverage: `TPS25751PatchLoader.cpp` 99%, `TPS25751EepromUpdater.cpp` 100%,
+and `TPS25751.cpp` 32% (165 of 515 lines). `TPS25751.cpp` was not measured before the
+Wire fake existed; its tests cover the task, burst, and raw read and write paths, and
+the typed read and write wrappers that forward to them are not tested. That figure is
+below the 90% target and is open for the user.
+
+Where the loader still departs from TI's flow. `docs/engineering/CONSTRAINTS.md` lists
+each with its source. None is changed on this branch, and each is open for the user:
+
+- The 448 burst transactions of 32 bytes go out back to back. The app note's example
+  sends three bursts with 500 us after each; the TRM figure shows no spacing.
+  `burstWrite()` already takes an inter-chunk delay, which the loader leaves at 0.
+- The `PBMs` timeout byte is 0x31. TRM Table 4-15 (page 76) recommends 0x32, 5 s in
+  100 ms units. The app note lists 0x31 as "3.1 seconds" and shows both values in its
+  traces.
+- `PBMe` is never issued after a burst that is not acknowledged or after "!CMD" on
+  `PBMc`.
+- DATA is written once before `PBMs` with no read-back.
+- In polling mode MODE is checked once for PTCH, with no ReadyForPatch poll.
+- No poll of INT_EVENT1.PatchLoaded; COMMAND is polled every 5 ms where the TRM figure
+  shows 10 ms; DATA is read whole, 64 bytes, where the app note reads 40.
+
+Still unverified, and marked so in the code: the new sequence on hardware; that
+`digitalRead()` sees SDA and SCL while the pins belong to LPI2C1; which pins the
+driver's pin-low flag covers.
 
 ## Tests
 
@@ -1140,7 +1197,9 @@ Ordered from safe to destructive. Each stage states its recovery.
    layout; `coldReset()` under the observed-restart rule returned Success for each
    restart into APP and `ResetTimeout` for the restart into PTCH.
 
-   Defect found, not fixed: the PBM load reports failure although it succeeded. The
+   Defect found, fixed after this stage and not yet retested on hardware (see the
+   investigation note under Batch 3 and stage 6): the PBM load reports failure although
+   it succeeded. The
    controller left the bus while `executeCommand()` read DATA after `PBMc`, before the
    20 ms delay of the app note's step 15, so `loadPatchBundle()` returned at that point
    and skipped its own checks of DATA and MODE. `l` then printed that the load did not
@@ -1150,14 +1209,62 @@ Ordered from safe to destructive. Each stage states its recovery.
 
    Also found, cause not established: after that cut-off read no I2C transaction from
    the Teensy was acknowledged until the Teensy restarted, while the controller was
-   in APP. That the fault is on the host side, in the Teensy's I2C driver or in how
-   the library leaves it after a short read, is inferred from the restart curing it;
-   the controller's state between the load and the restart was not observed. Until it
-   is understood, a PBM load from this example needs a Teensy restart before `pb`.
+   in APP. This note first inferred a fault on the host side from the restart curing
+   it. The investigation of 2026-11-23 withdrew that: the driver source does not
+   support a stuck Teensy, and the restart is confounded with elapsed time. The
+   controller's state between the load and the restart was not observed, and the cause
+   is unknown.
 
    Not shown by this stage: programming an erased EEPROM, because the bundles and the
    words were in place; that an AppConfigOffset write changes a value; a busy `FLwd`
    or any failure code; a boot after a loss of power.
+6. Retest after the changes of 2026-11-23. Added on 2026-11-23; not run. It needs its
+   own go-ahead, and a go-ahead for one part does not cover the other. Both parts use
+   the example built from the branch tip with the F8091166 image, start from an EEPROM
+   identical to `..._F8091166_fullFlash.bin`, and end there. Run from the 18650 pack.
+
+   Before either part: flash the build, then `r`. The dump must be identical to the
+   full-flash image and both `[offset]` lines must read 0.
+
+   Part A, the three AppConfigOffset reads of `updateRegion()`:
+
+   1. `b`, `updateBothRegions()` with the same image. Expected: Success. The call
+      issues 2734 tasks against the fake, and the example adds reads of its own, so
+      record the timing table; about 52 s by the task count.
+   2. `r`: the dump must be identical to the full-flash image.
+   3. `x`: VERSION 0xF8091166 and BOOT_FLAGS `18 00 F0 A2 C1`.
+
+   Part B, the PBM load:
+
+   1. `zero`, then `r`: the dump must equal the full-flash image with both pointer
+      words 0.
+   2. `x`. Expected as in stage 5: `ResetTimeout`, MODE PTCH, VERSION 0xF8091100,
+      BOOT_FLAGS `F8 00 60 02 C1`.
+   3. `l`. Expected: Success; the host I2C line prints SDA=1 SCL=1, which also checks
+      that the pins can be read; MODE APP; BOOT_FLAGS `F8 00 F0 C2 C1`. Record the
+      elapsed time and the register line.
+   4. Repeat steps 2 and 3 four more times. `x` returns the controller to PTCH because
+      no pointer is valid, and `l` writes nothing to the EEPROM, so the repeats cost no
+      EEPROM write. Five loads, because `load-patch-bundle` ran on this board with
+      the old sequence before stage 5, so the fault may not occur on every load and one
+      success shows little.
+   5. `pb`, then `r`: the dump must be identical to the full-flash image.
+   6. `x`: VERSION 0xF8091166 and BOOT_FLAGS `18 00 F0 A2 C1`.
+
+   If an `l` does not return Success: record everything it prints, including which
+   step, if any, restored communication. If reads still fail after its `Wire.begin()`
+   step, do not restart the Teensy at once: send `r` every 10 s for 2 minutes first, so
+   that elapsed time and the restart can be told apart. Then restart the Teensy by
+   flashing the same build, which writes nothing to the EEPROM, and continue with step
+   5 once MODE reads APP.
+
+   What the stage can show: that the documented sequence loads the patch and reports
+   it; that the diagnostics work. Five clean loads do not establish the cause of the
+   unacknowledged reads of stage 5; a repeat of the fault would, through the register
+   line and the recovery steps.
+
+   Recovery, in order: `l` then `pb` from PTCH; `examples/load-patch-bundle` followed
+   by `pb`; `write-flash.zsh` with the clip, which needs the stack apart.
 
 Two physical points were confirmed on 2026-11-22. First, the EEPROM can be reprogrammed
 in place with a SOIC8 clip, so `write-flash.zsh` (`24LC256@SOIC8`) is a recovery path
@@ -1184,8 +1291,9 @@ needs a qualification:
   PBM load is a recovery from PTCH that needs no teardown. After it, with the Low
   pointer 0 and the High pointer valid, `u` selects Low and passes pre-flight check 4.
   Pre-flight check 2 (I2C EEPROM Present in BOOT_FLAGS after a PBM boot) was verified
-  in stage 5. Stage 5 also showed that the load reports `I2cError` although it
-  succeeds, and that the Teensy must be restarted afterwards; see the stage 5 result.
+  in stage 5. Stage 5 also showed that the load reported `I2cError` although it
+  succeeded, and reads stayed unacknowledged until the Teensy was restarted; see the
+  stage 5 result and stage 6. The loader was changed after that.
 - The EEPROM is reachable from the Teensy directly on `Wire2`.
 
 Stages 2, 3, and 4 ran from the 18650 pack. Open, not decided: a direct `Wire2` dump

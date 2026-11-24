@@ -368,15 +368,26 @@ Pre-flight, before any write:
 2. BOOT_STATUS reports I2C EEPROM Present.
 3. `checkImage()`: the image starts with 0xACE00001 and its length is at least 0x38
    bytes and at most the region capacity (0x3C00 for both regions at the default size).
-4. The other region's pointer equals its bundle start. Step 1 below is safe only when
-   the region being kept is bootable.
+4. The other region is bootable: its pointer equals its bundle start and its
+   AppConfigOffset word reads 0. Step 1 below is safe only when the region being kept
+   is bootable. Otherwise the call returns `NoBootableRegion`.
+5. The target's AppConfigOffset word reads 0. Otherwise the call returns
+   `AppConfigOffsetNotZero`. `updateRegion()` does not write that word, so a target
+   with another value would end with a valid pointer over a region the controller may
+   not load.
+
+Checks 4 and 5 read each word with one `FLrd`. The word rule was decided on 2026-11-23
+(see the notes under Batch 3).
 
 Then the four steps of Figure 2-3:
 
 1. `writeRegionPointer(target, 0)`.
 2. `FLad` to the target bundle start, then `FLwd` in 32-byte chunks with the busy retry.
 3. `FLvy` at the target bundle start; then, when `compareAfterWrite` is set,
-   `compareRegion()`; then `writeRegionPointer(target, bundleStart)`.
+   `compareRegion()`; then one `FLrd` of the target's AppConfigOffset word, which must
+   still read 0; then `writeRegionPointer(target, bundleStart)`. A word that does not
+   read 0 returns `CompareMismatch` with `lastStep()` `CheckAppConfigOffset` and the
+   target pointer still 0, as in `programBlank()`.
 4. When `invalidateOldRegion` is set, `writeRegionPointer(other, 0)`.
 
 Change to step 2, approved on 2026-11-23. Step 2 as first written trusts the
@@ -417,7 +428,8 @@ after the read-back is not seen before step 3, and step 3 checks only the target
 region; when the target already held the same image, two chunks misplaced anywhere
 other than the pointer row go unseen. Whether an `FLrd` moves the write address is
 unknown, and no hardware stage shows it. A 14336-byte update with no retries issues 5
-`FLad`, 451 `FLwd`, 908 `FLrd`, and 1 `FLvy`.
+`FLad`, 451 `FLwd`, 911 `FLrd`, and 1 `FLvy`: 1368 tasks. Stages 3 and 4 ran the
+sequence without the three AppConfigOffset reads, at 908 `FLrd` and 1365 tasks.
 
 A stop in step 2 with `CompareMismatch` or `PointerNeighborsChanged` is final for the
 hardware stages: dump the EEPROM and find the misplaced bytes before any further
@@ -430,7 +442,8 @@ during the compare of step 3. `lastStep()` tells the phases apart.
 ### Region selection
 
 `selectTargetRegion()` reads both pointers and BOOT_STATUS. A pointer is valid when it
-equals that region's bundle start.
+equals that region's bundle start. Selection does not read the AppConfigOffset words;
+the pre-flight of `updateRegion()` does.
 
 | Low pointer | High pointer | Target |
 |---|---|---|
@@ -530,13 +543,14 @@ occurred.
 | `NotInAppMode` | Pre-flight | Unchanged |
 | `NoEepromPresent` | Pre-flight | Unchanged |
 | `BadImageHeader`, `BadImageLength` | `checkImage()` | Unchanged |
-| `NoBootableRegion` | Selection, pre-flight | Unchanged |
+| `NoBootableRegion` | Selection; pre-flight check 4, when the pointer of the region being kept is not valid or its AppConfigOffset word is not 0 | Unchanged |
+| `AppConfigOffsetNotZero` | Pre-flight check 5 of `updateRegion()` | Unchanged; the target's AppConfigOffset word is not 0. Repair: both pointers to 0, then `programBlank()` |
 | `EepromNotBlank` | `programBlank()` pre-flight | Unchanged |
 | `PointerEraseFailed` | Step 1 | Target pointer uncertain; other region still boots (Figure 2-6 or 2-7) |
 | `SetAddressFailed` | `FLad`, including the second `FLad` of step 2 and the `FLad` of a busy retry | Target pointer 0; other region boots (Figure 2-7) |
 | `WriteFailed`, `FlashBusy` | `FLwd` | Target region partly written, pointer 0; other region boots |
 | `VerifyFailed` | `FLvy` | Target written but not valid, pointer 0; other region boots (Figure 2-8) |
-| `CompareMismatch` | `compareRegion()` in step 3; the read-back of the first two chunks in step 2; in `programBlank()`, the read-back of an AppConfigOffset word and the check of that word before the pointer write | Step 3: same as `VerifyFailed`. Step 2: at most two chunks written, pointer 0; other region boots. `programBlank()` word write: no pointer written. `programBlank()` word check: region written and compared, pointer 0 |
+| `CompareMismatch` | `compareRegion()` in step 3; the read-back of the first two chunks in step 2; the check of the target's AppConfigOffset word before the step 3 pointer write; in `programBlank()`, the read-back of an AppConfigOffset word | Step 3: same as `VerifyFailed`. Step 2: at most two chunks written, pointer 0; other region boots. Word check before the pointer write: region written and compared, pointer 0; in an update the other region boots. `programBlank()` word write: no pointer written |
 | `PointerRestoreFailed` | Step 3 pointer write | Target pointer uncertain; other region boots |
 | `OldPointerEraseFailed` | Step 4 | Both pointers may be valid; low boots first (Figure 2-9) |
 | `PointerNeighborsChanged` | Neighbor check of a pointer write; the two pointer-row checks in step 2 | Bytes 4 to 15 after a pointer changed; stop and dump. From step 2: the first chunks landed in the target's pointer row, or the trace of an earlier misplaced write was found there before any bundle write; other region boots |
@@ -727,7 +741,7 @@ Decisions on these points, 2026-11-23:
 | Point | Decision | State |
 |---|---|---|
 | 1 and 2 | `programBlank()` writes both AppConfigOffset words first, then runs each pass as in an update, and reads the word once more before each pointer write | Implemented in `75263b5`; see the programBlank section |
-| 3 | A region counts as bootable only if its pointer is valid and its AppConfigOffset word is 0 | Approved, not implemented: the rule as worded conflicts with `updateBothRegions()`; see below |
+| 3 | A region counts as bootable only if its pointer is valid and its AppConfigOffset word is 0. `updateRegion()` also checks the target's word, in the pre-flight and again before the step 3 pointer write | Companion check decided on 2026-11-23: both points; see below and the updateRegion section |
 | 4 | `coldReset()` requires an observed I2C failure before it accepts APP | Implemented in `36d58f4`; see the coldReset section |
 | 5 | Stage 5 starts from an example command that writes both pointers to 0, not from a `minipro` erase | Implemented in `518b98c` as `zero`; see stage 5 |
 | 6 | No change | Recorded in `CONSTRAINTS.md` and the example's notes |
@@ -741,12 +755,21 @@ second pass then rewrites Low and repairs the state. With the approved rule the 
 pass refuses with `NoBootableRegion`, because the region it would keep is High, and the
 EEPROM is left with no bootable region. `updateInactiveRegion()` alone leaves the same
 state with or without the rule. The rule therefore needs a companion check on the
-target's word, and where that check sits is not decided:
+target's word. Decided 2026-11-23: the check sits at both points below. The options
+were:
 
 - In the pre-flight: refuse a target whose word is not 0. Nothing is written.
 - Before the step 3 pointer write, as `programBlank()` now does. This also catches a
   word changed during the update, but the bundle is already written when it fires.
 - Both.
+
+With both checks, the example above stops in the pre-flight of the first pass with
+`AppConfigOffsetNotZero` and nothing is written. The pre-flight refusal has its own
+status because its repair differs from that of `NoBootableRegion`: the kept region
+boots, and the target cannot be made bootable by an update. The check before the
+pointer write reuses `CompareMismatch` with `lastStep()` `CheckAppConfigOffset`, the
+result `programBlank()` already gives for the same read, so both calls share one pass.
+`programBlank()` keeps its task sequence, which stage 5 verified.
 
 Under any of these, a region whose word is not 0 cannot be updated by `updateRegion()`.
 The repair is `writeRegionPointer()` to 0 for both regions followed by

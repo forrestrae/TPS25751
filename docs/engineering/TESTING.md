@@ -93,11 +93,15 @@ no `Wire`, no Arduino framework. The `[env:native]` environment in
 `platformio.ini`:
 
 - uses **Unity** as the test framework (`test_framework = unity`);
-- compiles every register class, the base class, the debug helpers, and the
-  factory via `build_src_filter` (`test_build_src = yes`), listed in register
-  address order. The I2C-facing sources (`TPS25751.cpp`,
-  `TPS25751DownstreamDevice.cpp`, `TPS25751PatchLoader.cpp`) are not compiled;
-  a new register class must be added to the filter;
+- compiles every register class, the base class, the debug helpers, the PDO and
+  RDO value types, and the factory via `build_src_filter` (`test_build_src =
+  yes`), listed in register address order, followed by
+  `TPS25751EepromUpdater.cpp`, which reaches the controller only through the
+  `TPS25751CommandExecutor` interface, and by `TPS25751.cpp` and
+  `TPS25751PatchLoader.cpp`, which reach the bus through the TwoWire fake (see
+  "I2C Tests: the Wire Fake" below). `TPS25751HostExecutor.cpp` and
+  `TPS25751DownstreamDevice.cpp` are not compiled, because no suite tests them; a
+  new register class must be added to the filter;
 - satisfies the Arduino API symbols those sources reference (`Stream`,
   `Serial`, `F()`, `millis()`, `strncpy_P`) with the **header-only stubs** in
   `test/support/native/` (`Arduino.h`, `Stream.h`). The stubs print to stdout;
@@ -193,6 +197,138 @@ int main(int, char **)
     return UNITY_END();
 }
 ```
+
+### I2C Tests: the Wire Fake
+
+`test/support/native/Wire.h` gives the native build a `TwoWire` class and a `Wire`
+object with the calls the library makes (`begin()`, `beginTransmission()`, `write()`,
+`endTransmission()`, `requestFrom()`, `available()`, `read()`). It hands each transaction
+to a target and follows the Teensy 4 driver (`WireIMXRT.cpp`) where the library can see
+the difference: a 136-byte transmit buffer and receive buffer, `write()` returning 0
+until `beginTransmission()` has been called, `endTransmission()` returning 4 when no
+transmission was begun, and `requestFrom()` taking a `uint8_t` length of at least 1.
+`test/support/native/FakeTps25751Target.h` is that target, a scripted TPS25751:
+
+- the register protocol of the unique address: a pointer write, then a read of the count
+  byte and the register; a write of register, count, and data;
+- COMMAND and DATA as a 4CC task: a code written to COMMAND reads back for a scripted
+  number of polls, then clears or reads "!CMD", and DATA takes the task's output;
+- PBMs opening the burst port at 0x30 on a PatchStartStatus of 0, the port recording the
+  raw burst, and PBMc setting MODE to APP after a scripted delay;
+- faults by transaction index, time window, address, register, and kind: a write error
+  code the driver can return (2 for a NACK, of the address or of a data byte, which the
+  driver does not tell apart; 4; or 5) or a read that returns only N bytes, and a hook on
+  a task's completion that can open a fault window then;
+- a log of every transaction with the stub clock's time.
+
+The fake does not model the driver's bus-idle wait and the forced clocking it falls back
+to, clock stretching, the driver's 50 ms transaction timeouts, or `requestFrom()`
+returning 4 when the bus did not become idle, which a caller cannot tell from a 4-byte
+read.
+
+The Arduino stub's `millis()`, `micros()`, `delay()`, and `delayMicroseconds()` use a
+clock the tests set and read (`fake_arduino::g_nowUs`); `millis()` and `micros()` wrap at
+32 bits, as on the Teensy, and `digitalRead()` returns pin
+levels the tests set. The poll counts, the 0xFF padding of a long read, and the exact
+time MODE switches are choices of the fake, not documented behaviour.
+
+Two suites use it. `test_TPS25751Core` covers the register read and write with the
+length byte and their failures, `writeCommandData()` (the exact-length DATA write and the
+lengths it refuses), `executeCommand()` and `issueCommand()` (the handshake,
+DATA read at the instant COMMAND clears or not at all, rejected, the timeout at its exact
+bound, a COMMAND poll across a `millis()` wrap, and an I2C failure at each transaction),
+`burstWrite()`, and the fake's own match to the driver. `test_TPS25751PatchLoader` covers
+`loadPatchBundle()`: the transaction order of SLVAFV8A section 4, no DATA read within
+20 ms of `PBMc` completing (the regression test for the defect hardware stage 5 found;
+it fails against the earlier loader), a controller modelled off the bus for those 20 ms,
+at least 500 µs between the last burst chunk and the next transaction in both modes, the
+DATA retry and its cap, the MODE poll through failed and PTCH reads and both outcomes at
+its cap, both caps and the IRQ ready wait across a `millis()` wrap, a `PBMs` and a `PBMc`
+that each take longer than the 200 ms default timeout, every `PatchLoadStatus`, `debugPrint()`, the PBMs configuration bytes,
+and IRQ mode. Since 2026-11-24 it also covers the steps added from TRM Figure 5-1 and
+SLVAFV8A step 5: the INT_EVENT1 Ready for Patch poll of polling mode (10 ms interval,
+failed reads, its cap, and none in IRQ mode), the MODE poll until PTCH through BOOT and
+failed reads in both modes and its cap, both caps across a `millis()` wrap, the PBMs
+configuration read back 500 µs after its write (a dropped write rewritten, three
+mismatches, and failed writes and read-backs), and `PBMe` after a burst chunk that is not
+acknowledged and after "!CMD" on `PBMc`, with its own failures and the failures that must
+not issue it. The fake models a dropped write as a fault with `writeError` 0, matches
+faults by a minimum write length, holds INT_EVENT1 with bit 81 set, and runs a
+`beforeRead` hook so a test can change a register over time.
+
+### Sequencer Tests: the EEPROM Updater
+
+`TPS25751EepromUpdater` is the one sequencer with native tests. It reaches the controller
+only through `TPS25751CommandExecutor` (ADR-014), so its suite,
+`test/test_native/test_TPS25751EepromUpdater/`, drives it with a scripted fake instead of
+`Wire`. The suite exists to show that no failure at any task can leave a valid region
+pointer over a region that was not verified and compared.
+
+`test/support/native/FakeCommandExecutor.h` models what the flash tasks touch:
+
+- a byte-array EEPROM erased to 0xFF, of a configurable size, with no page model (the
+  24LC256 itself wraps a write at a 64-byte page);
+- the 64-byte DATA register, written with the input payload and read from byte 0, with
+  `returnCode` always DATA byte 0, as `TPS25751::executeCommand()` does;
+- `FLrd`, `FLad` with its write address, `FLwd` with the address advancing after each
+  write, `FLvy`, and `GAID` with a reboot window in which MODE and BOOT_FLAGS reads fail;
+- MODE and BOOT_FLAGS contents and read failures, a fake clock that `delayMs()` advances
+  and that wraps like `millis()`, and a log of every call (code, payload, `outLen`,
+  timeout, result).
+
+Faults are injected per call, by global call index or by the n-th call of one task code:
+an executor status, a forced return code with the task not run, or a hook that edits the
+fake after the task runs.
+
+Where the TRM is silent the fake has to choose, and the header labels each choice as an
+assumption: `FLrd` past the end of the part reads 0xFF; `FLad` past the end and `FLwd`
+without an `FLad` return 0x03; an `FLwd` after an `FLad` that was faulted into having no
+effect writes at the stale address; `FLvy` decides validity from the Header_ID alone;
+`GAID` clears the write address and reboots at once. A test that depends on one of these
+pins the fake, not the device. Two behaviours the fake follows were inferred from the
+documents rather than stated by them and have since been verified on the test board: the
+`FLrd` byte order and address order (stage 1) and the exact length of a 4-byte `FLwd`
+(stage 2; other lengths remain a model). Hardware has contradicted none of the fake's
+choices so far. One device behaviour is modelled only on
+request: `flrdMovesWriteAddress` makes every `FLrd` leave the write address at the address
+it read plus 16. The TRM does not say whether a read moves the write address, hardware has
+not shown it, and the default is that it does not.
+
+What the suite covers:
+
+- each task primitive: the exact 4CC, payload, little-endian address, timeout, and result
+  decoding;
+- region pointer writes, region selection including the stale BOOT_FLAGS case, the compare,
+  and the dump format;
+- `updateRegion()`, `updateBothRegions()`, and `programBlank()`: the full call sequence,
+  built in the test from the plan rather than from the implementation, at 100 bytes and at
+  the real 14336 bytes; the final EEPROM byte for byte; every status of the state tables by
+  fault injection, with the EEPROM state asserted;
+- sweeps that inject an executor failure, or a wrong return code, at every call of an
+  update and of `programBlank()`, at both lengths (at the real length the long run of
+  compare reads is thinned to the first, every 16th, and the last read of each pass);
+- the modelled misplaced bundle write, the trace check, and the stated limits of the step
+  2 read-back, each pinned so that a limit is not mistaken for coverage;
+- the AppConfigOffset checks of `updateRegion()`: each pre-flight refusal for both targets
+  with the EEPROM unchanged, the kept word checked before the target's, the conflict case
+  of the plan in `updateBothRegions()` and its opposite, the word check before the step 3
+  pointer write with and without the compare, executor failures on each new read, and the
+  task counts (1368 for an update, 2732 for `programBlank()`, at 14336 bytes);
+- for `programBlank()`, a sweep of an `FLad` that reports success without taking effect at
+  each of its 10 `FLad` calls, from three start states, with and without the moving-address
+  model, asserting that no valid pointer leads to a region that does not hold the image;
+  against the step order used before 2026-11-23 the same sweep fails;
+- the progress callback, `lastStep()`, `lastTarget()`, and `coldReset()`, including both of
+  its APP outcomes. A `rebootDurationMs` of 0 scripts a controller that reads APP with no
+  failed MODE read, which `coldReset()` must report as `ResetNotObserved`.
+
+`TPS25751HostExecutor` is a pass-through to `TPS25751` and stays outside the native build.
+The example `examples/eeprom-update` is built by `pio run -e example-eeprom-update` and
+exercised on hardware only. The hardware stages of `docs/plans/feature/eeprom-update.md` run
+its commands: `r` (stage 1 and every later check), `p` and `p2` (stage 2), `u`, `v`, `b`, and
+`x` (stage 3), `c1` to `c4` with `x` (stage 4), and for stage 5 `zero`, which writes both
+region pointers to 0 in place of an external erase, with `l`, `pb`, and `x`. The plan sets
+the order of each stage.
 
 ---
 
@@ -507,6 +643,23 @@ pio test -e native -v
 (`default_envs`) and will try to upload to a Teensy — always pass `-e native`
 for unit tests.
 
+### Script Tests
+
+The Python tools under `scripts/` have their own tests in `scripts/tests/`. Run them from
+the library root:
+
+```bash
+python3 -m unittest discover -s scripts/tests -t scripts -q
+```
+
+`test_bin_to_header.py` covers `scripts/bin_to_header.py`, which turns a low-region
+binary into the header `examples/eeprom-update` embeds. It checks that the bytes round
+trip, the declarations and the provenance comment (size, SHA-256, version word), that the
+output is reproducible and compiles as C++17, and that the script applies the checks of
+`TPS25751EepromUpdater::checkImage()` (Header_ID, minimum length, one region at most) and
+writes no header for a rejected file. The other files test the git workflow tooling. The
+verify gate runs this suite.
+
 ### Test Output
 
 Expected output format (from the seed suite):
@@ -626,10 +779,11 @@ across runs and the shared cache in `.pio/buildcache` restores object files
 without the `.gcno` notes gcov needs. On macOS it reads Apple clang's counters
 with `xcrun llvm-cov gcov`.
 
-Only sources compiled by `[env:native]` appear in the report, so the I2C-facing
-`TPS25751.cpp`, `TPS25751DownstreamDevice.cpp`, and `TPS25751PatchLoader.cpp`
-are not measured. Neither the verify gate nor CI runs the coverage step; the
->90% target is checked by running the script at review.
+Only sources compiled by `[env:native]` appear in the report, so
+`TPS25751HostExecutor.cpp` and `TPS25751DownstreamDevice.cpp` are not measured.
+`TPS25751EepromUpdater.cpp` is, through the executor interface, and `TPS25751.cpp`
+and `TPS25751PatchLoader.cpp` are, through the Wire fake. Neither the verify gate nor CI runs the coverage step; the >90%
+target is checked by running the script at review.
 
 First measurement, 2026-11-19 (727 tests): 84% of lines overall. Files under
 90%, lowest first: `TPS25751PowerStatus.cpp` 11%, `TPS25751Debug.cpp` 26%,
@@ -654,6 +808,31 @@ maximum (for example `TPS25751Status.cpp` 220 and 227, `TPS25751TypeCState.cpp`
 71 and 75, `TPS25751PDStatus.cpp` 241 and 247). Files at or above 90% that the
 second pass did not target, such as `TPS25751InterruptEvent.cpp` (93%) and
 `TPS25751ActivePDOContract.cpp` (95%), were left as they were.
+
+Third measurement, 2026-11-23 (1303 tests), the first recorded here with
+`TPS25751EepromUpdater.cpp` in the report, after the AppConfigOffset checks of
+`updateRegion()`: 98% of lines overall, every file at 93% or more, and the updater
+at 100% (527 of 527 lines, 155 tests in its suite).
+
+Fourth measurement, 2026-11-23 (1336 tests), with `TPS25751.cpp` and
+`TPS25751PatchLoader.cpp` in the native build: 93% of lines overall (5614 of 6026).
+`TPS25751PatchLoader.cpp` is at 99% (171 of 172 lines, 19 tests); it misses only the
+`default:` of `mapTaskStatus()`, which no caller reaches.
+`TPS25751.cpp` is at 32% (165 of 515 lines, 14 tests in `test_TPS25751Core`): the
+register read and write, the task calls, and the burst are covered; the typed
+`read*()` and `write*()` wrappers and the factory-based `read*Register()` functions,
+which each forward to those paths, `begin()`, the debug setters, and two unreachable
+branches after a full-length read are not, and no test calls them only to count lines.
+`TPS25751EepromUpdater.cpp` stays at 100% (527 of 527 lines, 155 tests). Every other
+file is at 93% or more.
+
+Fifth measurement, 2026-11-24 (1348 tests), after the loader gained the Ready for Patch
+and MODE polls, the PBMs configuration read-back, and `PBMe`: 93% of lines overall (5673
+of 6078). `TPS25751PatchLoader.cpp` is at 99% (217 of 218 lines, 30 tests), still missing
+only the `default:` of `mapTaskStatus()`. `TPS25751.cpp` is at 34% (178 of 521 lines, 15
+tests in `test_TPS25751Core`); the new `writeCommandData()` is covered, and the missed
+lines are the same wrappers as in the fourth measurement. `TPS25751EepromUpdater.cpp`
+stays at 100%, and every other file is at 93% or more.
 
 ### Regression Testing
 
@@ -697,6 +876,13 @@ Tests are successful when:
 | 1.2 | 2026-11-19 | Claude Code | The native build compiles every register class and the factory; factory and base-class suites; line coverage with `test/coverage.sh` and `[env:native-coverage]`, with the first per-file numbers |
 | 1.3 | 2026-11-19 | Claude Code | Second coverage measurement: 98% of lines, every file at 93% or more, and the kinds of line that remain unreachable |
 | 1.4 | 2026-11-23 | Claude Code | USB PD capture bundles and their generated headers |
+| 1.5 | 2026-11-23 | Claude Code | EEPROM updater suite and `FakeCommandExecutor` (what it models and which behaviours are assumptions), the updater in the native build and the coverage report, script tests for `bin_to_header.py` |
+| 1.6 | 2026-11-23 | Claude Code | The `programBlank()` `FLad` sweep, the two `coldReset()` APP outcomes, and the example commands the hardware stages run, including `zero` |
+| 1.7 | 2026-11-23 | Claude Code | Tests of the AppConfigOffset checks of `updateRegion()`, and the coverage numbers after them |
+| 1.8 | 2026-11-23 | Claude Code | The Wire fake, the core and patch-loader suites, `TPS25751.cpp` and `TPS25751PatchLoader.cpp` in the native build, and the fourth coverage measurement |
+| 1.9 | 2026-11-23 | Claude Code | The Wire fake follows the Teensy 4 driver's codes and limits, with what it does not model; the new core and loader tests; the fourth measurement rerun (1334 tests) |
+| 1.10 | 2026-11-23 | Claude Code | Loader tests of a slow `PBMs` and of the IRQ ready wait across a `millis()` wrap; the fourth measurement rerun (1336 tests) |
+| 1.11 | 2026-11-24 | Claude Code | Core test of `writeCommandData()`; loader tests of the Ready for Patch and MODE polls, the PBMs configuration read-back, and `PBMe`; the fake's additions; the fifth measurement (1348 tests) |
 
 ---
 

@@ -1,6 +1,6 @@
 # TPS25751 Library - Technical Constraints
 
-**Last Updated:** 2025-10-20
+**Last Updated:** 2026-11-23
 **Status:** Active
 
 ---
@@ -356,17 +356,311 @@ config[1] = (length >>  8) & 0xFF
 config[2] = (length >> 16) & 0xFF
 config[3] = (length >> 24) & 0xFF  // bundleSize MSB
 config[4] = 0x30                   // PBM_I2C_TARGET
-config[5] = 0x31                   // PBM_TIMEOUT (~3.1 s)
+config[5] = 0x32                   // PBM_TIMEOUT
 ```
+
+The timeout byte is in 100 ms units (TRM Table 4-15), so 0x31 is 4.9 s, and the TRM
+recommends 0x32 (5 s). SLVAFV8A is inconsistent: Table 4-1 (page 8) lists 0x31 as "3.1
+seconds", the byte listings of steps 4 and 5 (page 8) send 0x32, and the DATA read-back of
+step 9 (page 10) shows 0x31. The loader sends 0x32 since 2026-11-24. Five loads on hardware with 0x32 (stage 7 of the
+plan, 2026-11-24) all returned Success; every load before it sent 0x31.
 
 **PatchStartStatus** (DATA byte 0 after PBMs / PBMc, i.e. `result.returnCode`):
 `0x00` = success; `0x04` = bad bundle size; `0x05` = bad target address; `0x06` =
 bad timeout.  Map each to a distinct `PatchLoadStatus` enumerator (not a generic
 error).
 
+#### After PBMc: 20 ms before DATA
+
+Do not read DATA as soon as `PBMc` clears COMMAND. SLVAFV8A (step 15, page 11, and its
+code on page 18) and TRM Figure 5-1 (page 88) wait 20 ms between `PBMc` completing and the
+DATA read, while the controller loads and applies the image; the TRM says `PBMc` changes
+the I2C target address back to its normal value before it completes (Table 4-16, page
+79). The loader therefore issues `PBMc` with `TPS25751::issueCommand()`, which reads no
+DATA, waits 20 ms, reads DATA (retrying every 10 ms on a failed read, for up to 5000 ms),
+and then polls MODE every 10 ms until APP (up to 5000 ms; the caps are a choice). `PBMs`
+is different: SLVAFV8A reads its DATA right after COMMAND clears (steps 8 and 9), so it
+stays on `executeCommand()`.
+
+Evidence, one board, hardware stage 5 of the EEPROM-update plan, with the earlier code
+that read DATA at once: the read returned 28 of 65 bytes, the load reported `I2cError`
+although the patch had loaded, and every later read from the host failed with error 2
+until the host restarted. The Teensy 4 driver returns 2 only after `wait_idle()` found the
+bus free and the peripheral then saw a NACK, of the address or of a data byte (the driver
+cannot tell which); a busy bus, lost arbitration, a pin-low timeout, and its 50 ms timeout
+return 4. A controller that did not acknowledge fits the codes. They argue against a held
+line on the host side but do not rule out a host fault, and the cause is not established.
+Hardware stages 6 and 7 ran the 20 ms sequence in ten loads and stage 8 the current
+sequence in five, on the same board: all returned Success, and every later read was
+acknowledged. The fault did not recur, so those loads do not establish its cause.
+
+#### 500 µs before PBMc
+
+TRM Figure 5-1 (page 88) has one delay box, "Delay at least 500us", between "Entire Patch
+Bundle has been written? Yes" and the `PBMc` write; it has none between burst
+transactions. SLVAFV8A step 10 (page 10) and its code (pages 17 and 18) send the image as
+three separate I2C transactions of up to 4095 bytes, with 500 µs after each one, the last
+included. The loader waits `PBM_PRE_COMMIT_DELAY_US` (500 µs) once, directly after
+`burstWrite()` returns, so that the next transaction is at least 500 µs after the last
+chunk: the INT_CLEAR1 write of step 11 in IRQ mode, the `PBMc` COMMAND write otherwise.
+Each 32-byte chunk of `burstWrite()` is a separate transaction to 0x30, the same kind of
+transaction as the app note's bursts, and the loader sends them back to back
+(`interChunkDelayUs` stays 0), as it did in hardware stage 5, which loaded an image with no
+delay at all. Whether to add the spacing is an open decision.
+
+#### Where the loader departs from the documented flow
+
+These are facts about the code, each with the document it differs from. None has been
+observed to cause a failure.
+
+- ReadyForPatch. TRM Figure 5-1 starts by polling INT_EVENT1.ReadyForPatch every 10 ms,
+  without a bound. In polling mode the loader polls INT_EVENT1 bit 81 every 10 ms,
+  tolerating failed reads; in IRQ mode it waits for the I2Ct_IRQ pin to go low instead and
+  does not read INT_EVENT1. Both waits end at `PBM_READY_WAIT_CAP_MS` (5 s) with
+  `CommandTimeout`. The TRM shows an INT_EVENT1 bit only while its INT_MASK1 bit is set
+  (Table 3-8, page 19), and SLVAFV8A says Ready for Patch is the one interrupt enabled at a
+  cold boot into PTCH (step 1, page 6). On the test board, in PTCH after `GAID` with no
+  valid region pointer, the wait found bit 81 set in five of five loads (hardware stage 8
+  of the EEPROM-update plan, 2026-11-24). In APP with the board's configuration INT_EVENT1 read all zero (Read/Write
+  Registers section), so a polling-mode load on a controller in APP ends at this step after
+  5 s, not at the MODE check.
+- MODE before the load. Figure 5-1 polls MODE every 10 ms until it reads PTCH, without a
+  bound. The loader does the same in both modes, tolerating failed reads, and returns
+  `NotInPatchMode` at `PBM_PTCH_POLL_CAP_MS` (5 s), or at once when MODE reads `APP `,
+  which the controller does not leave on its own.
+- DATA before `PBMs`. SLVAFV8A step 5 (page 8) reads DATA back 500 µs after writing it and
+  rewrites it until it matches, without a bound; its trace shows a first read-back of zeros
+  after an acknowledged write, and its code (page 17) compares one byte. Figure 5-1 asks
+  "DATA1 write completed successfully?". The loader writes the 6 bytes with
+  `TPS25751::writeCommandData()`, waits 500 µs, reads DATA, and compares all 6, for up to
+  `PBMS_DATA_ATTEMPTS` (3) attempts, then issues `PBMs` with no input. No match returns
+  `PbmsConfigMismatch`, or `I2cError` when no read-back succeeded.
+- Transaction spacing. SLVAFV8A sends its 11392-byte example image as three burst
+  transactions with 500 µs after each (step 10, page 10; code, pages 17 and 18). The
+  loader sends the test board's 14336-byte image as 448 transactions of 32 bytes, back to
+  back. TRM Figure 5-1 shows no spacing between burst transactions. Whether to add it is
+  open (see above).
+- IRQ mode. With an IRQ pin, the loader enables CMD1 Complete in INT_MASK1 and clears
+  INT_CLEAR1 (step 3), and clears INT_CLEAR1 again after the burst (step 11), but it reads
+  the I2Ct_IRQ pin only in step 1. After `PBMs` and `PBMc` it polls COMMAND every 5 ms, as
+  in polling mode. SLVAFV8A waits for I2Ct_IRQ low before it reads CMD1 (steps 7 and 13,
+  pages 9 and 11; code, pages 17 and 18).
+- COMMAND poll interval. Figure 5-1 polls CMD1 with a 10 ms delay. `waitForCommandClear()`,
+  used for `PBMs` and `PBMc`, polls every 5 ms.
+- PBMe. Figure 5-1 issues `PBMe` after a burst that is not acknowledged and after `PBMc`
+  reads "!CMD", and on no other failure, then restarts the flow. The loader issues `PBMe`
+  on the same two paths, with a `PBME_CMD_TIMEOUT_MS` (500 ms) timeout, and returns
+  `BurstFailed` or `PbmcRejected`; the `PBMe` outcome is only logged, and the retry is the
+  caller's. Without `PBMe` a retry would find the session open, and TRM Table 4-15 (page
+  76) says a second `PBMs` then ignores its DATA input and keeps the first bundle size.
+- The wait after `PBMc`. TRM Table 4-16 (page 79) says to check DATA when CMD1 goes to 0;
+  the 20 ms delay appears only in Figure 5-1 and SLVAFV8A step 15 (page 11). The loader
+  follows the figure and the app note.
+- DATA read length after `PBMc`. SLVAFV8A step 16 (page 12) reads 40 bytes, and TRM
+  Table 4-16 gives `PBMc` 320 bits of output. The loader reads the whole 64-byte DATA
+  register and checks byte 0 only.
+- PatchLoaded. Figure 5-1 polls INT_EVENT1.PatchLoaded after DATA reads 0. The loader does
+  not. SLVAFV8A footnote 5 (page 11) says the interrupt can replace the 20 ms delay and
+  that doing so saved no time; the loader keeps the delay.
+- The delay before the final MODE read. Figure 5-1 waits 10 ms before reading MODE; its
+  footnote 2 calls the delay optional but recommended. The loader reads MODE right after
+  the DATA check, then polls every 10 ms until APP (SLVAFV8A code, page 18).
+- The `PBMs` timeout byte is 0x32, as TRM Table 4-15 recommends (see the configuration
+  layout above). Five loads on hardware with it returned Success (plan, stage 7); earlier loads sent 0x31.
+
 See `TPS25751PatchLoader` (`include/TPS25751PatchLoader.h`, `src/TPS25751PatchLoader.cpp`)
 for the complete 17-step implementation, and ADR-011 in ARCHITECTURE.md for the
 design rationale.
+
+### Flash tasks and EEPROM update
+
+The four flash tasks reach the external EEPROM (0x50 on I2Cc), and they do not share one
+result format. SLVAFL1 (EEPROM Boot Flow, page 2) says the host can write the EEPROM once
+MODE reads APP; neither it nor the TRM says whether the tasks are refused in other modes,
+and they have not been tried outside APP. The updater checks MODE before it writes. `TPS25751EepromUpdater` (ADR-014) applies the
+rules below; code that issues the tasks directly must apply them itself. Sources: TRM
+SLVUCR8B Tables 4-1, 4-3, and 4-19 to 4-22 (pages 61, 62, 81, and 82), TI application
+note SLVAFL1, and the hardware stages recorded in
+`docs/plans/feature/eeprom-update.md` (one board with a 24LC256, 2026-11-22 and 23).
+The datasheet (SLVSH93A, I2C Interface) asks for an EEPROM of at least 36 KB; the board's
+32 KB part holds the 31744-byte full-flash image and boots, and the updater takes the EEPROM
+size as a constructor parameter.
+
+#### Result offsets in library terms
+
+`TPS25751::executeCommand()` strips the I2C length byte and copies DATA from byte 0. The
+SLVAFL1 sample code reads `outdata[1]` because its buffer keeps the length byte; do not
+copy that offset.
+
+| Task | Input (DATA) | Result | Status |
+|---|---|---|---|
+| `FLrd` | 4-byte address, least significant byte first | `outData[0..15]`, the byte at the address first. There is no return code; `returnCode` is the first memory byte | Verified, stage 1 |
+| `FLad` | 4-byte address, least significant byte first (Table 4-20) | `returnCode`, standard return code, 0x00 success | 0x00 observed, stage 2 |
+| `FLwd` | 1 to 64 data bytes; the library sends at most 32 | `returnCode`: 0x00 written, 0xFF flash busy (Table 4-21) | 0x00 observed; busy never seen |
+| `FLvy` | 4-byte address, least significant byte first | `returnCode`: 0x00 valid, 0x01 not valid (Table 4-22) | Valid observed, stage 1; not valid observed, stage 3, exact byte not recorded |
+| `GAID` | none | none; the controller restarts (Table 4-3) | See "Cold reset" below |
+
+The TRM states the address byte order for `FLad` only. Stage 1 verified it for `FLrd`: both
+pointers read correctly and a dump of 0x0000 to 0x7C00 equalled the full-flash image. For
+`FLvy` the evidence is indirect: both bundles verified at 0x0800 and 0x4400, and either
+address byte-swapped lies outside the 32 KB part.
+
+Compare the whole return byte with 0. Table 4-1 puts the standard TaskResult in bits 3:0
+and lets a task use bits 7:4 while TaskResult is 0, so the whole-byte compare can report a
+false failure and never a false success. `FLwd` has its own two codes and does not refer to
+Table 4-1; the library treats any other value as `WriteFailed`.
+
+#### Chunk size and the EEPROM page
+
+Send `FLwd` data in 32-byte chunks. The TRM (Table 4-21) accepts up to 64 bytes and
+recommends 32, the default page size the task uses. The 24LC256 has a 64-byte page and a
+5 ms maximum write cycle, and a page write that crosses a page boundary wraps to the start
+of the same page (Microchip DS21203P). Both bundle starts are multiples of 64, so no
+32-byte chunk crosses a page. The pointer and AppConfigOffset words are 4-byte writes
+inside one page. The write address advances after each successful `FLwd`, so a bundle
+needs one `FLad`; stage 3 verified the advance across 446 chunks. The DATA write of one
+chunk fits the Teensy 4 `Wire` buffer of 136 bytes.
+
+#### What `FLvy` does and does not prove
+
+The TRM says `FLvy` completes after the header is checked and validated. Stage 3 inverted
+one body byte (image offset 0x1BE5) of a freshly written region, and `FLvy` reported it not
+valid, so it checks more than the header. One byte at one offset is the whole sample;
+whether it checks the CRC of every byte is not documented. Keep the `FLrd` compare before
+any pointer write.
+
+That matters because redundancy is one-directional. SLVAFL1 (Boot Process, page 2) says
+that after a correct Header_ID in the Low region, a CRC error while reading the Low bundle
+ends the load, and the controller does not try High. A High CRC error does fall back to
+Low. A valid Low pointer over a damaged Low body therefore does not boot, even with an
+intact High region.
+
+#### The stale BOOT_FLAGS trap
+
+BOOT_FLAGS (0x2D, BOOT_STATUS in SLVAFL1) and VERSION are latched at boot. After an update
+without a restart they describe the old layout. SLVAFL1 Figure 2-2 chooses the region to
+update from BOOT_FLAGS alone; in that state it would choose the region whose pointer is
+the only valid one, and step 1 would erase it. Stage 3 reached exactly that state: the Low
+pointer was 0 and BOOT_FLAGS still read as at boot. Choose the target from the region
+pointers first and read BOOT_FLAGS only when both pointers are valid, as
+`selectTargetRegion()` does.
+
+#### AppConfigOffset words
+
+The controller looks for a region's Header_ID at the region start plus that region's
+AppConfigOffset word (0x03FC and 0x07FC; SLVAFL1 page 2). Both words are 0 in the board's
+image. A region therefore counts as bootable only if its pointer equals its bundle start
+and its word reads 0 (decided 2026-11-23).
+
+- `programBlank()` writes both words to 0 before it writes any pointer or bundle, and reads
+  each once more right before that region's pointer write.
+- `updateRegion()` reads both words but does not write them. Its pre-flight refuses with
+  `NoBootableRegion` when the kept region's word is not 0 and with `AppConfigOffsetNotZero`
+  when the target's word is not 0, writing nothing; step 3 reads the target's word again
+  before the pointer write (`CompareMismatch`, `lastStep()` `CheckAppConfigOffset`).
+- `selectTargetRegion()` reads the pointers only, so a target it chooses can still be
+  refused by the pre-flight.
+- The repair for a word that is not 0 is to write both pointers to 0 and run
+  `programBlank()` (the example's `zero`, then `pb`).
+
+These reads are not hardware-tested: stages 3 and 4 ran the update before they were added,
+and stage 5 ran `programBlank()`, whose word reads predate them.
+
+#### PTCH while the controller boots
+
+MODE can read PTCH while a good bundle is still loading from the EEPROM, not only when no
+region loads. Hardware stage 9 (2026-11-24, a second board on a bench supply) read MODE
+PTCH, VERSION 0xF8091100, and BOOT_FLAGS `18 00 30 02 C1` (Patch Config Source None
+Loaded, Region 0 Attempted, no region Invalid) from a Teensy that started on the same
+supply, on three of eight power-ons: the three with the High pointer 0. The other five read
+APP at the same point. An `r` started a few seconds after each of the three read APP with
+the bundle loaded; the load time itself was not measured, and the documents read for the
+EEPROM update plan give none. Treat PTCH as "no bundle
+loads" only after it has lasted: poll MODE until APP or a timeout, tolerating failed
+reads. The eeprom-update example waits 5 s at start-up. The failed boots seen so far
+(stage 5, both pointers 0, `F8 00 60 02 C1`) marked each region tried as Invalid; the
+boots in progress read in stage 9 had no Invalid, Error, or CRC flag set.
+
+#### Recovery from PTCH
+
+When no region loads, the controller waits in PTCH for a patch over I2Ct. SLVAFL1
+(Recovering From EEPROM Failure, Figure 4-1, page 13) recovers by loading a patch with the
+PBM tasks (`TPS25751PatchLoader`, ADR-011) and then correcting the EEPROM with the flash
+tasks (`programBlank()` when no pointer is valid). The same page notes that this needs a
+host able to run and correct the EEPROM while the controller sits in PTCH, and that a
+system which needs the sink path before it can boot must select a suitable dead-battery
+configuration with the ADCINx pins; SafeMode does not apply there.
+
+#### DATA register behaviour
+
+TRM page 61 says the controller does not modify DATA after COMMAND reads 0, and that the
+bytes after a return code are task-defined. Stage 2 showed what that means on this
+controller: `FLad` leaves DATA bytes 4 to 63 as the preceding `FLrd` left them, and a 4-byte
+host write to DATA does not clear the rest. A 4-byte `FLwd` nevertheless wrote exactly four
+bytes. A check that compares neighbor bytes after a pointer write cannot by itself prove
+the write length, because DATA may hold those neighbors' own values; the example's `p2`
+command loads DATA with other bytes first.
+
+#### Timing
+
+Measured in stages 1 to 3 at the default I2C clock, with the executor reading all 64 DATA
+bytes after every task:
+
+| Item | Time |
+|---|---|
+| `FLrd`, `FLad` | 17.7 ms per call (stages 1 to 3) |
+| `FLwd`, 4 bytes | 17.7 to 17.8 ms (stage 2, three calls) |
+| `FLwd`, 32 bytes | 20.7 ms average, 20.8 ms maximum over the 449 calls of the stage 3 single-region update |
+| `FLvy` | 0.56 to 0.60 s |
+| One region, 14272 bytes, with compare | 25979 ms |
+| Both regions, 14336 bytes each | 52049 ms |
+
+No `FLwd` returned busy in the 1798 calls of stage 3. The library's timeouts (200 ms for
+`FLrd`, `FLad`, and `FLwd`, 1000 ms for `FLvy`) have ample margin. Most of each task's time is the 64-byte DATA read; an `outLen`-bounded read
+in `executeCommand()` is the first optimization if the update must be faster.
+
+#### Cold reset
+
+`GAID` never completes in the normal sense. An APP-mode controller enters Type-C Error
+Recovery and restarts after a typical 1-second delay (Table 4-3), and the port disconnects.
+Stages 3 and 4 measured the same sequence on every reset: COMMAND kept answering for 1276
+to 1277 ms, then a COMMAND poll failed on I2C and `executeCommand()` returned `I2CError`;
+the MODE read 100 ms later failed with error 4, not with a NACK; MODE read APP 1938 to
+1939 ms after `GAID`. The Teensy 4 driver returns 4 from `endTransmission()` when no
+transmission was begun (not the case here), when the bus did not become idle within 16 ms
+and `force_clock()` could not free it, on lost arbitration, on a pin-low timeout (PLTF; the
+driver leaves MCFGR1.TIMECFG clear, and which pins that covers was not checked against the
+i.MX RT1060 reference manual), and on its own 50 ms transaction timeout. Which one occurred
+is not recorded. That is one board, with the F8091164
+and the F8091166 bundle running; whether the two bundles differ in firmware is not recorded.
+TRM Table 4-3 marks `GAID` complete by COMMAND returning to 0 on reboot; `coldReset()` does
+not take that as evidence, so that documented completion without a caught NAK is a second
+false-negative path. A successful MODE read other than APP is not evidence either, because
+`coldReset()` does not read MODE before `GAID`.
+
+MODE reads APP before and after a restart, so it cannot by itself tell a restart from a
+`GAID` the controller accepted without restarting. `coldReset()` therefore returns `Success`
+only when it saw the controller go away first, through an `I2CError` on `GAID` or a failed
+MODE read, and returns `ResetNotObserved` when MODE reads APP without that evidence. The
+cost is a false negative: a restart that fits between two MODE reads, or a firmware that
+finishes the `GAID` handshake before resetting and is back before the first read, is
+reported as not observed. If that is ever seen, revisit `GAID_SETTLE_MS` and
+`GAID_MODE_POLL_MS` or add a timing-independent witness. An I2C failure that kept `GAID`
+from the controller still looks like a restart, so confirm any result by VERSION and
+BOOT_FLAGS.
+Table 4-3 calls `GAID` a cold restart in its Description and a warm restart in its
+Additional Information row.
+
+#### Bus sharing
+
+The updater is synchronous. Every 4CC task shares COMMAND and DATA, and the bundle write
+relies on the write address the controller holds between chunks. The application must not
+issue other tasks, such as I2Cr or I2Cw through `TPS25751DownstreamDevice`, from an
+interrupt or another task during an update, and a progress callback that returns must not
+issue any. The TRM states the 5-second spacing for I2Cr and I2Cw only; nothing on pages 81
+and 82 applies it to the flash tasks. Each flash task makes the controller ignore the
+I2Cc_IRQ pin until it completes, so an interrupt from a device on I2Cc can be deferred;
+that has not been measured.
 
 ### Maximum Read Sizes
 
@@ -1298,6 +1592,16 @@ void foo() {
 | 1.14 | 2026-11-19 | Claude Code | TX_SOURCE_INFO (0x78) semantic validation checks the USB PD R3.3 Table 6.29 and 6.30 rules: DPS Port requires both Port Type bits Managed, and the 1 W Port Maximum PDP equals the 0.5 W value rounded down (USB PD Specification Structures and Read/Write Registers sections) |
 | 1.15 | 2026-11-22 | Claude Code | PDO, APDO, and RDO cross-check against `usb-pd-docs` (device-register-mcp-server 696c854): the 0x32 subtype 10b APDO is an SPR AVS Source APDO, 0x34 First PDO Control Bits are PDO 1 bits 29:20 (confirmed on hardware), fixed-PDO flags are reserved outside PDO 1, 0x35 decodes as a Fixed or Variable RDO only, and the 0x48 Pad Object (USB PD Specification Structures section) |
 | 1.16 | 2026-11-22 | Claude Code | PDOs and RDOs decode through `TPS25751Pdo` and `TPS25751Rdo` (ADR-013): fixed-PDO flags only for PDO 1, SPR AVS Source decode, RDOs by kind, and validation of 0x30 to 0x34 per USB PD R3.3 (USB PD Specification Structures and PDO Parsing Strategy sections) |
+| 1.17 | 2026-11-23 | Claude Code | Flash tasks and EEPROM update section: result offsets, return-code compare, 32-byte chunks and the 24LC256 page, the `FLvy` limit, one-directional redundancy, the stale BOOT_FLAGS trap, DATA behaviour, timing, cold reset, and bus sharing, with the hardware results of stages 1 to 4 (ADR-014) |
+| 1.18 | 2026-11-23 | Claude Code | Flash tasks and EEPROM update section: what SLVAFL1 says about APP mode, AppConfigOffset words and recovery from PTCH (SLVAFL1 page 13) under their own headings, `FLwd` timing per run |
+| 1.19 | 2026-11-23 | Claude Code | `programBlank()` writes both AppConfigOffset words first; `coldReset()` requires an observed restart and returns `ResetNotObserved` otherwise (Flash tasks and EEPROM update section) |
+| 1.20 | 2026-11-23 | Claude Code | `updateRegion()` checks both AppConfigOffset words in its pre-flight and the target's again before the pointer write (AppConfigOffset words section); PTCH after a restart with no valid pointer observed in stage 5 |
+| 1.21 | 2026-11-23 | Claude Code | PBM: 20 ms between `PBMc` completing and the DATA read, `issueCommand()`, the stage 5 evidence and what it does not establish, the 500 µs burst spacing the figures show (Patch Burst Mode section) |
+| 1.22 | 2026-11-23 | Claude Code | The MODE read after a failed `GAID` poll failed with error 4, not a NACK (Cold reset section) |
+| 1.23 | 2026-11-23 | Claude Code | PBM: TRM Figure 5-1 has one 500 µs delay, before `PBMc`, which the loader now gives; the points where the loader departs from the documented flow; the `PBMs` timeout byte. Error 4 lists every source in the Teensy 4 driver (Cold reset section) |
+| 1.24 | 2026-11-23 | Claude Code | PBM: the app note spaces its separate burst transactions by 500 µs and the loader does not, an open decision; the loader's IRQ mode polls COMMAND instead of waiting for I2Ct_IRQ |
+| 1.25 | 2026-11-23 | Claude Code | PBM: SLVAFV8A shows both 0x31 and 0x32 for the `PBMs` timeout byte |
+| 1.26 | 2026-11-24 | Claude Code | PBM: the loader polls Ready for Patch (polling mode) and MODE before the load, reads the `PBMs` configuration back from DATA, and issues `PBMe` on the two paths of TRM Figure 5-1 |
 
 ---
 

@@ -15,8 +15,14 @@ The TPS25751 library is an object-oriented C++ library for interfacing with the 
 - RAII memory management for embedded systems
 - Platform-optimized for Teensy 4.x (ARM Cortex-M7, no RTTI)
 
-**Last Updated:** 2026-11-19
-**Current Phase:** Rev B register coverage complete, 37 of the 37 registers in TRM SLVUCR8B,
+**Last Updated:** 2026-11-24
+**Current Phase:** EEPROM update over I2Ct on `feat/eeprom-update`
+([eeprom-update.md](docs/plans/feature/eeprom-update.md)): `TPS25751EepromUpdater` updates,
+reads back, and blank-programs the configuration EEPROM through the flash 4CC tasks
+(ADR-014). Batches 1 to 3 are implemented. Hardware stages 1 to 10 passed on 2026-11-22
+to 24, including the AppConfigOffset reads of `updateRegion()` (stage 6), the reworked
+PBM load (stages 6 to 8), and power cuts during an update (stage 9). Before that: Rev B
+register coverage complete, 37 of the 37 registers in TRM SLVUCR8B,
 with typed USB PD decode (Batch L).
 [trm-revB-audit-remaining-registers.md](docs/plans/trm-revB-audit-remaining-registers.md)
 adds the ten registers rev B documents that the library did not decode, in Batches G
@@ -323,9 +329,21 @@ a UFP VDO 2, and index 5 a dual-role partner's DFP VDO (USB PD R3.3 page 158).
   TI app note SLVAFV8A to load a firmware/configuration image directly into the
   TPS25751 when no EEPROM is present (PTCH → APP bring-up path). **Not a register
   class** — does not inherit `TPS25751Register` and is not wired into the factory.
-  Builds entirely on `TPS25751::executeCommand()` (for the PBMs/PBMc 4CC handshakes)
-  and `TPS25751::burstWrite()` (raw chunked burst to I2C address 0x30); see ADR-011
+  Builds on `TPS25751::executeCommand()` for PBMs, `TPS25751::issueCommand()` for PBMc
+  (which waits 20 ms before DATA is read), and `TPS25751::burstWrite()` (raw chunked
+  burst to I2C address 0x30); see ADR-011
   in [ARCHITECTURE.md](docs/engineering/ARCHITECTURE.md)
+- **`TPS25751CommandExecutor`**, **`TPS25751HostExecutor`**
+  (`include/TPS25751CommandExecutor.h`, `include/TPS25751HostExecutor.h`): the host
+  operations a task sequencer needs (`executeCommand()`, the MODE and BOOT_FLAGS reads,
+  a delay, and a clock) as an interface without `Wire.h`, and its pass-through adapter
+  for a `TPS25751`. The interface lets the EEPROM updater run in the native tests; the
+  adapter is excluded from the native build. See ADR-014
+- **`TPS25751EepromUpdater`** (`include/TPS25751EepromUpdater.h`): updates, reads back,
+  and blank-programs the external configuration EEPROM through the flash 4CC tasks
+  (`FLrd`, `FLad`, `FLwd`, `FLvy`), and restarts the controller with `GAID`, following
+  TI SLVAFL1. Not a register class and not in the factory; built on
+  `TPS25751CommandExecutor`. See "EEPROM Update over I2Ct" below and ADR-014
 > **BQ25798 driver:** the typed driver for the BQ25798 buck-boost charger
 > (`BQ25798::Device`) now lives in the sibling **`lib/BQ25798`** repository — it is
 > the reference implementation of the downstream-device driver tier defined by
@@ -410,24 +428,64 @@ TPS26750").
 When the TPS25751 boots without an EEPROM it powers up in **PTCH** mode and waits
 for the host to push the firmware+configuration image over I2Ct.  The 17-step flow:
 
-1. (Optional) Wait for `I2Ct_IRQ` low.
-2. Read MODE — confirm PTCH.
+1. Wait for ready-for-patch, up to 5 s: `I2Ct_IRQ` low in IRQ mode, INT_EVENT1 bit 81
+   polled every 10 ms in polling mode (TRM Figure 5-1).
+2. Poll MODE every 10 ms until PTCH, up to 5 s; APP ends the load at once.
 3. (IRQ mode) Configure `INT_MASK1` / clear `INT_CLEAR1`.
-4-9. `executeCommand(PBMs, config[6])` — `config` = `bundleSize[4, LE] + 0x30 + 0x31`.
-10. `burstWrite(0x30, image, length)` — raw chunked burst (no reg number, no length byte).
+4-5. `writeCommandData(config[6])`, wait 500 us, read DATA back, and compare; up to 3
+   attempts (SLVAFV8A step 5). `config` = `bundleSize[4, LE] + 0x30 + 0x32`.
+6-9. `executeCommand(PBMs)` with no input.
+10. `burstWrite(0x30, image, length)`: raw chunked burst (no reg number, no length byte),
+   then at least 500 us before the next transaction (TRM Figure 5-1). A chunk that is
+   not acknowledged ends the load with `BurstFailed` after `PBMe`.
 11. (IRQ mode) Clear `INT_CLEAR1`.
-12-14. `executeCommand(PBMc)` — commit the bundle.
-15. `delay(20)` ms.
-16. Read `DATA[0]` — confirm `PatchStartStatus` == 0.
-17. Read MODE — confirm APP.
+12-14. `issueCommand(PBMc)`: commit the bundle and wait for COMMAND to clear, without
+   reading DATA. "!CMD" ends the load with `PbmcRejected` after `PBMe`.
+15. `delay(20)` ms (SLVAFV8A step 15; TRM Figure 5-1).
+16. Read DATA, retried every 10 ms on a failed read for up to 5 s; `DATA[0]` must be 0.
+17. Poll MODE every 10 ms until APP, tolerating failed reads, for up to 5 s.
 
-Steps 4-9 and 12-14 are each a single `executeCommand()` call; only step 10 uses the
-new `TPS25751::burstWrite()` primitive (the only addition to the core class).
+Steps 6-9 are a single `executeCommand()` call and steps 12-14 a single `issueCommand()`
+call, which writes DATA and COMMAND and polls COMMAND but reads no DATA; step 10 uses
+`TPS25751::burstWrite()`. An earlier version read DATA as soon as `PBMc` cleared COMMAND;
+in hardware stage 5 that read returned 28 of 65 bytes and the load reported `I2cError`
+although the patch had loaded. Hardware stages 6 and 7 ran the 20 ms sequence, ten loads,
+all Success. Steps 1, 2, 4, and 5 as described here date from 2026-11-24; stage 8 ran
+them, five loads, all Success. The `PBMe` paths have not run on hardware.
 `PatchLoadStatus` provides one distinct enumerator per failure point.
 
 See ADR-011 in [ARCHITECTURE.md](docs/engineering/ARCHITECTURE.md) and the PBM
 subsection of [CONSTRAINTS.md](docs/engineering/CONSTRAINTS.md) for protocol details
 and correctness traps.
+
+### EEPROM Update over I2Ct
+
+`TPS25751EepromUpdater` (`include/TPS25751EepromUpdater.h`,
+`src/TPS25751EepromUpdater.cpp`) rewrites the configuration EEPROM at 0x50 on I2Cc while
+the controller runs in APP, following TI application note SLVAFL1. It issues its tasks
+through `TPS25751CommandExecutor`, so it compiles and is tested in `[env:native]`.
+
+- `updateInactiveRegion()` and `updateRegion()` run the four steps of SLVAFL1 Figure 2-3:
+  erase the target pointer; write the bundle in 32-byte chunks, with a read-back after the
+  first two; `FLvy` and an `FLrd` compare, then the pointer; erase the old pointer. Their
+  pre-flight refuses, writing nothing, when the kept region is not bootable (pointer valid
+  and AppConfigOffset word 0) or the target's word is not 0 (`AppConfigOffsetNotZero`).
+  `updateBothRegions()` leaves the new bundle in both regions with both pointers valid.
+- `programBlank()` is for an EEPROM with no valid pointer, after a PBM load: it writes both
+  AppConfigOffset words to 0 first, then the image and the pointer of each region, Low
+  first (SLVAFL1 Figure 4-1).
+- `readRegionPointer()`, `selectTargetRegion()`, `compareRegion()`, and `dump()` only read.
+  `coldReset()` issues `GAID` and waits for APP; the port disconnects. It returns `Success`
+  only after it saw the controller go away, and `ResetNotObserved` for APP without that.
+
+Traps: choose the target from the region pointers first, because BOOT_FLAGS stays stale
+until a restart; never write a pointer before the region has been compared; `FLrd` data
+starts at `outData[0]` and has no return code. Hardware stages 1 to 4 verified the layout,
+the result offsets, a full region update, and the boot region after an update cut at each
+step; stage 5, which starts from the example's `zero` command, verified `programBlank()`.
+The `eeprom-update` example drives every call over serial. See ADR-014 in [ARCHITECTURE.md](docs/engineering/ARCHITECTURE.md), the "Flash tasks
+and EEPROM update" subsection of [CONSTRAINTS.md](docs/engineering/CONSTRAINTS.md), and the
+plan.
 
 ### Downstream Device Drivers (external)
 
@@ -546,7 +604,8 @@ auto statusReg = tps.readStatusRegister(true);  // with validation
     │   └── CODE_REVIEW_GUIDELINES.md   # Review checklist (embedded C++ / TPS25751-specific)
     └── plans/
         ├── plan-impl-v01.md            # Completed plan for the first 27 registers
-        └── trm-revB-audit-remaining-registers.md  # Current plan: the other ten rev B registers
+        ├── trm-revB-audit-remaining-registers.md  # Plan for the other ten rev B registers
+        └── feature/eeprom-update.md    # EEPROM updater plan, reviews, and hardware results
 ```
 
 Sibling repositories (side-by-side in the parent project's `lib/`):
@@ -748,6 +807,7 @@ example's `src/` directory, so examples build directly from this root.
 # From this library root (where platformio.ini lives):
 pio run -e example-read-registers            # compile the read-registers example
 pio run -e example-load-patch-bundle         # compile the PBM patch-loader example
+pio run -e example-eeprom-update             # compile the EEPROM update example
 pio run -e example-read-registers -t upload  # build + flash to Teensy 4.0
 pio device monitor                           # serial monitor @ 115200 baud
 
@@ -771,8 +831,11 @@ pio test -e native -f "test_native/test_TPS25751Status"  # one suite
 ```
 
 The `[env:native]` environment compiles the platform-independent sources
-against Arduino API stubs in `test/support/native/`; Unity suites live under
-`test/test_native/` (one directory per register class —
+against Arduino API stubs in `test/support/native/`, and `TPS25751.cpp` and
+`TPS25751PatchLoader.cpp` against a TwoWire fake there (`Wire.h`, driven by
+`FakeTps25751Target.h`), with a clock the tests control. Unity suites live under
+`test/test_native/` (one directory per register class, plus suites for the
+core class, the patch loader, and the EEPROM updater;
 `test_TPS25751Status` is the seed/reference suite). A green native test run is
 a hard gate for every register batch. See
 [TESTING.md](docs/engineering/TESTING.md) for the harness details, required
@@ -787,8 +850,11 @@ test/coverage.sh
 
 The first run, on 2026-11-19, measured 84% of lines, with 18 files under the
 >90% target. After nine new suites and additions to eleven more, the same day's
-run measured 98% (1063 tests), with every file at 93% or more. The verify gate
-and CI do not run it.
+run measured 98% (1063 tests), with every file at 93% or more. On 2026-11-23,
+with `TPS25751.cpp` and `TPS25751PatchLoader.cpp` added to the native build, it
+measured 93% (1336 tests): the patch loader at 99%, the EEPROM updater at 100%,
+and `TPS25751.cpp` at 32%, because its typed register wrappers have no tests of
+their own. The verify gate and CI do not run it.
 
 ### Publishing the Library
 

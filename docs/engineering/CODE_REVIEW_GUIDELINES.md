@@ -54,6 +54,13 @@ any code that directly implements the SLVAFV8A PBM sequence:
 - **PBMc timeout must be generous**: `executeCommand(PBMc, …, 5000)` is typical;
   the device may need several seconds to verify the bundle before clearing COMMAND.
   Using the default 200 ms `executeCommand` timeout risks a spurious `CommandTimeout`.
+- **The PBMs configuration is read back before PBMs**: SLVAFV8A step 5 shows an
+  acknowledged DATA write that did not take effect. Stage it with
+  `writeCommandData()`, read DATA 500 µs later, compare all 6 bytes, and only then
+  issue `PBMs` with no input, so `executeCommand()` does not write DATA again.
+- **PBMe only where TRM Figure 5-1 puts it**: after a burst chunk that is not
+  acknowledged and after "!CMD" on `PBMc`. Not after a `PBMc` timeout or I2C failure,
+  where the task may still be running, and it must not change the returned status.
 - **Step 16 DATA read-back is a separate call after the delay**: do not use
   `pbmcResult.returnCode` alone to confirm the apply — a separate `readDataRegister()`
   after `delay(PATCH_APPLY_DELAY_MS)` is required (the spec says "read DATA, confirm

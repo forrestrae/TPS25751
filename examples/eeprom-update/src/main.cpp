@@ -631,6 +631,10 @@ constexpr uint32_t BOOT_WAIT_MS = 5000;
 /// Polling interval of the start-up wait.
 constexpr uint32_t BOOT_POLL_MS = 10;
 
+/// The library's debug output for this sketch: errors only, so warnings cannot
+/// land inside the dump.
+constexpr uint8_t SKETCH_DEBUG_LEVEL = DEBUG_LEVEL_ERROR;
+
 /// Waits for the controller to finish booting before the start-up report.
 ///
 /// The Teensy runs from the same +5V rail as the controller, so after a
@@ -638,15 +642,19 @@ constexpr uint32_t BOOT_POLL_MS = 10;
 /// from the EEPROM. Hardware stage 9 (2026-11-24, one board) read MODE PTCH,
 /// VERSION 0xF8091100, and BOOT_FLAGS 18 00 30 02 C1 (Patch Config Source None
 /// Loaded, Region 0 Attempted, no region Invalid) in that window on three of
-/// seven power-ons, and APP about 2 s later each time. Reported then, PTCH
-/// would bring the advice to recover with l and pb although nothing is wrong.
+/// eight power-ons, the three with the High pointer 0; an r started a few
+/// seconds later read APP each time. Reported then, PTCH would bring the
+/// advice to recover with l and pb although nothing is wrong.
 ///
 /// Polls MODE every BOOT_POLL_MS until it reads APP or BOOT_WAIT_MS pass,
 /// tolerating failed reads, since the controller can fail to acknowledge
-/// while it boots. A controller with no bundle it can boot stays in PTCH, so
-/// that case costs the full wait and then gets the PTCH advice.
+/// while it boots. The library's error output is off during the poll, so a
+/// controller that never answers costs one summary line, not an error line
+/// per read. A controller with no bundle it can boot stays in PTCH, so that
+/// case costs the full wait and then gets the PTCH advice.
 static void waitForBoot()
 {
+    TPS25751::setDebugLevel(DEBUG_LEVEL_NONE);
     const uint32_t started = millis();
     uint32_t reads = 0;
     uint32_t failedReads = 0;
@@ -666,6 +674,7 @@ static void waitForBoot()
         delay(BOOT_POLL_MS);
     }
     const uint32_t elapsed = millis() - started;
+    TPS25751::setDebugLevel(SKETCH_DEBUG_LEVEL);
 
     Serial.print(app ? F("[setup] MODE read APP after ") : F("[setup] MODE did not read APP within "));
     Serial.print(elapsed);
@@ -675,7 +684,7 @@ static void waitForBoot()
     Serial.print(failedReads);
     Serial.println(F(" failed)."));
     if (!app) {
-        Serial.println(F("[setup] The report below shows the mode the controller stayed in."));
+        Serial.println(F("[setup] The report below reads MODE once more; PTCH there means the controller found no bundle it could boot."));
     }
 }
 
@@ -2205,8 +2214,7 @@ void setup()
         delay(10);
     }
 
-    // Errors only, so warnings cannot land inside the dump.
-    TPS25751::setDebugLevel(DEBUG_LEVEL_ERROR);
+    TPS25751::setDebugLevel(SKETCH_DEBUG_LEVEL);
     TPS25751::setDebugCategories(DEBUG_CAT_TASK | DEBUG_CAT_I2C);
 
     pd.begin();

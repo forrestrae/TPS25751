@@ -1,0 +1,15 @@
+{
+  "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
+  "name": "tps25751",
+  "description": "Tools for checking the TPS25751 library against USB PD traffic",
+  "owner": {
+    "name": "Forrest Rae"
+  },
+  "plugins": [
+    {
+      "name": "tps25751-bench",
+      "description": "Verify the TPS25751 library's register decode against USB PD traffic captured by a KM003C meter",
+      "source": "./plugins/tps25751-bench"
+    }
+  ]
+}

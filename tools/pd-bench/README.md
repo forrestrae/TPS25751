@@ -188,7 +188,7 @@ and commit in `.synced-from.json` inside it. It refuses a directory it did not w
 a symlink, unless `--force` is given, and refuses a `.agents` or `.agents/skills` that
 links into the library even then. The old copy is removed only after the new one is in
 place. `--dry-run` lists the files without writing.
-Claude Code projects get the skill from the plugin instead (Phase 8 of the toolset plan).
+Claude Code projects get the skill from the plugin `tps25751-bench`, listed in the library's `.claude-plugin/marketplace.json`.
 
 ## How the server finds and shares the port
 

@@ -1,0 +1,27 @@
+[mcp_servers.tps25751-docs]
+command = "uv"
+args = ["--directory", "../device-register-mcp-server", "run", "server.py"]
+env = { DEVICE_CONFIG = "devices/tps25751/device.json" }
+
+[mcp_servers.usb-pd-docs]
+command = "uv"
+args = ["--directory", "../device-register-mcp-server", "run", "server.py"]
+env = { DEVICE_CONFIG = "specifications/USB_PD/specification.json" }
+
+[mcp_servers.km003c]
+command = "uvx"
+args = ["--from", "git+https://github.com/forrestrae/mcp-powerz-km003c@v0.2.0", "km003c-mcp"]
+env = { KM003C_CAPTURE_DIR = "captures" }
+
+[mcp_servers.tps25751-bench]
+command = "uvx"
+args = ["--from", "git+https://github.com/forrestrae/TPS25751@v3.3.0#subdirectory=tools/pd-bench", "tps25751-pd-bench"]
+
+[mcp_servers.tps25751-bench.tools.bench_task]
+approval_mode = "prompt"
+
+[mcp_servers.tps25751-bench.tools.bench_write]
+approval_mode = "prompt"
+
+[mcp_servers.tps25751-bench.tools.bench_renegotiate]
+approval_mode = "prompt"

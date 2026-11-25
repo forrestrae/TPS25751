@@ -16,10 +16,21 @@
   "plansDirectory": "./docs/plans",
   "enabledMcpjsonServers": [
     "tps25751-docs",
-    "usb-pd-docs"
+    "usb-pd-docs",
+    "km003c",
+    "tps25751-bench"
   ],
+  "extraKnownMarketplaces": {
+    "tps25751": {
+      "source": {
+        "source": "github",
+        "repo": "forrestrae/TPS25751"
+      }
+    }
+  },
   "enabledPlugins": {
-    "clangd-lsp@claude-plugins-official": true
+    "clangd-lsp@claude-plugins-official": true,
+    "tps25751-bench@tps25751": true
   },
   "hooks": {
     "PreToolUse": [

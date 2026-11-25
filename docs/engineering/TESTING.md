@@ -466,9 +466,10 @@ Only sources compiled by `[env:native]` appear in the report, so
 `TPS25751PatchLoader.cpp`, and the bench console are, through the Wire fake. Neither the verify gate nor CI runs the coverage step; the >90%
 target is checked by running the script at review.
 
-The latest measurement, on 2026-11-24 with 1444 tests, is 99% of lines overall (5841 of
-5900): `TPS25751.cpp` and `TPS25751EepromUpdater.cpp` at 100%, `TPS25751PatchLoader.cpp`
-at 99%, and every other file at 93% or more. Most lines still missed cannot be reached by
+The latest measurement, on 2026-11-24 with 1600 tests, is 99% of lines overall (6715 of
+6777): `TPS25751.cpp`, `TPS25751EepromUpdater.cpp`, and `TPS25751BenchProtocol.cpp` at
+100%, `TPS25751PatchLoader.cpp` and `TPS25751BenchConsole.cpp` at 99%, and every other
+file at 93% or more. Most lines still missed cannot be reached by
 any input: `default:` returns in `toString()` switches over enums that `extractEnum()`
 clamps, and `> max` checks on fields too narrow to exceed the maximum. Do not add a test
 that calls a function only to count its lines.

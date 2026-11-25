@@ -1,8 +1,10 @@
 # TPS25751 library: developer guide
 
 An object-oriented C++ library for the Texas Instruments TPS25751 USB-C Power Delivery
-controller over I2C, built for Teensy 4.x in the Arduino framework and published to the
-PlatformIO Registry. `CLAUDE.md` is a symlink to this file; edit `AGENTS.md`.
+controller over I2C, for the Arduino framework, published to the PlatformIO Registry. It
+is not tied to a board or an MCU: the manifests declare every platform, and the Teensy
+4.0 in `platformio.ini` is only the development build target. Keep board-specific
+material in `examples/` and `docs/plans/`. `CLAUDE.md` is a symlink to this file; edit `AGENTS.md`.
 
 The headers in `include/` are the API reference. This guide holds what applies to every
 change, and points to the place where the detail for each area lives.

@@ -43,7 +43,7 @@
  * restored only after the written bundle has been checked.
  *
  * What hardware has shown (stages 1 to 5 of the plan, 2026-11-22 and 23, one
- * board with a 24LC256): FLrd returns its 16 bytes in DATA bytes 0 to 15 and
+ * TPS25751 with a 24LC256 EEPROM): FLrd returns its 16 bytes in DATA bytes 0 to 15 and
  * takes its address least significant byte first; FLad and FLwd report 0x00
  * on success; a 4-byte FLwd writes exactly four bytes; the write address
  * advances across 446 chunks; FLvy reports 0x00 for a valid bundle and "not
@@ -117,7 +117,8 @@ constexpr uint32_t FLRD_CMD_TIMEOUT_MS = 200;
 constexpr uint32_t FLAD_CMD_TIMEOUT_MS = 200;
 
 /// COMMAND-poll timeout (ms) for FLwd. The task completes when the data has
-/// been written (TRM Table 4-21); the 24LC256 write cycle is at most 5 ms.
+/// been written (TRM Table 4-21); the write cycle of a 24LC256, the EEPROM used in
+/// testing, is at most 5 ms.
 /// Hardware stage 3 measured 20.7 ms for a 32-byte chunk, at most 20.8 ms
 /// over 449 calls (2026-11-23).
 constexpr uint32_t FLWD_CMD_TIMEOUT_MS = 200;
@@ -327,7 +328,8 @@ public:
     /// Smallest image checkImage() accepts: the header through the version word.
     static constexpr size_t kMinImageLength = 0x38;
 
-    /// EEPROM size assumed when none is given: the board's 24LC256.
+    /// EEPROM size assumed when none is given: 32 KB, the part used in testing
+    /// (24LC256). Pass the size of the fitted EEPROM to the constructor.
     static constexpr uint32_t kDefaultEepromSize = 32768;
 
     /// Task return code this class requires from FLad: the whole byte is 0
@@ -350,7 +352,7 @@ public:
      * @brief Construct an updater bound to an executor
      * @param exec            Host executor (must outlive this object)
      * @param eepromSizeBytes Size of the external EEPROM in bytes; sets the high
-     *                        region's capacity (default 32768, the 24LC256)
+     *                        region's capacity (default 32768; pass the fitted part's size)
      */
     explicit TPS25751EepromUpdater(TPS25751CommandExecutor& exec,
                                    uint32_t eepromSizeBytes = kDefaultEepromSize);
@@ -480,8 +482,8 @@ public:
      * The TRM accepts up to 64 bytes and recommends 32-byte chunks, the default
      * EEPROM page size the task uses. This call accepts 1 to kFlashWriteChunk
      * bytes. Keep each write inside one 32-byte page: the documents do not
-     * describe a write that crosses a page, and the 24LC256 wraps such a write
-     * within its own page. The update flows start page-aligned and never cross.
+     * describe a write that crosses a page, and an EEPROM such as the 24LC256 wraps such a
+     * write within its own page. The update flows start page-aligned and never cross.
      *
      * Table 4-21 gives FLwd two return codes of its own, 0x00 and 0xFF, and
      * does not refer to Table 4-1. Any other value is treated as a failure;
@@ -710,7 +712,7 @@ public:
      * are the 64 after the target's pointer word, in otherwise unused EEPROM,
      * and the other region and its pointer are untouched. One qualification
      * even there: the second chunk then starts 36 bytes into a 64-byte page
-     * of the 24LC256 and crosses the page end. Unless the controller splits
+     * of an EEPROM such as the 24LC256 and crosses the page end. Unless the controller splits
      * the write, the bytes past the page end wrap onto the start of the page,
      * which is the pointer word. The check tests the word, so the update
      * still stops, but the target pointer may then no longer read 0.

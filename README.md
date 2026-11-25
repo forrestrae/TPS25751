@@ -12,13 +12,14 @@ that boots without an EEPROM, and reaches devices on the controller's secondary 
 bus. A typed driver for the BQ25798 buck-boost charger builds on that last feature and
 lives in the [BQ25798 repository](https://github.com/forrestrae/BQ25798).
 
-The library targets Teensy 4.x and the Arduino framework.
+The library works with any board that carries a TPS25751 and any MCU with an Arduino
+`Wire` implementation. It is developed and tested on a Teensy 4.0.
 
 ## Hardware requirements
 
 | Component   | Details                                        |
 |-------------|------------------------------------------------|
-| MCU         | Teensy 4.0 or 4.1 (ARM Cortex-M7)              |
+| MCU         | Any Arduino-framework MCU with `Wire` (I2C)    |
 | IC          | Texas Instruments TPS25751 USB-C PD controller |
 | Interface   | I2C (Arduino Wire library)                     |
 | I2C address | 0x20 to 0x23, set by the ADDR pins             |

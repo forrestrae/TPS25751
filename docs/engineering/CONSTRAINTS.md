@@ -8,9 +8,11 @@ and SLVAFL1, and USB PD R3.3 through the `usb-pd-docs` MCP server.
 
 ## Platform constraints
 
-The library targets Teensy 4.0 and 4.1 (ARM Cortex-M7, 512 KB and 1024 KB of RAM) in the
-Arduino framework, and its platform-independent sources also build on the host for the
-native tests.
+The library targets the Arduino framework on any MCU and is not tied to a board. The
+rules below come from the development build, a Teensy 4.0, and keep the code portable to
+smaller targets. The platform-independent sources also build on the host for the native
+tests. Hardware findings in this document come from one test setup, a Teensy 4.0 host and
+a TPS25751 with a 24LC256 configuration EEPROM, unless an entry says otherwise.
 
 ### No RTTI (Run-Time Type Information)
 

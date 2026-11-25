@@ -38,7 +38,7 @@ Writable through a `write<Name>()` method: 0x16, 0x18, 0x27, 0x32, 0x33, 0x37, 0
   0x77, bit 10 for 0x7D, bit 11 for 0x7B, bit 17 for 0x7E, bit 18 for 0x78, and bit 20
   for 0x7A.
 - The battery counts in 0x77 and 0x7E should agree with the populated entries of 0x7B and
-  0x7D. No single register's validation can check that, and the test board's reset values
+  0x7D. No single register's validation can check that, and the reset values read on hardware
   disagree.
 - An RDO's layout depends on the PDO it requests. Decode the own RDO of 0x35 with
   `rdoKindFor(activePdo())` from 0x34, and the requested RDO with `rdoKindFor()` of this

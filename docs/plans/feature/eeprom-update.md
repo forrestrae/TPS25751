@@ -1492,7 +1492,8 @@ finding: record it in full and stop the stage before any other write.
 
 1. No answer from the controller after power-on: `r` every 10 s for 2 minutes, then one
    more power cycle, recording each.
-2. MODE reads PTCH: flash the F8091166 build (the Teensy's flash only), `l`, `r` to record
+2. MODE reads PTCH in `r`, taken at least 2 s after the start-up report (corrected
+   during the stage, after S2): flash the F8091166 build (the Teensy's flash only), `l`, `r` to record
    the EEPROM, then `zero`, `pb`, and a power cycle. This is stage 5's path, which ran on
    this board in stages 5 to 8.
 3. If `l` fails: `examples/load-patch-bundle`, then `zero` and `pb`.
@@ -1524,6 +1525,24 @@ cleanly when the port goes away.
 | S0, flash and `r` | The F8091164 build (header SHA-256 `15019eac...6f81ec59`) flashed through the Teensy Loader. MODE `APP `; VERSION 0xF8091166; BOOT_FLAGS `18 00 F0 A2 C1`: EEPROM Loaded, Region 0 Attempted 1, Region 1 Attempted 0, every error flag 0. Both pointers valid; both AppConfigOffset words 0; `FLvy` Success on both regions; target High. Dump of 1984 lines identical to `..._F8091166_fullFlash.bin` (SHA-256 `a3e549ca...3096fdaec3`). The board's power history before this read is not recorded |
 | S0, dark check | Supply off: the user measured ROM1 pin 8 (VCC, LDO_3V3) below 0.2 V, and the Teensy left the Mac (no `/dev/cu.usbmodem181777201`, no device with vendor ID 0x16C0). The Teensy is powered from the board, not from USB, and the controller and the EEPROM lose power with the supply |
 | S1, baseline power-on | The port appeared 7.0 s after the capture started waiting (the user switched on in that window). Start-up report and `r` agree: MODE `APP `; VERSION 0xF8091166; BOOT_FLAGS `18 00 F0 A2 C1`, Dead Battery Flag 0, Region 0 Attempted 1, Region 1 Attempted 0, every error flag 0; both pointers valid; `FLvy` Success on both regions. Dump identical to the full-flash image. A power-on boot of the full-flash layout reads the same BOOT_FLAGS as a `GAID` restart on the first board |
+| S2, `c1` | Plan named target High and the F8091164 image (14272 bytes), so the script confirmed. Halted after step 1 in 0.7 s: Low pointer 0x00000800 (valid), High pointer 0. Tasks: `FLrd` 7, `FLad` 1, `FLwd` 1, all Success, about 17.8 ms each |
+| S2, power-on | Start-up report, taken as soon as the Teensy enumerated: MODE `PTCH`, VERSION 0xF8091100, BOOT_FLAGS `18 00 30 02 C1` (Patch Config Source None Loaded, I2C EEPROM Present 1, Region 0 Attempted 1, Region 1 Attempted 0, no Invalid, Error, or CRC flag). `r` about 2 s later: MODE `APP `; VERSION 0xF8091166; BOOT_FLAGS `18 00 F0 A2 C1`, Dead Battery Flag 0; Low pointer valid, High pointer 0; `FLvy` Success on both regions. Dump equals the full-flash image with the High pointer 0 and no other byte changed. Passed |
+
+The start-up report of S2 caught the controller while it was still loading the Low
+region: Region 0 was attempted, no configuration was loaded yet, and no error flag was
+set. The Teensy starts on the same rail and enumerates before the load ends. S1's
+report read APP, so the order is a race. The power-on stages of the first board never
+saw this, because each restart there was a `GAID` with the Teensy already running.
+Consequences:
+
+- The boot result of each step is judged from `r`, taken at least 2 s after the start-up
+  report, not from the report. Recovery item 2 below applies only to a PTCH read by `r`.
+- The example's start-up report says, for any PTCH read, that the controller found no
+  bundle it could boot and that `l` then `pb` recovers it. Right after a power-on that
+  advice is wrong while the EEPROM load is in progress. Open for the user, not changed
+  during the stage: whether the example should wait for the load to end (for example,
+  poll MODE until it leaves PTCH or a timeout passes, or check Patch Config Source and the
+  region flags) before it prints that advice.
 
 Two physical points were confirmed on 2026-11-22. First, the EEPROM can be reprogrammed
 in place with a SOIC8 clip, so `write-flash.zsh` (`24LC256@SOIC8`) is a recovery path

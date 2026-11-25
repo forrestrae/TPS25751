@@ -131,7 +131,7 @@ class Capture:
     messages: list[Message]
     conn: int
     vbus: list[int]
-    connect_lines: list[int] = field(default_factory=list)  # file lines of the connect records
+    attach_lines: list[int] = field(default_factory=list)  # file lines of connects that start an attach
 
 
 # --- reading ------------------------------------------------------------------------
@@ -152,14 +152,33 @@ def _json_lines(path: Path):
             yield number, record
 
 
+# A disconnect shorter than this is the meter's attach bounce, not a detach. Measured on
+# meter firmware 2.0.0: bounces of 112 ms (Phase 1 S2 and S3, the 2026-11-23 bundle, and
+# 2026-11-25 restart and restart_cold captures) and 100 ms (2026-11-25 port_reset), each
+# right after a connect; real detaches of 232 ms (port_reset), 268 ms (warm restart, VBUS
+# down to 4 mV), 828 ms (port_reset with an iPhone), and 1192 ms (cold restart). VBUS
+# does not separate them: one status record inside a bounce read 359 to 670 mV, and the
+# 232 ms detach never fell below 670 mV.
+ATTACH_BOUNCE_MAX_MS = 150
+
+
 def load_capture(path: str | Path) -> Capture:
+    """Read a capture file.
+
+    A connect record starts a new attach when no disconnect precedes it in the file, or
+    when the disconnect before it lasted at least ``ATTACH_BOUNCE_MAX_MS``; a shorter
+    one is an attach bounce within the same attach. The retransmission state resets at
+    each disconnect, since a message after a detach cannot repeat one from before it.
+    """
     path = Path(path).expanduser()
     header = None
     footer = None
     messages: list[Message] = []
     last: dict[tuple[str, int], bytes] = {}
     conn = 0
-    connect_lines: list[int] = []
+    attach_lines: list[int] = []
+    disconnect_t: int | None = None
+    seen_connect = False
     vbus: list[int] = []
     for number, record in _json_lines(path):
         kind = record.get("type")
@@ -171,8 +190,17 @@ def load_capture(path: str | Path) -> Capture:
             footer = record
         elif kind == "conn":
             conn += 1
-            if record.get("event") == "connect":
-                connect_lines.append(number)
+            t = record.get("t_meter_ms") if isinstance(record.get("t_meter_ms"), int) else None
+            if record.get("event") == "disconnect":
+                disconnect_t = t
+                last.clear()
+            elif record.get("event") == "connect":
+                if not seen_connect and disconnect_t is None:
+                    attach_lines.append(number)
+                elif disconnect_t is not None and (t is None or t - disconnect_t >= ATTACH_BOUNCE_MAX_MS):
+                    attach_lines.append(number)
+                seen_connect = True
+                disconnect_t = None
         elif kind == "status" and isinstance(record.get("vbus_mv"), int):
             vbus.append(record["vbus_mv"])
         elif kind == "pd":
@@ -203,7 +231,7 @@ def load_capture(path: str | Path) -> Capture:
             messages.append(msg)
     if header is None:
         raise CrosscheckError(f"{path}: no header record")
-    return Capture(path, header, footer, messages, conn, vbus, connect_lines)
+    return Capture(path, header, footer, messages, conn, vbus, attach_lines)
 
 
 def load_registers(path: str | Path) -> dict[int, bytes]:
@@ -666,11 +694,12 @@ def identity_after_attach(capture: Capture, role_at) -> tuple[Message | None, Me
 
     The wait ends on the first Discover Identity ACK on SOP from the partner that comes
     after the first completed contract of the latest attach: the first PS_RDY that
-    completes a Request after the last connect record, or after the start of the capture
-    when it has none. An ACK between that contract and a later one counts; an iPhone sends
+    completes a Request after the connect that started that attach (an attach bounce
+    does not start one; see ATTACH_BOUNCE_MAX_MS), or after the start of the capture when
+    it has none. An ACK between that contract and a later one counts; an iPhone sends
     its ACK between its two contracts. Returns that PS_RDY and the ACK, either None.
     """
-    attach = capture.connect_lines[-1] if capture.connect_lines else 0
+    attach = capture.attach_lines[-1] if capture.attach_lines else 0
     messages = [m for m in capture.messages
                 if m.sop == "SOP" and not m.goodcrc and not m.retry and m.line > attach]
     first_ps_rdy = None
@@ -720,8 +749,9 @@ def crosscheck(capture_path: str | Path, registers_path: str | Path, role: str |
     caps_expected = stimulus not in NO_CAPABILITIES_STIMULI
 
     # The snapshot describes the latest attach, and STATUS gives the board's role only
-    # for it, so only the messages after the last connect record are compared.
-    attach = whole.connect_lines[-1] if whole.connect_lines else 0
+    # for it, so only the messages after the connect that started it are compared. An
+    # attach bounce (see ATTACH_BOUNCE_MAX_MS) does not start an attach.
+    attach = whole.attach_lines[-1] if whole.attach_lines else 0
     capture = replace(whole, messages=[m for m in whole.messages if m.line > attach])
     earlier = sum(1 for m in whole.messages if m.line < attach and not m.goodcrc)
 
@@ -729,9 +759,9 @@ def crosscheck(capture_path: str | Path, registers_path: str | Path, role: str |
     notes, blocked = sanity(capture, contract, caps, unfinished, caps_expected)
     notes = role_notes + notes
     if earlier:
-        notes.insert(len(role_notes), f"{earlier} PD messages before the last connect record (line {attach}) belong "
-                                      "to an earlier attach and are not compared: the snapshot describes the "
-                                      "latest one")
+        notes.insert(len(role_notes), f"{earlier} PD messages before the connect that started the latest attach "
+                                      f"(line {attach}) belong to an earlier attach and are not compared: the "
+                                      "snapshot describes the latest one")
 
     # The board's power role at each point of the latest attach: STATUS gives it at the
     # snapshot, and each completed PR_Swap flips it for what came before.

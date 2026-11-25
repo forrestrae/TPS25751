@@ -143,7 +143,9 @@ hold it:
   the board's role before the swap is the opposite of the one STATUS reports. The final
   contract is compared as usual, and the other side's Source_Capabilities from before
   the swap are compared with their own register in rows marked "Before PR_Swap". Only
-  the latest attach, after the last connect record, is compared.
+  the latest attach is compared. A connect starts an attach unless the disconnect before
+  it lasted under 150 ms: the meter reports such an attach bounce (100 to 112 ms) right
+  after a connect, while real detaches measured 232 ms to 1.2 s.
 - The final Request against 0x35 bits 31:0 (sinking) or 127:96 (sourcing).
 - The requested PDO against 0x34 bits 31:0. With the board sinking, PDO 1 bits 29:20
   against 0x34 bits 41:32, which two chargers confirmed. With the board sourcing, one

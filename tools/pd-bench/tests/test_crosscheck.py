@@ -50,6 +50,15 @@ class CaptureFile:
         self.records.append({"type": "conn", "t_meter_ms": self.t, "code": 17, "event": event})
         return self
 
+    def pause(self, ms):
+        """Let meter time pass, as a detach does."""
+        self.t += ms
+        return self
+
+    def detach(self, ms=1000):
+        """A disconnect lasting ``ms``, then a connect."""
+        return self.conn("disconnect").pause(ms).conn()
+
     def pd(self, head, objects=(), sop="SOP", goodcrc=True):
         self.t += 2
         self.records.append({"type": "pd", "i": len(self.records), "t_meter_ms": self.t, "sop": sop,
@@ -581,7 +590,7 @@ def test_the_identity_wait_accepts_an_ack_between_two_contracts(tmp_path):
 def test_the_identity_wait_ignores_the_boards_own_ack_and_earlier_attaches(tmp_path):
     capture = CaptureFile(provenance={"stop": "identity"}).conn()
     capture.contract().identity_ack(source=True)          # the partner's, but in an earlier attach
-    capture.conn("disconnect").conn()
+    capture.detach()
     capture.contract().identity_ack(PARTNER_VDOS, source=False)  # the board's own (it is the sink)
     capture.write(tmp_path / "c.jsonl")
     loaded = crosscheck.load_capture(tmp_path / "c.jsonl")
@@ -655,7 +664,7 @@ def test_only_the_latest_attach_is_compared(tmp_path):
     capture = CaptureFile().conn()
     for message in IPHONE_SESSION:
         capture.wire_hex(message)
-    capture.conn("disconnect").conn()
+    capture.detach()
     for message in ("a151 2c910103 2cd10200 2cb10400 f4410600 f4b104e0", "821a 2cb18413", "a303", "a605",
                     "af19 01a800ff", "8f44 41a000ff ac0500d5 00000000 66210c71"):
         capture.wire_hex(message)
@@ -689,3 +698,42 @@ def test_a_sourcing_late_start_masks_the_pdo1_flags_and_stays_inconclusive(tmp_p
     assert any("started late" in n for n in result["sanity"])
     assert not [r for r in result["rows"] if r["result"] == MISMATCH]
     assert result["verdict"] == "inconclusive"
+
+
+# ----- attach bounces -----
+
+def test_an_attach_bounce_does_not_start_an_attach(tmp_path):
+    # The connection records of km003c-20261125T193413Z-pd-verify-restart_cold, a cold
+    # restart into PTCH on 2026-11-25: a 1192 ms detach, the charger's unanswered
+    # Source_Capabilities while the controller loads its patch, a 112 ms bounce, then the
+    # contract.
+    capture = CaptureFile()
+    capture.t = 62935616
+    capture.conn("disconnect")
+    capture.t = 62936808
+    capture.conn()
+    for _ in range(3):
+        capture.source_caps(goodcrc=False)
+    capture.t = 62937652
+    capture.conn("disconnect")
+    capture.t = 62937764
+    capture.conn()
+    capture.contract().identity_ack().status(20480).footer()
+    path = capture.write(tmp_path / "capture.jsonl")
+    loaded = crosscheck.load_capture(path)
+    first_connect = next(n for n, r in enumerate(capture.records, 1) if r.get("event") == "connect")
+    assert loaded.attach_lines == [first_connect]
+    # After the bounce's disconnect the same bytes are a new message, not a retransmission.
+    caps = [m for m in loaded.messages if m.is_data(crosscheck.DATA_SOURCE_CAPABILITIES)]
+    assert [m.retry for m in caps] == [False, True, True, False]
+    result = crosscheck.crosscheck(path, write_registers(tmp_path / "registers.json", sink_registers()))
+    assert not any("earlier attach" in n or "started late" in n for n in result["sanity"])
+    assert result["verdict"] == "pass"
+
+
+@pytest.mark.parametrize("gap_ms, starts_attach", [(100, False), (112, False), (149, False), (150, True),
+                                                    (232, True), (268, True), (1192, True)])
+def test_the_bounce_threshold(tmp_path, gap_ms, starts_attach):
+    capture = CaptureFile().conn().contract().detach(gap_ms).contract()
+    loaded = crosscheck.load_capture(capture.write(tmp_path / "capture.jsonl"))
+    assert len(loaded.attach_lines) == (2 if starts_attach else 1)

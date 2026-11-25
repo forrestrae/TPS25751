@@ -26,6 +26,12 @@ present.
   latest Source_Capabilities only, and the verdict is at best inconclusive.
 - Only Source_Capabilities sent with the Source power role count (`sender` `source/...`).
   A board that sinks never has its own capabilities compared against 0x30.
+- Compare only the latest attach: the messages after the connect record that started it.
+  A connect starts an attach when no disconnect precedes it, or when the disconnect
+  before it lasted 150 ms or more. A shorter gap is the meter's attach bounce, measured
+  at 100 to 112 ms right after a connect on firmware 2.0.0, while real detaches measured
+  232 ms (port_reset) to 1192 ms (cold restart). A message after a disconnect is never a
+  retransmission of one before it.
 - STATUS gives the board's role at the snapshot. Each PR_Swap on SOP that the other port
   accepted flips it for everything before that Accept; the summary shows them as
   `PR_Swap` and `Accept` lines. A message sent with the board's role at its time is the

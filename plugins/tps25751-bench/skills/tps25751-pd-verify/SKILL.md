@@ -187,11 +187,15 @@ Stop waiting when one of these holds:
    partner may answer between two contracts (an iPhone did, between its first and second
    Request), so do not require the ACK after the final P. Check in each step after the
    contract condition holds with `km003c` `pd_capture_read`, `mode` `messages`, `types`
-   `["connect", "PS_RDY", "PR_Swap", "Accept", "Discover_Identity"]`, and `limit` 50 (no
+   `["connect", "disconnect", "PS_RDY", "PR_Swap", "Accept", "Discover_Identity"]`, and `limit` 50 (no
    `sop`, which would drop the connect lines). Page with `after` set to the previous
    page's `next_after` until a page has no `next_after`, so the latest attach is read to
-   its end. The latest attach starts at the last `connect` line, or at the start of the
-   capture without one; its first contract ends at the first `PS_RDY` line after that.
+   its end. The latest attach starts at the last `connect` line whose `disconnect` line
+   before it is at least 150 ms earlier, or that has no `disconnect` before it; without
+   one it starts at the start of the capture. A shorter gap is the meter's attach bounce
+   (100 to 112 ms measured, right after a connect; real detaches measured 232 ms to
+   1.2 s) and belongs to the same attach. The attach's first contract ends at the first
+   `PS_RDY` line after its start.
    Count a `Discover_Identity ACK` line on SOP after that PS_RDY when its sender's power
    role (`from source/...` or `from sink/...`) differs from the board's role at that line;
    the same role is the board's own identity and does not count. Find the board's role

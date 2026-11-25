@@ -105,6 +105,72 @@ Phase 5 facts, for later phases:
   connector type reads 00b. Phase 7's SOP' report should expect it.
 - `captures/` and `tools/pd-bench/.venv/` are now in this library's `.gitignore`.
 
+Phase 6 complete 2026-11-24: `feat/pd-bench` is integrated after an independent review,
+rebased onto v3.2.0, whose EEPROM updater took ADR-014; the bench console is ADR-015.
+Native tests pass 1607 of 1607 and the bench server's 136 of 136. Line coverage is 99%
+for `TPS25751BenchConsole.cpp`, 100% for `TPS25751BenchProtocol.cpp` and `TPS25751.cpp`,
+and 99% for `TPS25751PatchLoader.cpp`. Every `bench_renegotiate` method except `ssrc`
+ran on hardware with the meter capturing, on the rebased tip `d8feeeb`; `ssrc` moves to
+the Phase 7 source session. The three review fixes after `d8feeeb` change only the
+no-write load path, the `sent=` token on the patch lines, and text, and did not run on
+hardware. Next: Phase 7.
+
+Phase 6 hardware results, Teensy 4.0, meter firmware 2.0.0:
+
+| Method | Charger | Result |
+|---|---|---|
+| `bench_snapshot` | 140 W | Console port found without configuration; 17 registers; live 0x30, 0x34, and 0x35 equal the bytes Phase 5 synthesized |
+| `gsrc` | 140 W | Get_Source_Cap, Source_Capabilities, Request, Accept, PS_RDY; VBUS flat. Repeated on the rebased tip |
+| `aneg` | Apple 67 W (PD 2.0) | VBUS 20.3 V to 15.0 V and back; `stepped_down` and `restored_contract` true |
+| `port_reset` | Apple 67 W | Rewriting 0x28 with its current value disconnects the port; reattach after 0.74 s and the full sequence |
+| `restart` | 140 W | First run failed with `ERR I2C`, MODE unreadable after the controller answered; fixed by waiting for MODE. Rerun: MODE PTCH 1 ms after the controller answered, APP 690 ms later; two detach and attach cycles about 1.9 s apart |
+| `restart_cold`, patch reload | 140 W | Two runs: MODE PTCH, patch Success after 1.47 s, APP. One detach and attach cycle. The charger repeated Source_Capabilities about 25 times without a GoodCRC for about 1.8 s while the controller sat in PTCH, then the contract completed |
+| `restart_cold`, EEPROM | 140 W | MODE PTCH 1 ms after the controller answered, no patch step, APP |
+
+The console uptime kept counting through every VBUS drop.
+
+No EEPROM-less board exists, so the patch reload ran on the EEPROM board in the PTCH
+state of hardware stage 5, part B, of the EEPROM-update plan. The `eeprom-update`
+example backed up the EEPROM, wrote both region pointers to 0, and reset the controller
+into PTCH (VERSION 0xF8091100, BOOT_FLAGS `F8 00 60 02 C1`). The `example-pd-bench-patch`
+build then loaded the TI F8091166 bundle at start-up (`patch_source=i2c`) and again in
+each `restart_cold`. `pb` restored both regions; the dump equals the backup
+byte for byte (SHA-256 `a3e549ca...3096fdaec3`), and after `x` the controller booted from
+the EEPROM with BOOT_FLAGS `18 00 F0 A2 C1`.
+
+The charger swap during the run also changed the cable. Its Discover Identity reply now
+carries VDOs `10030700 52200831`, where Phases 1 and 4 saw `10030500 52200821`; Phase 7
+fixtures should record which cable they used.
+
+Phase 6 corrections to this plan:
+- The dual-serial Teensy enumerates with PID 0x048B, not 0x0483; the console is the port
+  whose name ends in 3 on macOS.
+- The console reloads the patch in `begin()` and in `RESTART` only, not whenever MODE
+  reads PTCH. An EEPROM board passes through PTCH for under a second after a restart,
+  so the console waits up to 3 s for APP, or for PTCH with INT_EVENT1 ReadyForPatch,
+  before it calls the loader.
+- After a restart the controller acknowledges I2C before MODE is readable; `RESTART`
+  polls MODE for up to 10 s. `CMD Gaid` and `CMD GAID` run the `RESTART` sequence.
+- `RD` and `SNAP` report the length byte as read through the new
+  `TPS25751::readRegisterRaw()`.
+- `aneg` steps the host-provided maximum voltage down to the source's next lower Fixed
+  PDO instead of a fixed value.
+
+Phase 6 known gaps:
+- INT_EVENT1 bits 14 and 12 read 0 after `gsrc`; INT_MASK1 is the suspected cause, not
+  checked.
+- A failing patch load at start-up can hold the console silent for about 30 s, which the
+  server reports as busy.
+- A load that wrote nothing (`sent=0`) and then MODE APP counts as success. A load that
+  wrote and then timed out still answers `ERR PATCH` with MODE APP, which is stricter
+  than the `PatchLoadStatus` documentation.
+- Clearing INT_EVENT1 bit 81 while the controller sits in PTCH, as `SNAP` does, leaves
+  the next load without Ready for Patch, so it writes nothing. `RESTART cold` recovers;
+  a warm `RESTART` of a controller with no EEPROM has not run on hardware.
+- The restart facts above are in the console header, ADR-015, and the tools README, not
+  in `CONSTRAINTS.md`.
+- CI builds only `example-read-registers`; the gate builds `example-pd-bench` too.
+
 Correction found in Phase 0, affecting Phase 5: since `ci/verify-launcher`, `verify.py`
 is a launcher that runs `main`'s copy of `scripts/verify_gate.py`, and agents may edit
 `verify_gate.py` on a topic branch. The two Phase 5 checks therefore go into
@@ -658,9 +724,9 @@ Branch `feat/pd-bench`.
   Not included by `TPS25751.h`, so projects that don't use it pay nothing. Downstream
   firmware embeds the console with three lines rather than flashing our example.
 - Patch reload: the console optionally takes a patch bundle (pointer and length, as
-  `examples/load-patch-bundle` uses). After `GAID`, or whenever MODE reads PTCH, it
-  reloads the patch with `TPS25751PatchLoader::loadPatchBundle()` and reports the
-  outcome. A board with an EEPROM needs no bundle; a board without one and no bundle
+  `examples/load-patch-bundle` uses). In `begin()` and in `RESTART`, when MODE stays in
+  PTCH, it reloads the patch with `TPS25751PatchLoader::loadPatchBundle()` and reports
+  the outcome. A board with an EEPROM needs no bundle; a board without one and no bundle
   refuses `GAID`.
 - `examples/pd-bench/src/main.cpp` and `[env:example-pd-bench]`, built with
   `-D USB_DUAL_SERIAL`: the console on `SerialUSB1`, human-readable logs on `Serial`.
@@ -692,7 +758,7 @@ controller's own VBUS reading to compare with the meter.
 
 **Host server** (`tools/pd-bench/`, `uv` project, MCP SDK 2.x as in the docs server)
 
-- Port discovery: Teensy VID 0x16C0 and PID 0x0483, narrowed by
+- Port discovery: Teensy VID 0x16C0 and PID 0x048B (dual serial), narrowed by
   `TPS25751_BENCH_SERIAL` or `TPS25751_BENCH_PORT`. With dual serial, the console's
   port is the second interface; whether pyserial reports the interface number on macOS
   is checked in this phase, with `TPS25751_BENCH_PORT` as the fallback.
@@ -725,11 +791,13 @@ controller's own VBUS reading to compare with the meter.
   rewriting 0x28 with its current value disconnects the port, whether `GSrC` yields a
   full Request, Accept, PS_RDY sequence with the Apple charger, and whether `HELLO`
   uptime keeps counting through a VBUS drop (the console stays up on battery).
-  `restart_cold` runs on an EEPROM-less board and must come back in APP. `ssrc` runs in
+  `restart_cold` must come back in APP after a patch reload; with no EEPROM-less board,
+  it ran on the EEPROM board with both region pointers zeroed (see the Phase 6 results
+  at the top). `ssrc` runs in
   the source session of Phase 7.
 
 **Needs from you:** none for the code. The hardware run needs the board on its battery,
-the charger attached, and an EEPROM-less board for `restart_cold`; I will say before any
+the charger attached, and a controller that boots into PTCH for `restart_cold`; I will say before any
 method that drops VBUS, and before you need to swap boards.
 
 ### Phase 7: Verification skill and capture analyst

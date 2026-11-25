@@ -114,9 +114,8 @@ it apart because three other components depend on it alone.
 - Owns the `TwoWire&` and the 7-bit I2Ct address (0x20 to 0x23, `TPS25751_I2CT_ADDRESS_IDX`).
 - Typed reads in two forms: `read<Name>Register(bool validate = true)` returns a
   `std::unique_ptr` to the register class, or `nullptr` on a failed read or failed
-  validation, and `read<Name>(T&)` fills a caller-owned object. Most registers have both;
-  some have one form only (for example `readSleepControl()` and `readVersionRegister()`).
-  `readRegisterAs<T>(Address)` works for every register.
+  validation, and `read<Name>(T&)` fills a caller-owned object. All 37 registers have
+  both. `readRegisterAs<T>(Address)` is the generic equivalent of the first form.
 - One typed write per writable register (`writeSleepControl()`,
   `writeTransmitSourceCaps()`, and so on), plus the generic `writeRegister<T>(const T&)`
   keyed on the class's `kAddress`.
@@ -226,7 +225,7 @@ public:
     explicit TPS25751(TwoWire &wire = Wire, uint8_t address = TPS25751_I2CT_ADDRESS_IDX[0]);
     bool begin() const;
 
-    // Typed reads: most registers have both forms
+    // Typed reads: every register has both forms
     bool readStatus(TPS25751Status &statusOut) const;
     std::unique_ptr<TPS25751Status> readStatusRegister(bool validate = true) const;
 

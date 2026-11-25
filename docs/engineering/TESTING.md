@@ -1,6 +1,6 @@
 # TPS25751 Library - Testing Strategy
 
-**Last Updated:** 2026-11-23
+**Last Updated:** 2026-11-24
 **Status:** Active
 
 ---
@@ -239,7 +239,7 @@ levels the tests set. The poll counts, the 0xFF padding of a long read, and the 
 time MODE switches are choices of the fake, not documented behaviour.
 
 Three suites use it. `test_TPS25751Typed` covers the typed wrappers of `TPS25751.cpp`:
-each of the 32 `read*(T &)` functions, 15 `write*(const T &)` functions, and 33 factory
+each of the 37 `read*(T &)` functions, 15 `write*(const T &)` functions, and 37 factory
 `read*Register(validate)` functions is checked for the register address in the pointer
 write, the read of size + 1 bytes, the bytes the decoded object holds, the
 `[register, length, data...]` frame with a STOP for writes, and its failure paths (a NACKed
@@ -920,6 +920,7 @@ Tests are successful when:
 | 1.11 | 2026-11-24 | Claude Code | Core test of `writeCommandData()`; loader tests of the Ready for Patch and MODE polls, the PBMs configuration read-back, and `PBMe`; the fake's additions; the fifth measurement (1348 tests) |
 | 1.12 | 2026-11-24 | Claude Code | `test_TPS25751Typed`: the typed read and write wrappers and the factory read functions, and the sixth coverage measurement (1441 tests, `TPS25751.cpp` at 94%) |
 | 1.13 | 2026-11-24 | Claude Code | The `Wire.rxMissing` fault, the null-factory and short-buffer tests, and the seventh coverage measurement (1444 tests, `TPS25751.cpp` at 100%) |
+| 1.14 | 2026-11-24 | Claude Code | `test_TPS25751Typed` covers the nine typed reads added so that all 37 registers have both read forms (1453 tests) |
 
 ---
 

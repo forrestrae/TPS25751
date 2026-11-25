@@ -132,8 +132,12 @@ void checkTypedRead(Fn fn, Address a, const char *name)
 
 TYPED_READ(Mode, TPS25751Mode, MODE)
 TYPED_READ(CustomerUse, TPS25751CustomerUse, CUSTOMER_USE)
+TYPED_READ(Command, TPS25751Command, COMMAND)
+TYPED_READ(Data, TPS25751Data, DATA)
+TYPED_READ(Version, TPS25751Version, VERSION)
 TYPED_READ(InterruptEvent, TPS25751InterruptEvent, INT_EVENT1)
 TYPED_READ(InterruptMask, TPS25751InterruptMask, INT_MASK1)
+TYPED_READ(InterruptClear, TPS25751InterruptClear, INT_CLEAR1)
 TYPED_READ(Status, TPS25751Status, STATUS)
 TYPED_READ(PowerPathStatus, TPS25751PowerPathStatus, POWER_PATH_STATUS)
 TYPED_READ(GlobalSystemConfig, TPS25751GlobalSystemConfig, GLOBAL_SYSTEM_CONFIGURATION)
@@ -150,6 +154,7 @@ TYPED_READ(AutoNegotiateSink, TPS25751AutoNegotiateSink, AUTONEGOTIATE_SINK)
 TYPED_READ(PowerStatus, TPS25751PowerStatus, POWER_STATUS)
 TYPED_READ(PDStatus, TPS25751PDStatus, PD_STATUS)
 TYPED_READ(PD3Config, TPS25751PD3Config, PD3_CONFIGURATION)
+TYPED_READ(ReceivedSOPIdentity, TPS25751ReceivedSOPIdentity, RECEIVED_SOP_IDENTITY)
 TYPED_READ(IOConfig, TPS25751IOConfig, IO_CONFIG)
 TYPED_READ(TypeCState, TPS25751TypeCState, TYPEC_STATE)
 TYPED_READ(ADCResults, TPS25751ADCResults, ADC_RESULTS)
@@ -260,10 +265,13 @@ void checkFactoryRead(Fn fn, Address a, const char *name)
     void test_factory_read_##Name() { checkFactoryRead(&TPS25751::read##Name##Register, Address::Addr, #Name); }
 
 FACTORY_READ(Mode, MODE)
+FACTORY_READ(CustomerUse, CUSTOMER_USE)
 FACTORY_READ(Command, COMMAND)
 FACTORY_READ(Data, DATA)
 FACTORY_READ(Version, VERSION)
 FACTORY_READ(InterruptEvent, INT_EVENT1)
+FACTORY_READ(InterruptMask, INT_MASK1)
+FACTORY_READ(InterruptClear, INT_CLEAR1)
 FACTORY_READ(Status, STATUS)
 FACTORY_READ(PowerPathStatus, POWER_PATH_STATUS)
 FACTORY_READ(GlobalSystemConfig, GLOBAL_SYSTEM_CONFIGURATION)
@@ -284,6 +292,7 @@ FACTORY_READ(ReceivedSOPIdentity, RECEIVED_SOP_IDENTITY)
 FACTORY_READ(IOConfig, IO_CONFIG)
 FACTORY_READ(TypeCState, TYPEC_STATE)
 FACTORY_READ(ADCResults, ADC_RESULTS)
+FACTORY_READ(SleepControl, SLEEP_CONTROL)
 FACTORY_READ(GPIOStatus, GPIO_STATUS)
 FACTORY_READ(TransmitSourceCapsExtended, TRANSMIT_SOURCE_CAPABILITIES_EXTENDED)
 FACTORY_READ(TransmitSourceInfo, TRANSMIT_SOURCE_INFO)
@@ -525,12 +534,13 @@ void tearDown()
 int main()
 {
     UNITY_BEGIN();
-    RUN_READ(Mode); RUN_READ(CustomerUse); RUN_READ(InterruptEvent); RUN_READ(InterruptMask);
+    RUN_READ(Mode); RUN_READ(CustomerUse); RUN_READ(Command); RUN_READ(Data); RUN_READ(Version);
+    RUN_READ(InterruptEvent); RUN_READ(InterruptMask); RUN_READ(InterruptClear);
     RUN_READ(Status); RUN_READ(PowerPathStatus); RUN_READ(GlobalSystemConfig); RUN_READ(PortConfig);
     RUN_READ(PortControl); RUN_READ(BootFlags); RUN_READ(ReceivedSourceCaps); RUN_READ(ReceivedSinkCaps);
     RUN_READ(TransmitSourceCaps); RUN_READ(TransmitSinkCaps); RUN_READ(ActivePDOContract);
     RUN_READ(ActiveRDOContract); RUN_READ(AutoNegotiateSink); RUN_READ(PowerStatus); RUN_READ(PDStatus);
-    RUN_READ(PD3Config); RUN_READ(IOConfig); RUN_READ(TypeCState); RUN_READ(ADCResults);
+    RUN_READ(PD3Config); RUN_READ(ReceivedSOPIdentity); RUN_READ(IOConfig); RUN_READ(TypeCState); RUN_READ(ADCResults);
     RUN_READ(SleepControl); RUN_READ(GPIOStatus); RUN_READ(TransmitSourceCapsExtended);
     RUN_READ(TransmitSourceInfo); RUN_READ(TransmitPPSStatus); RUN_READ(TransmitBatteryStatus);
     RUN_READ(TransmitBatteryCapabilities); RUN_READ(TransmitSinkCapsExtended); RUN_READ(LiquidDetectionConfig);
@@ -541,14 +551,14 @@ int main()
     RUN_WRITE(TransmitSourceInfo); RUN_WRITE(TransmitPPSStatus); RUN_WRITE(TransmitBatteryStatus);
     RUN_WRITE(TransmitBatteryCapabilities); RUN_WRITE(TransmitSinkCapsExtended); RUN_WRITE(LiquidDetectionConfig);
 
-    RUN_FACTORY(Mode); RUN_FACTORY(Command); RUN_FACTORY(Data); RUN_FACTORY(Version);
-    RUN_FACTORY(InterruptEvent); RUN_FACTORY(Status); RUN_FACTORY(PowerPathStatus);
+    RUN_FACTORY(Mode); RUN_FACTORY(CustomerUse); RUN_FACTORY(Command); RUN_FACTORY(Data); RUN_FACTORY(Version);
+    RUN_FACTORY(InterruptEvent); RUN_FACTORY(InterruptMask); RUN_FACTORY(InterruptClear); RUN_FACTORY(Status); RUN_FACTORY(PowerPathStatus);
     RUN_FACTORY(GlobalSystemConfig); RUN_FACTORY(PortConfig); RUN_FACTORY(PortControl);
     RUN_FACTORY(BootFlags); RUN_FACTORY(ReceivedSourceCaps); RUN_FACTORY(ReceivedSinkCaps);
     RUN_FACTORY(TransmitSourceCaps); RUN_FACTORY(TransmitSinkCaps); RUN_FACTORY(ActivePDOContract);
     RUN_FACTORY(ActiveRDOContract); RUN_FACTORY(AutoNegotiateSink); RUN_FACTORY(PowerStatus);
     RUN_FACTORY(PDStatus); RUN_FACTORY(PD3Config); RUN_FACTORY(ReceivedSOPIdentity); RUN_FACTORY(IOConfig);
-    RUN_FACTORY(TypeCState); RUN_FACTORY(ADCResults); RUN_FACTORY(GPIOStatus);
+    RUN_FACTORY(TypeCState); RUN_FACTORY(ADCResults); RUN_FACTORY(SleepControl); RUN_FACTORY(GPIOStatus);
     RUN_FACTORY(TransmitSourceCapsExtended); RUN_FACTORY(TransmitSourceInfo); RUN_FACTORY(TransmitPPSStatus);
     RUN_FACTORY(TransmitBatteryStatus); RUN_FACTORY(TransmitBatteryCapabilities);
     RUN_FACTORY(TransmitSinkCapsExtended); RUN_FACTORY(LiquidDetectionConfig);

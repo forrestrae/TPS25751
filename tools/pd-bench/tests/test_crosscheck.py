@@ -227,8 +227,10 @@ def test_the_source_role_uses_0x32_and_the_partner_request(tmp_path):
     assert rows["Request RDO (partner)"]["result"] == MATCH
     assert "Request RDO (own)" not in rows
     assert rows["Requested PDO (position 2)"]["result"] == MATCH
-    # The 0x34 bits 41:32 mapping is confirmed only with the board sinking.
-    assert (rows["PDO 1 bits 29:20"]["result"], rows["PDO 1 bits 29:20"]["wire"]) == (REPORT, "0a0")
+    # With the board sourcing, 0x34 bits 41:32 are reported against 0x32 PDO 1 bits 29:20.
+    row = rows["0x32 PDO 1 bits 29:20"]
+    assert (row["result"], row["wire"], row["register"]) == (REPORT, "0a0", "0a0")
+    assert "equal here" in row["note"] and "one hardware observation" in row["note"]
     assert rows["Identity VDO 1"]["result"] == MATCH  # the iPhone answers as sink/ufp
     assert result["verdict"] == "pass"
 
@@ -537,3 +539,24 @@ def test_a_sourcing_board_compares_its_own_capabilities_with_0x32(tmp_path):
     assert rows["PDO 1 bit 25 Dual-Role Data"]["result"] == REPORT
     assert rows["Request RDO (partner)"]["result"] == MATCH
     assert not any(n.startswith("PR_Swap") for n in result["sanity"])
+
+
+SOURCE_BUNDLE = REPO_ROOT / "test" / "fixtures" / "pd-captures" / "2026-11-25-tps25751-iphone"
+
+
+@pytest.mark.skipif(not SOURCE_BUNDLE.is_dir(), reason="needs the library checkout's fixture bundle")
+def test_the_source_role_bundle_passes_with_its_runtime_differences_reported():
+    result = crosscheck.crosscheck(SOURCE_BUNDLE / "capture.jsonl", SOURCE_BUNDLE / "registers.json")
+    rows = rows_by_check(result)
+    assert result["role"] == "source" and result["verdict"] == "pass"
+    assert rows["PDO 1"]["where"] == "0x32 bytes 3..6" and rows["PDO 1"]["result"] == MATCH
+    assert sorted(check for check in rows if check.startswith("PDO 1 bit ")) == [
+        "PDO 1 bit 24 Unchunked Extended Messages Supported", "PDO 1 bit 25 Dual-Role Data",
+        "PDO 1 bit 29 Dual-Role Power"]
+    assert rows["Request RDO (partner)"]["wire"] == "1384b12c"
+    assert rows["Request RDO (partner)"]["result"] == MATCH
+    first_pdo = rows["0x32 PDO 1 bits 29:20"]
+    assert (first_pdo["wire"], first_pdo["register"], first_pdo["result"]) == ("200", "200", REPORT)
+    assert "(bits 29:20 = 030)" in first_pdo["note"]
+    assert [rows[f"Identity VDO {k}"]["wire"] for k in (1, 2, 3)] == ["d50005ac", "00000000", "710c2166"]
+    assert all(rows[f"Identity VDO {k}"]["result"] == MATCH for k in (1, 2, 3))

@@ -23,7 +23,8 @@ Each row compares one wire word with the register bits that should hold it:
   sent) or bits 127:96 (source: the partner's request).
 - The PDO at the RDO's Object Position against 0x34 bits 31:0, and PDO 1 bits 29:20
   against 0x34 bits 41:32. The TRM does not state that mapping; two chargers confirmed
-  it with the board sinking, so with the board sourcing it is reported, not compared.
+  it with the board sinking. With the board sourcing, one observation found 0x34 bits
+  41:32 equal to 0x32 PDO 1 bits 29:20 instead, so that pair is reported, not compared.
   Without Source_Capabilities on the wire (``aneg`` sends none), the PDOs come from the
   snapshot's 0x30 or 0x32.
 - The partner's latest Discover Identity ACK on SOP against 0x48: Response Type,
@@ -460,9 +461,24 @@ def _contract_rows(contract: Contract, regs: dict[int, bytes], role: str, caps_e
             rows.append(_compare(check, control, _bits(pdo34, 32, 10) if pdo34 else None, "0x34 bits 41:32",
                                  mapping, width=3))
         else:
-            register = f"{_bits(pdo34, 32, 10):03x}" if pdo34 else None
-            rows.append(_row(check, f"{control:03x}", register, "0x34 bits 41:32", REPORT,
-                             "reported, not compared: the mapping is confirmed only with the board sinking"))
+            # With the board sourcing, one observation (2026-11-25, bundle
+            # 2026-11-25-tps25751-iphone) found bits 41:32 equal to 0x32 PDO 1 bits 29:20
+            # rather than to the PDO 1 sent on the wire, whose runtime flags differ.
+            register = _bits(pdo34, 32, 10) if pdo34 else None
+            tx = _register_pdos(regs, "source")
+            tx_control = (tx[0][0] >> 20) & 0x3FF if tx and tx[0] else None
+            reference = tx_control if tx_control is not None else control
+            if tx_control is None:
+                agreement = "0x32 is not in the snapshot, so the wire's PDO 1 bits 29:20 are shown"
+            else:
+                agreement = "equal" if register == tx_control else "differ"
+                agreement = f"0x32 PDO 1 bits 29:20 and 0x34 bits 41:32 {agreement} here"
+            rows.append(_row("0x32 PDO 1 bits 29:20" if tx_control is not None else check,
+                             f"{reference:03x}", None if register is None else f"{register:03x}",
+                             "0x34 bits 41:32", REPORT,
+                             f"reported, not compared: with the board sourcing, one hardware observation "
+                             f"(2026-11-25) found 0x34 bits 41:32 equal to 0x32 PDO 1 bits 29:20, not to the "
+                             f"PDO 1 sent on the wire (bits 29:20 = {control:03x}); {agreement}"))
     return rows
 
 

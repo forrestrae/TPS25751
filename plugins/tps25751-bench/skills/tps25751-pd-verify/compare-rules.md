@@ -62,7 +62,7 @@ present.
 | none | 0x35 bits 127:96 | sink | report only. On the sink bench they read the same word as bits 31:0 |
 | PDO at the RDO's Object Position (RDO bits 31:28) | 0x34 bits 31:0 | either | equal; a position naming no PDO is a mismatch |
 | PDO 1 bits 29:20 | 0x34 bits 41:32 | sink | equal. The TRM does not state this mapping; two chargers confirmed it on hardware with the board sinking |
-| PDO 1 bits 29:20 | 0x34 bits 41:32 | source | report only: the mapping is unconfirmed with the board sourcing |
+| 0x32 PDO 1 bits 29:20 | 0x34 bits 41:32 | source | report only. One hardware observation (2026-11-25) found them equal with the board sourcing, while the PDO 1 sent on the wire differed in its runtime flags; the wire's bits 29:20 go in the note |
 | Partner's ACK, `ACK` | 0x48 bits 7:6 | either | value 1 (Responder ACK received) |
 | Partner's ACK, `vdo_count` | 0x48 bits 2:0 | either | equal |
 | Partner's ACK, VDO k from 1 (`vdos[k-1].hex`) | 0x48 bits 8 + 32(k - 1) + 31 to 8 + 32(k - 1), that is the word at byte 1 + 4(k - 1) | either | equal |

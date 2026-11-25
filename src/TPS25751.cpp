@@ -382,6 +382,42 @@ bool TPS25751::writeRegister(const uint8_t regAddr, const uint8_t *data, const s
     return true;
 }
 
+bool TPS25751::readRegisterRaw(const uint8_t regAddr, uint8_t *buffer, const size_t capacity, uint8_t &lengthByte) const
+{
+    if (buffer == nullptr || capacity == 0 || capacity > TPS25751Registers::Registers::DATA.size) {
+        TPS_DEBUG_ERROR(DEBUG_CAT_I2C, "readRegisterRaw: capacity %u not in 1 to %u",
+                        (unsigned)capacity, (unsigned)TPS25751Registers::Registers::DATA.size);
+        return false;
+    }
+    TPS_DEBUG_TRACE(DEBUG_CAT_I2C, "Reading register 0x%02X raw (addr=0x%02X, capacity=%u)", regAddr, _address, (unsigned)capacity);
+
+    _wire.beginTransmission(_address);
+    _wire.write(regAddr);
+    uint8_t result = _wire.endTransmission(false);
+    if (result != 0) {
+        TPS_REPORT_I2C_ERROR(_address, regAddr, "beginTransmission", result);
+        return false;
+    }
+
+    // The first byte of the response is the register's byte count, as in
+    // readRegister(); here it is reported instead of compared.
+    size_t received = _wire.requestFrom(_address, capacity + 1);
+    if (received != capacity + 1 || !_wire.available()) {
+        TPS_REPORT_I2C_ERROR(_address, regAddr, "requestFrom", received);
+        return false;
+    }
+
+    lengthByte = _wire.read();
+    const size_t wanted = (lengthByte < capacity) ? lengthByte : capacity;
+    for (size_t i = 0; i < wanted; ++i) {
+        if (!_wire.available()) {
+            return false;
+        }
+        buffer[i] = _wire.read();
+    }
+    return true;
+}
+
 // Type-safe register writing methods
 bool TPS25751::writeRegister(TPS25751Registers::Address addr, const uint8_t *data, size_t length) const
 {

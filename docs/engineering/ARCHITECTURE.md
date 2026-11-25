@@ -31,6 +31,8 @@ flowchart TB
         drivers["Downstream drivers, external<br/>BQ25798::Device in lib/BQ25798"]
     end
 
+    console["TPS25751BenchConsole on TPS25751BenchProtocol<br/>bench console, optional (ADR-015)"]
+
     main["TPS25751 main class<br/>typed reads and writes, debug settings"]
     task["4CC command-task layer<br/>executeCommand(), issueCommand(), writeCommandData(), burstWrite()"]
     factory["Factory layer<br/>TPS25751Factory, TPS25751RegisterFactoryImpl"]
@@ -48,6 +50,10 @@ flowchart TB
     app --> loader
     app --> updater
     app --> drivers
+    app --> console
+    console --> main
+    console --> task
+    console --> loader
     drivers --> ddev
     updater --> seam
     seam --> main
@@ -75,8 +81,8 @@ it apart because three other components depend on it alone.
 
 #### Application layer
 
-- User sketches and the three bundled examples: `read-registers`, `load-patch-bundle`, and
-  `eeprom-update` (see `examples/README.md`).
+- User sketches and the four bundled examples: `read-registers`, `load-patch-bundle`,
+  `eeprom-update`, and `pd-bench` (see `examples/README.md`).
 - USB-C PD policy and any behavior specific to the product.
 
 #### Main class (`TPS25751`)
@@ -91,7 +97,8 @@ it apart because three other components depend on it alone.
   keyed on the class's `kAddress`.
 - Generic access by address: `readRegisterByAddress()`, `readRegisterAs<T>()`, and the
   `readRegister()` and `writeRegister()` overloads that take an `Address` or a
-  `RegisterInfo`.
+  `RegisterInfo`. `readRegisterRaw()` reads any address and returns the length byte the
+  controller sent instead of comparing it with an expected size.
 - Debug configuration: `setDebugStream()`, `setDebugLevel()`, `setDebugCategories()`.
 - Every method is `const`: the object holds only the bus reference and the address, and
   all device state lives in the controller.
@@ -124,6 +131,17 @@ it apart because three other components depend on it alone.
   `FakeCommandExecutor`.
 - Neither sequencer is a register: neither inherits `TPS25751Register` nor appears in the
   factory.
+
+#### Bench console layer (optional)
+
+- `TPS25751BenchProtocol` is the line protocol without I2C or a clock: the request parser,
+  the `CMD` and `WR` allowlists, the snapshot register list, and the reply formatting.
+  `TPS25751BenchLinePrefixer` is a `Stream` that turns a register's `debugPrint()` into
+  reply lines.
+- `TPS25751BenchConsole` binds the protocol to a `TPS25751&` and a `Stream&`. It runs
+  tasks through `executeCommand()` and reloads a patch bundle through
+  `TPS25751PatchLoader` (ADR-015).
+- `TPS25751.h` does not include it. The host side is the MCP server in `tools/pd-bench`.
 
 #### I2Cc downstream-proxy layer
 
@@ -244,8 +262,9 @@ classDiagram
 
 `FakeCommandExecutor` lives in `test/support/native/` and is not part of the library.
 Classes that inherit nothing: `TPS25751`, `TPS25751Factory`, `TPS25751PatchLoader`,
-`TPS25751EepromUpdater`, the value types `TPS25751Pdo` and `TPS25751Rdo`, and the
-`TPS25751Task.h` structs.
+`TPS25751EepromUpdater`, `TPS25751BenchProtocol`, `TPS25751BenchConsole`, the value types
+`TPS25751Pdo` and `TPS25751Rdo`, and the `TPS25751Task.h` structs.
+`TPS25751BenchLinePrefixer` is a `Stream`.
 
 `TPS25751Register` is a device-agnostic decoder base. Register classes for parts on the
 I2Cc bus extend it exactly as host registers do. Each downstream device keeps its own
@@ -268,6 +287,7 @@ classDiagram
     class TPS25751CommandExecutor
     class TPS25751HostExecutor
     class TPS25751DownstreamDevice
+    class TPS25751BenchConsole
 
     TPS25751 ..> TPS25751Factory : creates registers through
     TPS25751Factory o-- TPS25751RegisterFactoryImpl : holds one
@@ -280,10 +300,12 @@ classDiagram
     TPS25751EepromUpdater --> TPS25751CommandExecutor : composes
     TPS25751CommandExecutor <|-- TPS25751HostExecutor
     TPS25751DownstreamDevice --> TPS25751 : composes, proxied transport
+    TPS25751BenchConsole --> TPS25751 : composes
+    TPS25751BenchConsole ..> TPS25751PatchLoader : reloads a bundle through
 ```
 
-Composition everywhere above the main class: the sequencers and the downstream device each
-hold a reference to the object they drive and never subclass it.
+Composition everywhere above the main class: the sequencers, the downstream device, and
+the bench console each hold a reference to the object they drive and never subclass it.
 
 ## Data Flow
 
@@ -523,12 +545,15 @@ flowchart BT
     Exe["TPS25751CommandExecutor.h, no Wire.h"] --> Task
     Seqs --> Exe
     App["Application code"] --> Main
+    Bench["TPS25751BenchConsole.h, TPS25751BenchProtocol.h<br/>not included by TPS25751.h"] --> Main
+    App -. "only when it wants the console" .-> Bench
 ```
 
 The sequencer headers forward-declare `TPS25751` and are included at the end of
 `TPS25751.h`, so an application needs one `#include` and the headers have no include
 cycle. `TPS25751CommandExecutor.h` does not include `Wire.h`, which is what lets the
-updater build on the host.
+updater build on the host. The bench console is the one header an application includes
+separately, so firmware that does not use it does not compile it in.
 
 ## Memory ownership
 
@@ -554,8 +579,9 @@ dependency:
 
 | Seam | Test double | Location |
 |---|---|---|
-| `TwoWire` | A Wire fake with a scriptable target and the Teensy driver's return codes | `test/support/native/Wire.h`, `FakeTps25751Target.h` |
+| `TwoWire` | A Wire fake with the Teensy driver's return codes and two targets: a scripted one, and a register table with hooks for the bench console | `test/support/native/Wire.h`, `FakeTps25751Target.h`, `FakeBenchTarget.h` |
 | Arduino API | `millis()`, `delay()`, `micros()`, `Serial`, and `Stream` stubs with a controllable clock | `test/support/native/Arduino.h`, `Stream.h` |
+| `Stream` | `FakeStream`, with input a test feeds and output it reads back | `test/support/native/FakeStream.h` |
 | `TPS25751CommandExecutor` | `FakeCommandExecutor`, a modelled EEPROM with fault injection per task | `test/support/native/FakeCommandExecutor.h` |
 | `TPS25751RegisterFactory` | Any subclass passed to `TPS25751Factory::setFactory()` | In the test |
 
@@ -929,3 +955,71 @@ Consequences:
 The task rules and timings are in CONSTRAINTS.md (Flash tasks and EEPROM update), the
 state the EEPROM is left in for every status is in `TPS25751EepromUpdater.h`, and the
 stage results are in `docs/plans/feature/eeprom-update.md`.
+
+### ADR-015: Bench Console, an Optional Layer over the Controller Class
+
+Status: accepted, 2026-11-23.
+
+Context: checking the library against a USB PD analyzer needs a host program that reads
+registers as raw bytes, runs 4CC tasks, and restarts the controller, without new firmware
+for each experiment. Downstream firmware needs the same access without flashing this
+library's example.
+
+Decision:
+
+- Two classes, neither a register. `TPS25751BenchProtocol` holds the line protocol's
+  parser, the task and write allowlists, and the reply formatting, with no I2C and no
+  clock. `TPS25751BenchConsole` binds it to a `TPS25751&` and a `Stream&` and runs from
+  `poll()` in `loop()`.
+- `TPS25751.h` does not include the console, so firmware that leaves it out does not
+  compile it in.
+- Default deny. `CMD` runs only the tasks on the allowlist, and `WR` writes only 0x27,
+  0x28, 0x37, and 0x42, as a whole register. The role swaps need
+  `-D TPS25751_BENCH_ALLOW_SWAPS`. The patch tasks, `GO2P`, the flash tasks, and `I2Cw`
+  are always refused.
+- The console adds no I2C code. Every task goes through `TPS25751::executeCommand()`, and
+  a patch reload through `TPS25751PatchLoader::loadPatchBundle()`.
+- One new core primitive, `TPS25751::readRegisterRaw()`. Every other read fails unless the
+  controller's length byte equals the size the caller expects, and none returns the byte.
+  The snapshot format stores the length byte as read, and `RD` must work for an address
+  the library has no size for. For such an address the console first asks for one byte to
+  learn the length, which the TRM permits (SLVUCR8B section 1.3.1, page 9).
+- A restart is confirmed, not assumed. `Gaid` and `GAID` never complete as tasks (SLVUCR8B
+  page 62), so the console writes a marker to DATA, issues the task, and waits until
+  COMMAND reads clear and one of three observations shows the restart: DATA lost the
+  marker, the controller stopped answering for a while, or COMMAND held the task code and
+  then cleared. A COMMAND write that was not acknowledged, and a `!CMD` that arrives
+  after the issue window, each end the wait at once with their own error.
+- Answering is not being ready. On hardware COMMAND and DATA read 30 ms after a warm
+  restart, while MODE gave nothing for several seconds and the port attached a second
+  time. After a restart the console therefore polls MODE every 50 ms, for up to 10 s,
+  until it reads APP or PTCH, and takes read errors, an empty MODE, and BOOT as "not yet".
+- One read of PTCH does not start a patch load, because a controller with an EEPROM reads
+  PTCH on its way to APP. The console gives the controller 3 s to reach APP; PTCH with
+  INT_EVENT1 Ready for Patch ends that wait early. The loader then makes its own Ready
+  for Patch and MODE checks (ADR-011) and sends nothing without them. `GAID` is refused up
+  front when BOOT_FLAGS says the configuration did not come from an EEPROM and no bundle
+  is set.
+- Reading commands only read. `HELLO`, `RD`, and `DEC` change nothing, so a host can mark
+  them read-only. Only `begin()` and `RESTART` load the patch bundle; `HELLO` reports
+  `mode=PTCH` and `patch_pending=1` instead.
+- Whole reply lines. Every I2C access of a command happens before the reply line that
+  reports it starts. The library can print an I2C error on its debug stream, and when
+  that stream is the console's, the report then lands between reply lines.
+
+Consequences:
+
+- The protocol is versioned: `HELLO` reports `proto=1`, and the host server in
+  `tools/pd-bench` refuses another version. Both come from the same library tag.
+- A command runs to completion inside `poll()`. A restart with a patch reload blocks
+  `loop()` for several seconds, which is acceptable on a bench and should be weighed
+  before the console goes into production firmware.
+- The console suite runs the real `TPS25751` class and the real patch loader against
+  `FakeBenchTarget`, a second target behind the Wire fake (TESTING.md, Bench console
+  tests).
+- The library version is not available to the sources. `HELLO` reports
+  `TPS25751_LIBRARY_VERSION` when the build defines it, as the example's pre-script does
+  from `library.json`, and `unknown` otherwise.
+
+The protocol, the allowlists, and the restart sequence are in `TPS25751BenchProtocol.h`,
+`TPS25751BenchConsole.h`, and `tools/pd-bench/README.md`.

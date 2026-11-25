@@ -440,6 +440,36 @@ public:
     bool readRegister(TPS25751Registers::RegisterInfo regInfo, uint8_t *buffer) const;
     bool readRegister(TPS25751Registers::Address addr, uint8_t *buffer, size_t length) const;
 
+    /**
+     * @brief Read a register and report the length byte the controller sent
+     *
+     * Every other read overload requires the controller's length byte to equal
+     * the size the caller expects and fails when it does not. This one returns
+     * the length byte instead, so a caller can record a register exactly as the
+     * controller presented it, or read a register the library has no size for.
+     * The bench console uses it for the `tps25751-registers` snapshot format,
+     * which stores the length byte as read (test/fixtures/pd-captures/README.md).
+     *
+     * The transaction is the library's usual one: the register address, a
+     * repeated start, then @p capacity + 1 bytes, of which the first is the
+     * length byte. When the length byte is larger than @p capacity, the buffer
+     * holds the first @p capacity bytes and the caller can read again with a
+     * larger buffer. The TRM allows the short read: "during a register read, the
+     * controller can issue the stop bit before reading all N bytes" (SLVUCR8B
+     * section 1.3.1, p.9).
+     *
+     * @param regAddr    Register address, 0x00 to 0xFF; it need not be in
+     *                   TPS25751Registers::Address
+     * @param buffer     Receives min(lengthByte, capacity) data bytes
+     * @param capacity   Data bytes to request after the length byte, 1 to 64
+     * @param lengthByte Receives the length byte the controller returned
+     * @return true if the controller answered; false on a NAK, a short read, a
+     *         null buffer, or a capacity outside 1 to 64
+     *
+     * @see SLVUCR8B section 1.3.1, Unique Address Interface Protocol, Figure 1-3 (p.9)
+     */
+    bool readRegisterRaw(uint8_t regAddr, uint8_t *buffer, size_t capacity, uint8_t &lengthByte) const;
+
     // Type-safe register writing methods (mirror the read overloads above)
     bool writeRegister(TPS25751Registers::Address addr, const uint8_t *data, size_t length) const;
     bool writeRegister(TPS25751Registers::RegisterInfo regInfo, const uint8_t *data) const;

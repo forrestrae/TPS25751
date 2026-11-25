@@ -24,14 +24,17 @@ no `Wire`, no Arduino framework. The `[env:native]` environment in
   `TPS25751EepromUpdater.cpp`, which reaches the controller only through the
   `TPS25751CommandExecutor` interface, and by `TPS25751.cpp` and
   `TPS25751PatchLoader.cpp`, which reach the bus through the TwoWire fake (see
-  "I2C Tests: the Wire Fake" below). `TPS25751HostExecutor.cpp` and
+  "I2C Tests: the Wire Fake" below), and by the bench console
+  (`TPS25751BenchProtocol.cpp` and `TPS25751BenchConsole.cpp`). `TPS25751HostExecutor.cpp` and
   `TPS25751DownstreamDevice.cpp` are not compiled, because no suite tests them; a
   new register class must be added to the filter;
 - satisfies the Arduino API symbols those sources reference (`Stream`,
   `Serial`, `F()`, `millis()`, `strncpy_P`) with the **header-only stubs** in
   `test/support/native/` (`Arduino.h`, `Stream.h`). The stubs print to stdout;
   they are just enough surface to compile the decode/encode logic, not an
-  Arduino emulation. Extend them (minimally) if a new source file needs more;
+  Arduino emulation. Every `print()` of the `Stream` stub ends in its virtual
+  `write()`, so `FakeStream.h` can capture what a class prints and feed it input.
+  Extend the stubs (minimally) if a new source file needs more;
 - only runs suites under `test/test_native/` (`test_filter = test_native/*`);
 - compiles as `-std=gnu++17`, the standard the Teensy build uses, so language
   features behave the same on the host and on the target. Without the flag the
@@ -175,7 +178,9 @@ setters. It also injects a factory that returns null through `TPS25751Factory::s
 to reach the decoder check of `readRegisterByAddress()` (its `tearDown()` restores the
 default factory), and uses `Wire.rxMissing` for a read whose buffer is empty or one byte
 short of the count `requestFrom()` reported. `test_TPS25751Core` covers the register read and write with the
-length byte and their failures, `writeCommandData()` (the exact-length DATA write and the
+length byte and their failures, `readRegisterRaw()` (a length byte equal to, above, and
+below the capacity, an address without a register, the refused arguments, and its I2C
+failures), `writeCommandData()` (the exact-length DATA write and the
 lengths it refuses), `executeCommand()` and `issueCommand()` (the handshake,
 DATA read at the instant COMMAND clears or not at all, rejected, the timeout at its exact
 bound, a COMMAND poll across a `millis()` wrap, and an I2C failure at each transaction),
@@ -197,6 +202,36 @@ acknowledged and after "!CMD" on `PBMc`, with its own failures and the failures 
 not issue it. The fake models a dropped write as a fault with `writeError` 0, matches
 faults by a minimum write length, holds INT_EVENT1 with bit 81 set, and runs a
 `beforeRead` hook so a test can change a register over time.
+
+### Bench console tests
+
+`test_TPS25751BenchProtocol` covers `TPS25751BenchProtocol` and the line prefixer with no
+bus at all: the parser, both allowlists, the per-task timeouts, the snapshot list, and the
+reply formatting.
+
+`test_TPS25751BenchConsole` runs every console command through the real `TPS25751` class
+and the real patch loader. The serial side is `FakeStream.h`. The controller is
+`test/support/native/FakeBenchTarget.h`, a second target behind the same Wire fake. The
+scripted target above completes a task after a set number of polls and injects faults per
+transaction, which suits suites that pin the library's own transactions. The console's
+cases are sequences over time, such as a restart that holds COMMAND, takes the controller
+off the bus, and brings it back in another mode, so its target is a register table with
+hooks:
+
+- registers a test fills directly, with an optional length byte that differs from the
+  register's size;
+- a task handler that runs at the COMMAND write, sees DATA, and returns complete, reject,
+  or pending;
+- INT_CLEAR1 clearing the matching bits of INT_EVENT1, and the burst port at 0x30;
+- a controller that stops answering, one register whose reads or writes fail, a write that
+  is acknowledged and dropped, hooks before a read and after a write, and changes
+  scheduled for a time on the stub clock;
+- lists of the writes, reads, tasks, and burst bytes the console caused.
+
+The task completing at the COMMAND write, the zero padding of a long read, and the times
+of scheduled changes are choices of this target. The replies the suite expects carry the
+stub clock's time, so a change to a poll interval in the console or the loader shows up as
+a changed `t_ms`.
 
 ### Sequencer Tests: the EEPROM Updater
 
@@ -366,6 +401,20 @@ output is reproducible and compiles as C++17, and that the script applies the ch
 writes no header for a rejected file. The other files test the git workflow tooling. The
 verify gate runs this suite.
 
+### Bench server tests
+
+The MCP server in `tools/pd-bench` has its own pytest suite. It talks to a simulated
+console behind a fake serial port. `tests/conftest.py` makes a real port unreachable for
+every test: it names a port that does not exist, which also switches discovery off, and
+makes opening any pyserial port raise. Run the suite from its directory:
+
+```bash
+cd tools/pd-bench && uv run --locked pytest
+```
+
+The verify gate runs this suite and fails if `uv` is missing or the run leaves untracked
+files in `tools/pd-bench`.
+
 ### USB PD Capture Bundles
 
 `test/fixtures/pd-captures/` holds USB PD captures from a ChargerLAB KM003C, each
@@ -413,13 +462,14 @@ with `xcrun llvm-cov gcov`.
 
 Only sources compiled by `[env:native]` appear in the report, so
 `TPS25751HostExecutor.cpp` and `TPS25751DownstreamDevice.cpp` are not measured.
-`TPS25751EepromUpdater.cpp` is, through the executor interface, and `TPS25751.cpp`
-and `TPS25751PatchLoader.cpp` are, through the Wire fake. Neither the verify gate nor CI runs the coverage step; the >90%
+`TPS25751EepromUpdater.cpp` is, through the executor interface, and `TPS25751.cpp`,
+`TPS25751PatchLoader.cpp`, and the bench console are, through the Wire fake. Neither the verify gate nor CI runs the coverage step; the >90%
 target is checked by running the script at review.
 
-The latest measurement, on 2026-11-24 with 1444 tests, is 99% of lines overall (5841 of
-5900): `TPS25751.cpp` and `TPS25751EepromUpdater.cpp` at 100%, `TPS25751PatchLoader.cpp`
-at 99%, and every other file at 93% or more. Most lines still missed cannot be reached by
+The latest measurement, on 2026-11-24 with 1600 tests, is 99% of lines overall (6715 of
+6777): `TPS25751.cpp`, `TPS25751EepromUpdater.cpp`, and `TPS25751BenchProtocol.cpp` at
+100%, `TPS25751PatchLoader.cpp` and `TPS25751BenchConsole.cpp` at 99%, and every other
+file at 93% or more. Most lines still missed cannot be reached by
 any input: `default:` returns in `toString()` switches over enums that `extractEnum()`
 clamps, and `> max` checks on fields too narrow to exceed the maximum. Do not add a test
 that calls a function only to count its lines.

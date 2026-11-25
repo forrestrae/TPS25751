@@ -34,4 +34,9 @@ test/coverage.sh
 - The headers in `support/native/fixtures/` are generated from `fixtures/pd-captures/` by
   `support/pd_capture_fixture.py`. Do not edit them; rerun the generator.
 - Extend the Arduino stubs in `support/native/` only as far as a new source file needs.
+- Two TPS25751 targets sit behind the Wire fake. `FakeTps25751Target.h` scripts tasks by
+  poll count and injects faults per transaction, for the suites that pin the library's own
+  transactions. `FakeBenchTarget.h` is a register table with task, fault, and schedule
+  hooks, for the bench console suite. Extend the one a suite already uses; do not add a
+  third.
 - Do not add a test that calls a function only to raise the coverage number.

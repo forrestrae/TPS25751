@@ -164,6 +164,8 @@ enum class PatchLoadStatus : uint8_t {
                         ///< (polling mode; a controller in APP ends here); or COMMAND did not clear and did not read "!CMD" within
                         ///< PBMS_CMD_TIMEOUT_MS after PBMs or PBMC_CMD_TIMEOUT_MS after PBMc.
                         ///< After a PBMc timeout the patch may have loaded.
+                        ///< TPS25751PatchLoader::wroteToController() separates step 1
+                        ///< from the two task timeouts.
     I2cError,           ///< An I2C transaction failed in the PBMs or PBMc handshake; or no
                         ///< read-back of the PBMs configuration in DATA succeeded in
                         ///< PBMS_DATA_ATTEMPTS attempts; or, after PBMc, no DATA read
@@ -259,6 +261,21 @@ public:
     PatchLoadStatus loadPatchBundle(const uint8_t* image, size_t length);
 
     /**
+     * @brief Whether the last loadPatchBundle() wrote anything to the controller
+     *
+     * Steps 1 and 2 only read. The first write is step 3 in IRQ mode
+     * (INT_MASK1 and INT_CLEAR1) and step 4 in polling mode (DATA). The status
+     * alone does not tell the two apart: CommandTimeout is the step 1 result
+     * and also the result of a PBMs or PBMc whose COMMAND did not clear.
+     *
+     * @return false when the last load ended at step 1 (CommandTimeout) or
+     *         step 2 (NotInPatchMode), and before the first load; true when
+     *         the load went on to step 3, whether or not a write was
+     *         acknowledged.
+     */
+    bool wroteToController() const { return _wroteToController; }
+
+    /**
      * @brief Print the last loadPatchBundle() result to a stream
      * @param s Output stream (defaults to Serial)
      */
@@ -275,6 +292,7 @@ private:
     TPS25751& _pd;
     int        _irqPin;
     PatchLoadStatus _lastStatus{PatchLoadStatus::I2cError};
+    bool _wroteToController{false};  ///< The last load went past step 2
 
     // --- Step helpers ---
 

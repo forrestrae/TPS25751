@@ -1,8 +1,8 @@
 /**
  * @file test_TPS25751Core.cpp
  * @brief Native tests of the I2C paths of TPS25751 (src/TPS25751.cpp): the
- *        register read and write with the length byte, the 4CC task calls, and
- *        the raw PBM burst. Driven through the TwoWire fake (Wire.h) and the
+ *        register read and write with the length byte, readRegisterRaw(), the
+ *        4CC task calls, and the raw PBM burst. Driven through the TwoWire fake (Wire.h) and the
  *        scripted target (FakeTps25751Target.h).
  *
  * Run with: pio test -e native -f "test_native/test_TPS25751Core"
@@ -162,6 +162,122 @@ void test_write_register_failures()
         Rig r;
         TEST_ASSERT_FALSE(r.pd.writeRegister(TPS25751Registers::Address::COMMAND, data, 3));
         TEST_ASSERT_EQUAL_size_t(0, r.dev.log.size());
+    }
+}
+
+// --- readRegisterRaw() ----------------------------------------------------------------
+
+void test_read_raw_returns_the_length_byte_and_the_data()
+{
+    Rig r;
+    r.dev.setReg(0x34, bytes({0xD6, 0x41, 0x06, 0x00, 0x98, 0x00}));
+    uint8_t buf[6] = {};
+    uint8_t length = 0;
+    TEST_ASSERT_TRUE(r.pd.readRegisterRaw(0x34, buf, sizeof(buf), length));
+    TEST_ASSERT_EQUAL_UINT8(6, length);
+    const uint8_t expected[] = {0xD6, 0x41, 0x06, 0x00, 0x98, 0x00};
+    TEST_ASSERT_EQUAL_HEX8_ARRAY(expected, buf, sizeof(buf));
+    // The usual transaction: the pointer write, then capacity + 1 bytes.
+    TEST_ASSERT_EQUAL_size_t(2, r.dev.log.size());
+    assertRegisterRead(r.dev.log, 0, 0x34, 6, "raw read");
+}
+
+void test_read_raw_reports_a_length_byte_that_is_not_the_capacity()
+{
+    {
+        // The register is longer than the buffer: the length byte says so, and
+        // only capacity bytes are copied. 0x73 has no RegisterInfo.
+        Rig r;
+        r.dev.setReg(0x73, bytes({0x11, 0x22, 0x33, 0x44, 0x55, 0x66}));
+        uint8_t buf[4] = {0xEE, 0xEE, 0xEE, 0xEE};
+        uint8_t length = 0;
+        TEST_ASSERT_TRUE(r.pd.readRegisterRaw(0x73, buf, 2, length));
+        TEST_ASSERT_EQUAL_UINT8(6, length);
+        TEST_ASSERT_EQUAL_HEX8(0x11, buf[0]);
+        TEST_ASSERT_EQUAL_HEX8(0x22, buf[1]);
+        TEST_ASSERT_EQUAL_HEX8(0xEE, buf[2]);
+        assertRead(r.dev.log[1], 0x73, 3, "short raw read");
+    }
+    {
+        // The register is shorter: bytes past the length byte's count are not
+        // copied (the fake pads them with 0xFF).
+        Rig r;
+        r.dev.setReg(0x73, bytes({0x11, 0x22}));
+        uint8_t buf[8];
+        memset(buf, 0xEE, sizeof(buf));
+        uint8_t length = 0xFF;
+        TEST_ASSERT_TRUE(r.pd.readRegisterRaw(0x73, buf, sizeof(buf), length));
+        TEST_ASSERT_EQUAL_UINT8(2, length);
+        TEST_ASSERT_EQUAL_HEX8(0x22, buf[1]);
+        TEST_ASSERT_EQUAL_HEX8(0xEE, buf[2]);
+    }
+    {
+        // An address the controller has no register for reads length 0.
+        Rig r;
+        uint8_t buf[1] = {0xEE};
+        uint8_t length = 0xFF;
+        TEST_ASSERT_TRUE(r.pd.readRegisterRaw(0xEE, buf, sizeof(buf), length));
+        TEST_ASSERT_EQUAL_UINT8(0, length);
+        TEST_ASSERT_EQUAL_HEX8(0xEE, buf[0]);
+    }
+}
+
+void test_read_raw_refuses_bad_arguments_without_a_transaction()
+{
+    Rig r;
+    uint8_t buf[65];
+    uint8_t length = 0;
+    TEST_ASSERT_FALSE(r.pd.readRegisterRaw(0x34, nullptr, 6, length));
+    TEST_ASSERT_FALSE(r.pd.readRegisterRaw(0x34, buf, 0, length));
+    TEST_ASSERT_FALSE(r.pd.readRegisterRaw(0x34, buf, 65, length));  // DATA, the longest register, is 64
+    TEST_ASSERT_EQUAL_size_t(0, r.dev.log.size());
+
+    TEST_ASSERT_TRUE(r.pd.readRegisterRaw(0x09, buf, 64, length));
+    TEST_ASSERT_EQUAL_UINT8(64, length);
+}
+
+void test_read_raw_failures()
+{
+    uint8_t buf[6] = {};
+    uint8_t length = 0;
+    {
+        // The pointer write is not acknowledged: no read follows.
+        Rig r;
+        Fault f;
+        f.kind = 0;
+        f.writeError = 2;
+        r.dev.faults.push_back(f);
+        TEST_ASSERT_FALSE(r.pd.readRegisterRaw(0x34, buf, sizeof(buf), length));
+        TEST_ASSERT_EQUAL_size_t(1, r.dev.log.size());
+    }
+    {
+        // A short read: fewer bytes than capacity + 1.
+        Rig r;
+        Fault f;
+        f.kind = 1;
+        f.readBytes = 3;
+        r.dev.faults.push_back(f);
+        TEST_ASSERT_FALSE(r.pd.readRegisterRaw(0x34, buf, sizeof(buf), length));
+    }
+    {
+        // Another address on the bus does not answer for the controller.
+        Rig r;
+        TPS25751 other(Wire, 0x21);
+        TEST_ASSERT_FALSE(other.readRegisterRaw(0x34, buf, sizeof(buf), length));
+    }
+    {
+        // requestFrom() reports the count and the receive buffer is empty.
+        Rig r;
+        Wire.rxMissing = 7;
+        TEST_ASSERT_FALSE(r.pd.readRegisterRaw(0x34, buf, sizeof(buf), length));
+    }
+    {
+        // The receive buffer runs out one byte before the length byte's count.
+        Rig r;
+        r.dev.setReg(0x34, bytes({1, 2, 3, 4, 5, 6}));
+        Wire.rxMissing = 1;
+        TEST_ASSERT_FALSE(r.pd.readRegisterRaw(0x34, buf, sizeof(buf), length));
+        TEST_ASSERT_EQUAL_UINT8(6, length);
     }
 }
 
@@ -433,6 +549,10 @@ int main(int, char **)
     RUN_TEST(test_read_register_failures);
     RUN_TEST(test_write_register_sends_the_length_byte);
     RUN_TEST(test_write_register_failures);
+    RUN_TEST(test_read_raw_returns_the_length_byte_and_the_data);
+    RUN_TEST(test_read_raw_reports_a_length_byte_that_is_not_the_capacity);
+    RUN_TEST(test_read_raw_refuses_bad_arguments_without_a_transaction);
+    RUN_TEST(test_read_raw_failures);
     RUN_TEST(test_execute_command_reads_data_right_after_the_clear);
     RUN_TEST(test_execute_command_without_input_or_output);
     RUN_TEST(test_execute_command_rejected_and_timeout);

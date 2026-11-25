@@ -12,7 +12,9 @@ tag ships:
 The copy replaces ``<project>/.agents/skills/tps25751-pd-verify`` as a whole, so files
 removed from the skill disappear from the copy too. It records where it came from in
 ``.synced-from.json`` inside the copy. An existing directory without that file, and a
-symlink, are left alone unless ``--force`` is given: either was put there by hand.
+symlink, are left alone unless ``--force`` is given: either was put there by hand. A
+``.agents`` or ``.agents/skills`` that links into the library is refused even with
+``--force``. The old copy is moved aside and removed only after the new one is in place.
 
 Standard library only. Exit status: 0 written (or would be, with ``--dry-run``), 2 refused.
 """
@@ -76,17 +78,21 @@ def target_for(project: Path) -> Path:
 def check_target(project: Path, target: Path, source: Path, force: bool) -> None:
     if not project.is_dir():
         raise SyncError(f"{project} is not a directory; --dest names the downstream project's root")
-    if project.resolve() == source.resolve().parents[3]:
+    library = source.resolve().parents[3]
+    if project.resolve() == library:
         raise SyncError(f"{project} is the library itself, whose .agents/skills entry is a symlink to the "
                         "plugin; nothing to copy")
+    # A linked .agents or .agents/skills that leads into the library would make the copy
+    # write into, and replace, the library's own files. --force does not override this.
+    for linked in (project / ".agents", project / ".agents" / "skills"):
+        if linked.exists() and linked.resolve().is_relative_to(library):
+            raise SyncError(f"{linked} resolves into the library ({linked.resolve()}); replace the link "
+                            "with a directory first")
     if target.is_symlink():
         # Replacing the link removes only the link, never what it points at.
         if not force:
             raise SyncError(f"{target} is a symlink (to {os.readlink(target)}); remove it or pass --force "
                             "to replace it with a copy")
-    elif target.exists() and target.resolve() == source.resolve():
-        raise SyncError(f"{target} is the library's skill directory itself, reached through a linked "
-                        "parent directory; replacing it would delete the source")
     elif target.exists():
         if not target.is_dir():
             raise SyncError(f"{target} exists and is not a directory")
@@ -111,23 +117,38 @@ def sync(project: Path, source: Path = SOURCE, force: bool = False, dry_run: boo
         return result
     target.parent.mkdir(parents=True, exist_ok=True)
     staging = target.with_name(f".{SKILL_NAME}.sync-{os.getpid()}")
-    if staging.exists():
-        shutil.rmtree(staging)
+    previous = target.with_name(f".{SKILL_NAME}.old-{os.getpid()}")
+    for leftover in (staging, previous):
+        _remove(leftover)
     staging.mkdir()
     try:
         for f in files:
             (staging / f).parent.mkdir(parents=True, exist_ok=True)
             shutil.copyfile(source / f, staging / f)
         (staging / MARKER).write_text(json.dumps(record, indent=2) + "\n", encoding="utf-8")
-        if target.is_symlink() or target.is_file():
-            target.unlink()
-        elif target.exists():
-            shutil.rmtree(target)
-        staging.rename(target)
+        # The old copy (or link) moves aside first and is removed only once the new copy
+        # is in place, so a failure at any point leaves one of the two at the target.
+        had_previous = target.exists() or target.is_symlink()
+        if had_previous:
+            target.rename(previous)
+        try:
+            staging.rename(target)
+        except OSError:
+            if had_previous:
+                previous.rename(target)
+            raise
+        _remove(previous)
     finally:
-        if staging.exists():
-            shutil.rmtree(staging)
+        _remove(staging)
     return result
+
+
+def _remove(path: Path) -> None:
+    """Remove a file, a link (never what it points at), or a directory tree, if present."""
+    if path.is_symlink() or path.is_file():
+        path.unlink()
+    elif path.exists():
+        shutil.rmtree(path)
 
 
 def main(argv: list[str] | None = None, source: Path = SOURCE) -> int:

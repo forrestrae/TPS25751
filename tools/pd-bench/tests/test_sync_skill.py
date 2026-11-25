@@ -89,16 +89,40 @@ def test_a_symlink_is_left_alone_without_force(library, project):
     assert (library / "SKILL.md").is_file()  # replacing the link did not touch what it pointed at
 
 
-def test_the_library_itself_is_refused(library, project):
+def test_the_library_itself_is_refused(library):
     with pytest.raises(sync_skill.SyncError, match="the library itself"):
         sync_skill.sync(library.parents[3], library, origin=ORIGIN)
-    # A project whose .agents/skills directory links into the library would have the
-    # copy replace the source.
-    (project / ".agents").mkdir()
-    (project / ".agents" / "skills").symlink_to(library.parent)
-    with pytest.raises(sync_skill.SyncError, match="would delete the source"):
+
+
+@pytest.mark.parametrize("linked", [".agents", ".agents/skills"])
+def test_a_link_into_the_library_is_refused_even_with_force(library, project, linked):
+    # A project whose .agents or .agents/skills links into the library would have the copy
+    # replace the library's own files.
+    link = project / linked
+    link.parent.mkdir(parents=True, exist_ok=True)
+    link.symlink_to(library.parents[3] / linked if linked == ".agents" else library.parent)
+    (library.parents[3] / ".agents").mkdir(exist_ok=True)
+    with pytest.raises(sync_skill.SyncError, match="resolves into the library"):
         sync_skill.sync(project, library, force=True, origin=ORIGIN)
     assert (library / "SKILL.md").is_file()
+
+
+def test_a_failed_rename_keeps_the_old_copy(library, project, monkeypatch):
+    sync_skill.sync(project, library, origin=ORIGIN)
+    (library / "SKILL.md").write_text("new\n")
+    real_rename = Path.rename
+
+    def failing_rename(self, target):
+        if self.name.startswith(f".{sync_skill.SKILL_NAME}.sync-"):
+            raise OSError("simulated failure")
+        return real_rename(self, target)
+
+    monkeypatch.setattr(Path, "rename", failing_rename)
+    with pytest.raises(OSError, match="simulated"):
+        sync_skill.sync(project, library, origin=ORIGIN)
+    monkeypatch.undo()
+    assert (target(project) / "SKILL.md").read_text().startswith("---")  # the old copy
+    assert sorted(p.name for p in target(project).parent.iterdir()) == [sync_skill.SKILL_NAME]
 
 
 def test_a_missing_project_or_skill_is_refused(library, tmp_path):

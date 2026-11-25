@@ -173,7 +173,9 @@ python3 tools/pd-bench/sync_skill.py --dest <project>
 `<project>` is the downstream project's root. The script replaces
 `<project>/.agents/skills/tps25751-pd-verify` as a whole and records the library version
 and commit in `.synced-from.json` inside it. It refuses a directory it did not write, and
-a symlink, unless `--force` is given, and `--dry-run` lists the files without writing.
+a symlink, unless `--force` is given, and refuses a `.agents` or `.agents/skills` that
+links into the library even then. The old copy is removed only after the new one is in
+place. `--dry-run` lists the files without writing.
 Claude Code projects get the skill from the plugin instead (Phase 8 of the toolset plan).
 
 ## How the server finds and shares the port

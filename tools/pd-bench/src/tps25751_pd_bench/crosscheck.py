@@ -42,7 +42,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 
 CAPTURE_FORMAT = ("km003c-capture", 1)
@@ -131,7 +131,7 @@ class Capture:
     messages: list[Message]
     conn: int
     vbus: list[int]
-    connects: list[int] = field(default_factory=list)  # meter times of connect records
+    connect_lines: list[int] = field(default_factory=list)  # file lines of the connect records
 
 
 # --- reading ------------------------------------------------------------------------
@@ -159,7 +159,7 @@ def load_capture(path: str | Path) -> Capture:
     messages: list[Message] = []
     last: dict[tuple[str, int], bytes] = {}
     conn = 0
-    connects: list[int] = []
+    connect_lines: list[int] = []
     vbus: list[int] = []
     for number, record in _json_lines(path):
         kind = record.get("type")
@@ -171,8 +171,8 @@ def load_capture(path: str | Path) -> Capture:
             footer = record
         elif kind == "conn":
             conn += 1
-            if record.get("event") == "connect" and isinstance(record.get("t_meter_ms"), int):
-                connects.append(record["t_meter_ms"])
+            if record.get("event") == "connect":
+                connect_lines.append(number)
         elif kind == "status" and isinstance(record.get("vbus_mv"), int):
             vbus.append(record["vbus_mv"])
         elif kind == "pd":
@@ -203,7 +203,7 @@ def load_capture(path: str | Path) -> Capture:
             messages.append(msg)
     if header is None:
         raise CrosscheckError(f"{path}: no header record")
-    return Capture(path, header, footer, messages, conn, vbus, connects)
+    return Capture(path, header, footer, messages, conn, vbus, connect_lines)
 
 
 def load_registers(path: str | Path) -> dict[int, bytes]:
@@ -607,20 +607,47 @@ def sanity(capture: Capture, contract: Contract | None, caps: Message | None, un
     return notes, False
 
 
-def accepted_power_swaps(messages: list[Message]) -> list[tuple[Message, Message]]:
-    """Each PR_Swap on SOP that the other port accepted, with that Accept."""
+@dataclass
+class PowerSwap:
+    request: Message      # the PR_Swap
+    accept: Message       # the other port's Accept
+    completion: Message   # the new Source's PS_RDY; the roles have changed from here on
+
+
+def completed_power_swaps(messages: list[Message]) -> list[PowerSwap]:
+    """Each PR_Swap on SOP that the other port accepted and the new Source completed.
+
+    The reply is the next non-GoodCRC message on SOP after the PR_Swap, and it counts
+    only as an Accept sent with the opposite power role. The swap counts once the new
+    Source sends PS_RDY: a PS_RDY with the Source power role from the port that was Sink.
+    The old Source's own PS_RDY already carries the Sink power role (on 2026-11-25, 0x0AA6
+    then 0x0786 from the new Source). A Soft_Reset, another PR_Swap, Source_Capabilities,
+    or a Request before that PS_RDY ends the attempt uncounted, as does the end of the
+    capture; a Hard Reset leaves no PS_RDY and is not counted either.
+    """
+    seq = [m for m in messages if m.sop == "SOP" and not m.goodcrc and not m.retry]
+
+    def power_source(m: Message) -> bool:
+        return bool(m.header & (1 << 8))
+
+    def dfp(m: Message) -> bool:
+        return bool(m.header & (1 << 5))
+
     swaps = []
-    pending: Message | None = None
-    for m in messages:
-        if m.sop != "SOP" or m.goodcrc or m.retry:
+    for k, m in enumerate(seq):
+        if not m.is_control(CTRL_PR_SWAP) or k + 1 >= len(seq):
             continue
-        if m.is_control(CTRL_PR_SWAP):
-            pending = m
-        elif pending is not None and (m.is_control(CTRL_ACCEPT) or m.is_control(CTRL_REJECT)
-                                      or m.is_control(CTRL_WAIT)):
-            if m.is_control(CTRL_ACCEPT):
-                swaps.append((pending, m))
-            pending = None
+        reply = seq[k + 1]
+        if not reply.is_control(CTRL_ACCEPT) or power_source(reply) == power_source(m):
+            continue
+        old_source_dfp = dfp(m) if power_source(m) else dfp(reply)
+        for n in seq[k + 2:]:
+            if n.is_control(CTRL_PS_RDY) and power_source(n) and dfp(n) != old_source_dfp:
+                swaps.append(PowerSwap(m, reply, n))
+                break
+            if (n.is_control(CTRL_SOFT_RESET) or n.is_control(CTRL_PR_SWAP) or is_source_capabilities(n)
+                    or n.is_data(DATA_REQUEST) or n.is_data(DATA_EPR_REQUEST)):
+                break
     return swaps
 
 
@@ -633,10 +660,9 @@ def identity_after_attach(capture: Capture, role_at) -> tuple[Message | None, Me
     when it has none. An ACK between that contract and a later one counts; an iPhone sends
     its ACK between its two contracts. Returns that PS_RDY and the ACK, either None.
     """
-    attach = max(capture.connects) if capture.connects else None
+    attach = capture.connect_lines[-1] if capture.connect_lines else 0
     messages = [m for m in capture.messages
-                if m.sop == "SOP" and not m.goodcrc and not m.retry
-                and (attach is None or (m.t is not None and m.t >= attach))]
+                if m.sop == "SOP" and not m.goodcrc and not m.retry and m.line > attach]
     first_ps_rdy = None
     state = None  # None, "requested", "accepted"
     for m in messages:
@@ -677,22 +703,34 @@ def crosscheck(capture_path: str | Path, registers_path: str | Path, role: str |
     sends no Source_Capabilities, the requested PDO comes from the snapshot and the
     verdict can still be pass.
     """
-    capture = load_capture(capture_path)
+    whole = load_capture(capture_path)
     regs = load_registers(registers_path)
     board, role_from, role_notes = board_role(regs, role)
-    stimulus = stimulus or capture_stimulus(capture)
+    stimulus = stimulus or capture_stimulus(whole)
     caps_expected = stimulus not in NO_CAPABILITIES_STIMULI
+
+    # The snapshot describes the latest attach, and STATUS gives the board's role only
+    # for it, so only the messages after the last connect record are compared.
+    attach = whole.connect_lines[-1] if whole.connect_lines else 0
+    capture = replace(whole, messages=[m for m in whole.messages if m.line > attach])
+    earlier = sum(1 for m in whole.messages if m.line < attach and not m.goodcrc)
+
     contract, caps, unfinished = select_contract(capture.messages)
     notes, blocked = sanity(capture, contract, caps, unfinished, caps_expected)
     notes = role_notes + notes
+    if earlier:
+        notes.insert(len(role_notes), f"{earlier} PD messages before the last connect record (line {attach}) belong "
+                                      "to an earlier attach and are not compared: the snapshot describes the "
+                                      "latest one")
 
-    # The board's power role at each point: STATUS gives it at the snapshot, and each
-    # accepted PR_Swap before then flips it.
-    swaps = accepted_power_swaps(capture.messages)
+    # The board's power role at each point of the latest attach: STATUS gives it at the
+    # snapshot, and each completed PR_Swap flips it for what came before.
+    swaps = completed_power_swaps(capture.messages)
     other_role = "sink" if board == "source" else "source"
 
     def role_at(line: int) -> str:
-        return board if sum(1 for _, accept in swaps if accept.line > line) % 2 == 0 else other_role
+        flips = sum(1 for swap in swaps if swap.completion.line > line)
+        return board if flips % 2 == 0 else other_role
 
     rows: list[dict] = []
     if not blocked:
@@ -706,11 +744,13 @@ def crosscheck(capture_path: str | Path, registers_path: str | Path, role: str |
                            if m.sop == "SOP" and not m.retry and m.line < caps.line
                            and m.is_data(DATA_SOURCE_CAPABILITIES) and is_source_capabilities(m)
                            and (role_at(m.line) == "source") != caps_from_board]
-                for pr_swap, accept in swaps:
+                for swap in swaps:
+                    pr_swap = swap.request
                     initiator = "the board" if (pr_swap.header >> 8 & 1) == (role_at(pr_swap.line) == "source") \
                         else "the partner"
-                    notes.append(f"PR_Swap at {pr_swap.where()} from {initiator}, accepted at {accept.where()}: "
-                                 f"the board was {role_at(pr_swap.line)} before it and {role_at(accept.line)} after it")
+                    notes.append(f"PR_Swap at {pr_swap.where()} from {initiator}, accepted at {swap.accept.where()} "
+                                 f"and completed by the new Source's PS_RDY at {swap.completion.where()}: the board "
+                                 f"was {role_at(pr_swap.line)} before it and {role_at(swap.completion.line)} after it")
                 if earlier:
                     first = earlier[-1]
                     whose = "the board's own" if not caps_from_board else "the partner's"

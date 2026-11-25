@@ -597,3 +597,74 @@ def test_the_identity_wait_accepts_the_iphone_ack_of_the_source_bundle():
     first_ps_rdy, ack = crosscheck.identity_after_attach(loaded, lambda line: "source")
     assert (first_ps_rdy.t, ack.t) == (65455685, 65455721)  # first contract's PS_RDY, the iPhone's ACK
     assert ack.objects[1] == 0xD50005AC
+
+
+# ----- PR_Swap pairing, completion, and the attach boundary -----
+
+def test_a_pr_swap_answered_by_not_supported_is_no_swap(tmp_path):
+    # The board's PR_Swap answered by the iPhone's Not_Supported, after the first contract
+    # of the source-role bundle. The board's later Accept of the iPhone's Request must not
+    # complete it.
+    lines = (SOURCE_BUNDLE / "capture.jsonl").read_text().splitlines()
+    ps_rdy = next(k for k, line in enumerate(lines) if '"wire":"a605"' in line)
+    template = json.loads(lines[ps_rdy])
+    inserted = []
+    # The board's PR_Swap (Source/DFP), the iPhone's GoodCRC, its Not_Supported (Sink/UFP),
+    # and the board's GoodCRC.
+    for wire_hex in ("aa09", "6101", "9006", "4102"):
+        inserted.append(json.dumps(dict(template, wire=wire_hex)))
+    path = tmp_path / "capture.jsonl"
+    path.write_text("\n".join(lines[:ps_rdy + 2] + inserted + lines[ps_rdy + 2:]) + "\n")
+    result = crosscheck.crosscheck(path, SOURCE_BUNDLE / "registers.json")
+    assert not any(n.startswith("PR_Swap") for n in result["sanity"])
+    assert not [r for r in result["rows"] if r["result"] == MISMATCH]
+    assert result["verdict"] == "pass"
+
+
+def test_a_pr_swap_without_the_new_sources_ps_rdy_is_no_swap(tmp_path):
+    # As the iPhone session, but the new Source never sends its PS_RDY (0x0786): only the
+    # old Source's PS_RDY with the Sink power role, then capabilities.
+    session = [m for m in IPHONE_SESSION if m != "8607"]
+    swaps_completed = []
+    for messages in (IPHONE_SESSION, session):
+        capture = CaptureFile().conn()
+        for message in messages:
+            capture.wire_hex(message)
+        capture.write(tmp_path / "c.jsonl")
+        swaps_completed.append(len(crosscheck.completed_power_swaps(
+            crosscheck.load_capture(tmp_path / "c.jsonl").messages)))
+    assert swaps_completed == [1, 0]
+    result = run(tmp_path, capture.status(5141).footer(), iphone_registers())
+    assert not any(n.startswith("PR_Swap") for n in result["sanity"])
+    assert not any(check.startswith("Before PR_Swap") for check in rows_by_check(result))
+
+
+def test_a_pr_swap_rejected_or_from_the_same_side_is_no_swap(tmp_path):
+    for reply in ("a305", "8404"):  # an Accept from the Source (the board itself), the iPhone's Reject
+        capture = CaptureFile().conn()
+        for message in IPHONE_SESSION:
+            capture.wire_hex(reply if message == "8304" else message)
+        capture.write(tmp_path / "c.jsonl")
+        assert crosscheck.completed_power_swaps(crosscheck.load_capture(tmp_path / "c.jsonl").messages) == []
+
+
+@pytest.mark.skipif(not SOURCE_BUNDLE.is_dir(), reason="needs the library checkout's fixture bundle")
+def test_only_the_latest_attach_is_compared(tmp_path):
+    # First attach: the board sources, then swaps to Sink (the iPhone session). Second
+    # attach: the board sources again, as in the source-role bundle, whose snapshot this is.
+    capture = CaptureFile().conn()
+    for message in IPHONE_SESSION:
+        capture.wire_hex(message)
+    capture.conn("disconnect").conn()
+    for message in ("a151 2c910103 2cd10200 2cb10400 f4410600 f4b104e0", "821a 2cb18413", "a303", "a605",
+                    "af19 01a800ff", "8f44 41a000ff ac0500d5 00000000 66210c71"):
+        capture.wire_hex(message)
+    path = capture.status(4729).footer().write(tmp_path / "capture.jsonl")
+    result = crosscheck.crosscheck(path, SOURCE_BUNDLE / "registers.json")
+    rows = rows_by_check(result)
+    assert result["role"] == "source"
+    assert rows["PDO 1"]["where"] == "0x32 bytes 3..6" and rows["PDO 1"]["result"] == MATCH
+    assert rows["Request RDO (partner)"]["result"] == MATCH
+    assert not any(check.startswith("Before PR_Swap") for check in rows)
+    assert any("earlier attach" in n for n in result["sanity"])
+    assert result["verdict"] == "pass"

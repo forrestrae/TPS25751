@@ -752,84 +752,47 @@ caps are artifacts of the proxy path, not of the part.
 - The big-endian decode/encode conventions (ADR-008/009) are unchanged: burst reads/writes
   carry multi-byte registers identically over either transport.
 
-### ADR-011: Patch Loader — Non-Register PBM Sequencer on `executeCommand()`
-**Status:** Accepted
-**Date:** 2026-06
-**Context:** The TPS25751 can boot in PTCH (patch) mode when no EEPROM is present and
-receive its firmware+configuration image directly over I2Ct via Patch Burst Mode (PBM),
-documented in TI app note SLVAFV8A.  The PBM flow uses two 4CC command-tasks (`PBMs`
-to start the session, `PBMc` to commit it) plus a raw burst write to I2C address `0x30`
-(no register number, no length byte — unlike every other TPS25751 write).
-**Decision:**
-- **`TPS25751PatchLoader` is not a register.** The PBM flow has no fixed register layout
-  and does not benefit from the factory / three-tier validation machinery. The loader
-  deliberately does not inherit `TPS25751Register` and is not wired into
-  `TPS25751RegisterFactory`. Reviewers should not expect the register-class template.
-- **Reuse `executeCommand()` for both 4CC commands.** `PBMs` and `PBMc` are submitted
-  via `TPS25751::executeCommand()` like any other task; DATA staging, COMMAND write,
-  COMMAND polling, `"!CMD"` detection, and DATA read-back are all handled by the executor.
-  The loader supplies only the payload bytes and maps `TPS25751TaskResult` to
-  `PatchLoadStatus`.
-- **One new core primitive: `TPS25751::burstWrite()`.** The raw burst to `0x30` (no
-  register number, no length byte) is the only I2C access shape `executeCommand()` cannot
-  cover. It is implemented as a public method on `TPS25751`, loops
-  `beginTransmission/write/endTransmission(true)` per chunk of `min(chunk, remaining)`
-  bytes, and reuses `TPS_DEBUG_*` / `TPS_REPORT_I2C_ERROR` exactly like `writeRegister`.
-  The default chunk size is `PBM_BURST_CHUNK` (32 bytes, matching the stock Wire TX
-  buffer); the PBM pointer auto-increments across I2C START/STOP so chunking is safe
-  (SLVAFV8A footnote 3).
-- **`PatchLoadStatus` provides one distinct value per failure point** in the 17-step
-  sequence, giving callers a precise diagnostic rather than a boolean.
-- **IRQ-gated inter-command waiting is optional** (`irqPin = -1` defaults to pure
-  polling). Command-completion polling is always done by `executeCommand()`'s internal
-  `waitForCommandClear()`; the IRQ pin is used only for the "Ready-for-Patch" step 1
-  signal, which the polling mode skips.
-**Consequences:**
-- `TPS25751PatchLoader` is a standalone sequencer (`include/TPS25751PatchLoader.h`,
-  `src/TPS25751PatchLoader.cpp`) that composes a `TPS25751&` reference. It forward-
-  declares `TPS25751` in its header to avoid a circular include (TPS25751.h includes
-  TPS25751PatchLoader.h at its end for transparent consumer access).
-- The `0x30` argument to `burstWrite()` is a 7-bit I2C *device address* (the PBM receive
-  port), not a TPS25751 register offset — these happen to share the numeric value with
-  `TPS25751Registers::Address::RECEIVED_SOURCE_CAPABILITIES` but are entirely unrelated.
-- The `bundleSize` field of the `PBMs` configuration is **little-endian** (4 bytes, LSB
-  first), consistent with host-register byte order and opposite to the BQ25798 downstream
-  registers, which are big-endian. See CONSTRAINTS.md "Patch Burst Mode (PBM)".
+### ADR-011: Patch Loader, a Non-Register PBM Sequencer on `executeCommand()`
 
-Amendment, 2026-11-23: `PBMc` no longer goes through `executeCommand()`, which reads
-DATA the instant COMMAND clears. SLVAFV8A (step 15, page 11, and its code on page 18) and
-TRM Figure 5-1 (page 88) wait 20 ms between `PBMc` completing and the DATA read. In hardware
-stage 5 of the EEPROM-update plan, on one board, that immediate read returned 28 of 65
-bytes and the load reported `I2cError` although the patch had loaded; every later read
-from the host failed with error 2, for a cause not established on either side of the bus.
-- `TPS25751::issueCommand()` writes DATA and COMMAND and waits for COMMAND to clear or
-  read "!CMD", without reading DATA. `executeCommand()` is `issueCommand()` plus the DATA
-  read, with the same transactions as before. `PBMs` keeps `executeCommand()`, because
-  SLVAFV8A reads its DATA right after the clear (steps 8 and 9, pages 9 and 10).
-- After `PBMc` the loader waits `PATCH_APPLY_DELAY_MS` (20 ms), reads DATA with a retry
-  every 10 ms for up to `PBM_DATA_READ_CAP_MS`, then polls MODE every 10 ms for up to
-  `PBM_MODE_POLL_CAP_MS` until APP, tolerating failed reads. Both caps are 5000 ms, a
-  choice the documents do not bound. The INT_EVENT1.PatchLoaded poll of Figure 5-1 is not
-  used; SLVAFV8A goes from DATA to MODE without it.
-- `TPS25751.cpp` and `TPS25751PatchLoader.cpp` now build in `[env:native]` against a
-  TwoWire fake, and `test_TPS25751PatchLoader` pins the transaction order and the 20 ms.
-  Hardware stages 6 and 7 of the EEPROM-update plan ran this sequence in ten loads, all
-  Success, with every later read acknowledged.
+Status: accepted, 2026-06; amended 2026-11-23 and 2026-11-24.
 
-Amendment, 2026-11-24: three more steps follow TRM Figure 5-1 (page 88) and SLVAFV8A,
-by the user's decision recorded in the EEPROM-update plan.
-- Step 1 in polling mode polls INT_EVENT1 bit 81 (Ready for Patch) every 10 ms for up to
-  5 s, so the IRQ pin is no longer the only ready signal. Step 2 polls MODE every 10 ms
-  for up to 5 s until PTCH, in both modes.
-- The `PBMs` configuration is staged with the new `TPS25751::writeCommandData()`, read
-  back 500 µs later, and compared, for up to 3 attempts; `PBMs` then goes through
-  `executeCommand()` with no input. The loader now uses the core class for one more
-  primitive, an exact-length DATA write, which `issueCommand()` also uses.
-- After a burst chunk that is not acknowledged, or "!CMD" on `PBMc`, the loader issues
-  `PBMe` through `executeCommand()` and still returns `BurstFailed` or `PbmcRejected`.
-- `PatchLoadStatus::PbmsConfigMismatch` is appended after `I2cError`, so the earlier
-  values keep their numbers. Hardware stage 8 of the EEPROM-update plan (2026-11-24) ran
-  steps 1, 2, and 5 in five loads, all Success; neither `PBMe` path has run on hardware.
+Context: a TPS25751 with no EEPROM boots in PTCH and takes its firmware and configuration
+image over I2Ct through Patch Burst Mode (TI SLVAFV8A): the `PBMs` and `PBMc` tasks around
+a raw burst to I2C address 0x30, which has no register number and no length byte.
+
+Decision:
+
+- `TPS25751PatchLoader` is a sequencer, not a register. PBM has no register layout, so
+  the loader does not inherit `TPS25751Register` and is not in the factory. It composes a
+  `TPS25751&`.
+- The loader adds no task handshake of its own. It uses the core class's
+  `executeCommand()`, and the core class gained three primitives for it: `burstWrite()`,
+  the one bus access with no register framing; `issueCommand()`, the handshake without
+  the DATA read; and `writeCommandData()`, an exact-length DATA write.
+- `PBMc` goes through `issueCommand()`, and the loader waits 20 ms before it reads DATA.
+  SLVAFV8A step 15 and TRM Figure 5-1 specify the wait. Without it, a read on hardware
+  returned 28 of 65 bytes, the load reported `I2cError` although the patch had loaded,
+  and every later read failed.
+- The loader follows TRM Figure 5-1 where the two documents differ in detail: it polls
+  for Ready for Patch and for PTCH, reads the `PBMs` configuration back before starting,
+  and issues `PBMe` after a failed burst or a rejected `PBMc`.
+- `PatchLoadStatus` has one value per failure point, so a caller learns which step
+  failed. New values are appended so existing ones keep their numbers.
+- The IRQ pin is optional. Command completion is always polled.
+
+Consequences:
+
+- The 0x30 passed to `burstWrite()` is an I2C device address. It shares its value with
+  the register address of RECEIVED_SOURCE_CAPABILITIES and is unrelated to it.
+- Both poll caps are 5000 ms, a choice the documents do not bound.
+- `TPS25751.cpp` and the loader build in `[env:native]` against the TwoWire fake, and
+  `test_TPS25751PatchLoader` pins the transaction order and the 20 ms.
+- Fifteen loads on hardware succeeded with the amended sequence. Neither `PBMe` path has
+  run on hardware.
+
+The step-by-step flow, its timings, and where it departs from SLVAFV8A are in
+`TPS25751PatchLoader.h` and CONSTRAINTS.md (Patch Burst Mode). The hardware stages are in
+`docs/plans/feature/eeprom-update.md`.
 
 ### ADR-012: 16-Bit Bit Positions in the Register Base Class
 **Status:** Accepted
@@ -908,103 +871,61 @@ validation rules that disagreed with the specification.
   the raw words and common fields with a note that the typed fields need the PDO type.
 
 ### ADR-014: EEPROM Updater, a Non-Register Flash-Task Sequencer on an Executor Seam
-**Status:** Accepted
-**Date:** 2026-11-23
-**Context:** The TPS25751 boots its patch bundle from an external EEPROM at 0x50 on its
-I2Cc bus. A host on I2Ct rewrites that EEPROM only through four flash 4CC tasks, `FLrd`,
-`FLad`, `FLwd`, and `FLvy` (TRM SLVUCR8B Tables 4-19 to 4-22, pages 81 and 82), while the
-controller runs in APP. TI application note SLVAFL1 defines a two-region layout and a
-four-step update in which an erased region pointer keeps the controller from loading a
-region while it is written. An ordering error can leave no bootable region; recovery then
-needs a PBM load (ADR-011) or an external programmer. The sequencing therefore needs
-host-run tests that inject a fault at every task, and `src/TPS25751.cpp`, which owns
-`executeCommand()`, could not run on the host because it needs `Wire`. (The TwoWire fake
-added the same day for the ADR-011 amendment later brought `TPS25751.cpp` into
-`[env:native]`; the seam stays, because a fake executor models the EEPROM far more simply
-than a fake bus.)
-**Decision:**
-- `TPS25751EepromUpdater` is a sequencer, not a register, beside `TPS25751PatchLoader`: it
-  does not inherit `TPS25751Register` and is not in the factory. It provides the task
-  primitives, checked region pointer writes, `updateRegion()`, `updateInactiveRegion()`,
-  `updateBothRegions()`, `programBlank()`, `compareRegion()`, `dump()`, and `coldReset()`.
-- It depends on `TPS25751CommandExecutor`, an interface of five calls (`executeCommand()`,
-  `readMode()`, `readBootFlags()`, `delayMs()`, `nowMs()`) that does not include `Wire.h`.
-  `TPS25751HostExecutor` adapts a `TPS25751` to it on the target, and the native tests use
-  `FakeCommandExecutor`. Virtual calls need no RTTI, so the `-fno-rtti` constraint holds.
-  `TPS25751` itself is unchanged.
+
+Status: accepted, 2026-11-23.
+
+Context: the controller boots its patch bundle from an EEPROM at 0x50 on I2Cc, which a
+host can rewrite only through the flash tasks `FLrd`, `FLad`, `FLwd`, and `FLvy` while
+the controller runs in APP. TI SLVAFL1 defines two regions and a four-step update. An
+ordering error can leave no bootable region, and recovery then needs a PBM load (ADR-011)
+or an external programmer. The sequencing therefore needs host tests that inject a fault
+at every task.
+
+Decision:
+
+- `TPS25751EepromUpdater` is a sequencer, not a register, beside `TPS25751PatchLoader`.
+- It depends on `TPS25751CommandExecutor`, an interface of five calls that does not
+  include `Wire.h`. `TPS25751HostExecutor` adapts a `TPS25751` on the target, and the
+  native tests use `FakeCommandExecutor`. The seam stays although `TPS25751.cpp` now
+  builds natively, because a fake executor models the EEPROM far more simply than a fake
+  bus. Virtual calls need no RTTI.
 - A region counts as bootable only if its pointer equals its bundle start and its
   AppConfigOffset word reads 0, because the controller looks for the Header_ID at the
-  region start plus that word (SLVAFL1 page 2; decided 2026-11-23). The pre-flight of
-  `updateRegion()` requires the kept region to be bootable (`NoBootableRegion`) and the
-  target's word to read 0 (`AppConfigOffsetNotZero`), and step 3 reads the target's word
-  once more before the pointer write. `updateRegion()` does not write the word; a region
-  behind another value is repaired by erasing both pointers and running `programBlank()`.
-- Region selection reads the pointers first and BOOT_FLAGS (0x2D, BOOT_STATUS in SLVAFL1)
-  second, and only when both pointers are valid. BOOT_FLAGS is latched at boot. After an
-  update without a restart it describes the old layout, and SLVAFL1 Figure 2-2, which
-  decides from BOOT_FLAGS alone, would then select the region whose pointer is the only
-  valid one and erase it. Hardware stage 3 of the plan reached that state and the
-  pointer-first rule chose correctly.
+  region start plus that word (SLVAFL1 page 2). An update refuses unless the kept region
+  is bootable and the target's word is 0.
+- Region selection reads the region pointers first and BOOT_FLAGS only when both are
+  valid. BOOT_FLAGS is latched at boot, so after an update without a restart SLVAFL1
+  Figure 2-2, which decides from BOOT_FLAGS alone, would select and erase the only valid
+  region.
 - The written region is compared with the image through `FLrd` before its pointer is
-  written. The TRM says `FLvy` completes after the header is checked. Stage 3 saw it reject
-  a bundle with one inverted body byte, which is a sample of one, and SLVAFL1 (page 2)
-  says a CRC error in a Low region with a correct header ends the boot without trying
-  High, so a valid Low pointer over a damaged Low body costs both regions. A High CRC
-  error does fall back to Low.
-- Step 2 of an update reads back before it trusts the controller's write address. Before
-  any task it checks that the 12 bytes after the erased pointer are not the start of the
-  image, the trace of an earlier misplaced write. After the first two chunks it reads the
-  target pointer row and then the chunks, compares both, and sends a fresh `FLad` before
-  the rest. An `FLad` that reported success without taking effect, a case no TI document
-  describes, then misplaces 64 bytes into the unused bytes after the pointer instead of a
-  whole bundle across the other region, in the case the tests model: a write address left
-  just past the pointer word.
-- `coldReset()` (`GAID`) is a separate call, so the application decides when the port
-  disconnects. It returns `Success` only when MODE reads APP after the call saw the
-  controller go away (an `I2CError` on `GAID` or a failed MODE read), and
-  `ResetNotObserved` for APP without that evidence, because MODE reads APP before and
-  after a restart (decided 2026-11-23).
-- `programBlank()` writes both AppConfigOffset words to 0 first, then runs steps 1 to 3 of
-  `updateRegion()` per region, Low first, reading the region's word once more before its
-  final pointer write, and refuses while any pointer is valid (decided 2026-11-23). The last
-  write before each bundle `FLad` is then the pointer erase, as in `updateRegion()`. It is
-  the flash-task half of the recovery in SLVAFL1 Figure 4-1, after a PBM load.
-**Consequences:**
-- The updater builds in `[env:native]` and `test/coverage.sh` measures it. Its suite
-  checks every call sequence against the plan and sweeps an executor failure and a wrong
-  return code across every task of an update, asserting the EEPROM state the status table
+  written. `FLvy` is not enough: the TRM says it completes after the header check, and
+  SLVAFL1 says a CRC error in a Low region with a correct header ends the boot without
+  trying High, so a valid Low pointer over a damaged Low body costs both regions.
+- Step 2 reads back the first two chunks and the target pointer row before writing the
+  rest, then sends a fresh `FLad`. An `FLad` that reported success without taking effect,
+  which no TI document describes, then misplaces 64 bytes instead of a whole bundle.
+- `coldReset()` is a separate call, so the application decides when the port
+  disconnects. It returns `Success` only after it saw the controller go away, because
+  MODE reads APP both before and after a restart.
+- `programBlank()` writes both AppConfigOffset words first, then each region, Low first,
+  and refuses while any pointer is valid.
+
+Consequences:
+
+- The updater builds in `[env:native]`. Its suite sweeps an executor failure and a wrong
+  return code across every task and asserts the EEPROM state the header's status table
   promises.
-- `FakeCommandExecutor` models behaviour the TRM does not state, such as an `FLwd` at a
-  stale write address and an `FLvy` that checks only Header_ID. A test that depends on such
-  a choice pins the fake, not the device; the fake labels each one.
-- The read-back of step 2 has residual limits. The `FLad` after the read-back is not
-  verified, a write address that goes wrong later shows only in step 3 and only inside the
-  target region, and when the target already held the image, chunks misplaced outside the
-  pointer row go unseen. `programBlank()` inherits these limits per pass; a sweep of an
-  `FLad` without effect at each of its 10 `FLad` calls, with and without an `FLrd` that
-  moves the write address, finds no valid pointer over a region that does not hold the
-  image. Whether an `FLrd` moves the write address is not documented and has not been
-  observed.
-- Hardware stages 1 to 4 verified the layout, the result offsets, a 4-byte `FLwd`, a full
-  region update, `updateBothRegions()`, `GAID`, and the boot region after a cut at each
-  step; the update sequence then had 1365 tasks for 14336 bytes. Stage 5 verified
-  `programBlank()` from an EEPROM boot with a 14272-byte image (2720 tasks, 51943 ms) and
-  after a PBM load with a 14336-byte image (2732 tasks, 52118 ms), the I2C
-  EEPROM Present flag after a PBM boot, and PTCH after a restart with no valid pointer.
-  The three AppConfigOffset reads `updateRegion()` makes since 2026-11-23, which bring the
-  update to 1368 tasks, ran in stage 6 part A, on words that were 0; the refusals for a
-  word that is not 0 have not run on hardware.
-  The `GAID` sequence the `ResetNotObserved` rule relies on was seen on one board with the
-  F8091164 and the F8091166 bundle running; whether the two differ in firmware is not
-  recorded.
-- Stages 6 to 10 (2026-11-23 and 24) added: `programBlank()` after five PBM loads; a power
-  cut after each step of an update and one inside step 2, after which the controller
-  booted the region the status table predicts (stage 9, on a second board); and the
-  example's start-up wait for APP (stage 10). Not shown on hardware: a cut inside a pointer
-  write or inside a 24LC256 write cycle, and the refusals for a nonzero AppConfigOffset
-  word.
-- A region update blocks for about 26 s and both regions for about 52 s (stage 3). An
-  application with a watchdog services it from the progress callback.
-- `TPS25751PatchLoader` and `TPS25751DownstreamDevice` still call `TPS25751` directly.
-  The loader has native tests through the TwoWire fake; the downstream device has none.
-  Moving either to the executor seam is not planned.
+- `FakeCommandExecutor` models behaviour the TRM does not state. A test that depends on
+  such a choice pins the fake, not the device; the fake labels each one.
+- The read-back has limits, listed in `TPS25751EepromUpdater.h`: the `FLad` after it is
+  not verified, and chunks misplaced outside the pointer row go unseen when the target
+  already held the image.
+- A region update blocks for about 26 s and both regions for about 52 s. An application
+  with a watchdog services it from the progress callback.
+- Hardware stages 1 to 10 ran every call, including a power cut after each step of an
+  update. Not shown on hardware: a cut inside a pointer write or an EEPROM write cycle,
+  and the refusals for a nonzero AppConfigOffset word.
+
+The task rules and timings are in CONSTRAINTS.md (Flash tasks and EEPROM update), the
+state the EEPROM is left in for every status is in `TPS25751EepromUpdater.h`, and the
+stage results are in `docs/plans/feature/eeprom-update.md`.

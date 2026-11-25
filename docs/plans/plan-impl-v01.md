@@ -25,7 +25,7 @@ registers. To start execution, see [Launching the Plan](#launching-the-plan).
 - **[Implementation Standards](../engineering/STANDARDS.md)** - Class structure, validation, factory integration
 - **[Technical Constraints](../engineering/CONSTRAINTS.md)** - Platform limitations, I2C protocol, USB PD complexity
 - **[Testing Requirements](../engineering/TESTING.md)** - Unit, integration, and hardware testing
-- **[Documentation Standards](../engineering/DOCUMENTATION.md)** - Doxygen, examples, troubleshooting
+- **[Documentation Standards](../engineering/STANDARDS.md#doxygen)** - Doxygen (DOCUMENTATION.md was folded into STANDARDS.md on 2026-11-24)
 - **[Architecture](../engineering/ARCHITECTURE.md)** - System design and component relationships
 - **[Code Review Guidelines](../engineering/CODE_REVIEW_GUIDELINES.md)** - The review-gate checklist used by the delegated workflow
 
@@ -540,7 +540,7 @@ Run this checklist at the end of **every** batch, before merge. The orchestrator
 |------|----------------|
 | `AGENTS.md` (repo root — **edit AGENTS.md, never CLAUDE.md**, which is a symlink to it) | "Implemented Registers" count and list in *Implementation Status*; the *Register Classes* list (add the new class + one-line description); "Last Updated" date; remove/adjust any statement made stale by the batch (e.g. "remaining N registers") |
 | `docs/plans/plan-impl-v01.md` (this file) | Move the batch's registers from *Unimplemented* to *Implemented* with completion date; update counts in the Executive Summary; add a Revision History row |
-| Doxygen in the new headers/sources | Per [DOCUMENTATION.md](../engineering/DOCUMENTATION.md) — done during implementation, verified at review |
+| Doxygen in the new headers/sources | Per [STANDARDS.md, Doxygen](../engineering/STANDARDS.md#doxygen) — done during implementation, verified at review |
 
 ### When applicable
 
@@ -594,7 +594,7 @@ time for lower cost; orchestrator attention per batch is the scarce resource.
 
 ### Documentation
 - Per-batch [Documentation Update Checklist](#documentation-update-checklist-per-batch) completed — AGENTS.md register list/count never stale after a merge
-- Doxygen complete per DOCUMENTATION.md
+- Doxygen complete per STANDARDS.md, Doxygen
 - New traps fed back into CONSTRAINTS.md / CODE_REVIEW_GUIDELINES.md
 
 ## Dependencies and Risks

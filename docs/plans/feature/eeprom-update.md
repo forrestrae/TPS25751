@@ -1540,10 +1540,11 @@ Consequences:
   report, not from the report. Recovery item 2 below applies only to a PTCH read by `r`.
 - The example's start-up report says, for any PTCH read, that the controller found no
   bundle it could boot and that `l` then `pb` recovers it. Right after a power-on that
-  advice is wrong while the EEPROM load is in progress. Open for the user, not changed
-  during the stage: whether the example should wait for the load to end (for example,
-  poll MODE until it leaves PTCH or a timeout passes, or check Patch Config Source and the
-  region flags) before it prints that advice.
+  advice is wrong while the EEPROM load is in progress. Fixed after the stage, see the
+  decision after the stage 9 result. The question left open during the stage was
+  whether the example should wait for the load to end (for example, poll MODE until it
+  leaves PTCH or a timeout passes, or check Patch Config Source and the region flags)
+  before it prints that advice.
 
 | Step | Result |
 |---|---|
@@ -1608,9 +1609,20 @@ byte); more than one sample of the mid-write cut; the effect of the power cycle 
 PD contract, since the USB-C port was unconnected; and the first board under a power
 cycle.
 
-Open for the user after this stage: the example's start-up advice for a PTCH read that is
-a load in progress (see the note after S2), and the cause of the start-up report's PTCH
-reads, which so far occur only while the High pointer is 0.
+Open for the user after this stage: the cause of the start-up report's PTCH reads, which so
+far occur only while the High pointer is 0.
+
+Decision of 2026-11-24, session 4, after stage 9: the user decided to fix the example's
+start-up advice on this branch. Implemented in `97724df`: `setup()` polls MODE every 10 ms,
+tolerating failed reads, until it reads APP or 5 s pass (a choice, matching the caps of
+`coldReset()` and the loader's MODE poll), prints the time and the count of reads and
+failed reads, and only then prints the report. A controller with no bootable bundle stays
+in PTCH, costs the full 5 s, and still gets the advice to send `l` then `pb`. `r` sent
+later does not wait: the Teensy restarts with every power-on of the controller, and `x`
+already polls MODE. CONSTRAINTS.md (PTCH while the controller boots) and
+`examples/README.md` describe the wait. Verified by build only. A hardware check needs a
+power-on with the High pointer 0, the state in which stage 9 saw the race, which means
+`c1`, a power cycle, and `b` to restore: EEPROM writes that need the user's go-ahead.
 
 Two physical points were confirmed on 2026-11-22. First, the EEPROM can be reprogrammed
 in place with a SOIC8 clip, so `write-flash.zsh` (`24LC256@SOIC8`) is a recovery path

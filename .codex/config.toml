@@ -10,7 +10,7 @@ env = { DEVICE_CONFIG = "specifications/USB_PD/specification.json" }
 
 [mcp_servers.km003c]
 command = "uvx"
-args = ["--from", "git+https://github.com/forrestrae/mcp-powerz-km003c@v0.2.0", "km003c-mcp"]
+args = ["--from", "git+https://github.com/forrestrae/mcp-powerz-km003c@v0.2.1", "km003c-mcp"]
 env = { KM003C_CAPTURE_DIR = "captures" }
 
 [mcp_servers.tps25751-bench]

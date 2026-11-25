@@ -1508,6 +1508,23 @@ loss of power, and that an update cut by power loss inside step 2 leaves the oth
 bootable and changes nothing outside the target region. What it cannot show: a cut inside
 a pointer write, and more than one sample of the mid-write cut.
 
+Result, 2026-11-24, branch commit `a4b5a65`, in progress.
+
+Second board. Stage 9 runs on a second carrier and Teensy 4.0, which the user describes as
+an exact copy of the board of stages 1 to 8. Its Teensy enumerates as
+`/dev/cu.usbmodem181777201` (USB serial number 18177720); stages 1 to 8 used
+`/dev/cu.usbmodem181764301`. Results from the two boards are not interchangeable: a
+difference between stage 4 and stage 9 can come from the unit as well as from the power
+cycle. Serial commands go through `run_cmd.py` of the stage 2 to 5 scratch folder with
+`--expect` strings taken from stage 4's logs; the hand cut uses a copy that also ends
+cleanly when the port goes away.
+
+| Step | Result |
+|---|---|
+| S0, flash and `r` | The F8091164 build (header SHA-256 `15019eac...6f81ec59`) flashed through the Teensy Loader. MODE `APP `; VERSION 0xF8091166; BOOT_FLAGS `18 00 F0 A2 C1`: EEPROM Loaded, Region 0 Attempted 1, Region 1 Attempted 0, every error flag 0. Both pointers valid; both AppConfigOffset words 0; `FLvy` Success on both regions; target High. Dump of 1984 lines identical to `..._F8091166_fullFlash.bin` (SHA-256 `a3e549ca...3096fdaec3`). The board's power history before this read is not recorded |
+| S0, dark check | Supply off: the user measured ROM1 pin 8 (VCC, LDO_3V3) below 0.2 V, and the Teensy left the Mac (no `/dev/cu.usbmodem181777201`, no device with vendor ID 0x16C0). The Teensy is powered from the board, not from USB, and the controller and the EEPROM lose power with the supply |
+| S1, baseline power-on | The port appeared 7.0 s after the capture started waiting (the user switched on in that window). Start-up report and `r` agree: MODE `APP `; VERSION 0xF8091166; BOOT_FLAGS `18 00 F0 A2 C1`, Dead Battery Flag 0, Region 0 Attempted 1, Region 1 Attempted 0, every error flag 0; both pointers valid; `FLvy` Success on both regions. Dump identical to the full-flash image. A power-on boot of the full-flash layout reads the same BOOT_FLAGS as a `GAID` restart on the first board |
+
 Two physical points were confirmed on 2026-11-22. First, the EEPROM can be reprogrammed
 in place with a SOIC8 clip, so `write-flash.zsh` (`24LC256@SOIC8`) is a recovery path
 that needs no rework. Second, the board runs from the 18650 battery pack, so the Teensy

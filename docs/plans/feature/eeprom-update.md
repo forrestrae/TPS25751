@@ -1559,6 +1559,11 @@ controller booted Low, and `FLvy` reported the half-written High bundle as not v
 which is the second `FLvy` failure observed (stage 3 on the first board was the first). One
 sample, on the second board.
 
+| Step | Result |
+|---|---|
+| S4, `c2` | Plan named target High and the F8091164 image; the script confirmed. The step 2 checks passed over the half-written region, and the sketch halted after step 2 in 10.3 s with the Low pointer valid and the High pointer 0. Tasks: `FLwd` 447 (the pointer erase and 446 chunks) at 20.8 ms, maximum 21.2 ms; `FLad` 3; `FLrd` 12 (its `rc_nonzero` and `rc_0xFF` are memory bytes); every call Success, no busy result |
+| S4, power-on | Start-up report in mid-load, as in S2 and S3 (`PTCH`, 0xF8091100, `18 00 30 02 C1`). `r`: MODE `APP `; VERSION 0xF8091166; BOOT_FLAGS `18 00 F0 A2 C1`, Dead Battery Flag 0, Region 1 Attempted 0; Low pointer valid, High pointer 0; both AppConfigOffset words 0; `FLvy` Success on both regions. Dump identical to the expected image: the full-flash image with the High pointer 0 and F8091164 at 0x4400. Passed |
+
 Two physical points were confirmed on 2026-11-22. First, the EEPROM can be reprogrammed
 in place with a SOIC8 clip, so `write-flash.zsh` (`24LC256@SOIC8`) is a recovery path
 that needs no rework. Second, the board runs from the 18650 battery pack, so the Teensy

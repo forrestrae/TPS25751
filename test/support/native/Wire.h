@@ -49,6 +49,10 @@ public:
     size_t txCapacity = kBufferLength;  // data bytes after the address; tests may lower it
     unsigned beginCalls = 0;
     uint32_t clockHz = 0;
+    // Not driver behaviour: a fault for tests. requestFrom() still returns the
+    // count the target gave, but the last rxMissing of those bytes are absent
+    // from the receive buffer, so available() falls short of that count.
+    size_t rxMissing = 0;
 
     void begin() { ++beginCalls; }
     void setClock(uint32_t hz) { clockHz = hz; }
@@ -88,7 +92,9 @@ public:
         if (n > kBufferLength) n = kBufferLength;
         _rxLen = target ? target->onRead(addr, n, _rx) : 0;
         _rxPos = 0;
-        return static_cast<uint8_t>(_rxLen);
+        const size_t reported = _rxLen;
+        _rxLen = rxMissing < _rxLen ? _rxLen - rxMissing : 0;
+        return static_cast<uint8_t>(reported);
     }
     uint8_t requestFrom(uint8_t addr, uint8_t quantity, bool sendStop)
     {

@@ -853,8 +853,13 @@ The first run, on 2026-11-19, measured 84% of lines, with 18 files under the
 run measured 98% (1063 tests), with every file at 93% or more. On 2026-11-23,
 with `TPS25751.cpp` and `TPS25751PatchLoader.cpp` added to the native build, it
 measured 93% (1336 tests): the patch loader at 99%, the EEPROM updater at 100%,
-and `TPS25751.cpp` at 32%, because its typed register wrappers have no tests of
-their own. The verify gate and CI do not run it.
+and `TPS25751.cpp` at 32%, because its typed register wrappers had no tests of
+their own. On 2026-11-24, after `test_TPS25751Typed` (the typed read and write
+wrappers and the factory read functions), it measured 98% (1441 tests), with
+`TPS25751.cpp` at 94% (492 of 521 lines). The same day, after the typed
+`read*Register()` functions were folded into one template and three tests reached the
+remaining checks, it measured 99% (1444 tests), with `TPS25751.cpp` at 100%. The verify
+gate and CI do not run it.
 
 ### Publishing the Library
 

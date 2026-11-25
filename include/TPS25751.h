@@ -507,19 +507,15 @@ public:
      * @brief Generic register reader that creates appropriate register objects
      * @tparam T Target register type (will be cast from base)
      * @param addr Register address to create
-     * @return Unique pointer to specific register type (nullptr if failed or wrong type)
+     * @return Unique pointer to specific register type (nullptr if the read failed)
+     * @warning T must be the class the factory creates for @p addr. The cast is a
+     *          static_cast (no RTTI), so a mismatched T is not detected.
      */
     template<typename T>
     std::unique_ptr<T> readRegisterAs(TPS25751Registers::Address addr) const {
-        auto reg = readRegisterByAddress(addr);
-        if (!reg) return nullptr;
-        
-        // Since we control factory creation, we can use static_cast
-        if (reg) {
-            T* castedReg = static_cast<T*>(reg.release());
-            return std::unique_ptr<T>(castedReg);
-        }
-        return nullptr;
+        // The factory creates the class for addr, so static_cast is safe; a null
+        // pointer casts to null.
+        return std::unique_ptr<T>(static_cast<T*>(readRegisterByAddress(addr).release()));
     }
     
     // Type-safe factory-based convenience methods
@@ -866,6 +862,17 @@ public:
 private:
     TwoWire &_wire;
     uint8_t _address;
+
+    /**
+     * @brief readAndValidateRegisterByAddress() cast to the class for @p addr
+     *
+     * Shared by the typed read*Register() functions. T must be the class the
+     * factory creates for @p addr; a null result casts to null.
+     */
+    template<typename T>
+    std::unique_ptr<T> readAndValidateAs(TPS25751Registers::Address addr, bool validate) const {
+        return std::unique_ptr<T>(static_cast<T*>(readAndValidateRegisterByAddress(addr, validate).release()));
+    }
 
     bool readRegister(uint8_t regAddr, uint8_t *buffer, size_t length) const;
     bool writeRegister(uint8_t regAddr, const uint8_t *data, size_t length) const;

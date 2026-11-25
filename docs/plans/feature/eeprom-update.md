@@ -917,7 +917,7 @@ Decisions of 2026-11-24 on these points and on the other open items:
 | `PBMs` timeout byte | Changed to 0x32 on 2026-11-24 (session 2). Checked against TRM Table 4-15 (page 76: "recommended to always use 0x32 ... 5 seconds, LSB of 100 ms") and SLVAFV8A (Table 4-1 lists 0x31 as "3.1 seconds"; the byte listings of steps 4 and 5 send 0x32; the step 9 read-back shows 0x31). Retested on hardware the same day, see stage 7 |
 | Is the branch finished | Not yet. `scripts/integrate.py` stays unrun until the user confirms |
 | `PBMe`, DATA read-back, and ReadyForPatch | Decided in session 3, see below |
-| Coverage of `TPS25751.cpp`; `Wire2` restore sketch; stage 4 with a power cycle | Deferred by the user to later sessions, each to be decided there |
+| Coverage of `TPS25751.cpp`; `Wire2` restore sketch; stage 4 with a power cycle | Deferred by the user to later sessions, each to be decided there. Stage 4 with a power cycle was taken up in session 4 as stage 9 |
 
 Decisions of 2026-11-24, session 3, on three of the loader's departures from TI's flow.
 Burst transaction spacing and the 500 us before `PBMc` stay out of scope by the user's
@@ -1411,6 +1411,102 @@ Not shown by this stage: either `PBMe` path, because no burst chunk failed and `
 was not rejected; a DATA read-back mismatch on hardware; a polling-mode load after the
 INT_MASK1 or INT_EVENT1 state was changed, the case in which the step 1 wait would fail
 on a controller that is ready. The native tests cover those paths.
+
+Stage 9, stage 4 repeated with a power cycle. Added on 2026-11-24 at the user's request,
+session 4. Stage 4 restarted the controller with `GAID` after each cut and listed a boot
+after a loss of power as not shown. This stage cuts power instead, from the same four
+states, and adds one cut stage 4 could not make: power removed while step 2 is writing the
+bundle, so that an EEPROM write is interrupted in the middle of a task. The user does every
+physical step. Each serial command, each flash of the Teensy, and each EEPROM write needs
+the user's go-ahead for that step.
+
+The power topology decides whether a cut is real. The netlist of the carrier
+(`Sound Sensor Teensy Carrier.kicad_sch`, exported on 2026-11-24) shows:
+
+- The Teensy's 5V pin is on the board's +5V rail, which feeds the TLV75533 LDO (+3V3, the
+  TPS25751's VIN_3V3) and the TPS25751's PP5V. With the Teensy's VIN-to-VUSB link intact,
+  the Mac's USB port would power +5V and the controller would never lose power.
+- The TPS25751 can also run from VBUS (a dead-battery boot), so a source on the USB-C port
+  would keep it powered.
+- The 24LC256's VCC (ROM1 pin 8) and the I2Ct and I2Cc pull-ups are on the controller's
+  LDO_3V3, so the EEPROM and the controller lose power together.
+
+Supply setup, done once by the user:
+
+1. Take the stack apart and disconnect the pack and the protector board. This also exposes
+   the EEPROM for the clip.
+2. Connect a bench supply to the carrier's pack input, BAT_CON1 (pin 1 +PACK, the BQ25798's
+   BAT; pin 2 GND). Set 14.8 V, the pack's nominal voltage (SPECIFICATION.md gives 11.6 V
+   to 16.8 V), with a current limit of 0.5 A. The specification budgets 1 W for the Teensy,
+   the rails, the charger, and the controller, about 70 mA at 14.8 V; a current near the
+   limit means a fault, and the supply goes off.
+3. Leave the USB-C port unconnected for the whole stage.
+4. Connect the Teensy's USB to the Mac and secure every lead.
+
+A power cycle in this stage means: wait until the command has ended (`[done]`, or `[halt]`
+for `c1` and `c2`), switch the supply off, wait until the Teensy's serial port has left
+the Mac and then 10 s more, and switch the supply on. The Teensy restarts with the board,
+so unlike stage 4 a halted `c1` or `c2` needs no reflash. After each power-on the host
+captures the start-up report, then runs `r` and compares the whole dump with the expected
+contents. BOOT_FLAGS bit 2 (Dead Battery Flag, TRM page 33) must read 0; a 1 means the
+controller booted from VBUS and the cut did not remove its supply. A difference in a
+reserved BOOT_FLAGS bit is recorded, not counted as a failure.
+
+Images, as in stage 4: the cuts use the example built with the F8091164 low-region image
+(14272 bytes, SHA-256 `15019eac...6f81ec59`) on an EEPROM that holds F8091166, so VERSION
+shows which region booted. The restore uses the F8091166 build (14336 bytes, SHA-256
+`60c6cdd8...add77772c`). Both builds are made before the stage, and the checked-in
+placeholder header is restored after each build.
+
+Steps, in order. Each starts from the state the previous one left, as in stage 4. "Full
+flash" is `..._F8091166_fullFlash.bin`; "F8091164 at 0x4400" leaves 0x7BC0 to 0x7BFF with
+the old bundle's last 64 bytes.
+
+| Step | Action | EEPROM after the cut | Expected boot after power-on |
+|---|---|---|---|
+| S0, dark check | Supply on; flash the F8091164 build; `r`, whose dump must equal the full flash; supply off. The serial port must leave the Mac, and LDO_3V3 at ROM1 pin 8 must read below 0.2 V. If the port stays, the Teensy is powered from USB and back-feeds +5V: stop, because no power cycle in this setup is real | Unchanged: full flash | Not booted yet |
+| S1, baseline | Supply on; start-up report and `r` | Full flash | APP; VERSION 0xF8091166; BOOT_FLAGS `18 00 F0 A2 C1`: EEPROM Loaded, Low attempted, High not attempted, Dead Battery 0. Stage 1 read the same value after an unrecorded history; this is the first read after a known power-on |
+| S2, `c1` | Plan must name target High; power cycle | Full flash with the High pointer 0 | As S1 |
+| S3, cut M | `u` (plan must name target High); the user switches the supply off while the progress lines of the write phase show 30% to 70%, about 3 to 6 s into the write | Full flash with the High pointer 0. From 0x4400: F8091164 up to a chunk boundary, then at most one 64-byte page that matches neither image, then F8091166 to 0x7BFF. No byte outside 0x4400 to 0x7BFF and the High pointer changed | As S1 |
+| S4, `c2` | Plan must name target High; power cycle | Full flash with the High pointer 0 and F8091164 at 0x4400 | As S1 |
+| S5, `c3` | Plan must name target High; power cycle | As S4 with the High pointer 0x4400; both pointers valid | As S1: Low boots first (SLVAFL1 Figure 2-9) |
+| S6, `c4` | Plan must name target High; power cycle | As S5 with the Low pointer 0 | APP; VERSION 0xF8091164; BOOT_FLAGS `78 00 F0 A2 C1`: Region 0 Invalid, High booted (Figure 2-10) |
+| S7, restore | Flash the F8091166 build; `b` (plan must name Low, then High); `r`; power cycle | Full flash | As S1 |
+
+Cut M is the only cut inside a task. The 24LC256 starts its internal write cycle at the
+STOP of a page write and takes up to 5 ms (DS21203P, TWC). No document read for this plan
+says what a loss of power during that cycle leaves, so the check lets the bytes being
+written, rounded up to their 64-byte page, hold anything. The other region and both pointers are written by no task in flight at the cut.
+A power cut inside a pointer write is not attempted: an `FLwd` takes 20.7 ms, too short
+to hit by hand.
+
+The dump check, per step: extract the 1984 dump lines of `r`, rebuild the binary, and
+compare it with the expected image built from the full-flash image, both pointer words,
+and the bundle written at 0x4400. For cut M the check finds the longest prefix of the High
+region equal to F8091164 and the longest suffix equal to F8091166, and passes when they
+meet within one 64-byte page and nothing else differs. It reports the boundary, which
+gives the fraction written before the cut.
+
+Recovery when a boot differs from the table. A boot that does not match is the stage's
+finding: record it in full and stop the stage before any other write.
+
+1. No answer from the controller after power-on: `r` every 10 s for 2 minutes, then one
+   more power cycle, recording each.
+2. MODE reads PTCH: flash the F8091166 build (the Teensy's flash only), `l`, `r` to record
+   the EEPROM, then `zero`, `pb`, and a power cycle. This is stage 5's path, which ran on
+   this board in stages 5 to 8.
+3. If `l` fails: `examples/load-patch-bundle`, then `zero` and `pb`.
+4. Last: `write-flash.zsh` with the clip and the full-flash image, with the supply off.
+   The stack is already apart, so this needs no further rework.
+
+A boot of the High region in S1 to S5 cannot occur while the High pointer is 0 or the Low
+region is valid; if it does, record it and stop, because the EEPROM still has a valid
+pointer and needs no repair before the user decides.
+
+What the stage can show: that each state of the status table boots as predicted after a
+loss of power, and that an update cut by power loss inside step 2 leaves the other region
+bootable and changes nothing outside the target region. What it cannot show: a cut inside
+a pointer write, and more than one sample of the mid-write cut.
 
 Two physical points were confirmed on 2026-11-22. First, the EEPROM can be reprogrammed
 in place with a SOIC8 clip, so `write-flash.zsh` (`24LC256@SOIC8`) is a recovery path

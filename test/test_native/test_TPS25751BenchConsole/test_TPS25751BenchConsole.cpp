@@ -1232,7 +1232,115 @@ void test_restart_reports_a_failed_patch_load()
     };
     const Lines lines = b.run("@7 RESTART warm");
     TEST_ASSERT_TRUE(hasLineStarting(lines, "@7 step=patch result=BadBundleSize t_ms="));
+    TEST_ASSERT_EQUAL(1, countContaining(lines, " sent=1"));
     TEST_ASSERT_EQUAL_STRING("@7 ERR PATCH patch load ended with BadBundleSize, MODE PTCH",
+                             lines.back().c_str());
+}
+
+void test_restart_succeeds_when_the_controller_reaches_app_while_the_loader_waits()
+{
+    // A board with an EEPROM that stays in PTCH past kPatchReadyTimeoutMs
+    // without ReadyForPatch and then reaches APP by itself. The loader polls
+    // INT_EVENT1 only, runs to PBM_READY_WAIT_CAP_MS, and returns
+    // CommandTimeout with nothing written. MODE reads APP, so the restart
+    // succeeded; the loader's status is reported with sent=0.
+    Bench b;
+    b.console.setPatchBundle(patchImage, sizeof(patchImage));
+    b.fake.taskHandler = [&b](const std::string &, std::vector<uint8_t> &) {
+        scriptRestart(b.fake, "PTCH");
+        // PTCH from 1300 ms; the console's wait ends near 4300 ms.
+        b.fake.schedule(millis() + 5000, [](FakeBenchTarget &f) { f.setMode("APP "); });
+        return Verdict::Pending;
+    };
+    const Lines lines = b.run("@7 RESTART warm");
+    TEST_ASSERT_TRUE(hasLine(lines, "@7 step=mode t_ms=6305 mode=PTCH waited_ms=0"));
+    TEST_ASSERT_TRUE(hasLine(lines, "@7 step=patch result=CommandTimeout t_ms=14305 sent=0"));
+    TEST_ASSERT_TRUE(hasLine(lines, "@7 step=done mode=APP t_ms=14305"));
+    TEST_ASSERT_EQUAL_STRING("@7 OK", lines.back().c_str());
+    for (const std::string &line : lines) TEST_ASSERT_TRUE(isWholeReplyLine(line, "7"));
+
+    // The loader ran its whole ReadyForPatch wait and wrote nothing: the only
+    // writes are the restart's marker in DATA and its task in COMMAND.
+    TEST_ASSERT_TRUE(millis() >= kStartMillis + 1300 + TPS25751BenchConsole::kPatchReadyTimeoutMs +
+                                     PBM_READY_WAIT_CAP_MS);
+    TEST_ASSERT_EQUAL(1, b.fake.tasks.size());
+    TEST_ASSERT_EQUAL(1, b.fake.writeCount(FakeBenchTarget::kData));
+    TEST_ASSERT_EQUAL(2, b.fake.writes.size());
+    TEST_ASSERT_EQUAL(0, b.fake.pbmBytes.size());
+}
+
+void test_restart_succeeds_when_the_loader_finds_app_in_its_mode_check()
+{
+    // PTCH with ReadyForPatch sends the console to the loader at once. The
+    // controller reaches APP before the loader's MODE check (step 2), which
+    // ends the load as NotInPatchMode with nothing written.
+    Bench b;
+    b.console.setPatchBundle(patchImage, sizeof(patchImage));
+    b.fake.taskHandler = [&b](const std::string &, std::vector<uint8_t> &) {
+        scriptRestart(b.fake, "PTCH");
+        b.fake.schedule(millis() + 1300, [](FakeBenchTarget &f) { setReadyForPatch(f); });
+        return Verdict::Pending;
+    };
+    // The console reads INT_EVENT1 once, the loader reads it next.
+    size_t eventReads = 0;
+    b.fake.beforeRead = [&eventReads](FakeBenchTarget &f, uint8_t reg, size_t) {
+        if (reg == FakeBenchTarget::kIntEvent && ++eventReads == 2) f.setMode("APP ");
+    };
+    const Lines lines = b.run("@7 RESTART warm");
+    TEST_ASSERT_TRUE(hasLineStarting(lines, "@7 step=patch result=NotInPatchMode t_ms="));
+    TEST_ASSERT_EQUAL(1, countContaining(lines, " sent=0"));
+    TEST_ASSERT_TRUE(hasLineStarting(lines, "@7 step=done mode=APP t_ms="));
+    TEST_ASSERT_EQUAL_STRING("@7 OK", lines.back().c_str());
+    TEST_ASSERT_EQUAL(1, b.fake.tasks.size());
+    TEST_ASSERT_EQUAL(2, b.fake.writes.size());
+}
+
+void test_restart_fails_when_a_load_that_wrote_ends_with_mode_app()
+{
+    // The same status, CommandTimeout, from a load that did write: PBMs never
+    // completes. MODE reads APP afterwards, and the restart still fails,
+    // because the controller took a PBMs the loader could not finish.
+    Bench b;
+    b.console.setPatchBundle(patchImage, sizeof(patchImage));
+    b.fake.taskHandler = [&b](const std::string &code, std::vector<uint8_t> &) {
+        if (code == "Gaid") {
+            scriptRestart(b.fake, "PTCH");
+            b.fake.schedule(millis() + 1300, [](FakeBenchTarget &f) { setReadyForPatch(f); });
+            return Verdict::Pending;
+        }
+        b.fake.setMode("APP ");
+        return Verdict::Pending;  // PBMs stays in COMMAND
+    };
+    const Lines lines = b.run("@7 RESTART warm");
+    TEST_ASSERT_TRUE(hasLineStarting(lines, "@7 step=patch result=CommandTimeout t_ms="));
+    TEST_ASSERT_EQUAL(1, countContaining(lines, " sent=1"));
+    TEST_ASSERT_FALSE(hasLineStarting(lines, "@7 step=done"));
+    TEST_ASSERT_EQUAL_STRING("@7 ERR PATCH patch load ended with CommandTimeout, MODE APP",
+                             lines.back().c_str());
+    TEST_ASSERT_EQUAL(2, b.fake.tasks.size());
+    TEST_ASSERT_EQUAL_STRING("PBMs", b.fake.tasks[1].c_str());
+}
+
+void test_restart_fails_when_a_rejected_load_ends_with_mode_app()
+{
+    // PatchStartStatus 0x04 with MODE APP afterwards: the load failed after
+    // PBMs, so APP does not make it a success.
+    Bench b;
+    b.console.setPatchBundle(patchImage, sizeof(patchImage));
+    b.fake.taskHandler = [&b](const std::string &code, std::vector<uint8_t> &data) {
+        if (code == "Gaid") {
+            scriptRestart(b.fake, "PTCH");
+            b.fake.schedule(millis() + 1300, [](FakeBenchTarget &f) { setReadyForPatch(f); });
+            return Verdict::Pending;
+        }
+        data[0] = 0x04;
+        b.fake.setMode("APP ");
+        return Verdict::Complete;
+    };
+    const Lines lines = b.run("@7 RESTART warm");
+    TEST_ASSERT_TRUE(hasLineStarting(lines, "@7 step=patch result=BadBundleSize t_ms="));
+    TEST_ASSERT_EQUAL(1, countContaining(lines, " sent=1"));
+    TEST_ASSERT_EQUAL_STRING("@7 ERR PATCH patch load ended with BadBundleSize, MODE APP",
                              lines.back().c_str());
 }
 
@@ -1663,7 +1771,7 @@ void test_begin_loads_the_patch_and_reports_it()
     const Lines lines = b.io.takeLines();
     TEST_ASSERT_EQUAL(2, lines.size());
     TEST_ASSERT_EQUAL_STRING("! READY proto=1", lines[0].c_str());
-    TEST_ASSERT_EQUAL_STRING("! PATCH result=Success mode=APP", lines[1].c_str());
+    TEST_ASSERT_EQUAL_STRING("! PATCH result=Success mode=APP sent=1", lines[1].c_str());
 }
 
 void test_begin_reports_ptch_without_a_bundle()
@@ -1689,7 +1797,7 @@ void test_begin_reports_a_failed_patch_load()
     };
     b.console.begin();
     const Lines lines = b.io.takeLines();
-    TEST_ASSERT_EQUAL_STRING("! PATCH result=BadBundleSize mode=PTCH", lines[1].c_str());
+    TEST_ASSERT_EQUAL_STRING("! PATCH result=BadBundleSize mode=PTCH sent=1", lines[1].c_str());
     TEST_ASSERT_EQUAL(0, b.fake.pbmBytes.size());
 }
 
@@ -1719,12 +1827,44 @@ void test_begin_leaves_a_ptch_without_ready_for_patch_to_the_loader()
     b.fake.setMode("PTCH");
     b.console.begin();
     const Lines lines = b.io.takeLines();
-    TEST_ASSERT_EQUAL_STRING("! PATCH result=CommandTimeout mode=PTCH", lines[1].c_str());
+    TEST_ASSERT_EQUAL_STRING("! PATCH result=CommandTimeout mode=PTCH sent=0", lines[1].c_str());
     TEST_ASSERT_TRUE(millis() >= kStartMillis + TPS25751BenchConsole::kPatchReadyTimeoutMs +
                                      PBM_READY_WAIT_CAP_MS);
     TEST_ASSERT_EQUAL(0, b.fake.tasks.size());
     TEST_ASSERT_EQUAL(0, b.fake.writes.size());
     TEST_ASSERT_EQUAL(0, b.fake.pbmBytes.size());
+}
+
+void test_begin_reports_a_controller_that_reaches_app_while_the_loader_waits()
+{
+    // PTCH without ReadyForPatch past kPatchReadyTimeoutMs, then APP while the
+    // loader polls INT_EVENT1. Nothing was written, and the event says so.
+    Bench b;
+    b.console.setPatchBundle(patchImage, sizeof(patchImage));
+    b.fake.setMode("PTCH");
+    b.fake.schedule(kStartMillis + 4000, [](FakeBenchTarget &f) { f.setMode("APP "); });
+    b.console.begin();
+    const Lines lines = b.io.takeLines();
+    TEST_ASSERT_EQUAL(2, lines.size());
+    TEST_ASSERT_EQUAL_STRING("! PATCH result=CommandTimeout mode=APP sent=0", lines[1].c_str());
+    TEST_ASSERT_EQUAL(0, b.fake.tasks.size());
+    TEST_ASSERT_EQUAL(0, b.fake.writes.size());
+    TEST_ASSERT_EQUAL(0, b.fake.pbmBytes.size());
+}
+
+void test_begin_reports_a_load_that_wrote_and_ended_with_mode_app()
+{
+    Bench b;
+    b.console.setPatchBundle(patchImage, sizeof(patchImage));
+    b.fake.setMode("PTCH");
+    setReadyForPatch(b.fake);
+    b.fake.taskHandler = [&b](const std::string &, std::vector<uint8_t> &) {
+        b.fake.setMode("APP ");
+        return Verdict::Pending;  // PBMs stays in COMMAND
+    };
+    b.console.begin();
+    const Lines lines = b.io.takeLines();
+    TEST_ASSERT_EQUAL_STRING("! PATCH result=CommandTimeout mode=APP sent=1", lines[1].c_str());
 }
 
 void test_patch_bundle_can_be_given_to_the_constructor()
@@ -1844,6 +1984,10 @@ int main(int, char **)
     RUN_TEST(test_restart_treats_an_unreadable_data_register_as_no_evidence);
     RUN_TEST(test_restart_into_ptch_without_a_bundle);
     RUN_TEST(test_restart_reports_a_failed_patch_load);
+    RUN_TEST(test_restart_succeeds_when_the_controller_reaches_app_while_the_loader_waits);
+    RUN_TEST(test_restart_succeeds_when_the_loader_finds_app_in_its_mode_check);
+    RUN_TEST(test_restart_fails_when_a_load_that_wrote_ends_with_mode_app);
+    RUN_TEST(test_restart_fails_when_a_rejected_load_ends_with_mode_app);
     RUN_TEST(test_restart_reports_a_controller_stuck_in_boot);
     RUN_TEST(test_restart_waits_for_mode_after_the_controller_answers);
     RUN_TEST(test_restart_waits_through_an_empty_mode_and_boot);
@@ -1873,6 +2017,8 @@ int main(int, char **)
     RUN_TEST(test_begin_reports_a_failed_patch_load);
     RUN_TEST(test_begin_waits_for_a_controller_that_boots_from_eeprom);
     RUN_TEST(test_begin_leaves_a_ptch_without_ready_for_patch_to_the_loader);
+    RUN_TEST(test_begin_reports_a_controller_that_reaches_app_while_the_loader_waits);
+    RUN_TEST(test_begin_reports_a_load_that_wrote_and_ended_with_mode_app);
     RUN_TEST(test_patch_bundle_can_be_given_to_the_constructor);
     RUN_TEST(test_log_stream_gets_one_line_per_request);
 

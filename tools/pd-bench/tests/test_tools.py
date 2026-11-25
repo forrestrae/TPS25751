@@ -164,6 +164,29 @@ def test_task_restart_reports_the_steps(bench):
     assert result["restart_steps"][1] == {"step": "back", "evidence": "data_cleared", "t_ms": 6305}
 
 
+def test_task_restart_reports_a_patch_step_that_sent_nothing(bench):
+    # The controller reached APP by itself while the patch loader waited: the
+    # console reports the loader's status with sent=0 and answers OK.
+    bench.console.script["CMD GAID"] = [[
+        "step=issue task=GAID status=timeout t_ms=5105",
+        "step=back evidence=data_cleared t_ms=6305",
+        "step=mode t_ms=6305 mode=PTCH waited_ms=0",
+        "step=patch result=CommandTimeout t_ms=14305 sent=0",
+        "step=done mode=APP t_ms=14305", "OK"]]
+    result = bench.tools.bench_task("GAID")
+    assert "kind" not in result
+    assert result["restart_steps"][3] == {
+        "step": "patch", "result": "CommandTimeout", "t_ms": 14305, "sent": False}
+    assert result["restart_steps"][4]["mode"] == "APP"
+
+
+def test_task_restart_reports_a_patch_step_that_loaded(bench):
+    bench.console.script["CMD GAID"] = [[
+        "step=patch result=Success t_ms=9000 sent=1", "step=done mode=APP t_ms=9000", "OK"]]
+    result = bench.tools.bench_task("GAID")
+    assert result["restart_steps"][0] == {"step": "patch", "result": "Success", "t_ms": 9000, "sent": True}
+
+
 # ----- bench_write -----
 
 def test_write(bench):

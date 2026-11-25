@@ -520,6 +520,43 @@ void test_not_in_patch_mode()
     }
 }
 
+void test_wrote_to_controller_separates_the_two_command_timeouts()
+{
+    // CommandTimeout is the step 1 result and also a PBMs whose COMMAND never
+    // clears. wroteToController() tells them apart, and is false for every
+    // load that ends in step 1 or 2.
+    Rig r;
+    TPS25751PatchLoader loader(r.pd);
+    TEST_ASSERT_FALSE(loader.wroteToController());  // before the first load
+
+    r.dev.tasks["PBMs"].pollsBeforeDone = 100000;
+    ASSERT_LOAD(PatchLoadStatus::CommandTimeout, loader.loadPatchBundle(r.image.data(), r.image.size()));
+    TEST_ASSERT_TRUE(loader.wroteToController());
+
+    // The next load on the same object ends in step 1 and clears the flag.
+    r.dev.setReadyForPatch(false);
+    ASSERT_LOAD(PatchLoadStatus::CommandTimeout, loader.loadPatchBundle(r.image.data(), r.image.size()));
+    TEST_ASSERT_FALSE(loader.wroteToController());
+
+    // Step 2, MODE reads APP: nothing written either.
+    r.dev.setReadyForPatch(true);
+    r.dev.setMode("APP ");
+    ASSERT_LOAD(PatchLoadStatus::NotInPatchMode, loader.loadPatchBundle(r.image.data(), r.image.size()));
+    TEST_ASSERT_FALSE(loader.wroteToController());
+
+    // A load that fails before PBMs but after the DATA write counts as written.
+    Rig mismatch;
+    TPS25751PatchLoader second(mismatch.pd);
+    mismatch.dev.tasks["PBMs"].output = {0x04};
+    ASSERT_LOAD(PatchLoadStatus::BadBundleSize, second.loadPatchBundle(mismatch.image.data(), mismatch.image.size()));
+    TEST_ASSERT_TRUE(second.wroteToController());
+
+    Rig ok;
+    TPS25751PatchLoader third(ok.pd);
+    ASSERT_LOAD(PatchLoadStatus::Success, third.loadPatchBundle(ok.image.data(), ok.image.size()));
+    TEST_ASSERT_TRUE(third.wroteToController());
+}
+
 // --- Every other status --------------------------------------------------------------
 
 void test_pbms_outcomes()
@@ -879,6 +916,7 @@ int main(int, char **)
     RUN_TEST(test_irq_mode_does_not_read_int_event1);
     RUN_TEST(test_mode_is_polled_until_ptch);
     RUN_TEST(test_not_in_patch_mode);
+    RUN_TEST(test_wrote_to_controller_separates_the_two_command_timeouts);
     RUN_TEST(test_pbms_outcomes);
     RUN_TEST(test_pbms_config_rewritten_after_a_dropped_write);
     RUN_TEST(test_pbms_config_never_reads_back);

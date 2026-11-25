@@ -121,9 +121,13 @@ public:
     /**
      * @brief Announce the console and bring the controller to APP mode
      *
-     * Optional. Prints the event `! READY proto=1`. When MODE reads PTCH and a
-     * patch bundle is set, loads the bundle and reports the outcome as a
-     * `! PATCH` event. Call it once after Wire and the stream are started.
+     * Optional. Prints the event `! READY proto=1`. When the controller stays
+     * in PTCH mode and a patch bundle is set, runs the patch loader and reports
+     * the outcome as a `! PATCH result=<status> mode=<MODE> sent=<0|1>` event.
+     * `sent=0` says the loader ended before it wrote anything to the
+     * controller; with `mode=APP` the controller reached APP by itself and the
+     * status is for information only. Call it once after Wire and the stream
+     * are started.
      *
      * begin() and `RESTART` are the only places that load the bundle. `HELLO`
      * reads only: for a controller in PTCH mode it reports `mode=PTCH` and
@@ -165,6 +169,7 @@ private:
         bool i2cFailed = false;    ///< MODE could not be read
         bool noBundle = false;     ///< PTCH mode and no patch bundle set
         bool attempted = false;    ///< loadPatchBundle() ran
+        bool sent = false;         ///< The loader wrote to the controller (it passed steps 1 and 2)
         PatchLoadStatus status = PatchLoadStatus::Success;
         char mode[5] = {'?', 0, 0, 0, 0};  ///< MODE at the end, without trailing spaces
     };
@@ -200,8 +205,12 @@ private:
     /// yet". Returns false on timeout, with the last result in @p last.
     bool waitForRunningMode(char mode[5], uint32_t &waitedMs, ModeRead &last) const;
 
-    /// Bring the controller to APP mode, loading the patch bundle when MODE
-    /// reads PTCH. Returns true when MODE ends as APP.
+    /// Bring the controller to APP mode, loading the patch bundle when it
+    /// stays in PTCH. Returns true when MODE ends as APP and the patch loader
+    /// did not run, returned Success, or ended before it wrote anything
+    /// (TPS25751PatchLoader::wroteToController() false: the controller reached
+    /// APP by itself). A load that wrote and then failed returns false even
+    /// when MODE reads APP.
     bool ensureAppMode(PatchReport &report);
 
     /// Refuse the line in the buffer without parsing it as a request: a

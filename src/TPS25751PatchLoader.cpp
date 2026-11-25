@@ -233,6 +233,8 @@ PatchLoadStatus TPS25751PatchLoader::loadPatchBundle(const uint8_t* image, size_
         "PBM: loadPatchBundle start — image=%p length=%u irqPin=%d",
         image, (unsigned)length, _irqPin);
 
+    _wroteToController = false;
+
     // Step 1: wait for ready-for-patch (IRQ pin, or INT_EVENT1 bit 81)
     if (!waitReadyForPatch()) {
         _lastStatus = PatchLoadStatus::CommandTimeout;
@@ -246,6 +248,9 @@ PatchLoadStatus TPS25751PatchLoader::loadPatchBundle(const uint8_t* image, size_
         TPS_DEBUG_ERROR(DEBUG_CAT_TASK, "PBM: failed at step 2 (mode check)");
         return _lastStatus;
     }
+
+    // Steps 1 and 2 only read. Everything from here on writes.
+    _wroteToController = true;
 
     // Step 3: configure interrupt mask and clear pending interrupts (IRQ mode only)
     configInterruptMask();

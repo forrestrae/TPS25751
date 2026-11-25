@@ -44,6 +44,13 @@ void printMillis(Stream &out)
     out.print(static_cast<unsigned long>(millis()));
 }
 
+// The last token of a patch report: whether the patch loader wrote anything
+// to the controller. 0 means the load ended in step 1 or 2, which only read.
+void printSent(Stream &out, bool sent)
+{
+    out.print(sent ? F(" sent=1") : F(" sent=0"));
+}
+
 // Prints text with spaces replaced by underscores, so it stays one token.
 void printToken(Stream &out, const char *text)
 {
@@ -97,7 +104,9 @@ void TPS25751BenchConsole::begin()
         _io.print(F("! PATCH result="));
         _io.print(TPS25751PatchLoader::toString(report.status));
         _io.print(F(" mode="));
-        _io.println(report.mode);
+        _io.print(report.mode);
+        printSent(_io, report.sent);
+        _io.println();
     } else if (report.noBundle) {
         Protocol::writeEvent(_io, F("PATCH result=NoBundle mode=PTCH"));
     }
@@ -362,8 +371,16 @@ bool TPS25751BenchConsole::ensureAppMode(PatchReport &report)
     TPS25751PatchLoader loader(_pd);
     report.attempted = true;
     report.status = loader.loadPatchBundle(_patchBundle, _patchBundleLength);
+    report.sent = loader.wroteToController();
     readModeWithRetry(report.mode);
-    return report.status == PatchLoadStatus::Success && strcmp(report.mode, "APP") == 0;
+    if (strcmp(report.mode, "APP") != 0) return false;
+
+    // APP after a load that ended in step 1 or 2 is a controller that loaded
+    // its own configuration while the loader waited: the loader only read, so
+    // its status is reported and does not count. The status cannot decide
+    // this, because CommandTimeout is also a PBMs or PBMc that did not
+    // complete. A load that wrote and then failed stays a failure, APP or not.
+    return report.status == PatchLoadStatus::Success || !report.sent;
 }
 
 // ---------------------------------------------------------------------------
@@ -875,6 +892,7 @@ void TPS25751BenchConsole::handleRestart(const char *id, bool cold)
         _io.print(F("step=patch result="));
         _io.print(TPS25751PatchLoader::toString(report.status));
         printMillis(_io);
+        printSent(_io, report.sent);
         _io.println();
     }
     if (!inApp) {

@@ -308,6 +308,10 @@ def _restart_steps(reply: Reply) -> list[dict]:
 
     ``t_ms`` is the console's uptime clock. ``step=mode`` carries ``waited_ms``:
     how long after the controller answered again MODE took to read APP or PTCH.
+    ``step=patch`` carries the patch loader's ``result`` and ``sent``: false when
+    the loader ended before it wrote anything to the controller. With ``sent``
+    false and a ``step=done`` after it, the controller reached APP by itself and
+    ``result`` is for information only.
     """
     steps = []
     for line in reply.data_lines():
@@ -316,6 +320,8 @@ def _restart_steps(reply: Reply) -> list[dict]:
             for name in ("t_ms", "waited_ms"):
                 if tokens.get(name, "").isdigit():
                     tokens[name] = int(tokens[name])
+            if tokens.get("sent") in ("0", "1"):
+                tokens["sent"] = tokens["sent"] == "1"
             steps.append(tokens)
     return steps
 

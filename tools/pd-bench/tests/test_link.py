@@ -43,14 +43,14 @@ def test_port_is_opened_exclusively(rig):
 def test_log_lines_and_events_are_kept_apart_from_the_reply(rig):
     clock, console, factory, link = rig
     # Firmware log output and an event arrive between the reply lines.
-    console.noise = ["[bench] sketch says hello", "! PATCH result=Success mode=APP", "@9999999 OK"]
+    console.noise = ["[bench] sketch says hello", "! PATCH result=Success mode=APP sent=1", "@9999999 OK"]
     with link() as bench:
         reply = bench.command("SNAP", 5.0)
 
     assert reply.ok
     assert len(reply.lines) == 19                      # uptime, 17 registers, int_clear
     assert all("sketch" not in line for line in reply.lines)
-    assert reply.events == ["PATCH result=Success mode=APP"] * 20
+    assert reply.events == ["PATCH result=Success mode=APP sent=1"] * 20
     # A reply line for another request id is a stale answer, not part of this reply.
     assert reply.log.count("[bench] sketch says hello") == 20
     assert reply.log.count("@9999999 OK") == 20

@@ -80,6 +80,32 @@ public:
 
     bool readMode(TPS25751Mode &modeOut) const;
     bool readCustomerUse(TPS25751CustomerUse &customerUse) const;
+
+    /**
+     * @brief Read the COMMAND register (0x08)
+     *
+     * COMMAND is transient: executeCommand() writes a 4CC and polls it until it
+     * clears or reads "!CMD". This read is for inspection and debugging.
+     *
+     * @param command Register object to populate (4 bytes)
+     * @return true if the read succeeded
+     */
+    bool readCommand(TPS25751Command &command) const;
+
+    /**
+     * @brief Read the DATA register (0x09)
+     * @param data Register object to populate (64 bytes)
+     * @return true if the read succeeded
+     */
+    bool readData(TPS25751Data &data) const;
+
+    /**
+     * @brief Read the VERSION register (0x0F)
+     * @param version Register object to populate (4 bytes)
+     * @return true if the read succeeded
+     */
+    bool readVersion(TPS25751Version &version) const;
+
     bool readInterruptEvent(TPS25751InterruptEvent &intEvent) const;
 
     /**
@@ -88,6 +114,17 @@ public:
      * @return true if the read succeeded
      */
     bool readInterruptMask(TPS25751InterruptMask &interruptMask) const;
+
+    /**
+     * @brief Read the Interrupt Clear register (0x18)
+     *
+     * The library writes INT_CLEAR1 to acknowledge INT_EVENT1 sources; the TRM
+     * marks it R/W, so it can be read back.
+     *
+     * @param interruptClear Register object to populate (11 bytes)
+     * @return true if the read succeeded
+     */
+    bool readInterruptClear(TPS25751InterruptClear &interruptClear) const;
 
     bool readStatus(TPS25751Status &statusOut) const;
     bool readPowerPathStatus(TPS25751PowerPathStatus &pps) const;
@@ -138,6 +175,13 @@ public:
      * @return true if the read succeeded
      */
     bool readPD3Config(TPS25751PD3Config &pd3Config) const;
+
+    /**
+     * @brief Read the Received SOP Identity Data Object register (0x48)
+     * @param sopIdentity Register object to populate (25 bytes)
+     * @return true if the read succeeded
+     */
+    bool readReceivedSOPIdentity(TPS25751ReceivedSOPIdentity &sopIdentity) const;
 
     /**
      * @brief Read the IO Config register (0x5C)
@@ -525,6 +569,13 @@ public:
      * @return Unique pointer to Mode register (nullptr if failed)
      */
     std::unique_ptr<TPS25751Mode> readModeRegister(bool validate = true) const;
+
+    /**
+     * @brief Read Customer Use register (0x06) using factory pattern
+     * @param validate Whether to validate the register after reading
+     * @return Unique pointer to Customer Use register (nullptr if failed)
+     */
+    std::unique_ptr<TPS25751CustomerUse> readCustomerUseRegister(bool validate = true) const;
     
     /**
      * @brief Read Command register (0x08) using factory pattern
@@ -558,6 +609,20 @@ public:
      * @return Unique pointer to Interrupt Event register (nullptr if failed)
      */
     std::unique_ptr<TPS25751InterruptEvent> readInterruptEventRegister(bool validate = true) const;
+
+    /**
+     * @brief Read Interrupt Mask register (0x16) using factory pattern
+     * @param validate Whether to validate the register after reading
+     * @return Unique pointer to Interrupt Mask register (nullptr if failed)
+     */
+    std::unique_ptr<TPS25751InterruptMask> readInterruptMaskRegister(bool validate = true) const;
+
+    /**
+     * @brief Read Interrupt Clear register (0x18) using factory pattern
+     * @param validate Whether to validate the register after reading
+     * @return Unique pointer to Interrupt Clear register (nullptr if failed)
+     */
+    std::unique_ptr<TPS25751InterruptClear> readInterruptClearRegister(bool validate = true) const;
 
     /**
      * @brief Read Status register using factory pattern
@@ -707,6 +772,13 @@ public:
      * @return Unique pointer to ADC Results register (nullptr if failed)
      */
     std::unique_ptr<TPS25751ADCResults> readADCResultsRegister(bool validate = true) const;
+
+    /**
+     * @brief Read Sleep Control register (0x70) using factory pattern
+     * @param validate Whether to validate the register after reading
+     * @return Unique pointer to Sleep Control register (nullptr if failed)
+     */
+    std::unique_ptr<TPS25751SleepControl> readSleepControlRegister(bool validate = true) const;
 
     /**
      * @brief Read GPIO Status register using factory pattern

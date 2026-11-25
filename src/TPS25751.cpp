@@ -80,6 +80,21 @@ bool TPS25751::readCustomerUse(TPS25751CustomerUse &customerUse) const
     return readRegister(TPS25751Registers::Registers::CUSTOMER_USE, customerUse);
 }
 
+bool TPS25751::readCommand(TPS25751Command &command) const
+{
+    return readRegister(TPS25751Registers::Registers::COMMAND, command);
+}
+
+bool TPS25751::readData(TPS25751Data &data) const
+{
+    return readRegister(TPS25751Registers::Registers::DATA, data);
+}
+
+bool TPS25751::readVersion(TPS25751Version &version) const
+{
+    return readRegister(TPS25751Registers::Registers::VERSION, version);
+}
+
 bool TPS25751::readInterruptEvent(TPS25751InterruptEvent &intEvent) const
 {
     return readRegister(TPS25751Registers::Registers::INT_EVENT1, intEvent);
@@ -88,6 +103,11 @@ bool TPS25751::readInterruptEvent(TPS25751InterruptEvent &intEvent) const
 bool TPS25751::readInterruptMask(TPS25751InterruptMask &interruptMask) const
 {
     return readRegister(TPS25751Registers::Registers::INT_MASK1, interruptMask);
+}
+
+bool TPS25751::readInterruptClear(TPS25751InterruptClear &interruptClear) const
+{
+    return readRegister(TPS25751Registers::Registers::INT_CLEAR1, interruptClear);
 }
 
 bool TPS25751::readStatus(TPS25751Status &statusOut) const
@@ -168,6 +188,11 @@ bool TPS25751::readPDStatus(TPS25751PDStatus &pdStatus) const
 bool TPS25751::readPD3Config(TPS25751PD3Config &pd3Config) const
 {
     return readRegister(TPS25751Registers::Registers::PD3_CONFIGURATION, pd3Config);
+}
+
+bool TPS25751::readReceivedSOPIdentity(TPS25751ReceivedSOPIdentity &sopIdentity) const
+{
+    return readRegister(TPS25751Registers::Registers::RECEIVED_SOP_IDENTITY, sopIdentity);
 }
 
 bool TPS25751::readIOConfig(TPS25751IOConfig &ioConfig) const
@@ -433,6 +458,10 @@ std::unique_ptr<TPS25751Mode> TPS25751::readModeRegister(bool validate) const {
     return readAndValidateAs<TPS25751Mode>(TPS25751Registers::Address::MODE, validate);
 }
 
+std::unique_ptr<TPS25751CustomerUse> TPS25751::readCustomerUseRegister(bool validate) const {
+    return readAndValidateAs<TPS25751CustomerUse>(TPS25751Registers::Address::CUSTOMER_USE, validate);
+}
+
 std::unique_ptr<TPS25751Command> TPS25751::readCommandRegister(bool validate) const {
     return readAndValidateAs<TPS25751Command>(TPS25751Registers::Address::COMMAND, validate);
 }
@@ -447,6 +476,14 @@ std::unique_ptr<TPS25751Version> TPS25751::readVersionRegister(bool validate) co
 
 std::unique_ptr<TPS25751InterruptEvent> TPS25751::readInterruptEventRegister(bool validate) const {
     return readAndValidateAs<TPS25751InterruptEvent>(TPS25751Registers::Address::INT_EVENT1, validate);
+}
+
+std::unique_ptr<TPS25751InterruptMask> TPS25751::readInterruptMaskRegister(bool validate) const {
+    return readAndValidateAs<TPS25751InterruptMask>(TPS25751Registers::Address::INT_MASK1, validate);
+}
+
+std::unique_ptr<TPS25751InterruptClear> TPS25751::readInterruptClearRegister(bool validate) const {
+    return readAndValidateAs<TPS25751InterruptClear>(TPS25751Registers::Address::INT_CLEAR1, validate);
 }
 
 std::unique_ptr<TPS25751Status> TPS25751::readStatusRegister(bool validate) const {
@@ -527,6 +564,10 @@ std::unique_ptr<TPS25751TypeCState> TPS25751::readTypeCStateRegister(bool valida
 
 std::unique_ptr<TPS25751ADCResults> TPS25751::readADCResultsRegister(bool validate) const {
     return readAndValidateAs<TPS25751ADCResults>(TPS25751Registers::Address::ADC_RESULTS, validate);
+}
+
+std::unique_ptr<TPS25751SleepControl> TPS25751::readSleepControlRegister(bool validate) const {
+    return readAndValidateAs<TPS25751SleepControl>(TPS25751Registers::Address::SLEEP_CONTROL, validate);
 }
 
 std::unique_ptr<TPS25751GPIOStatus> TPS25751::readGPIOStatusRegister(bool validate) const {

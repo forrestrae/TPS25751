@@ -5,8 +5,6 @@
 * **Project:** TPS25751 USB-C PD Controller Library
 * **Status:** **27/27 registers complete** — Batch 0 (test harness) and Batch A (SLEEP_CONTROL, CUSTOMER_USE) **done 2026-07-06**, Batch B (INT_MASK1, INT_CLEAR1), Batch C (ADC_RESULTS), Batch D (TRANSMIT_SOURCE_CAPS, TRANSMIT_SINK_CAPS), and Batch E (AUTONEGOTIATE_SINK, IO_CONFIG) **done 2026-07-07**, Batch F (LIQUID_DETECTION_CONFIG) **done 2026-07-08** — the register set is now fully implemented
 
----
-
 ## Executive Summary
 
 This document plans the implementation of the remaining registers of the TPS25751
@@ -31,8 +29,6 @@ registers. To start execution, see [Launching the Plan](#launching-the-plan).
 - **[Architecture](../engineering/ARCHITECTURE.md)** - System design and component relationships
 - **[Code Review Guidelines](../engineering/CODE_REVIEW_GUIDELINES.md)** - The review-gate checklist used by the delegated workflow
 
----
-
 ## Completed Work (history)
 
 ### Phase 1 — Critical PD Diagnostics ✅ (2025-10-22)
@@ -50,8 +46,6 @@ originally slated for old Phase 4, pulled forward to enable
 `TPS25751::executeCommand()`, the `TPS25751DownstreamDevice` I2Cc proxy, and
 `TPS25751PatchLoader` (PBM). See ADR-007/ADR-011 in
 [ARCHITECTURE.md](../engineering/ARCHITECTURE.md).
-
----
 
 ## Current Implementation Status
 
@@ -106,8 +100,6 @@ Every register address and size lived in `TPS25751Registers::Address` /
 base-class `setBits()` write primitive + typed `writeRegister<T>()` keyed on a
 class `kAddress` served every R/W register through to the last (Batch F's
 LIQUID_DETECTION_CONFIG), so no new I2C plumbing was needed after Batch B.
-
----
 
 ## Implementation Order & Rationale
 
@@ -293,8 +285,6 @@ cross-check against the MCP register data matched all 12 fields exactly. The TRM
 - Liquid/moisture detection thresholds and response actions; R/W. Last because
   it is a specialized safety feature with no current example coverage.
 
----
-
 ## Delegated Implementation Workflow
 
 **Decision: yes — delegate implementation to a less expensive subagent, gate with
@@ -383,8 +373,6 @@ Do not delegate: factory/architecture refactors, CONSTRAINTS.md/ADR authoring,
 anything requiring hardware interaction, or fix-ups after a failed review (see
 escalation rule). Those stay with the orchestrator.
 
----
-
 ## Pilot Retrospective & Plan Amendments (Batch A)
 
 Batch A was the pilot whose explicit job was to validate the delegated pipeline
@@ -469,8 +457,6 @@ gaps. Recorded here so Batches B–F benefit.
    **Amendment:** work orders name the base commit/branch the worktree must sit
    on (`main` at or after Batch 0), so the subagent doesn't have to infer it.
 
----
-
 ## Launching the Plan
 
 Execution is session-driven: **run each batch as its own Claude Code session**,
@@ -543,8 +529,6 @@ For Batch D (or any batch you're uneasy about), you can additionally run
 `/code-review ultra <PR#>` (or the no-arg branch form) yourself before merging —
 it is user-triggered and billed, and the orchestrator cannot launch it for you.
 
----
-
 ## Documentation Update Checklist (per batch)
 
 Run this checklist at the end of **every** batch, before merge. The orchestrator
@@ -577,8 +561,6 @@ Run this checklist at the end of **every** batch, before merge. The orchestrator
   (`scripts/bump_version.py`) is the single source of truth. Version intent is
   expressed only via `#minor`/`#major` tokens in the commit subject line.
 
----
-
 ## Estimated Effort
 
 Historical calibration: Phase 1 (6 registers, incl. the hardest PDO decode work)
@@ -594,8 +576,6 @@ time for lower cost; orchestrator attention per batch is the scarce resource.
 | D | TRANSMIT_SOURCE/SINK_CAPS | **High** (PDO encode) | 3–4 h (spec-writing + deep review) | Large |
 | E | AUTONEGOTIATE_SINK, IO_CONFIG | Medium | 2 h | Large |
 | F | LIQUID_DETECTION_CONFIG | Low | 1 h | Small |
-
----
 
 ## Success Criteria
 
@@ -617,8 +597,6 @@ time for lower cost; orchestrator attention per batch is the scarce resource.
 - Doxygen complete per DOCUMENTATION.md
 - New traps fed back into CONSTRAINTS.md / CODE_REVIEW_GUIDELINES.md
 
----
-
 ## Dependencies and Risks
 
 ### Dependencies
@@ -636,15 +614,11 @@ time for lower cost; orchestrator attention per batch is the scarce resource.
 | No runnable test harness | Medium | Batch 0 is a required prerequisite — register batches do not start until the native test run is green |
 | Registry auto-publish on every merge to `main` | Low | Batch = merge = release is intentional; use `#minor` for API additions, verify tarball with `pio pkg pack` if export list changes |
 
----
-
 ## Future Enhancements
 
 Unchanged from v0.3: caching layer, async I2C, register-change subscriptions,
 configuration profiles, power-profile builder, interrupt-driven architecture,
 data logging. Additional platform support (ESP32, RP2040) tracked in AGENTS.md.
-
----
 
 ## Revision History
 
@@ -662,8 +636,6 @@ data logging. Additional platform support (ESP32, RP2040) tracked in AGENTS.md.
 | 1.0 | 2026-07-07 | Claude Code | **Batch D executed and complete** (24/27, 3 remaining): `TPS25751TransmitSourceCaps` (0x32, 63 B) + `TPS25751TransmitSinkCaps` (0x33, 53 B) via the delegated pipeline (Sonnet subagent, orchestrator-gated, Batch-D Tightening applied) — the library's first **PDO encode** path: static `build*PDO()` word builders for all four PDO types (PPS at 100 mV/50 mA), `setPDO`/`setPDOCount`, source-side `get/setPowerPathForPDO`, `read/writeTransmit{Source,Sink}Caps`, two 23-test native suites (175/175 green). Work order pasted the hardware-verified PDO bit map + the source-vs-sink byte-offset difference (PDO 1 at byte 3 vs byte 1). Inline `/code-review high` gate + manual per-PDO re-derivation found **no correctness findings**. Gate surfaced a latent `bool`-truncation bug in the pre-existing read-only `TPS25751ReceivedSinkCaps` FRS getter (left unchanged; fed into CODE_REVIEW_GUIDELINES.md + CONSTRAINTS.md as a follow-up); corrected two imprecise PPS bit ranges in CONSTRAINTS.md. Shared PDO codec extraction deliberately deferred. Moved both registers to Implemented, updated all counts |
 | 1.1 | 2026-07-07 | Claude Code | **Batch E executed and complete** (26/27, 1 remaining): `TPS25751AutoNegotiateSink` (0x37, 24 B, R/W sink-negotiation configuration — voltage window, minimum required power, PPS sink request parameters, `setBits()`-based setters, cross-field min≤max semantic check) + `TPS25751IOConfig` (0x5C, 49 B) via the delegated pipeline (Sonnet subagent, orchestrator-gated). **Correction:** IO_CONFIG was implemented **read-only**, not R/W as this plan previously stated — the TRM/register-docs mark every field `[R]` and state GPIO configuration is fixed at boot; no setters/write path/`kAddress` were added. IO_CONFIG is also the library's first register whose bit offsets (up to 391) exceed `extractBits()`'s `uint8_t bitPos` range, so every field decodes via direct byte assembly from `_raw[]` (mirroring `TPS25751TransmitSourceCaps::getPDO()`). Two native test suites added (61 tests). Moved both registers to Implemented, corrected IO_CONFIG's access in the Unimplemented→Implemented move, updated all counts |
 | 1.2 | 2026-07-08 | Claude Code | **Batch F executed and complete — register set now 27/27, 0 remaining**: `TPS25751LiquidDetectionConfig` (0x98, 11 B, R/W liquid/moisture-detection configuration — with/without-liquid sleep intervals at 1000 ms/LSB, ADC sample count + sample-time cadence at 10 ms/LSB, two 14 mV/LSB ADC threshold pairs with hysteresis, and the liquid-detection-state / enable-corrosion-mitigation / enable-liquid-detection bits) via the delegated pipeline (Sonnet subagent, orchestrator-gated). A near-clone of `TPS25751AutoNegotiateSink`: `setBits()`-based setters, `kAddress` + typed `writeRegister<T>()` write path, cross-field low ≤ high semantic check on each threshold pair; all bit offsets (≤ 82) fit `extractBits()`/`setBits()`'s `uint8_t bitPos` range so no direct byte assembly was needed. Full factory integration, read/write + factory-reader convenience methods, read-only example demo, 32-test native suite (269/269 green), warning-free build. Inline `/code-review high` gate found **no findings**; manual bit-offset cross-check matched all 12 fields. The "Number of Samples must be 2^N" TRM note intentionally not enforced (reset 0 is not a power of two). Moved LIQUID_DETECTION_CONFIG to Implemented, updated all counts — **all planned register work is complete** |
-
----
 
 ## Appendix A: Register Quick Reference
 
@@ -698,7 +670,5 @@ data logging. Additional platform support (ESP32, RP2040) tracked in AGENTS.md.
 | 27 | LIQUID_DETECTION_CONFIG | 0x98 | 11 | R/W | F | ✅ Done (2026-07-08) |
 
 **Note:** For USB PD PDO type details, see [CONSTRAINTS.md - USB Power Delivery Complexity](../engineering/CONSTRAINTS.md#usb-power-delivery-complexity)
-
----
 
 *End of Implementation Plan v1.2*

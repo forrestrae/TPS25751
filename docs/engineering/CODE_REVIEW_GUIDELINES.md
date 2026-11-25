@@ -2,8 +2,6 @@
 
 This document outlines guidelines for reviewing TPS25751 library code changes, with emphasis on embedded C++ concerns specific to the Teensy 4.x platform and TPS25751 I2C protocol.
 
----
-
 ## Platform-Specific Correctness
 
 The most critical review category for this codebase. Many bugs here cause silent runtime failures or non-compiling builds.
@@ -131,8 +129,6 @@ Review these when a downstream R/W register class adds field setters or a driver
 - **Self-clearing bits read back 0**: REG_RST, WD_RST, FORCE_* are written as `setX(true)` and cleared by hardware. Do not assert they read back 1, and do not loop expecting them to stay set
 - **Typed writes obey the I2Cw framing**: `len <= 11` and `Length = payload + 1` (counts the offset byte) apply to typed writes exactly as to raw I2Cw — see the I2Cw bullets above
 
----
-
 ## Hard-to-Notice Bugs
 
 - **Off-by-one in bitfield extraction**: Verify bit positions match the TI datasheet exactly — bit 0 vs bit 1 shifts are easy to transpose
@@ -153,8 +149,6 @@ Review these when a downstream R/W register class adds field setters or a driver
 - **A per-port flag read from a per-offer word** (caught in the 2026-11-22 USB PD cross-check): USB PD puts the port's flags (Dual-Role Power, Unconstrained Power, USB Communications Capable, Dual-Role Data, Unchunked, EPR Capable) only in PDO 1, the vSafe5V PDO (Tables 6.8, 6.9); bits 29:22 of every other Fixed PDO are reserved Device Flags (Table 6.10). Reading them from the PDO at hand, or from the active contract's PDO, returns reserved bits: on the bench, 0x34 printed Unconstrained Power: No from the 20 V PDO of a charger whose PDO 1 sets it. Per-offer fields (Peak Current, voltage, current) do belong to each PDO. When a register holds one PDO word, check which of its fields describe the offer and which describe the port, and take the port's from PDO 1 (in 0x34, First PDO Control Bits). `TPS25751Pdo` encodes this rule; new code should not decode PDO flags itself.
 - **Printing a USB PD field the specification makes conditional** (caught in Batch L of the rev B plan): some specification fields are reserved unless another field has a given value. BSDO Charging Status is reserved when Battery Present is 0 or the capacity is FFFFh; Source_Capabilities_Extended Source Inputs bit 1 is ignored when bit 0 is 0. An accessor may decode the bits regardless, but a `debugPrint()` that prints them unconditionally reports "Charging" or "capacity 0 mWh" for a battery that does not exist, as the first Batch L output did for the 0x7B reset value. Check every typed debug line against the condition column of its specification table.
 
----
-
 ## Security Vulnerabilities
 
 For an embedded I2C library, the relevant attack surface is different from web applications:
@@ -163,8 +157,6 @@ For an embedded I2C library, the relevant attack surface is different from web a
 - **Integer overflow in size calculations**: `pdoCount * 4` can overflow `uint8_t`; promote to `size_t` before arithmetic
 - **Unvalidated enum values from hardware**: Hardware may return out-of-range enum values. Code that indexes arrays or switch statements using raw hardware values without range checks can access out-of-bounds memory
 - **Hardcoded I2C addresses**: I2C device addresses should use the named constants in the register map, not magic numbers, to avoid silent address collisions
-
----
 
 ## Standards Compliance
 
@@ -177,8 +169,6 @@ Verify that new code follows all mandatory standards from [STANDARDS.md](STANDAR
 - **Magic numbers**: Bitfield masks and shift counts defined as `static constexpr` named constants, not inline literals
 - **Doxygen**: Every public method has `@brief`, `@return`, and a `@see` reference to the TI datasheet section
 
----
-
 ## Unintended Code
 
 - **Debug print statements left in**: `Serial.print` calls that are not inside `debugPrint()` or guarded by a debug flag
@@ -187,8 +177,6 @@ Verify that new code follows all mandatory standards from [STANDARDS.md](STANDAR
 - **Hardcoded test data in production code**: Magic byte arrays that are clearly test vectors
 - **Disabled validation**: Validation methods that always `return true` as a placeholder
 - **Builder pattern usage**: `TPS25751RegisterBuilder` is deprecated (ADR-001). New code must not use it
-
----
 
 ## Code Style
 
@@ -199,8 +187,6 @@ Verify that new code follows all mandatory standards from [STANDARDS.md](STANDAR
 - **Excessive nesting**: Validation logic with more than 2-3 levels of nesting should be flattened with early returns
 - **Unused `#include`s**: Unnecessary headers increase compile time and can cause unexpected namespace pollution
 
----
-
 ## Testing
 
 - **Coverage below 90%**: Every register class requires >90% code coverage. New code without tests should be blocked
@@ -210,8 +196,6 @@ Verify that new code follows all mandatory standards from [STANDARDS.md](STANDAR
 - **Tests that always pass**: Watch for tests with incorrect `EXPECT_*` calls that never actually exercise the failure path
 - **A cached build proves nothing about warnings** (caught in Batch G of the rev B plan): `platformio.ini` sets `build_cache_dir = .pio/buildcache`, so `pio run` and even `pio run -t clean` followed by `pio run` retrieve unchanged objects from the cache ("Retrieved ... from cache") and print none of their warnings. A "warning-free" claim needs a compile that bypasses the cache, for example `PLATFORMIO_BUILD_CACHE_DIR=<empty scratch dir> pio run -e example-read-registers` after `-t clean`, with the log showing a `Compiling` line for each new source file
 - **A saturating fixture cannot catch a wrong shift** (caught in Batch L of the rev B plan): a packed-word fixture such as 0xFFF9 sets every sub-field to its maximum, so a decode with the wrong shift or mask can still produce the expected numbers. For each multi-field word, add one fixture whose sub-fields hold distinct, non-maximal values, and derive the expected values by hand from the specification table
-
----
 
 ## Additional Concerns
 

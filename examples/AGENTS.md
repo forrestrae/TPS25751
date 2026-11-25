@@ -3,8 +3,6 @@
 This file guides AI coding assistants working with the example sketches in this
 directory. `CLAUDE.md` is a symlink to this file — edit `AGENTS.md`.
 
----
-
 ## Purpose
 
 This directory holds runnable example sketches for the TPS25751 library. Each
@@ -14,8 +12,6 @@ focused capability (host register reads, patch-bundle loading, etc.).
 For library development itself (register classes, factory, validation, architecture),
 see the library developer guide at [`../AGENTS.md`](../AGENTS.md). This file is scoped
 to the **examples** only.
-
----
 
 ## ⚠️ Keep `README.md` In Sync — Required
 
@@ -44,8 +40,6 @@ The README does **not** need to list every example exhaustively if the set grows
 large, but every example that exists should be discoverable and the table must not
 reference examples that no longer exist.
 
----
-
 ## Building & Running Examples
 
 Examples build through per-example environments in the library's `../platformio.ini`,
@@ -58,8 +52,6 @@ pio device monitor                            # 115200 baud
 
 The per-example `platformio.ini` files inside some example folders are for standalone
 consumption and are not the primary build path used in this repo.
-
----
 
 ## Conventions Across Examples
 
@@ -76,8 +68,6 @@ consumption and are not the primary build path used in this repo.
   `setDebugCategories()` rather than build flags.
 - BQ25798 downstream-device examples now live in the sibling `lib/BQ25798` repo
   (see its `examples/AGENTS.md` for the I2Cc pacing convention).
-
----
 
 ## Further Reading
 

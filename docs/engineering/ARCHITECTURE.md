@@ -3,8 +3,6 @@
 **Last Updated:** 2026-11-24
 **Status:** Active
 
----
-
 ## Overview
 
 This document describes how the TPS25751 library is built: its layers, its main classes,
@@ -15,8 +13,6 @@ Records at the end explain why the structure is the way it is; ADR-001 to ADR-00
 
 The diagrams are Mermaid, which GitHub and most Markdown viewers render. Class and method
 names in them match the headers in `include/`.
-
----
 
 ## Table of Contents
 
@@ -32,8 +28,6 @@ names in them match the headers in `include/`.
 10. [Future Architecture Considerations](#future-architecture-considerations)
 11. [Architectural Decision Records](#architectural-decision-records)
 12. [Revision History](#revision-history)
-
----
 
 ## System Overview
 
@@ -114,9 +108,8 @@ it apart because three other components depend on it alone.
 - Owns the `TwoWire&` and the 7-bit I2Ct address (0x20 to 0x23, `TPS25751_I2CT_ADDRESS_IDX`).
 - Typed reads in two forms: `read<Name>Register(bool validate = true)` returns a
   `std::unique_ptr` to the register class, or `nullptr` on a failed read or failed
-  validation, and `read<Name>(T&)` fills a caller-owned object. Most registers have both;
-  some have one form only (for example `readSleepControl()` and `readVersionRegister()`).
-  `readRegisterAs<T>(Address)` works for every register.
+  validation, and `read<Name>(T&)` fills a caller-owned object. All 37 registers have
+  both. `readRegisterAs<T>(Address)` is the generic equivalent of the first form.
 - One typed write per writable register (`writeSleepControl()`,
   `writeTransmitSourceCaps()`, and so on), plus the generic `writeRegister<T>(const T&)`
   keyed on the class's `kAddress`.
@@ -209,8 +202,6 @@ it apart because three other components depend on it alone.
 - `TPS25751RegisterAddress.h`: the `Address` enum, the `RegisterInfo` size table, and
   `getRegisterInfo()` and `getRegisterSize()`.
 
----
-
 ## Component Architecture
 
 ### Core Components
@@ -226,7 +217,7 @@ public:
     explicit TPS25751(TwoWire &wire = Wire, uint8_t address = TPS25751_I2CT_ADDRESS_IDX[0]);
     bool begin() const;
 
-    // Typed reads: most registers have both forms
+    // Typed reads: every register has both forms
     bool readStatus(TPS25751Status &statusOut) const;
     std::unique_ptr<TPS25751Status> readStatusRegister(bool validate = true) const;
 
@@ -472,8 +463,6 @@ compilation and defaulted to 0, so `setDebugLevel()` had no effect without
 | `TPS25751EepromUpdater` | `include/TPS25751EepromUpdater.h`, `src/TPS25751EepromUpdater.cpp` | Task primitives (`readFlash()`, `setWriteAddress()`, `writeData()`, `verifyBundle()`), checked region-pointer writes, `updateRegion()`, `updateInactiveRegion()`, `updateBothRegions()`, `programBlank()`, `compareRegion()`, `dump()`, and `coldReset()`. Returns `EepromUpdateStatus`; `lastStep()` names the step that failed |
 | `TPS25751DownstreamDevice` | `include/TPS25751DownstreamDevice.h`, `src/TPS25751DownstreamDevice.cpp` | `readRegister()` and `writeRegister()` for a part on I2Cc, by proxy or direct transport |
 
----
-
 ## Design Patterns
 
 ### 1. Factory Method Pattern
@@ -594,8 +583,6 @@ TPS25751EepromUpdater updater(exec);
 The patch loader and the downstream device take a `TPS25751` directly. Since the TwoWire
 fake of 2026-11-23, `TPS25751.cpp` and the loader also build in `[env:native]`.
 
----
-
 ## Class Hierarchy
 
 ### Inheritance Tree
@@ -698,8 +685,6 @@ classDiagram
 
 Composition everywhere above the main class: the sequencers and the downstream device each
 hold a reference to the object they drive and never subclass it.
-
----
 
 ## Data Flow
 
@@ -894,8 +879,6 @@ The `(addr, data, length)` overload follows the same switch into the creator tha
 the bytes, and the `RegisterInfo` overload creates an empty object of the size the table
 gives.
 
----
-
 ## Extension Points
 
 ### Adding a New Register Class
@@ -993,8 +976,6 @@ public:
 };
 ```
 
----
-
 ## Component Relationships
 
 ### Module Dependencies
@@ -1058,8 +1039,6 @@ The sequencer headers forward-declare `TPS25751` and are included at the end of
 cycle. `TPS25751CommandExecutor.h` does not include `Wire.h`, which is what lets the
 updater build on the host.
 
----
-
 ## Memory Management Strategy
 
 ### Ownership Model
@@ -1099,8 +1078,6 @@ std::unique_ptr<TPS25751Register> TPS25751RegisterFactoryImpl::createStatusRegis
 registerOut = RegisterT(buffer, regInfo.size);
 ```
 
----
-
 ## Testing Architecture
 
 `TESTING.md` is the full description; this section shows how the tests attach to the
@@ -1133,8 +1110,6 @@ the ten hardware stages of `docs/plans/feature/eeprom-update.md`. The verify gat
 
 `TPS25751DownstreamDevice.cpp` and `TPS25751HostExecutor.cpp` are not in the native build.
 
----
-
 ## Future Architecture Considerations
 
 ### Planned Enhancements
@@ -1160,8 +1135,6 @@ is that a read always reflects the device at the time of the call.
 - Non-blocking register reads with a completion callback.
 - Change notification for subscribed registers.
 - Saving and restoring a set of register values as a profile.
-
----
 
 ## Architectural Decision Records
 
@@ -1442,7 +1415,6 @@ by the user's decision recorded in the EEPROM-update plan.
   values keep their numbers. Hardware stage 8 of the EEPROM-update plan (2026-11-24) ran
   steps 1, 2, and 5 in five loads, all Success; neither `PBMe` path has run on hardware.
 
-
 ### ADR-012: 16-Bit Bit Positions in the Register Base Class
 **Status:** Accepted
 **Date:** 2026-11-19
@@ -1482,7 +1454,6 @@ has, and every new long register would have added another.
 - The PDO accessors of the capability registers (0x30 to 0x33) still assemble their 32-bit
   words from `_raw[]` by hand. They are correct and were left as they are; they could move
   to `extractBits32()` and `setBits()` in a later cleanup.
-
 
 ### ADR-013: USB PD Objects as Value Types
 **Status:** Accepted
@@ -1621,8 +1592,6 @@ than a fake bus.)
 - `TPS25751PatchLoader` and `TPS25751DownstreamDevice` still call `TPS25751` directly.
   The loader has native tests through the TwoWire fake; the downstream device has none.
   Moving either to the executor seam is not planned.
-
----
 
 ## Revision History
 

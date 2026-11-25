@@ -1650,13 +1650,36 @@ build: the branch tip `135a798` with the F8091166 image. Steps:
    the wait polls through PTCH and ends with APP after some hundreds of milliseconds,
    and the report reads APP, VERSION 0xF8091166, BOOT_FLAGS `18 00 F0 A2 C1`. `r`'s dump
    equals the full-flash image with the High pointer 0.
-3. `b` (`Low, then High`), `r`, a power cycle, and `r`. Expected: the full-flash image and
+3. `b`, `r`, a power cycle, and `r`. With the Low pointer valid and the High pointer 0,
+   selection targets High first, so the plan reads `High, then Low` (corrected during the
+   stage; this line first said `Low, then High`). Expected: the full-flash image and
    the S1 boot, which returns the board to its starting state.
 
 The check passes when step 2's start-up report reads APP and prints no PTCH advice. If the
 wait ends with APP after a few milliseconds, the power-on missed the race and the step
 shows nothing about the fix; one repeat of the power cycle is then allowed. Recovery: as
 stage 9.
+
+Result, 2026-11-24, branch commit `135a798` with the F8091166 image (header SHA-256
+`60c6cdd8...add77772c`), second board, bench supply.
+
+| Step | Result |
+|---|---|
+| 1, flash and `r` | Start-up: `MODE read APP after 3 ms (1 MODE reads, 0 failed)`; report APP, VERSION 0xF8091166, BOOT_FLAGS `18 00 F0 A2 C1`. `r`: dump identical to the full-flash image |
+| 2, `c1` | Plan named target High and the F8091166 image (14336 bytes); the script confirmed. Halted after step 1 with the High pointer 0; `FLrd` 7, `FLad` 1, `FLwd` 1, all Success |
+| 2, power-on | Port back 23 s after it left. Start-up: `MODE read APP after 111 ms (11 MODE reads, 0 failed)`, so ten reads answered with a mode other than APP before APP; the report then read APP, VERSION 0xF8091166, BOOT_FLAGS `18 00 F0 A2 C1`, Low pointer valid, High pointer 0, and printed no PTCH advice. `r`: dump identical to the full-flash image with the High pointer 0. Passed |
+| 3, `b` | The procedure's expected plan line, `Low, then High`, was wrong for this state; the script was given `High, then Low`, which the example printed, and the F8091166 image. `updateBothRegions()` returned Success in 52727 ms, both pointers valid. Tasks: `FLrd` 1824, `FLad` 9, `FLwd` 901 at 20.8 ms (maximum 21.2 ms), `FLvy` 2 at 603 ms; every call Success |
+| 3, `r` | Dump identical to the full-flash image (SHA-256 `a3e549ca...3096fdaec3`); both pointers valid; `FLvy` Success on both |
+| 3, power-on | Port back 16 s after it left. Start-up: `MODE read APP after 1 ms (1 MODE reads, 0 failed)`. `r`: MODE `APP `; VERSION 0xF8091166; BOOT_FLAGS `18 00 F0 A2 C1`, Region 1 Attempted 0; both pointers valid; dump identical to the full-flash image. The board is back in its starting state |
+
+Stage 10 passed. The start-up wait held the report through a boot in progress after a
+power-on with the High pointer 0 and printed no false recovery advice; in the other three
+start-ups it ended at its first read. One sample of the race.
+
+Reading of step 2: the power-on hit the same window as S2 to S4 of stage 9, and the wait
+held the report until APP. The wait does not log the mode of the reads before APP; stage 9
+read PTCH at that point. The window lasted at most about 111 ms from the Teensy's first
+MODE read, far inside the 5 s cap.
 
 Two physical points were confirmed on 2026-11-22. First, the EEPROM can be reprogrammed
 in place with a SOIC8 clip, so `write-flash.zsh` (`24LC256@SOIC8`) is a recovery path

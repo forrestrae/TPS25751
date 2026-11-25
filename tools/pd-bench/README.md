@@ -148,6 +148,23 @@ register missing from the snapshot), or `no negotiation`. The command exits 1 on
 and 2 when a file cannot be read. The `tps25751-pd-verify` skill in
 `plugins/tps25751-bench` drives the whole check and adds the field-by-field decode.
 
+## Copy the skill into a downstream project
+
+Codex reads skills from `<project>/.agents/skills/`. This library links its own entry to
+the plugin's skill directory; a project that consumes the library gets a copy instead,
+written from a library checkout at the tag the project pins, so the skill matches the
+bench server from that tag. Run it from the library root:
+
+```bash
+python3 tools/pd-bench/sync_skill.py --dest <project>
+```
+
+`<project>` is the downstream project's root. The script replaces
+`<project>/.agents/skills/tps25751-pd-verify` as a whole and records the library version
+and commit in `.synced-from.json` inside it. It refuses a directory it did not write, and
+a symlink, unless `--force` is given, and `--dry-run` lists the files without writing.
+Claude Code projects get the skill from the plugin instead (Phase 8 of the toolset plan).
+
 ## How the server finds and shares the port
 
 Discovery lists the serial ports with the Teensy VID 0x16C0. `TPS25751_BENCH_SERIAL`
@@ -258,7 +275,7 @@ The console does not pace `I2Cr`; the TRM asks for 5 s between two of them.
 ## Tests
 
 The tests use a simulated console behind a fake serial port and never open a real one.
-The comparison tests use files in a temporary directory.
+The comparison and `sync_skill.py` tests use files in a temporary directory.
 The verify gate of the library runs them with the locked dependencies:
 
 ```bash

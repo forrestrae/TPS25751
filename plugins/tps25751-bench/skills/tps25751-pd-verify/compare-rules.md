@@ -108,3 +108,21 @@ library's `debugPrint()` prints only the common RDO fields; the facts and table 
 cover the rest.
 
 A field the library does not print is not a disagreement; say it was not checked.
+
+## Field layouts without `usb-pd-docs`
+
+From USB PD R3.3 V1.0, for decoding by hand when the `usb-pd-docs` server is absent. A
+word that is none of these is reported as not field-checked. Units: voltages in 50 mV and
+currents in 10 mA unless noted.
+
+| Object (table) | Bits |
+|---|---|
+| Fixed PDO 1, source (6.8) | 31:30 type 00b; 29 Dual-Role Power; 28 USB Suspend Supported; 27 Unconstrained Power; 26 USB Communications Capable; 25 Dual-Role Data; 24 Unchunked Extended Messages; 23 EPR Capable; 22 reserved; 21:20 Peak Current; 19:10 Voltage; 9:0 Maximum Current |
+| Fixed PDO 1, sink (6.9) | 31:30 type 00b; 29 Dual-Role Power; 28 Higher Capability; 27 Unconstrained Power; 26 USB Communications Capable; 25 Dual-Role Data; 24:23 Fast Role Swap current; 22:20 reserved; 19:10 Voltage; 9:0 Operational Current |
+| Fixed PDO above 5 V (6.10) | As 6.8 with bits 29:22 reserved |
+| SPR PPS APDO, source (6.13) | 31:30 11b; 29:28 00b; 27 PPS Power Limited; 24:17 Maximum Voltage (100 mV); 15:8 Minimum Voltage (100 mV); 6:0 Maximum Current (50 mA) |
+| SPR AVS APDO, source (6.15) | 31:30 11b; 29:28 10b; 27:26 Peak Current; 25:20 reserved; 19:10 Maximum Current 9 to 15 V; 9:0 Maximum Current 15 to 20 V |
+| Fixed or Variable RDO (6.19) | 31:28 Object Position; 27 Giveback (deprecated); 26 Capability Mismatch; 25 USB Communications Capable; 24 No USB Suspend; 23 Unchunked Extended Messages; 22 EPR Capable; 21:20 reserved; 19:10 Operating Current; 9:0 Maximum Operating Current (deprecated, equal to Operating Current) |
+| ID Header VDO (6.34) | 31 USB Host; 30 USB Device; 29:27 Product Type (UFP); 26 Alternate Modes Supported; 25:23 Product Type (DFP); 22:21 Connector Type; 20:16 reserved; 15:0 USB Vendor ID |
+| Cert Stat VDO (6.38) | 31:0 XID |
+| Product VDO (6.39) | 31:16 USB Product ID; 15:0 bcdDevice |

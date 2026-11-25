@@ -25,6 +25,12 @@ If `km003c` or `tps25751-bench` is not available, stop and say which server is m
 `bench_crosscheck` is newer than the other bench tools; when it is absent, apply the
 rules in [compare-rules.md](compare-rules.md) by hand, which give the same rows.
 
+`usb-pd-docs` serves USB PD R3.3 and is often absent in a downstream project. Without it,
+decode the specification column from the field layouts in
+[compare-rules.md](compare-rules.md) and say in the report that the spec column was
+decoded by hand. Never fetch the specification from the web: copies online are often a
+different revision or altered, and the comparison must use R3.3.
+
 ## Rules that hold throughout
 
 - Never call a `km003c` tool whose name starts with `trigger_`. The meter would take part

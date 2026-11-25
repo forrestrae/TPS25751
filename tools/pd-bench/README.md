@@ -22,8 +22,9 @@ bench.poll();
 
 Flash the example from the library root. Use `example-pd-bench-patch` for a board
 without a configuration EEPROM; it compiles in the patch bundle of
-`examples/load-patch-bundle`, which the console loads when MODE reads PTCH at start
-(`begin()`) and after a restart. `HELLO` never loads it.
+`examples/load-patch-bundle`. The console loads the bundle at start (`begin()`) and
+after a restart, and only when the controller stays in PTCH: it waits up to 3 s for APP,
+and PTCH with INT_EVENT1 Ready for Patch ends that wait early. `HELLO` never loads it.
 
 ```bash
 pio run -e example-pd-bench -t upload
@@ -90,9 +91,11 @@ VBUS. Agent configurations should ask for approval before each call to them.
 The call sends `HELLO` first and refuses a method that does not fit: `gsrc` and `aneg`
 need the sink role and a plug, `ssrc` the source role and a plug, and every method but
 the two restarts needs MODE to read APP. `restart_cold` is refused when the controller's
-configuration did not come from an EEPROM and the firmware has no patch bundle. A
-controller that `bench_hello` reports in PTCH mode with `patch_pending` is brought to APP
-by `restart`, which loads the bundle after the restart.
+configuration did not come from an EEPROM and the firmware has no patch bundle. For a
+controller that `bench_hello` reports in PTCH mode with `patch_pending`, both restarts
+load the bundle once the controller is back in PTCH with Ready for Patch. `restart_cold`
+is verified on hardware for that. `restart` is not: a warm restart of a controller
+without an EEPROM has not run on hardware.
 
 `aneg` picks its temporary maximum from the registers: the highest Fixed PDO in 0x30
 below the voltage of the active PDO in 0x34. With the Apple 140 W charger at 20 V that
@@ -198,6 +201,27 @@ INT_EVENT1 Ready for Patch ends that wait early. `TPS25751PatchLoader` then poll
 for Patch and MODE itself and sends nothing without them, so a PTCH without Ready for
 Patch ends as `CommandTimeout`, not as a load. The server waits 60 s for a `RESTART`,
 against about 50 s inside the console when every wait runs to its cap.
+
+`RESTART` reports the loader's outcome in a `step=patch` line and `begin()` in a
+`! PATCH` event:
+
+```
+@7 step=patch result=<status> t_ms=<ms> sent=<0|1>
+! PATCH result=<status> mode=<MODE> sent=<0|1>
+```
+
+`sent=0` says the loader ended in its Ready for Patch or MODE check, before it wrote
+anything to the controller. If MODE then reads APP, the controller loaded its own
+configuration while the loader waited, and the restart succeeds: the line
+`step=patch result=CommandTimeout t_ms=14305 sent=0` is followed by `step=done mode=APP`
+and `OK`. A load with `sent=1` that does not end as `Success` fails with `ERR PATCH`,
+even when MODE reads APP. The status alone does not separate the two cases:
+`CommandTimeout` is also a `PBMs` or `PBMc` that did not complete.
+
+Ready for Patch is INT_EVENT1 bit 81. Anything that clears it while the controller sits
+in PTCH leaves the next load without it, so that load ends with `sent=0` and the
+controller stays in PTCH. `SNAP` does this: it writes INT_CLEAR1 with the bits it read.
+`RESTART cold` is the recovery verified on hardware.
 
 Error codes: `SYNTAX`, `TOOLONG`, `UNKNOWN`, `BADARG`, `REFUSED`, `I2C`, `TIMEOUT`,
 `REJECTED`, `NOBUNDLE`, `PATCH`, and `NODECODER`.

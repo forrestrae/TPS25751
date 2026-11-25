@@ -568,7 +568,8 @@ def build_tools(service: BenchService) -> SimpleNamespace:
         result["finished_utc"] = service.now_utc()
         return result
 
-    def bench_crosscheck(capture_path: str, registers_path: str, role: str | None = None) -> dict:
+    def bench_crosscheck(capture_path: str, registers_path: str, role: str | None = None,
+                         stimulus: str | None = None) -> dict:
         """Compare a USB PD capture file with a register snapshot file, word for word.
 
         Reads two files and never opens the serial port. capture_path is a
@@ -576,21 +577,26 @@ def build_tools(service: BenchService) -> SimpleNamespace:
         returns it; registers_path is a tps25751-registers version 1 file, as
         bench_snapshot(path=...) writes it. Give absolute paths: a relative path
         resolves against this server's working directory. role (sink or source) is
-        needed only when the snapshot has no STATUS (0x1A).
+        needed only when the snapshot has no STATUS (0x1A). stimulus is the
+        bench_renegotiate method, read from the capture header's provenance.stimulus
+        when not given; with aneg, which sends no Source_Capabilities, the requested
+        PDO is taken from the snapshot's 0x30.
 
         The capture is read from its wire hex. Returns one row per compared word
         (check, wire hex, register hex, where in the register, result, note):
         Source_Capabilities against 0x30 (sink) or 0x32 (source), the final
         contract's Request against 0x35, the requested PDO and PDO 1 bits 29:20
-        against 0x34, the partner's Discover Identity ACK on SOP against 0x48, and
-        the meter's last VBUS against 0x6A. The board's own ACK and cable ACKs are
-        reported, not compared. Also returns the sanity notes, a verdict (pass,
+        against 0x34 (bits 41:32 reported, not compared, with the board sourcing),
+        the partner's Discover Identity ACK on SOP against 0x48, and the meter's last
+        VBUS against 0x6A when STATUS reports a plug. The board's own ACK and cable
+        ACKs are reported, not compared. A data message shorter than its header
+        declares makes the file unreadable (CrosscheckError). Also returns the sanity notes, a verdict (pass,
         fail, inconclusive, or no negotiation), and the rows as a Markdown table.
         """
         if role is not None and role not in ("sink", "source"):
             return {"error": f"role must be sink or source, not {role!r}", "kind": "ValueError"}
         try:
-            result = crosscheck.crosscheck(capture_path, registers_path, role)
+            result = crosscheck.crosscheck(capture_path, registers_path, role, stimulus)
         except crosscheck.CrosscheckError as exc:
             return {"error": str(exc), "kind": type(exc).__name__}
         result["table"] = crosscheck.render_table(result)

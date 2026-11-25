@@ -70,7 +70,7 @@ The server speaks MCP over stdio. It needs Python 3.11 or later, `mcp` 2.x, and
 | `bench_task(code, data_hex?)` | Yes | Runs one 4CC task and returns its return code and the 64 DATA bytes. |
 | `bench_write(addr, hex)` | Yes | Writes the whole of 0x27, 0x28, 0x37, or 0x42 and returns the readback. |
 | `bench_renegotiate(method, max_voltage_mv?)` | Yes | Starts a negotiation and returns each step with UTC times. |
-| `bench_crosscheck(capture_path, registers_path, role?)` | No, and opens no port | Compares a `km003c-capture` file with a `registers.json` snapshot, word for word, and returns the rows, the sanity notes, a verdict, and a Markdown table. See "Compare a capture with a snapshot". |
+| `bench_crosscheck(capture_path, registers_path, role?, stimulus?)` | No, and opens no port | Compares a `km003c-capture` file with a `registers.json` snapshot, word for word, and returns the rows, the sanity notes, a verdict, and a Markdown table. See "Compare a capture with a snapshot". |
 
 A result carries `owner_check: unavailable: ...` when `lsof` is missing or did not
 finish, which means the server could not see whether another program has the port open.
@@ -130,14 +130,24 @@ contract, so the capture holds no Request from it.
 
 `bench_crosscheck` and the command `tps25751-pd-crosscheck` run the same comparison,
 `crosscheck.py`. They read the capture's wire hex themselves, so a decode error in the
-meter server cannot hide a mismatch, and they follow the meter server's rules for
-retransmissions and the final contract. Each row compares one wire word with the register
-bits that should hold it: Source_Capabilities against 0x30 (board sinking) or 0x32
-(board sourcing), the final Request against 0x35 bits 31:0 or 127:96, the requested PDO
-and PDO 1 bits 29:20 against 0x34, the partner's Discover Identity ACK on SOP against
-0x48, and the meter's last VBUS against 0x6A. The board's own ACK and cable ACKs are
-reported, not compared. The board's role comes from STATUS (0x1A) bit 5; `--role` is
-needed only for a snapshot without STATUS.
+meter server cannot hide a mismatch, and they follow the fixture generator's rules for
+retransmissions and the final contract, counting only Source_Capabilities sent with the
+Source power role. Each row compares one wire word with the register bits that should
+hold it:
+
+- Source_Capabilities against 0x30 (board sinking) or 0x32 (board sourcing).
+- The final Request against 0x35 bits 31:0 (sinking) or 127:96 (sourcing).
+- The requested PDO against 0x34 bits 31:0, and PDO 1 bits 29:20 against 0x34 bits
+  41:32. That mapping is confirmed only with the board sinking, so a sourcing board's
+  row is reported, not compared.
+- The partner's Discover Identity ACK on SOP against 0x48.
+- The meter's last VBUS against 0x6A, unless STATUS reports no plug.
+
+The board's own ACK and cable ACKs are reported, not compared. The board's role comes
+from STATUS (0x1A) bit 5; `--role` is needed only for a snapshot without STATUS. `aneg`
+sends Requests without Source_Capabilities, so for it the requested PDO comes from the
+snapshot's 0x30, and the rows say so. The stimulus is read from the capture header's
+`provenance.stimulus`; `--stimulus` sets it for a capture that does not record it.
 
 ```bash
 uv run tps25751-pd-crosscheck <capture.jsonl> <registers.json>
@@ -145,7 +155,8 @@ uv run tps25751-pd-crosscheck <capture.jsonl> <registers.json>
 
 The verdict is `pass`, `fail`, `inconclusive` (no completed contract, a late start, or a
 register missing from the snapshot), or `no negotiation`. The command exits 1 on `fail`
-and 2 when a file cannot be read. The `tps25751-pd-verify` skill in
+and 2 when a file cannot be read, including a data message shorter than its header
+declares; the tool returns the same cases as an error with kind `CrosscheckError`. The `tps25751-pd-verify` skill in
 `plugins/tps25751-bench` drives the whole check and adds the field-by-field decode.
 
 ## Copy the skill into a downstream project

@@ -5,7 +5,8 @@ the ``km003c`` MCP server) and a ``tps25751-registers`` version 1 snapshot (writ
 ``bench_snapshot(path=...)``). The capture is read from the ``wire`` hex of each ``pd``
 record, not from the meter server's decode, so a decode error in either server cannot
 hide a mismatch. The rules for retransmissions and the final contract are those of the
-meter server's ``final_contract()`` and of ``test/support/pd_capture_fixture.py``.
+meter server's ``final_contract()`` and of ``test/support/pd_capture_fixture.py``, except
+that Source_Capabilities count only when sent with the Source power role.
 
 Each row compares one wire word with the register bits that should hold it:
 
@@ -14,10 +15,14 @@ Each row compares one wire word with the register bits that should hold it:
 - The final contract's Request RDO against 0x35 bits 31:0 (sink: the RDO this device
   sent) or bits 127:96 (source: the partner's request).
 - The PDO at the RDO's Object Position against 0x34 bits 31:0, and PDO 1 bits 29:20
-  against 0x34 bits 41:32 (a mapping the TRM does not state, confirmed on hardware).
+  against 0x34 bits 41:32. The TRM does not state that mapping; two chargers confirmed
+  it with the board sinking, so with the board sourcing it is reported, not compared.
+  Without Source_Capabilities on the wire (``aneg`` sends none), the PDOs come from the
+  snapshot's 0x30 or 0x32.
 - The partner's latest Discover Identity ACK on SOP against 0x48: Response Type,
   Number Valid VDOs, and each VDO.
-- The meter's last VBUS reading against ADC_RESULTS (0x6A) byte 3, 98 mV per LSB.
+- The meter's last VBUS reading against ADC_RESULTS (0x6A) byte 3, 98 mV per LSB,
+  skipped when STATUS reports no plug (0x6A is not updated in Unconnected Sleep).
 
 The board's own Discover Identity ACK and SOP'/SOP'' cable ACKs are reported, not
 compared: no register in this library holds them.
@@ -166,7 +171,13 @@ def load_capture(path: str | Path) -> Capture:
                 continue
             msg = Message(number, record.get("i"), record.get("t_meter_ms"), str(record.get("sop", "SOP")), wire)
             if not msg.extended:
-                msg.objects = [int.from_bytes(wire[o:o + 4], "little") for o in range(2, len(wire) - 3, 4)]
+                expected = 2 + 4 * msg.num_objects
+                if len(wire) != expected:
+                    # The fixture generator refuses such a file too (BundleError).
+                    raise CrosscheckError(
+                        f"{path}:{number}: header 0x{msg.header:04X} declares {msg.num_objects} data "
+                        f"objects ({expected} bytes), wire has {len(wire)}")
+                msg.objects = [int.from_bytes(wire[o:o + 4], "little") for o in range(2, len(wire), 4)]
             # A retransmission: the same bytes from the same sender on the same SOP, with
             # no GoodCRC on that SOP in between.
             if msg.goodcrc:
@@ -208,44 +219,62 @@ class Contract:
     request: Message
     caps: Message | None
     epr: bool
-    complete: bool
 
 
-def select_contract(messages: list[Message]) -> tuple[Contract | None, Message | None]:
-    """The final contract and the Source_Capabilities its Request named.
+OUTCOMES = {None: "no Accept, Reject, or Wait", CTRL_ACCEPT: "Accept but no PS_RDY",
+            CTRL_REJECT: "Reject", CTRL_WAIT: "Wait", CTRL_SOFT_RESET: "abandoned by a Soft_Reset"}
 
-    Only non-GoodCRC, non-retransmitted messages on SOP count. A Request starts a
-    negotiation and names the latest capabilities before it; the first Accept, Reject,
-    or Wait is its outcome; a PS_RDY after an Accept completes it; a Soft_Reset abandons
-    it. Returns the last completed negotiation, else the last Request that was not
-    completed (``complete`` False), and the latest capabilities when there is no Request.
+
+def is_source_capabilities(m: Message) -> bool:
+    """Source_Capabilities or EPR_Source_Capabilities sent with the Source power role (header bit 8)."""
+    sent_as_source = bool(m.header & (1 << 8))
+    return sent_as_source and (m.is_data(DATA_SOURCE_CAPABILITIES)
+                               or (m.extended and m.msg_type == EXT_EPR_SOURCE_CAPABILITIES))
+
+
+def select_contract(messages: list[Message]) -> tuple[Contract | None, Message | None, dict | None]:
+    """The final contract, the Source_Capabilities it named, and the last unfinished Request.
+
+    The same rules as ``select_contract()`` of ``test/support/pd_capture_fixture.py`` and
+    the meter server's ``final_contract()``: only non-GoodCRC, non-retransmitted messages
+    on SOP count. A Request starts a negotiation and names the latest Source_Capabilities
+    before it; the first Accept, Reject, or Wait is its outcome; a PS_RDY after an Accept
+    completes it; a Soft_Reset abandons it. The final contract is the last completed
+    negotiation, or None. The capabilities are the final contract's, or the latest in
+    the capture when there is no contract. Unlike the generator, Source_Capabilities
+    count only when sent with the Source power role.
+
+    The third value describes the last Request after the final contract (or the last
+    Request, with no contract) that did not complete: ``{"request", "outcome"}``.
     """
     caps: Message | None = None
     current: dict | None = None
     final: Contract | None = None
-    pending: Contract | None = None
     for m in messages:
         if m.sop != "SOP" or m.goodcrc or m.retry:
             continue
         if m.is_control(CTRL_SOFT_RESET):
-            current = None
-        elif m.is_data(DATA_SOURCE_CAPABILITIES) or (m.extended and m.msg_type == EXT_EPR_SOURCE_CAPABILITIES):
+            if current is not None and current["outcome"] != CTRL_PS_RDY:
+                current["outcome"] = CTRL_SOFT_RESET
+                current["closed"] = True
+        elif is_source_capabilities(m):
             caps = m
         elif m.is_data(DATA_REQUEST) or m.is_data(DATA_EPR_REQUEST):
-            pending = Contract(m, caps, m.msg_type == DATA_EPR_REQUEST, False)
-            current = {"contract": pending, "outcome": None}
-        elif current is not None and current["outcome"] is None and (
+            current = {"contract": Contract(m, caps, m.msg_type == DATA_EPR_REQUEST), "outcome": None,
+                       "closed": False}
+        elif current is not None and not current["closed"] and current["outcome"] is None and (
                 m.is_control(CTRL_ACCEPT) or m.is_control(CTRL_REJECT) or m.is_control(CTRL_WAIT)):
             current["outcome"] = m.msg_type
-        elif current is not None and current["outcome"] == CTRL_ACCEPT and m.is_control(CTRL_PS_RDY):
-            final = Contract(current["contract"].request, current["contract"].caps,
-                             current["contract"].epr, True)
-            current["outcome"] = CTRL_PS_RDY
+        elif current is not None and not current["closed"] and current["outcome"] == CTRL_ACCEPT \
+                and m.is_control(CTRL_PS_RDY):
+            final = current["contract"]
+            current["outcome"] = CTRL_PS_RDY  # a second PS_RDY does not complete it again
+    unfinished = None
+    if current is not None and current["outcome"] != CTRL_PS_RDY:
+        unfinished = {"request": current["contract"].request, "outcome": OUTCOMES[current["outcome"]]}
     if final is not None:
-        return final, final.caps
-    if pending is not None:
-        return pending, pending.caps
-    return None, caps
+        return final, final.caps, unfinished
+    return None, caps, unfinished
 
 
 def is_identity_ack(m: Message) -> bool:
@@ -328,7 +357,19 @@ def _caps_rows(caps: Message, regs: dict[int, bytes], role: str) -> list[dict]:
     return rows
 
 
-def _contract_rows(contract: Contract, regs: dict[int, bytes], role: str) -> list[dict]:
+def _register_pdos(regs: dict[int, bytes], role: str) -> tuple[list[int], str] | None:
+    """The PDO words of 0x30 (board sinking) or 0x32 (board sourcing), and the register's name."""
+    address, first = (0x30, 1) if role == "sink" else (0x32, 3)
+    data = regs.get(address)
+    if not data:
+        return None
+    count = data[0] & 0x07
+    pdos = [int.from_bytes(data[first + 4 * k:first + 4 * k + 4], "little") for k in range(count)
+            if len(data) >= first + 4 * k + 4]
+    return pdos, f"0x{address:02X}"
+
+
+def _contract_rows(contract: Contract, regs: dict[int, bytes], role: str, caps_expected: bool) -> list[dict]:
     rows = []
     rdo = contract.request.objects[0]
     position = (rdo >> 28) & 0xF
@@ -336,8 +377,6 @@ def _contract_rows(contract: Contract, regs: dict[int, bytes], role: str) -> lis
     own = _bits(pdo35, 0, 32) if pdo35 and len(pdo35) >= 4 else None
     requested = _bits(pdo35, 96, 32) if pdo35 and len(pdo35) >= 16 else None
     note = f"from {contract.request.sender()} at {contract.request.where()}, Object Position {position}"
-    if not contract.complete:
-        note += "; no PS_RDY after an Accept, so this is not a completed contract"
     if role == "sink":
         rows.append(_compare("Request RDO (own)", rdo, own, "0x35 bits 31:0", note))
         if requested is not None:
@@ -347,25 +386,45 @@ def _contract_rows(contract: Contract, regs: dict[int, bytes], role: str) -> lis
                              "a partner's request only while STATUS reports Source; differs from bits 31:0"))
     else:
         rows.append(_compare("Request RDO (partner)", rdo, requested, "0x35 bits 127:96", note))
+
     pdo34 = regs.get(0x34)
-    caps = contract.caps
-    if caps is None:
-        rows.append(_row("Requested PDO", None, _w(_bits(pdo34, 0, 32)) if pdo34 else None, "0x34 bits 31:0",
-                         SKIPPED, "no Source_Capabilities before the Request: the capture started late"))
-        return rows
-    pdos = caps.objects
+    if contract.caps is not None:
+        pdos, origin, label, label_note = contract.caps.objects, "the wire", "", ""
+    else:
+        # No Source_Capabilities before the Request: aneg sends none, and a late start
+        # misses them. The board's own capability register stands in, which compares
+        # register with register rather than with the wire.
+        from_register = _register_pdos(regs, role)
+        why = "aneg sends none" if not caps_expected else "the capture started late"
+        if from_register is None or not from_register[0]:
+            rows.append(_row("Requested PDO", None, _w(_bits(pdo34, 0, 32)) if pdo34 else None, "0x34 bits 31:0",
+                             SKIPPED, f"no Source_Capabilities on the wire ({why}) and no PDOs in the snapshot's "
+                             f"{'0x30' if role == 'sink' else '0x32'}"))
+            return rows
+        pdos, name = from_register
+        origin, label = name, f", from {name}"
+        label_note = f"PDO from {name}, not from the wire: no Source_Capabilities before the Request ({why})"
     wire_pdo = pdos[position - 1] if 1 <= position <= len(pdos) else None
     if wire_pdo is None:
-        rows.append(_row("Requested PDO", None, None, "0x34 bits 31:0", MISMATCH,
-                         f"Object Position {position} names no PDO of the {len(pdos)} on the wire"))
+        rows.append(_row("Requested PDO", None, _w(_bits(pdo34, 0, 32)) if pdo34 else None, "0x34 bits 31:0",
+                         MISMATCH, f"Object Position {position} names no PDO of the {len(pdos)} in {origin}"))
     else:
-        rows.append(_compare(f"Requested PDO (position {position})", wire_pdo,
-                             _bits(pdo34, 0, 32) if pdo34 else None, "0x34 bits 31:0"))
+        rows.append(_compare(f"Requested PDO (position {position}{label})", wire_pdo,
+                             _bits(pdo34, 0, 32) if pdo34 else None, "0x34 bits 31:0",
+                             label_note if label else ""))
     if pdos:
         control = (pdos[0] >> 20) & 0x3FF
-        rows.append(_compare("PDO 1 bits 29:20", control, _bits(pdo34, 32, 10) if pdo34 else None,
-                             "0x34 bits 41:32", "mapping confirmed on hardware, not stated by the TRM",
-                             width=3))
+        check = f"PDO 1 bits 29:20{label}"
+        mapping = "the TRM does not state this mapping; two chargers confirmed it on hardware with the board sinking"
+        if label:
+            mapping = f"{label_note}; {mapping}"
+        if role == "sink":
+            rows.append(_compare(check, control, _bits(pdo34, 32, 10) if pdo34 else None, "0x34 bits 41:32",
+                                 mapping, width=3))
+        else:
+            register = f"{_bits(pdo34, 32, 10):03x}" if pdo34 else None
+            rows.append(_row(check, f"{control:03x}", register, "0x34 bits 41:32", REPORT,
+                             "reported, not compared: the mapping is confirmed only with the board sinking"))
     return rows
 
 
@@ -414,8 +473,9 @@ def _identity_rows(acks: dict[tuple[str, str], Message], regs: dict[int, bytes],
 
 def _vbus_row(capture: Capture, regs: dict[int, bytes]) -> dict | None:
     adc = regs.get(0x6A)
-    if not capture.vbus:
-        return None
+    status = regs.get(0x1A)
+    if not capture.vbus or (status and not _bits(status, 0, 1)):
+        return None  # 0x6A is not updated in Unconnected Sleep
     meter = capture.vbus[-1]
     if adc is None or len(adc) < 4:
         return _row("VBUS (meter, last status)", f"{meter} mV", None, "0x6A byte 3", MISSING,
@@ -427,7 +487,11 @@ def _vbus_row(capture: Capture, regs: dict[int, bytes]) -> dict | None:
                 MATCH if ok else MISMATCH, f"allowed difference {allowance} mV")
 
 
-def sanity(capture: Capture, contract: Contract | None, caps: Message | None) -> tuple[list[str], bool]:
+NO_CAPABILITIES_STIMULI = {"aneg"}  # bench_renegotiate methods that send a Request but no Source_Capabilities
+
+
+def sanity(capture: Capture, contract: Contract | None, caps: Message | None, unfinished: dict | None,
+           caps_expected: bool) -> tuple[list[str], bool]:
     """The sanity notes, and whether they rule out a comparison."""
     notes: list[str] = []
     sent = [m for m in capture.messages if not m.goodcrc]
@@ -440,17 +504,25 @@ def sanity(capture: Capture, contract: Contract | None, caps: Message | None) ->
             notes.append(f"no PD messages and no connection records; header pd_monitor {monitor}")
         return notes, True
     flat = not capture.vbus or max(capture.vbus) - min(capture.vbus) < VBUS_FLAT_MV
-    if caps is None and contract is None and flat:
+    if caps is None and contract is None and unfinished is None and flat:
         notes.append("no Source_Capabilities, no Request, VBUS flat: no negotiation happened in this "
                      "window; check the stimulus, not the protocol")
         return notes, True
     if contract is not None and contract.caps is None:
-        notes.append(f"Request at {contract.request.where()} has no Source_Capabilities before it: the "
-                     "capture started late")
-    if contract is None:
+        if caps_expected:
+            notes.append(f"Request at {contract.request.where()} has no Source_Capabilities before it: the "
+                         "capture started late")
+        else:
+            notes.append("aneg sends no Source_Capabilities: the requested PDO is taken from the snapshot")
+    if unfinished is not None:
+        where = unfinished["request"].where()
+        if contract is None:
+            notes.append(f"no completed contract: the last Request, at {where}, ended with {unfinished['outcome']}")
+        else:
+            notes.append(f"a Request after the final contract, at {where}, ended with {unfinished['outcome']}; "
+                         "the comparison uses the earlier, completed contract")
+    elif contract is None:
         notes.append("no Request: only the capabilities can be compared")
-    elif not contract.complete:
-        notes.append("the last Request has no PS_RDY after an Accept: no completed contract")
     if contract is not None and contract.epr:
         notes.append("the contract is an EPR_Request; EPR objects are not compared by this tool")
     retries = [m for m in capture.messages if m.retry]
@@ -466,13 +538,29 @@ def sanity(capture: Capture, contract: Contract | None, caps: Message | None) ->
     return notes, False
 
 
-def crosscheck(capture_path: str | Path, registers_path: str | Path, role: str | None = None) -> dict:
-    """The comparison table for one capture and one snapshot, with a verdict."""
+def capture_stimulus(capture: Capture) -> str | None:
+    """The stimulus the skill recorded in the header's provenance, if any."""
+    provenance = capture.header.get("provenance")
+    stimulus = provenance.get("stimulus") if isinstance(provenance, dict) else None
+    return stimulus if isinstance(stimulus, str) else None
+
+
+def crosscheck(capture_path: str | Path, registers_path: str | Path, role: str | None = None,
+               stimulus: str | None = None) -> dict:
+    """The comparison table for one capture and one snapshot, with a verdict.
+
+    ``stimulus`` is the ``bench_renegotiate`` method that started the negotiation; it
+    defaults to ``provenance.stimulus`` in the capture's header. With ``aneg``, which
+    sends no Source_Capabilities, the requested PDO comes from the snapshot and the
+    verdict can still be pass.
+    """
     capture = load_capture(capture_path)
     regs = load_registers(registers_path)
     board, role_from, role_notes = board_role(regs, role)
-    contract, caps = select_contract(capture.messages)
-    notes, blocked = sanity(capture, contract, caps)
+    stimulus = stimulus or capture_stimulus(capture)
+    caps_expected = stimulus not in NO_CAPABILITIES_STIMULI
+    contract, caps, unfinished = select_contract(capture.messages)
+    notes, blocked = sanity(capture, contract, caps, unfinished, caps_expected)
     notes = role_notes + notes
     rows: list[dict] = []
     if not blocked:
@@ -482,7 +570,7 @@ def crosscheck(capture_path: str | Path, registers_path: str | Path, role: str |
             rows.append(_row("EPR_Source_Capabilities", caps.wire.hex(), None, "", SKIPPED,
                              "EPR capabilities are not compared by this tool"))
         if contract is not None and not contract.epr:
-            rows += _contract_rows(contract, regs, board)
+            rows += _contract_rows(contract, regs, board, caps_expected)
         rows += _identity_rows(identity_acks(capture.messages), regs, board)
     vbus = _vbus_row(capture, regs)
     if vbus is not None:
@@ -492,7 +580,7 @@ def crosscheck(capture_path: str | Path, registers_path: str | Path, role: str |
         verdict = "no negotiation"
     elif any(r["result"] == MISMATCH for r in rows):
         verdict = "fail"
-    elif contract is None or not contract.complete or contract.caps is None or contract.epr \
+    elif contract is None or contract.epr or (contract.caps is None and caps_expected) \
             or any(r["result"] == MISSING for r in rows) or not compared:
         verdict = "inconclusive"
     else:
@@ -502,6 +590,7 @@ def crosscheck(capture_path: str | Path, registers_path: str | Path, role: str |
         "registers": str(Path(registers_path).expanduser().resolve()),
         "role": board,
         "role_from": role_from,
+        "stimulus": stimulus,
         "meter_fw": (capture.header.get("meter") or {}).get("fw_version"),
         "stop_reason": (capture.footer or {}).get("reason"),
         "sanity": notes,
@@ -533,10 +622,12 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("registers", help="tps25751-registers version 1 file (registers.json)")
     parser.add_argument("--role", choices=("sink", "source"),
                         help="the board's power role, when the snapshot has no STATUS (0x1A)")
+    parser.add_argument("--stimulus", help="the bench_renegotiate method, when the capture's header does "
+                        "not record it; aneg sends no Source_Capabilities")
     parser.add_argument("--json", action="store_true", help="print the result as JSON")
     args = parser.parse_args(argv)
     try:
-        result = crosscheck(args.capture, args.registers, args.role)
+        result = crosscheck(args.capture, args.registers, args.role, args.stimulus)
     except CrosscheckError as exc:
         print(f"tps25751-pd-crosscheck: {exc}", file=sys.stderr)
         return 2

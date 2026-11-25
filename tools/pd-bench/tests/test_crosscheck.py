@@ -35,10 +35,11 @@ def wire(head, objects=()):
 class CaptureFile:
     """A km003c-capture v1 file built record by record."""
 
-    def __init__(self):
+    def __init__(self, provenance=None):
         self.records = [{"type": "header", "format": "km003c-capture", "version": 1,
                          "meter": {"serial": "000000", "fw_version": "2.0.0"},
-                         "pd_monitor": {"enabled": True, "outcome": "accepted"}}]
+                         "pd_monitor": {"enabled": True, "outcome": "accepted"},
+                         "provenance": provenance}]
         self.t = 1000
 
     def status(self, vbus_mv):
@@ -73,6 +74,10 @@ class CaptureFile:
     def contract(self, pdos=APPLE_PDOS, rdo=APPLE_RDO):
         """Source_Capabilities from the Source, whichever side the board is, then the Sink's Request."""
         self.source_caps(pdos)
+        return self.request_accepted(rdo)
+
+    def request_accepted(self, rdo=APPLE_RDO):
+        """A Request, Accept, and PS_RDY with no Source_Capabilities, as aneg's ANeg produces them."""
         self.request(rdo)
         self.control("Accept", from_source=True)
         return self.control("PS_RDY", from_source=True)
@@ -113,9 +118,9 @@ def write_registers(path, regs):
     return path
 
 
-def run(tmp_path, capture, regs, role=None):
+def run(tmp_path, capture, regs, role=None, stimulus=None):
     return crosscheck.crosscheck(capture.write(tmp_path / "capture.jsonl"),
-                                 write_registers(tmp_path / "registers.json", regs), role)
+                                 write_registers(tmp_path / "registers.json", regs), role, stimulus)
 
 
 def rows_by_check(result):
@@ -215,6 +220,8 @@ def test_the_source_role_uses_0x32_and_the_partner_request(tmp_path):
     assert rows["Request RDO (partner)"]["result"] == MATCH
     assert "Request RDO (own)" not in rows
     assert rows["Requested PDO (position 2)"]["result"] == MATCH
+    # The 0x34 bits 41:32 mapping is confirmed only with the board sinking.
+    assert (rows["PDO 1 bits 29:20"]["result"], rows["PDO 1 bits 29:20"]["wire"]) == (REPORT, "0a0")
     assert rows["Identity VDO 1"]["result"] == MATCH  # the iPhone answers as sink/ufp
     assert result["verdict"] == "pass"
 
@@ -243,20 +250,67 @@ def test_a_soft_reset_abandons_the_negotiation_in_progress(tmp_path):
     assert result["verdict"] == "pass"
 
 
-def test_a_request_without_ps_rdy_is_inconclusive(tmp_path):
+def test_a_request_without_ps_rdy_is_no_contract(tmp_path):
+    # As the fixture generator: a negotiation that did not complete is no contract.
     capture = CaptureFile().conn().source_caps().request().control("Accept").status(20480).footer()
     result = run(tmp_path, capture, sink_registers())
-    assert "no PS_RDY after an Accept" in rows_by_check(result)["Request RDO (own)"]["note"]
+    assert "Request RDO (own)" not in rows_by_check(result)
+    assert any("no completed contract" in n and "Accept but no PS_RDY" in n for n in result["sanity"])
     assert result["verdict"] == "inconclusive"
 
 
-def test_a_late_start_skips_the_pdo_rows(tmp_path):
-    capture = CaptureFile().conn().request().control("Accept").control("PS_RDY").status(20480).footer()
+@pytest.mark.parametrize("ending, outcome", [("Reject", "Reject"), ("Soft_Reset", "abandoned by a Soft_Reset")])
+def test_a_rejected_or_abandoned_request_is_no_contract(tmp_path, ending, outcome):
+    capture = CaptureFile().conn().source_caps().request().control(ending).status(20480).footer()
+    result = run(tmp_path, capture, sink_registers())
+    assert "Request RDO (own)" not in rows_by_check(result)
+    assert any(outcome in n for n in result["sanity"])
+
+
+def test_a_failed_request_after_the_contract_is_noted(tmp_path):
+    capture = CaptureFile().conn().contract().request(0x3184B12C).control("Reject") \
+        .identity_ack().status(20480).footer()
+    result = run(tmp_path, capture, sink_registers())
+    assert rows_by_check(result)["Request RDO (own)"]["wire"] == "4184b12c"
+    assert any("after the final contract" in n and "Reject" in n for n in result["sanity"])
+    assert result["verdict"] == "pass"
+
+
+def test_the_boards_own_source_capabilities_are_not_compared(tmp_path):
+    # A sink that also advertises Source_Capabilities sends them with power role Sink.
+    capture = CaptureFile().conn().contract().pd(header(1, 1, source=False), [0x0001912C]) \
+        .identity_ack().status(20480).footer()
+    rows = rows_by_check(run(tmp_path, capture, sink_registers()))
+    assert rows["PDO 1"]["wire"] == "0981912c" and rows["PDO 1"]["result"] == MATCH
+
+
+def test_a_late_start_takes_the_pdos_from_the_snapshot(tmp_path):
+    capture = CaptureFile().conn().request_accepted().status(20480).footer()
     result = run(tmp_path, capture, sink_registers())
     rows = rows_by_check(result)
     assert any("started late" in n for n in result["sanity"])
-    assert rows["Requested PDO"]["result"] == SKIPPED
+    row = rows["Requested PDO (position 4, from 0x30)"]
+    assert row["result"] == MATCH and "not from the wire" in row["note"] and "started late" in row["note"]
     assert result["verdict"] == "inconclusive"
+
+
+def test_aneg_compares_the_contract_against_the_snapshot_and_can_pass(tmp_path):
+    # Step down to 15 V (position 3), then back to 20 V (position 4): no Source_Capabilities.
+    capture = CaptureFile(provenance={"stimulus": "aneg"}).conn().request_accepted(0x3184B12C) \
+        .request_accepted(APPLE_RDO).status(20480).footer()
+    result = run(tmp_path, capture, sink_registers())
+    rows = rows_by_check(result)
+    assert result["stimulus"] == "aneg"
+    assert rows["Request RDO (own)"]["wire"] == "4184b12c" and rows["Request RDO (own)"]["result"] == MATCH
+    assert rows["Requested PDO (position 4, from 0x30)"]["result"] == MATCH
+    assert rows["PDO 1 bits 29:20, from 0x30"]["result"] == MATCH
+    assert "aneg sends none" in rows["PDO 1 bits 29:20, from 0x30"]["note"]
+    assert not any("started late" in n for n in result["sanity"])
+    assert result["verdict"] == "pass"
+    # The same capture without the header's provenance needs the stimulus given.
+    plain = CaptureFile().conn().request_accepted(0x3184B12C).request_accepted().status(20480).footer()
+    assert run(tmp_path, plain, sink_registers())["verdict"] == "inconclusive"
+    assert run(tmp_path, plain, sink_registers(), stimulus="aneg")["verdict"] == "pass"
 
 
 # ----- sanity rules -----
@@ -279,6 +333,14 @@ def test_vbus_outside_the_allowance_is_a_mismatch(tmp_path):
     result = run(tmp_path, sink_capture(vbus_mv=19800), sink_registers(vbus_raw=209))
     row = rows_by_check(result)["VBUS (meter, last status)"]
     assert row["result"] == MISMATCH and "allowed difference 296 mV" in row["note"]
+
+
+def test_vbus_is_skipped_without_a_plug(tmp_path):
+    regs = sink_registers()
+    regs[0x1A] = bytes(5)
+    result = run(tmp_path, sink_capture(vbus_mv=0), regs)
+    assert "VBUS (meter, last status)" not in rows_by_check(result)
+    assert any("no plug" in n for n in result["sanity"])
 
 
 def test_no_partner_ack_reports_what_0x48_holds(tmp_path):
@@ -318,6 +380,15 @@ def test_files_in_other_formats_are_refused(tmp_path):
         crosscheck.crosscheck(tmp_path / "no-such.jsonl", regs)
 
 
+def test_a_data_message_shorter_than_its_header_is_unreadable(tmp_path):
+    capture = sink_capture()
+    request = next(r for r in capture.records if r.get("wire", "").startswith("8210"))
+    request["wire"] = "8210"  # the header declares one data object
+    with pytest.raises(CrosscheckError, match=r"declares 1 data objects \(6 bytes\), wire has 2"):
+        run(tmp_path, capture, sink_registers())
+    assert crosscheck.main([str(tmp_path / "capture.jsonl"), str(tmp_path / "registers.json")]) == 2
+
+
 def test_the_command_line_exit_status(tmp_path, capsys):
     capture = sink_capture().write(tmp_path / "c.jsonl")
     good = write_registers(tmp_path / "good.json", sink_registers())
@@ -343,3 +414,9 @@ def test_the_tool_reads_files_and_never_the_serial_port(bench, tmp_path):
     assert bench.tools.bench_crosscheck(str(capture), str(regs), role="drp")["kind"] == "ValueError"
     missing = bench.tools.bench_crosscheck(str(tmp_path / "none.jsonl"), str(regs))
     assert missing["kind"] == "CrosscheckError"
+    short = sink_capture()
+    next(r for r in short.records if r.get("wire", "").startswith("8210"))["wire"] = "8210"
+    unreadable = bench.tools.bench_crosscheck(str(short.write(tmp_path / "short.jsonl")), str(regs))
+    assert unreadable["kind"] == "CrosscheckError" and "declares 1 data objects" in unreadable["error"]
+    aneg = CaptureFile().conn().request_accepted().status(20480).footer().write(tmp_path / "aneg.jsonl")
+    assert bench.tools.bench_crosscheck(str(aneg), str(regs), stimulus="aneg")["verdict"] == "pass"

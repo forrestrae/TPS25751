@@ -33,7 +33,7 @@ def test_tool_arguments_match_the_plan(bench):
     assert arguments("bench_task") == ({"code", "data_hex"}, {"code"})
     assert arguments("bench_write") == ({"addr", "hex"}, {"addr", "hex"})
     assert arguments("bench_renegotiate") == ({"method", "max_voltage_mv"}, {"method"})
-    assert arguments("bench_crosscheck") == ({"capture_path", "registers_path", "role"},
+    assert arguments("bench_crosscheck") == ({"capture_path", "registers_path", "role", "stimulus"},
                                              {"capture_path", "registers_path"})
 
 

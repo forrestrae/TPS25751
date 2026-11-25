@@ -1,0 +1,10 @@
+{
+  "name": "tps25751-bench",
+  "version": "0.1.0",
+  "description": "Verify the TPS25751 library's register decode against USB PD traffic captured by a KM003C meter: the tps25751-pd-verify skill and the pd-capture-analyst agent. Uses the km003c, tps25751-bench, and usb-pd-docs MCP servers, which the project configures.",
+  "author": {
+    "name": "Forrest Rae"
+  },
+  "license": "Apache-2.0",
+  "keywords": ["tps25751", "usb-pd", "km003c", "verification"]
+}

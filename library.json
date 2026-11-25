@@ -46,7 +46,8 @@
       "scripts",
       "test",
       "tools",
-      "plugins"
+      "plugins",
+      ".agents"
     ]
   },
   "dependencies": [

@@ -1563,6 +1563,16 @@ sample, on the second board.
 |---|---|
 | S4, `c2` | Plan named target High and the F8091164 image; the script confirmed. The step 2 checks passed over the half-written region, and the sketch halted after step 2 in 10.3 s with the Low pointer valid and the High pointer 0. Tasks: `FLwd` 447 (the pointer erase and 446 chunks) at 20.8 ms, maximum 21.2 ms; `FLad` 3; `FLrd` 12 (its `rc_nonzero` and `rc_0xFF` are memory bytes); every call Success, no busy result |
 | S4, power-on | Start-up report in mid-load, as in S2 and S3 (`PTCH`, 0xF8091100, `18 00 30 02 C1`). `r`: MODE `APP `; VERSION 0xF8091166; BOOT_FLAGS `18 00 F0 A2 C1`, Dead Battery Flag 0, Region 1 Attempted 0; Low pointer valid, High pointer 0; both AppConfigOffset words 0; `FLvy` Success on both regions. Dump identical to the expected image: the full-flash image with the High pointer 0 and F8091164 at 0x4400. Passed |
+| S5, `c3` | Plan named target High and the F8091164 image; the script confirmed. `updateRegion()` without step 4 returned Success in 26197 ms, last step Done; both pointers valid. Tasks: `FLrd` 907 at 17.9 ms, `FLad` 4, `FLwd` 448 at 20.8 ms (maximum 21.2 ms), `FLvy` 1 at 603 ms; every call Success, no busy result |
+| S5, power-on | The port came back 7.2 s after it went away, so the supply was off for about 6 s, not the 10 s after the port left that the procedure sets. Start-up report: MODE `APP `, VERSION 0xF8091166, BOOT_FLAGS `18 00 F0 A2 C1`. `r`: the same, Dead Battery Flag 0, Region 1 Attempted 0; both pointers valid; both AppConfigOffset words 0; `FLvy` Success on both regions. Dump identical to the expected image (S4 with the High pointer 0x4400). The readings match the table, but they would read the same if the controller had not restarted, and the start-up report read APP where S2 to S4 caught a load in progress. The Teensy lost power, which puts +5V below its operating range and is strong but indirect evidence that the controller did too |
+| S5, power-on repeated | At the user's decision, with no EEPROM write. The port came back 19.3 s after it went away, so the supply was off for well over 10 s after the port left. Start-up report and `r` as in the first S5 power-on: MODE `APP `, VERSION 0xF8091166, BOOT_FLAGS `18 00 F0 A2 C1`, Dead Battery Flag 0, Region 1 Attempted 0, both pointers valid, `FLvy` Success on both, dump identical to the expected image. Passed. The S0 dark check, the 19 s off, and the Teensy losing power together show the controller lost power; no reading in this state can show the restart directly |
+
+The start-up report read `APP ` after every power-on with both pointers valid (S1, S5,
+the S5 repeat) and caught a load in progress after every power-on with the High pointer
+0 (S2, S3, S4). The note after S2 called the order a race; six power-ons fit a dependence
+on the High pointer better, although six is a small sample and the documents read for
+this plan say nothing about boot time. Whatever the cause, the S2 rule stands: the boot
+result is judged from `r`.
 
 Two physical points were confirmed on 2026-11-22. First, the EEPROM can be reprogrammed
 in place with a SOIC8 clip, so `write-flash.zsh` (`24LC256@SOIC8`) is a recovery path

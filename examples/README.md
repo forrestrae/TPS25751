@@ -39,7 +39,7 @@ the line `yes` sent after its `[confirm]` prompt.
 
 | Command | What it does | Writes the EEPROM |
 |---|---|---|
-| `r` | Report: MODE, VERSION, BOOT_FLAGS, both region pointers, both AppConfigOffset words, the region an update would target, `FLvy` for each region, and a dump of 0x0000 to 0x7C00. In PTCH it says to recover with `l`, then `pb` | No |
+| `r` | Report: MODE, VERSION, BOOT_FLAGS, both region pointers, both AppConfigOffset words, the region an update would target, `FLvy` for each region, and a dump of 0x0000 to 0x7C00. In PTCH it says to recover with `l`, then `pb`. The report printed at start-up, without the dump, first waits up to 5 s for MODE to read APP, because right after a power-on the controller can read PTCH while it is still loading a good bundle from the EEPROM | No |
 | `x` | `coldReset()`: `GAID`, then waits for APP; the port disconnects. Reports `ResetNotObserved` when MODE reads APP without a failed I2C transaction first, and then asks for a check of VERSION and BOOT_FLAGS | No |
 | `l` | Only in PTCH: loads the embedded image into the controller's RAM with `TPS25751PatchLoader` (Patch Burst Mode), then prints host I2C diagnostics and recovers communication if MODE cannot be read | No |
 | `p`, `p2` | Pointer tests of hardware stage 2: erase and restore the High pointer; show whether `FLwd` writes more than the bytes it is given | Yes |

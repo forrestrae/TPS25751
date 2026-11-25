@@ -10,8 +10,15 @@ that Source_Capabilities count only when sent with the Source power role.
 
 Each row compares one wire word with the register bits that should hold it:
 
-- Source_Capabilities PDO count and words against 0x30 (board is sink) or 0x32 (board is
-  source; PDO 1 at byte 3).
+- Source_Capabilities PDO count and words against 0x30 when the partner sent them, or
+  0x32 when the board did (PDO 1 at byte 3). Against 0x32, PDO 1 bits 31:30 and 22:0
+  must match and each differing flag in bits 29:23 is reported, not failed: the
+  controller sets those flags at runtime.
+- The board's power role comes from STATUS at the snapshot, and each accepted PR_Swap
+  in the capture flips it for what came before. After a PR_Swap the final contract is
+  compared as usual, and the other side's Source_Capabilities from before the swap are
+  compared with their own register in rows marked "Before PR_Swap"; the earlier
+  contract's Request is not compared, since 0x34 and 0x35 hold the final contract.
 - The final contract's Request RDO against 0x35 bits 31:0 (sink: the RDO this device
   sent) or bits 127:96 (source: the partner's request).
 - The PDO at the RDO's Object Position against 0x34 bits 31:0, and PDO 1 bits 29:20
@@ -20,7 +27,8 @@ Each row compares one wire word with the register bits that should hold it:
   Without Source_Capabilities on the wire (``aneg`` sends none), the PDOs come from the
   snapshot's 0x30 or 0x32.
 - The partner's latest Discover Identity ACK on SOP against 0x48: Response Type,
-  Number Valid VDOs, and each VDO.
+  Number Valid VDOs, and each VDO. An ACK is the board's own when its power role equals
+  the board's role at that point of the capture.
 - The meter's last VBUS reading against ADC_RESULTS (0x6A) byte 3, 98 mV per LSB,
   skipped when STATUS reports no plug (0x6A is not updated in Unconnected Sleep).
 
@@ -40,7 +48,7 @@ CAPTURE_FORMAT = ("km003c-capture", 1)
 REGISTERS_FORMAT = ("tps25751-registers", 1)
 
 # Message types (USB PD R3.3 Tables 6.5 and 6.6).
-CTRL_GOODCRC, CTRL_ACCEPT, CTRL_REJECT, CTRL_PS_RDY, CTRL_WAIT, CTRL_SOFT_RESET = 1, 3, 4, 6, 12, 13
+CTRL_GOODCRC, CTRL_ACCEPT, CTRL_REJECT, CTRL_PS_RDY, CTRL_PR_SWAP, CTRL_WAIT, CTRL_SOFT_RESET = 1, 3, 4, 6, 10, 12, 13
 DATA_SOURCE_CAPABILITIES, DATA_REQUEST, DATA_EPR_REQUEST, DATA_VENDOR_DEFINED = 1, 2, 9, 15
 EXT_EPR_SOURCE_CAPABILITIES = 17
 PD_SID = 0xFF00
@@ -285,15 +293,6 @@ def is_identity_ack(m: Message) -> bool:
             and vdm & 0x1F == VDM_DISCOVER_IDENTITY)
 
 
-def identity_acks(messages: list[Message]) -> dict[tuple[str, str], Message]:
-    """The latest Discover Identity ACK per SOP and sender."""
-    latest: dict[tuple[str, str], Message] = {}
-    for m in messages:
-        if not m.retry and is_identity_ack(m):
-            latest[(m.sop, m.sender())] = m
-    return latest
-
-
 def _bits(data: bytes, low: int, width: int) -> int:
     return (int.from_bytes(data, "little") >> low) & ((1 << width) - 1)
 
@@ -336,24 +335,63 @@ def _compare(check: str, wire: int | None, register: int | None, where: str, not
     return _row(check, fmt(wire), fmt(register), where, MATCH if wire == register else MISMATCH, note)
 
 
-def _caps_rows(caps: Message, regs: dict[int, bytes], role: str) -> list[dict]:
-    address, first = (0x30, 1) if role == "sink" else (0x32, 3)
+# PDO 1 bits 29:23 of a Fixed 5 V Source PDO (USB PD R3.3 Table 6.8). On the wire the
+# controller can send other values than 0x32 holds: on 2026-11-25 the board sent PDO 1
+# 0x2301912C with 0x32 PDO 1 at 0x2001912C. Each flag names the setting most likely to
+# drive it at runtime; only bit 27's is TRM text (SLVUCR8B p.31).
+PDO1_FLAGS = {
+    29: ("Dual-Role Power", "inferred, not TRM text: the DRP Type-C state machine (0x28 bits 1:0) "
+                            "and PR_Swap support (0x29 bits 7:4)"),
+    28: ("USB Suspend Supported", "none identified"),
+    27: ("Unconstrained Power", "TRM: PORT_CONTROL (0x29) bit 19 also sets this bit (SLVUCR8B p.31)"),
+    26: ("USB Communications Capable", "none identified"),
+    25: ("Dual-Role Data", "inferred, not TRM text: DR_Swap support (0x29 bits 15:12)"),
+    24: ("Unchunked Extended Messages Supported", "inferred, not TRM text: PD3_CONFIGURATION (0x42) "
+                                                  "bit 4, Unchunked Supported"),
+    23: ("EPR Capable", "none identified"),
+}
+PDO1_FLAG_MASK = 0x3F800000  # bits 29:23
+
+
+def _caps_rows(caps: Message, regs: dict[int, bytes], from_board: bool, prefix: str = "") -> list[dict]:
+    """Rows for one Source_Capabilities: against 0x32 when the board sent it, else 0x30.
+
+    Against 0x32, PDO 1 bits 31:30 and 22:0 must match, and each differing flag in bits
+    29:23 is reported, not failed: the controller sets those flags at runtime.
+    """
+    address, first = (0x32, 3) if from_board else (0x30, 1)
     name = f"0x{address:02X}"
     data = regs.get(address)
     pdos = list(caps.objects)
     rows = []
+    sender = f"from {caps.sender()} ({'the board' if from_board else 'the partner'}) at {caps.where()}"
     if data is None:
-        return [_row("Source_Capabilities", " ".join(_w(p) for p in pdos), None, name, MISSING,
-                     "register not in the snapshot")]
+        return [_row(f"{prefix}Source_Capabilities", " ".join(_w(p) for p in pdos), None, name, MISSING,
+                     f"{sender}; register not in the snapshot")]
     count = data[0] & 0x07
-    rows.append(_compare("Source_Capabilities PDO count", len(pdos), count, f"{name} bits 2:0",
-                         f"from {caps.sender()} at {caps.where()}", width=1))
+    rows.append(_compare(f"{prefix}Source_Capabilities PDO count", len(pdos), count, f"{name} bits 2:0",
+                         sender, width=1))
     for position in range(1, max(len(pdos), count) + 1):
         offset = first + 4 * (position - 1)
         register = int.from_bytes(data[offset:offset + 4], "little") if len(data) >= offset + 4 else None
         wire = pdos[position - 1] if position <= len(pdos) else None
-        rows.append(_compare(f"PDO {position}", wire, register,
-                             f"{name} bytes {offset}..{offset + 3}"))
+        where = f"{name} bytes {offset}..{offset + 3}"
+        if not (from_board and position == 1 and wire is not None and register is not None):
+            rows.append(_compare(f"{prefix}PDO {position}", wire, register, where))
+            continue
+        fixed = ~PDO1_FLAG_MASK & 0xFFFFFFFF
+        same = (wire & fixed) == (register & fixed)
+        differing = [bit for bit in PDO1_FLAGS if (wire ^ register) >> bit & 1]
+        note = "bits 31:30 and 22:0 compared; flags in bits 29:23 "
+        note += "equal" if not differing else "reported below"
+        rows.append(_row(f"{prefix}PDO {position}", _w(wire), _w(register), where,
+                         MATCH if same else MISMATCH, note))
+        for bit in differing:
+            flag, source = PDO1_FLAGS[bit]
+            rows.append(_row(f"{prefix}PDO 1 bit {bit} {flag}", str(wire >> bit & 1), str(register >> bit & 1),
+                             f"{name} bit {24 + bit}", REPORT,
+                             f"the controller sets PDO 1 flags at runtime: reported, not failed. Likely "
+                             f"source: {source}"))
     return rows
 
 
@@ -428,15 +466,25 @@ def _contract_rows(contract: Contract, regs: dict[int, bytes], role: str, caps_e
     return rows
 
 
-def _identity_rows(acks: dict[tuple[str, str], Message], regs: dict[int, bytes], role: str) -> list[dict]:
+def _identity_rows(messages: list[Message], regs: dict[int, bytes], role_at) -> list[dict]:
+    """0x48 against the partner's latest Discover Identity ACK on SOP; the others reported.
+
+    An ACK on SOP is the board's own when its power role bit equals the board's role at
+    that point of the capture (``role_at``, which follows accepted PR_Swaps), else the
+    partner's.
+    """
     rows = []
-    partner_power = "source" if role == "sink" else "sink"
-    partner = [m for (sop, sender), m in acks.items() if sop == "SOP" and sender.startswith(partner_power)]
+    acks = [m for m in messages if not m.retry and is_identity_ack(m)]
+
+    def power(m: Message) -> str:
+        return "source" if m.header & (1 << 8) else "sink"
+
+    partner_acks = [m for m in acks if m.sop == "SOP" and power(m) != role_at(m.line)]
     data = regs.get(0x48)
-    if partner:
-        ack = max(partner, key=lambda m: m.line)
+    if partner_acks:
+        ack = partner_acks[-1]
         vdos = ack.objects[1:]
-        note = (f"from {ack.sender()} at {ack.where()}, PD {ack.spec_revision} header, "
+        note = (f"from {ack.sender()} (the partner) at {ack.where()}, PD {ack.spec_revision} header, "
                 f"VDM header {ack.objects[0]:08x}")
         if data is None:
             rows.append(_row("Partner Discover Identity ACK", " ".join(_w(v) for v in vdos), None, "0x48",
@@ -456,11 +504,12 @@ def _identity_rows(acks: dict[tuple[str, str], Message], regs: dict[int, bytes],
                          "from an earlier exchange. Not compared"))
     else:
         rows.append(_row("Partner Discover Identity ACK", None, None, "0x48", SKIPPED,
-                         f"no Discover Identity ACK from the {partner_power} on SOP, and 0x48 is not in the "
-                         "snapshot"))
-    for (sop, sender), m in sorted(acks.items(), key=lambda kv: kv[1].line):
-        if m in partner:
-            continue
+                         "no Discover Identity ACK from the partner on SOP, and 0x48 is not in the snapshot"))
+    others: dict[tuple[str, str], Message] = {}
+    for m in acks:
+        if m.sop != "SOP" or m not in partner_acks:
+            others[(m.sop, m.sender())] = m
+    for (sop, sender), m in sorted(others.items(), key=lambda kv: kv[1].line):
         whose = "board's own" if sop == "SOP" else "cable"
         note = f"{whose} ACK at {m.where()}, PD {m.spec_revision} header, SVDM version " \
                f"{'1.0' if not (m.objects[0] >> 13) & 0x3 else '2.x'}"
@@ -538,6 +587,23 @@ def sanity(capture: Capture, contract: Contract | None, caps: Message | None, un
     return notes, False
 
 
+def accepted_power_swaps(messages: list[Message]) -> list[tuple[Message, Message]]:
+    """Each PR_Swap on SOP that the other port accepted, with that Accept."""
+    swaps = []
+    pending: Message | None = None
+    for m in messages:
+        if m.sop != "SOP" or m.goodcrc or m.retry:
+            continue
+        if m.is_control(CTRL_PR_SWAP):
+            pending = m
+        elif pending is not None and (m.is_control(CTRL_ACCEPT) or m.is_control(CTRL_REJECT)
+                                      or m.is_control(CTRL_WAIT)):
+            if m.is_control(CTRL_ACCEPT):
+                swaps.append((pending, m))
+            pending = None
+    return swaps
+
+
 def capture_stimulus(capture: Capture) -> str | None:
     """The stimulus the skill recorded in the header's provenance, if any."""
     provenance = capture.header.get("provenance")
@@ -562,16 +628,49 @@ def crosscheck(capture_path: str | Path, registers_path: str | Path, role: str |
     contract, caps, unfinished = select_contract(capture.messages)
     notes, blocked = sanity(capture, contract, caps, unfinished, caps_expected)
     notes = role_notes + notes
+
+    # The board's power role at each point: STATUS gives it at the snapshot, and each
+    # accepted PR_Swap before then flips it.
+    swaps = accepted_power_swaps(capture.messages)
+    other_role = "sink" if board == "source" else "source"
+
+    def role_at(line: int) -> str:
+        return board if sum(1 for _, accept in swaps if accept.line > line) % 2 == 0 else other_role
+
     rows: list[dict] = []
     if not blocked:
         if caps is not None and caps.is_data(DATA_SOURCE_CAPABILITIES):
-            rows += _caps_rows(caps, regs, board)
+            caps_from_board = role_at(caps.line) == "source"
+            rows += _caps_rows(caps, regs, caps_from_board)
+            if swaps:
+                # The other side's capabilities from before the swap: the board's own
+                # (against 0x32) when the final contract has the partner as Source.
+                earlier = [m for m in capture.messages
+                           if m.sop == "SOP" and not m.retry and m.line < caps.line
+                           and m.is_data(DATA_SOURCE_CAPABILITIES) and is_source_capabilities(m)
+                           and (role_at(m.line) == "source") != caps_from_board]
+                for pr_swap, accept in swaps:
+                    initiator = "the board" if (pr_swap.header >> 8 & 1) == (role_at(pr_swap.line) == "source") \
+                        else "the partner"
+                    notes.append(f"PR_Swap at {pr_swap.where()} from {initiator}, accepted at {accept.where()}: "
+                                 f"the board was {role_at(pr_swap.line)} before it and {role_at(accept.line)} after it")
+                if earlier:
+                    first = earlier[-1]
+                    whose = "the board's own" if not caps_from_board else "the partner's"
+                    notes.append(f"the final contract's Source_Capabilities at {caps.where()} are "
+                                 f"{'the board' if caps_from_board else 'the partner'}'s and are compared with "
+                                 f"{'0x32' if caps_from_board else '0x30'}; {whose} Source_Capabilities at "
+                                 f"{first.where()}, from before the PR_Swap, are compared with "
+                                 f"{'0x30' if caps_from_board else '0x32'} in the rows marked 'Before PR_Swap'. "
+                                 "The Request of that earlier contract is not compared: 0x34 and 0x35 hold the "
+                                 "final contract")
+                    rows += _caps_rows(first, regs, not caps_from_board, prefix="Before PR_Swap: ")
         elif caps is not None:
             rows.append(_row("EPR_Source_Capabilities", caps.wire.hex(), None, "", SKIPPED,
                              "EPR capabilities are not compared by this tool"))
         if contract is not None and not contract.epr:
             rows += _contract_rows(contract, regs, board, caps_expected)
-        rows += _identity_rows(identity_acks(capture.messages), regs, board)
+        rows += _identity_rows(capture.messages, regs, role_at)
     vbus = _vbus_row(capture, regs)
     if vbus is not None:
         rows.append(vbus)

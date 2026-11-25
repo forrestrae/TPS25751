@@ -26,6 +26,16 @@ present.
   latest Source_Capabilities only, and the verdict is at best inconclusive.
 - Only Source_Capabilities sent with the Source power role count (`sender` `source/...`).
   A board that sinks never has its own capabilities compared against 0x30.
+- STATUS gives the board's role at the snapshot. Each PR_Swap on SOP that the other port
+  accepted flips it for everything before that Accept; the summary shows them as
+  `PR_Swap` and `Accept` lines. A message sent with the board's role at its time is the
+  board's. So when the board attaches as Source and then swaps to Sink, as with an
+  iPhone, the final contract has the partner as Source: its Source_Capabilities go
+  against 0x30 and the board's Request against 0x35 bits 31:0. The board's own
+  Source_Capabilities, from the first contract, go against 0x32 in separate rows marked
+  "Before PR_Swap". That first contract's Request is not compared: 0x34 and 0x35 hold the
+  final contract. The same role rule decides whether a Discover Identity ACK on SOP is
+  the partner's or the board's own.
 - With no Source_Capabilities before the contract's Request (`aneg` sends none; any other
   stimulus means a late start), take the PDOs from the snapshot instead: 0x30 when the
   board sinks, 0x32 when it sources. Those rows compare register with register and say so.
@@ -45,7 +55,8 @@ present.
 | Source_Capabilities PDO count (`len(pdos)`) | 0x30 bits 2:0 | sink | equal |
 | Source_Capabilities PDO count | 0x32 bits 2:0 | source | equal |
 | PDO p, p from 1 to the larger count | 0x30 word at byte 1 + 4(p - 1) | sink | equal; a PDO present on one side only is a mismatch |
-| PDO p | 0x32 word at byte 3 + 4(p - 1) | source | as above. 0x32 holds PDO 1's Power Path in bits 9:8 and reserved bits 23:10, so PDO 1 starts at byte 3 |
+| PDO p | 0x32 word at byte 3 + 4(p - 1) | source | as above. 0x32 holds PDO 1's Power Path in bits 9:8 and reserved bits 23:10, so PDO 1 starts at byte 3. For PDO 1 only bits 31:30 and 22:0 must be equal |
+| PDO 1 bits 29:23, one row per differing flag | 0x32 bits 53:47 | source | report only: the controller sets these flags at runtime. Likely sources, inferred and not TRM text: bit 25 Dual-Role Data from DR_Swap support (0x29 bits 15:12), bit 24 Unchunked Extended Messages from PD3_CONFIGURATION (0x42) bit 4, bit 29 Dual-Role Power from the DRP state machine (0x28) and PR_Swap support (0x29). The TRM says 0x29 bit 19 sets bit 27, Unconstrained Power |
 | Request RDO | 0x35 bits 31:0 (bytes 0 to 3) | sink | equal. Bits 31:0 are the RDO this device sent as Sink |
 | Request RDO | 0x35 bits 127:96 (bytes 12 to 15) | source | equal. Bits 127:96 are the partner's request only while STATUS reports Source |
 | none | 0x35 bits 127:96 | sink | report only. On the sink bench they read the same word as bits 31:0 |

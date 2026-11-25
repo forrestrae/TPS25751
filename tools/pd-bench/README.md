@@ -135,7 +135,14 @@ retransmissions and the final contract, counting only Source_Capabilities sent w
 Source power role. Each row compares one wire word with the register bits that should
 hold it:
 
-- Source_Capabilities against 0x30 (board sinking) or 0x32 (board sourcing).
+- Source_Capabilities against 0x30 when the partner sent them, or 0x32 when the board
+  did. Against 0x32, PDO 1 flags in bits 29:23 are reported, not compared: the
+  controller sets them at runtime (on 2026-11-25 the board sent bits 25 and 24 set with
+  0x32 holding them clear). Bits 31:30 and 22:0 and the other PDOs must match.
+- After an accepted PR_Swap, the board's role before the swap is the opposite of the
+  one STATUS reports. The final contract is compared as usual, and the other side's
+  Source_Capabilities from before the swap are compared with their own register in
+  rows marked "Before PR_Swap".
 - The final Request against 0x35 bits 31:0 (sinking) or 127:96 (sourcing).
 - The requested PDO against 0x34 bits 31:0, and PDO 1 bits 29:20 against 0x34 bits
   41:32. That mapping is confirmed only with the board sinking, so a sourcing board's

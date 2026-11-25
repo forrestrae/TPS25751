@@ -205,6 +205,7 @@ Read the summary's `warnings` and `lines`:
 | Only connection records, no PD messages | No PD traffic, for example a non-PD source. The warning text says PD monitoring was not active; on firmware 2.0.0 the meter captures with monitoring disabled, so read it as no traffic. Quote the header's `pd_monitor` | Report and stop |
 | A Request with no Source_Capabilities before it, stimulus other than `aneg` | The capture started late | Compare what remains, mark the verdict inconclusive |
 | A Request with no Source_Capabilities before it, stimulus `aneg` | Expected: `aneg` sends Requests only. The meter's "capture started late" warning does not apply | None. The requested PDO comes from the snapshot's 0x30 |
+| A `PR_Swap` line followed by an `Accept` | The power roles swapped: the board's role before it is the opposite of the one `bench_hello` reports now. The final contract is the one after the swap | None. `bench_crosscheck` compares the final contract with 0x30 or 0x32 as usual and the board's own Source_Capabilities from before the swap with 0x32 in rows marked "Before PR_Swap"; say so in the report. To keep a sourcing board from swapping, clear PORT_CONTROL (0x29) bits 5 and 4 by hand before the run; this skill does not write 0x29 |
 | Lines ending in `(retry)` | Retransmissions; each counts once | None. During a cold restart into PTCH the charger repeats Source_Capabilities about 25 times without a GoodCRC for about 1.8 s before the contract: expected |
 
 When a rule fires and the cause is not clear from the summary, read the Large captures
@@ -260,8 +261,10 @@ Report in this order:
 
    `Raw` is the row's result from step 7.1. `Fields` is `agree` or names each
    disagreeing field with its three values. Reported rows (the board's own ACK, cable
-   ACKs, 0x35 bits 127:96 on a sink, 0x34 bits 41:32 on a source) carry `report` and no
-   field check.
+   ACKs, 0x35 bits 127:96 on a sink, 0x34 bits 41:32 on a source, and the board's PDO 1
+   flags in bits 29:23 that differ from 0x32) carry `report` and no field check. Give a
+   differing PDO 1 flag its likely runtime source as the row states it, and say it is
+   inferred unless the row cites the TRM.
 4. The verdict: `pass` when every compared word matches and every field agrees, `fail`
    when any word or field disagrees, `inconclusive` when something needed is missing
    (no completed contract, a late start, a register absent from the snapshot), `no

@@ -62,6 +62,13 @@ class CaptureFile:
                                                      rev=1))})
         return self
 
+    def wire_hex(self, text, sop="SOP"):
+        """A message given as its wire hex, with spaces allowed, as the meter summary prints it."""
+        data = bytes.fromhex(text.replace(" ", ""))
+        head = int.from_bytes(data[:2], "little")
+        objects = [int.from_bytes(data[o:o + 4], "little") for o in range(2, len(data), 4)]
+        return self.pd(head, objects, sop=sop)
+
     def source_caps(self, pdos=APPLE_PDOS, **kw):
         return self.pd(header(1, len(pdos), source=True, dfp=True), pdos, **kw)
 
@@ -420,3 +427,113 @@ def test_the_tool_reads_files_and_never_the_serial_port(bench, tmp_path):
     assert unreadable["kind"] == "CrosscheckError" and "declares 1 data objects" in unreadable["error"]
     aneg = CaptureFile().conn().request_accepted().status(20480).footer().write(tmp_path / "aneg.jsonl")
     assert bench.tools.bench_crosscheck(str(aneg), str(regs), stimulus="aneg")["verdict"] == "pass"
+
+
+# ----- the board as Source, then a PR_Swap (iPhone session, 2026-11-25) -----
+
+# The SOP messages of that capture (cap-port_reset-120508.jsonl), as the meter summary
+# printed them, without the GoodCRCs, which the builder adds. The board attaches as
+# Source/DFP and sends its Source_Capabilities, the iPhone requests 5 V, the board sends
+# PR_Swap and the iPhone accepts, then the iPhone is Source and the board requests from it.
+IPHONE_SESSION = [
+    "a151 2c910123 2cd10200 2cb10400 f4410600 f4b104e0",   # board Source_Capabilities, PDO 1 0x2301912C
+    "8210 2cb18417",                                       # iPhone Request, position 1
+    "a303", "a605",                                        # board Accept, PS_RDY
+    "8802", "a447 2c910132 2cd10200 2cb10400 2c410600",    # Get_Sink_Cap, iPhone Sink_Capabilities
+    "aa09", "8304",                                        # board PR_Swap, iPhone Accept
+    "a60a", "8607",                                        # PS_RDY from each side
+    "8119 96900137", "a210 96588211", "830b", "860d",      # iPhone caps, board Request, Accept, PS_RDY
+    "af14 01a800ff",                                       # board Discover Identity REQ
+    "8f43 41a000ff ac0500d5 00000000 66210c71",            # iPhone ACK, VID 0x05AC
+    "811f 96900127", "a210 96588211", "8301", "8603",      # the final contract
+    "8f1d 01a000ff",                                       # iPhone Discover Identity REQ
+    "af4a 41a000ff 51044000 00000000 11090000",            # the board's own ACK, VID 0x0451
+]
+# 0x32 as read in that session: 5 PDOs, Power Path bytes aa 2a, PDO 1 0x2001912C.
+IPHONE_0X32 = bytes.fromhex("05aa2a2c9101202cd102002cb10400f4410600f4b104e0") + bytes(63 - 23)
+
+
+def iphone_registers():
+    final_pdo, final_rdo = 0x27019096, 0x11825896
+    return {
+        0x1A: bytes([0x01, 0, 0, 0, 0]),                    # plug present, port role Sink
+        0x30: bytes([1]) + le(final_pdo) + bytes(48),
+        0x32: IPHONE_0X32,
+        0x34: le(final_pdo) + ((final_pdo >> 20) & 0x3FF).to_bytes(2, "little"),
+        0x35: le(final_rdo) + bytes(8) + le(final_rdo),
+        0x48: bytes([(1 << 6) | 3]) + le(0xD50005AC, 0x00000000, 0x710C2166) + bytes(12),
+        0x6A: bytes([0, 0, 0, 52]) + bytes(9),               # 52 x 98 = 5096 mV
+    }
+
+
+def iphone_capture():
+    capture = CaptureFile(provenance={"stimulus": "port_reset"}).conn()
+    for message in IPHONE_SESSION:
+        capture.wire_hex(message)
+    return capture.status(5141).footer()
+
+
+def test_after_a_power_swap_each_capabilities_meets_its_own_register(tmp_path):
+    result = run(tmp_path, iphone_capture(), iphone_registers())
+    rows = rows_by_check(result)
+    assert result["role"] == "sink"
+    # The final contract: the iPhone's capabilities against 0x30, the board's Request
+    # against 0x35 bits 31:0, its PDO against 0x34.
+    assert (rows["PDO 1"]["wire"], rows["PDO 1"]["where"], rows["PDO 1"]["result"]) == \
+        ("27019096", "0x30 bytes 1..4", MATCH)
+    assert rows["Request RDO (own)"]["wire"] == "11825896" and rows["Request RDO (own)"]["result"] == MATCH
+    assert rows["Requested PDO (position 1)"]["result"] == MATCH
+    # The board's own capabilities from before the swap, against 0x32.
+    assert rows["Before PR_Swap: Source_Capabilities PDO count"]["result"] == MATCH
+    assert rows["Before PR_Swap: PDO 1"]["where"] == "0x32 bytes 3..6"
+    # The iPhone's Request of the first contract (0x1784B12C) is compared with nothing.
+    assert not any(r["wire"] == "1784b12c" for r in result["rows"])
+    # Its Discover Identity ACK came after the swap, from the Source: the partner.
+    assert rows["Identity VDO 1"]["wire"] == "d50005ac" and rows["Identity VDO 1"]["result"] == MATCH
+    assert rows["SOP Discover Identity ACK (sink/dfp)"]["result"] == REPORT  # the board's own
+    swap = next(n for n in result["sanity"] if n.startswith("PR_Swap"))
+    assert "from the board" in swap and "was source before it and sink after it" in swap
+    assert any("Before PR_Swap" in n and "not compared" in n for n in result["sanity"])
+    assert result["verdict"] == "pass"
+
+
+def test_the_boards_pdo1_flags_are_reported_not_failed(tmp_path):
+    rows = rows_by_check(run(tmp_path, iphone_capture(), iphone_registers()))
+    pdo1 = rows["Before PR_Swap: PDO 1"]
+    assert (pdo1["wire"], pdo1["register"], pdo1["result"]) == ("2301912c", "2001912c", MATCH)
+    assert "29:23" in pdo1["note"]
+    dual_role_data = rows["Before PR_Swap: PDO 1 bit 25 Dual-Role Data"]
+    assert (dual_role_data["wire"], dual_role_data["register"], dual_role_data["result"]) == ("1", "0", REPORT)
+    unchunked = rows["Before PR_Swap: PDO 1 bit 24 Unchunked Extended Messages Supported"]
+    assert unchunked["result"] == REPORT and "0x42) bit 4" in unchunked["note"]
+    assert not any("bit 29" in check or "bit 23" in check for check in rows)
+    # PDOs 2 to 5, the SPR AVS APDO included, match exactly.
+    assert [rows[f"Before PR_Swap: PDO {p}"]["wire"] for p in range(2, 6)] == \
+        ["0002d12c", "0004b12c", "000641f4", "e004b1f4"]
+    assert all(rows[f"Before PR_Swap: PDO {p}"]["result"] == MATCH for p in range(2, 6))
+
+
+def test_a_board_pdo1_difference_outside_the_flags_fails(tmp_path):
+    regs = iphone_registers()
+    # Maximum Current 3.0 A in the wire's PDO 1, 2.9 A (0x122) in 0x32.
+    regs[0x32] = regs[0x32][:3] + le(0x20019122) + regs[0x32][7:]
+    result = run(tmp_path, iphone_capture(), regs)
+    assert rows_by_check(result)["Before PR_Swap: PDO 1"]["result"] == MISMATCH
+    assert result["verdict"] == "fail"
+
+
+def test_a_sourcing_board_compares_its_own_capabilities_with_0x32(tmp_path):
+    # Without the swap: the board stays Source and its first contract is the final one.
+    capture = CaptureFile().conn()
+    for message in IPHONE_SESSION[:4]:
+        capture.wire_hex(message)
+    regs = iphone_registers()
+    regs[0x1A] = bytes([0x21, 0, 0, 0, 0])
+    regs[0x34] = le(0x2301912C) + ((0x2301912C >> 20) & 0x3FF).to_bytes(2, "little")
+    regs[0x35] = le(0) + bytes(8) + le(0x1784B12C)
+    result = run(tmp_path, capture.status(5141).footer(), regs)
+    rows = rows_by_check(result)
+    assert rows["PDO 1"]["where"] == "0x32 bytes 3..6" and rows["PDO 1"]["result"] == MATCH
+    assert rows["PDO 1 bit 25 Dual-Role Data"]["result"] == REPORT
+    assert rows["Request RDO (partner)"]["result"] == MATCH
+    assert not any(n.startswith("PR_Swap") for n in result["sanity"])

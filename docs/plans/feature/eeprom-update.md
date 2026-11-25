@@ -1574,6 +1574,15 @@ on the High pointer better, although six is a small sample and the documents rea
 this plan say nothing about boot time. Whatever the cause, the S2 rule stands: the boot
 result is judged from `r`.
 
+| Step | Result |
+|---|---|
+| S6, `c4` | Plan named target High and the F8091164 image; the script confirmed. `updateRegion()` returned Success in 26272 ms, last step Done: Low pointer 0, High pointer 0x4400. Tasks: `FLrd` 909 at 17.9 ms, `FLad` 5, `FLwd` 449 at 20.8 ms (maximum 21.2 ms), `FLvy` 1 at 602 ms; every call Success, no busy result |
+| S6, power-on | Port back 19 s after it left. Start-up report and `r`: MODE `APP `; VERSION 0xF8091164; BOOT_FLAGS `78 00 F0 A2 C1`: EEPROM Loaded, Region 0 Attempted 1 and Invalid 1, Region 1 Attempted 1 and Invalid 0, no Error or CRC flag, Dead Battery Flag 0. Low pointer 0, High pointer valid; both AppConfigOffset words 0; `FLvy` Success on both regions; target Low. Dump identical to the expected image (S5 with the Low pointer 0). The controller booted the High region after a loss of power (Figure 2-10), with the BOOT_FLAGS stage 4 read after a `GAID` restart. Passed |
+
+The S6 start-up report read `APP ` with the Low pointer 0 and the High pointer valid, which
+keeps the pattern noted after S5: the report has caught a load in progress only while the
+High pointer was 0.
+
 Two physical points were confirmed on 2026-11-22. First, the EEPROM can be reprogrammed
 in place with a SOIC8 clip, so `write-flash.zsh` (`24LC256@SOIC8`) is a recovery path
 that needs no rework. Second, the board runs from the 18650 battery pack, so the Teensy

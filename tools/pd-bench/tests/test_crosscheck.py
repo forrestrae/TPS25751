@@ -557,7 +557,7 @@ def test_the_source_role_bundle_passes_with_its_runtime_differences_reported():
     assert rows["Request RDO (partner)"]["result"] == MATCH
     first_pdo = rows["0x32 PDO 1 bits 29:20"]
     assert (first_pdo["wire"], first_pdo["register"], first_pdo["result"]) == ("200", "200", REPORT)
-    assert "(bits 29:20 = 030)" in first_pdo["note"]
+    assert "the PDO 1 sent on the wire has bits 29:20 = 030" in first_pdo["note"]
     assert [rows[f"Identity VDO {k}"]["wire"] for k in (1, 2, 3)] == ["d50005ac", "00000000", "710c2166"]
     assert all(rows[f"Identity VDO {k}"]["result"] == MATCH for k in (1, 2, 3))
 
@@ -668,3 +668,24 @@ def test_only_the_latest_attach_is_compared(tmp_path):
     assert not any(check.startswith("Before PR_Swap") for check in rows)
     assert any("earlier attach" in n for n in result["sanity"])
     assert result["verdict"] == "pass"
+
+
+@pytest.mark.skipif(not SOURCE_BUNDLE.is_dir(), reason="needs the library checkout's fixture bundle")
+def test_a_sourcing_late_start_masks_the_pdo1_flags_and_stays_inconclusive(tmp_path):
+    # The source-role bundle without the board's Source_Capabilities (its line 37): the
+    # requested PDO 1 then comes from 0x32, which lacks the runtime flags 0x34 holds.
+    lines = (SOURCE_BUNDLE / "capture.jsonl").read_text().splitlines()
+    caps = next(k for k, line in enumerate(lines) if '"msg":"Source_Capabilities"' in line)
+    assert caps == 36  # line 37
+    path = tmp_path / "capture.jsonl"
+    path.write_text("\n".join(lines[:caps] + lines[caps + 1:]) + "\n")
+    result = crosscheck.crosscheck(path, SOURCE_BUNDLE / "registers.json")
+    rows = rows_by_check(result)
+    requested = rows["Requested PDO (position 1, from 0x32)"]
+    assert (requested["wire"], requested["register"], requested["result"]) == ("2001912c", "0301912c", MATCH)
+    assert "29:23 not" in requested["note"]
+    first_pdo = rows["0x32 PDO 1 bits 29:20"]
+    assert "no PDO 1 from the wire in this capture" in first_pdo["note"]
+    assert any("started late" in n for n in result["sanity"])
+    assert not [r for r in result["rows"] if r["result"] == MISMATCH]
+    assert result["verdict"] == "inconclusive"

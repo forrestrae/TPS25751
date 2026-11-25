@@ -451,6 +451,14 @@ def _contract_rows(contract: Contract, regs: dict[int, bytes], role: str, caps_e
     if wire_pdo is None:
         rows.append(_row("Requested PDO", None, _w(_bits(pdo34, 0, 32)) if pdo34 else None, "0x34 bits 31:0",
                          MISMATCH, f"Object Position {position} names no PDO of the {len(pdos)} in {origin}"))
+    elif label and role == "source" and position == 1 and pdo34:
+        # 0x34 holds PDO 1 as the board sent it, with the runtime flags in bits 29:23;
+        # 0x32 holds it without them. Compare the rest, as for the wire.
+        active = _bits(pdo34, 0, 32)
+        fixed = ~PDO1_FLAG_MASK & 0xFFFFFFFF
+        rows.append(_row(f"Requested PDO (position 1{label})", _w(wire_pdo), _w(active), "0x34 bits 31:0",
+                         MATCH if (wire_pdo & fixed) == (active & fixed) else MISMATCH,
+                         f"{label_note}; bits 31:30 and 22:0 compared, the runtime flags in bits 29:23 not"))
     else:
         rows.append(_compare(f"Requested PDO (position {position}{label})", wire_pdo,
                              _bits(pdo34, 0, 32) if pdo34 else None, "0x34 bits 31:0",
@@ -477,12 +485,14 @@ def _contract_rows(contract: Contract, regs: dict[int, bytes], role: str, caps_e
             else:
                 agreement = "equal" if register == tx_control else "differ"
                 agreement = f"0x32 PDO 1 bits 29:20 and 0x34 bits 41:32 {agreement} here"
+            wire_note = ("no PDO 1 from the wire in this capture" if label
+                         else f"the PDO 1 sent on the wire has bits 29:20 = {control:03x}")
             rows.append(_row("0x32 PDO 1 bits 29:20" if tx_control is not None else check,
                              f"{reference:03x}", None if register is None else f"{register:03x}",
                              "0x34 bits 41:32", REPORT,
                              f"reported, not compared: with the board sourcing, one hardware observation "
                              f"(2026-11-25) found 0x34 bits 41:32 equal to 0x32 PDO 1 bits 29:20, not to the "
-                             f"PDO 1 sent on the wire (bits 29:20 = {control:03x}); {agreement}"))
+                             f"PDO 1 sent on the wire; {wire_note}; {agreement}"))
     return rows
 
 

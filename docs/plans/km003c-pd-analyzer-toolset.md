@@ -324,6 +324,35 @@ Phase 9 facts, for later phases:
   Codex run used `-c` overrides rather than a project `.codex/config.toml`.
 - Claude Code reorders `.claude/settings.json` keys when it saves plugin settings.
 
+Phase 10 complete 2026-11-25: the overview issue
+https://github.com/fejesd/mcp-powerz-km003c/issues/1 is open, with the user's approval.
+It offers nine branches of the fork and asks the maintainer which to take and in what
+form; no pull request is open. The user chose the issue alone because upstream has had
+no activity since 2026-10-28, had never had an issue or pull request, and the stack adds
+about 6,700 lines. All phases of this plan are complete; what follows depends on the
+maintainer's answer.
+
+Phase 10 facts, for whoever picks up the answer:
+- The nine branches on the fork, in stack order from upstream `main` 4b26a6c:
+  `upstream/macos-backend`, `disconnect-reply`, `pd-monitor-enable`, `pd-poll-interval`,
+  `busy-error`, `lagging-meter-reset` (split out of `idle-release` at the user's request,
+  placed before it because the lease code was written on top of it), `idle-release`,
+  `trigger-gate`, and `pd-capture-files`. Each branch's unit suite passes on its own,
+  from 133 tests on upstream `main` to 363. Only `disconnect-reply` applies to upstream
+  `main` by itself. Per-branch pull request drafts were written but are not in the
+  repository.
+- Before the push the stack was rebuilt: the meter serial is the placeholder `000000`, no
+  commit message names this library or the plan, and the fixtures are named by poll
+  interval. The fork's published `main` history still holds the old serial and one such
+  commit message from before; rewriting it was not done.
+- The rebuild found and fixed a real bug: the capture summary cut `path` to 200
+  characters, which broke a test whenever the file path was longer. The summary now keeps
+  the whole path (fork `main` ee1cd05, and `upstream/pd-capture-files`).
+- Upstream's current `parse_pd` reads a connection event's timestamp from bytes 1 to 3;
+  the issue offers the 32-bit fix as a separate one-line pull request on request.
+- The fork's `origin` uses SSH; its `main` is ee1cd05 and tag `v0.2.0` is 26c7128, which
+  this library's `.mcp.json` pins.
+
 Correction found in Phase 0, affecting Phase 5: since `ci/verify-launcher`, `verify.py`
 is a launcher that runs `main`'s copy of `scripts/verify_gate.py`, and agents may edit
 `verify_gate.py` on a topic branch. The two Phase 5 checks therefore go into

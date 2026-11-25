@@ -171,6 +171,68 @@ and 2 when a file cannot be read, including a data message shorter than its head
 declares; the tool returns the same cases as an error with kind `CrosscheckError`. The `tps25751-pd-verify` skill in
 `plugins/tps25751-bench` drives the whole check and adds the field-by-field decode.
 
+## Cabling and the meter's trigger tools
+
+The `km003c` server's trigger tools are absent unless the environment variable
+`KM003C_ENABLE_TRIGGER=1` is set. When they are on, the meter becomes a USB PD sink toward
+the device on its receptacle (input), negotiates what the tool asks for, and passes the
+resulting VBUS to its plug (output). Whatever is on the plug receives that voltage without
+having negotiated it. The tools are `trigger_detect`, `trigger_enter`,
+`trigger_pd_source_caps`, `trigger_pd_request`, `trigger_fast_charge`, `trigger_reset`,
+`trigger_close`, and `trigger_raw`.
+
+Safe cabling:
+
+- A charger on the receptacle and nothing on the plug, to characterise the charger.
+- The board as Source on the receptacle and nothing on the plug. The meter requests the
+  board's PDOs, including the SPR AVS APDO in PDO 5, which tests 0x32 and 0x7A against a
+  real sink. The board runs from its battery. Read 0x32 and 0x7A with the bench console
+  after each request.
+
+Unsafe cabling:
+
+- The board as Sink on the plug with a charger on the receptacle. The trigger raises VBUS
+  past anything in 0x33 or 0x37, and the sink path may already be closed from the 5 V
+  implicit contract. An EPR charger such as the Apple 140 W can be requested up to 28 V.
+- Any load on the plug that cannot take the highest voltage the input source offers,
+  including a phone in a source-role session.
+- Running trigger tools during a verification capture. The meter then takes part in the
+  negotiation it is meant to observe.
+
+Keep the trigger tools off during verification and whenever anything is on the meter's
+plug. Never set `KM003C_ENABLE_TRIGGER` in a checked-in configuration.
+
+For a trigger session in Codex, set the flag for that one run and require approval for
+each trigger tool on the same command line, from the library root:
+
+```bash
+codex \
+  -c 'mcp_servers.km003c.env.KM003C_ENABLE_TRIGGER="1"' \
+  -c 'mcp_servers.km003c.tools.trigger_detect.approval_mode="prompt"' \
+  -c 'mcp_servers.km003c.tools.trigger_enter.approval_mode="prompt"' \
+  -c 'mcp_servers.km003c.tools.trigger_pd_source_caps.approval_mode="prompt"' \
+  -c 'mcp_servers.km003c.tools.trigger_pd_request.approval_mode="prompt"' \
+  -c 'mcp_servers.km003c.tools.trigger_fast_charge.approval_mode="prompt"' \
+  -c 'mcp_servers.km003c.tools.trigger_reset.approval_mode="prompt"' \
+  -c 'mcp_servers.km003c.tools.trigger_close.approval_mode="prompt"' \
+  -c 'mcp_servers.km003c.tools.trigger_raw.approval_mode="prompt"'
+```
+
+Non-interactive `codex exec` under the default `on-request` policy ran prompt-gated tools
+without asking. For `codex exec`, add `-c approval_policy="never"`, which refuses them.
+The flag is the primary guard under Codex. With `approvals_reviewer = "auto_review"` in
+the user configuration, the prompts may go to the automatic reviewer instead of the user.
+
+For a trigger session in Claude Code, start `claude` with the variable set in that shell:
+
+```bash
+KM003C_ENABLE_TRIGGER=1 claude
+```
+
+The project's `permissions.ask` rules prompt on each trigger call, and on `bench_task`,
+`bench_write`, and `bench_renegotiate`. They do not protect a session that bypasses
+permissions.
+
 ## Copy the skill into a downstream project
 
 Codex reads skills from `<project>/.agents/skills/`. This library links its own entry to

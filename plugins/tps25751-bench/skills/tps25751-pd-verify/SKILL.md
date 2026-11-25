@@ -28,7 +28,12 @@ rules in [compare-rules.md](compare-rules.md) by hand, which give the same rows.
 ## Rules that hold throughout
 
 - Never call a `km003c` tool whose name starts with `trigger_`. The meter would take part
-  in the negotiation it is meant to observe, and it can raise VBUS on its output.
+  in the negotiation it is meant to observe, and it can raise VBUS on its output. The
+  trigger tools stay off during verification and whenever anything is on the meter's plug:
+  a load there receives whatever voltage the trigger negotiates from the input source. If
+  they appear in the tool list, `KM003C_ENABLE_TRIGGER` is set; tell the user and use none
+  of them. The cabling rules are in the bench server's README, "Cabling and the meter's
+  trigger tools".
 - Never call `tps25751-bench` `bench_write` or `bench_task` in this skill. Every stimulus
   goes through `bench_renegotiate`, which checks the power role and restores what it
   changes. When a result names a `bench_write` call as the recovery, give it to the user;

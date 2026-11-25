@@ -64,7 +64,7 @@ authority on what is allowed without a prompt.
 
 | MCP server | Source | Use for |
 |---|---|---|
-| `km003c` | Fork `forrestrae/mcp-powerz-km003c`, pinned tag, run with `uvx` | The KM003C meter: measurements and USB PD captures, written under `captures/`. Trigger tools are off unless `KM003C_ENABLE_TRIGGER=1` |
+| `km003c` | Fork `forrestrae/mcp-powerz-km003c`, pinned tag, run with `uvx` | The KM003C meter: measurements and USB PD captures, written under `captures/`. Trigger tools are off unless `KM003C_ENABLE_TRIGGER=1`; the cabling rules and the per-session commands are in the bench README, "Cabling and the meter's trigger tools" |
 | `tps25751-bench` | `tools/pd-bench`, pinned to a release tag of this library, run with `uvx` | The board through the bench console. `bench_task`, `bench_write`, and `bench_renegotiate` can drop VBUS or reset the controller; its README lists the tools |
 
 The pinned tags are the versions tested here; keep the `tps25751-bench` tag equal to the

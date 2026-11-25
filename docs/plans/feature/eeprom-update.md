@@ -1639,6 +1639,25 @@ mode the controller stayed in, although the report reads MODE again; and the par
 above did not say that the `r` argument depends on the Teensy being powered from the
 board.
 
+Stage 10, the start-up wait on hardware. Added on 2026-11-24 at the user's request, on the
+second board and the bench supply of stage 9, which starts in the full-flash layout. One
+build: the branch tip `135a798` with the F8091166 image. Steps:
+
+1. Flash the build; capture the start-up report and run `r`. Expected: the wait ends at
+   once with APP, and the dump equals the full-flash image.
+2. `c1` (target High), which erases the High pointer and halts, then a power cycle with
+   the capture armed. Expected: if the controller is still loading when the Teensy starts,
+   the wait polls through PTCH and ends with APP after some hundreds of milliseconds,
+   and the report reads APP, VERSION 0xF8091166, BOOT_FLAGS `18 00 F0 A2 C1`. `r`'s dump
+   equals the full-flash image with the High pointer 0.
+3. `b` (`Low, then High`), `r`, a power cycle, and `r`. Expected: the full-flash image and
+   the S1 boot, which returns the board to its starting state.
+
+The check passes when step 2's start-up report reads APP and prints no PTCH advice. If the
+wait ends with APP after a few milliseconds, the power-on missed the race and the step
+shows nothing about the fix; one repeat of the power cycle is then allowed. Recovery: as
+stage 9.
+
 Two physical points were confirmed on 2026-11-22. First, the EEPROM can be reprogrammed
 in place with a SOIC8 clip, so `write-flash.zsh` (`24LC256@SOIC8`) is a recovery path
 that needs no rework. Second, the board runs from the 18650 battery pack, so the Teensy

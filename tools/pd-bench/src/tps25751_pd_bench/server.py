@@ -471,10 +471,9 @@ def build_tools(service: BenchService) -> SimpleNamespace:
         whole register, as many bytes as its length byte. A write to 0x27 or 0x28
         disconnects and reconnects the port. A write to 0x29 (PORT_CONTROL) does
         not: it takes effect the next time the policy it governs runs, such as the
-        board initiating (bit 5) or accepting (bit 4) the next PR_Swap to sink. Start a
-        0x27 write from a fresh
-        bench_read: the firmware keeps values in bits the TRM calls reserved.
-        Host-written values last until the next restart.
+        board initiating (bit 5) or accepting (bit 4) the next PR_Swap to sink.
+        Start a 0x27 write from a fresh bench_read: the firmware keeps values in bits
+        the TRM calls reserved. Host-written values last until the next restart.
 
         Returns the register as read back and match, which is false when the
         controller kept other bytes than the ones written.

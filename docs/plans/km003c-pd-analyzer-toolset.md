@@ -747,7 +747,7 @@ host keeps them separately. Asynchronous events are `! <text>` lines.
 | `DEC <addr>` | Raw hex, then the library's `debugPrint()` output for that register |
 | `SNAP` | Raw hex of 0x03, 0x14, 0x1A, 0x26, 0x30 to 0x35, 0x37, 0x3F, 0x40, 0x42, 0x48, 0x69, 0x6A, then clears INT_EVENT1 |
 | `CMD <4cc> [hex]` | Task status, then the DATA output as hex. Allowed: `GSrC`, `GSkC`, `ANeg`, `SSrC`, `GPPI`, `MBRd`, `Gaid`, `GAID`, `SRDY`, `SRYR`, `DBfg`, `I2Cr`. Refused: `PBM*`, `GO2P`, `FL*`, `I2Cw`, and the swaps unless built with `-D TPS25751_BENCH_ALLOW_SWAPS`. |
-| `WR <addr> <hex>` | Allowed only for 0x27, 0x28, 0x37, 0x42; reads back and returns the new raw hex |
+| `WR <addr> <hex>` | Allowed only for 0x27, 0x28, 0x29, 0x37, 0x42 (0x29 added in Phase 7); reads back and returns the new raw hex |
 
 `SNAP` is the cross-check channel. 0x30 to 0x35 hold the capabilities and the contract,
 0x37 explains which PDO the board chose, 0x48 holds the partner's identity, STATUS

@@ -139,14 +139,17 @@ hold it:
   did. Against 0x32, PDO 1 flags in bits 29:23 are reported, not compared: the
   controller sets them at runtime (on 2026-11-25 the board sent bits 25 and 24 set with
   0x32 holding them clear). Bits 31:30 and 22:0 and the other PDOs must match.
-- After an accepted PR_Swap, the board's role before the swap is the opposite of the
-  one STATUS reports. The final contract is compared as usual, and the other side's
-  Source_Capabilities from before the swap are compared with their own register in
-  rows marked "Before PR_Swap".
+- After a completed PR_Swap (the other port's Accept, then the new Source's PS_RDY),
+  the board's role before the swap is the opposite of the one STATUS reports. The final
+  contract is compared as usual, and the other side's Source_Capabilities from before
+  the swap are compared with their own register in rows marked "Before PR_Swap". Only
+  the latest attach, after the last connect record, is compared.
 - The final Request against 0x35 bits 31:0 (sinking) or 127:96 (sourcing).
-- The requested PDO against 0x34 bits 31:0, and PDO 1 bits 29:20 against 0x34 bits
-  41:32. That mapping is confirmed only with the board sinking, so a sourcing board's
-  row is reported, not compared.
+- The requested PDO against 0x34 bits 31:0. With the board sinking, PDO 1 bits 29:20
+  against 0x34 bits 41:32, which two chargers confirmed. With the board sourcing, one
+  observation found 0x34 bits 41:32 equal to 0x32 PDO 1 bits 29:20 rather than to the
+  PDO 1 sent on the wire, so that row reports 0x32 PDO 1 bits 29:20 against 0x34 bits
+  41:32 and is not compared.
 - The partner's Discover Identity ACK on SOP against 0x48.
 - The meter's last VBUS against 0x6A, unless STATUS reports no plug.
 

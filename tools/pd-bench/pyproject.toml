@@ -17,6 +17,7 @@ dependencies = [
 
 [project.scripts]
 tps25751-pd-bench = "tps25751_pd_bench.server:main"
+tps25751-pd-crosscheck = "tps25751_pd_bench.crosscheck:main"
 
 [dependency-groups]
 # `uv run` installs this group by default; the verify gate runs `uv run --locked pytest` here.

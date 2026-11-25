@@ -70,6 +70,7 @@ The server speaks MCP over stdio. It needs Python 3.11 or later, `mcp` 2.x, and
 | `bench_task(code, data_hex?)` | Yes | Runs one 4CC task and returns its return code and the 64 DATA bytes. |
 | `bench_write(addr, hex)` | Yes | Writes the whole of 0x27, 0x28, 0x37, or 0x42 and returns the readback. |
 | `bench_renegotiate(method, max_voltage_mv?)` | Yes | Starts a negotiation and returns each step with UTC times. |
+| `bench_crosscheck(capture_path, registers_path, role?)` | No, and opens no port | Compares a `km003c-capture` file with a `registers.json` snapshot, word for word, and returns the rows, the sanity notes, a verdict, and a Markdown table. See "Compare a capture with a snapshot". |
 
 A result carries `owner_check: unavailable: ...` when `lsof` is missing or did not
 finish, which means the server could not see whether another program has the port open.
@@ -124,6 +125,28 @@ whether the contract moved to a PDO at or under the temporary maximum, and
 `restored_contract` whether the original PDO is active again at the end. Neither makes
 the call fail: `stepped_down: false` means the method ran and the controller kept its
 contract, so the capture holds no Request from it.
+
+## Compare a capture with a snapshot
+
+`bench_crosscheck` and the command `tps25751-pd-crosscheck` run the same comparison,
+`crosscheck.py`. They read the capture's wire hex themselves, so a decode error in the
+meter server cannot hide a mismatch, and they follow the meter server's rules for
+retransmissions and the final contract. Each row compares one wire word with the register
+bits that should hold it: Source_Capabilities against 0x30 (board sinking) or 0x32
+(board sourcing), the final Request against 0x35 bits 31:0 or 127:96, the requested PDO
+and PDO 1 bits 29:20 against 0x34, the partner's Discover Identity ACK on SOP against
+0x48, and the meter's last VBUS against 0x6A. The board's own ACK and cable ACKs are
+reported, not compared. The board's role comes from STATUS (0x1A) bit 5; `--role` is
+needed only for a snapshot without STATUS.
+
+```bash
+uv run tps25751-pd-crosscheck <capture.jsonl> <registers.json>
+```
+
+The verdict is `pass`, `fail`, `inconclusive` (no completed contract, a late start, or a
+register missing from the snapshot), or `no negotiation`. The command exits 1 on `fail`
+and 2 when a file cannot be read. The `tps25751-pd-verify` skill in
+`plugins/tps25751-bench` drives the whole check and adds the field-by-field decode.
 
 ## How the server finds and shares the port
 
@@ -235,6 +258,7 @@ The console does not pace `I2Cr`; the TRM asks for 5 s between two of them.
 ## Tests
 
 The tests use a simulated console behind a fake serial port and never open a real one.
+The comparison tests use files in a temporary directory.
 The verify gate of the library runs them with the locked dependencies:
 
 ```bash

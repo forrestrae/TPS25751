@@ -33,7 +33,7 @@ from mcp.server.mcpserver import MCPServer
 from mcp.types import ToolAnnotations
 from serial.tools import list_ports
 
-from . import PROTOCOL_VERSION, registers
+from . import PROTOCOL_VERSION, crosscheck, registers
 from .link import FIRST_LINE_TIMEOUT_S, BenchLink, TrafficLog, utc_now
 from .ports import PortCandidate, find_candidates, port_holders
 from .protocol import (
@@ -568,9 +568,37 @@ def build_tools(service: BenchService) -> SimpleNamespace:
         result["finished_utc"] = service.now_utc()
         return result
 
+    def bench_crosscheck(capture_path: str, registers_path: str, role: str | None = None) -> dict:
+        """Compare a USB PD capture file with a register snapshot file, word for word.
+
+        Reads two files and never opens the serial port. capture_path is a
+        km003c-capture version 1 file, as the km003c server's pd_capture_start
+        returns it; registers_path is a tps25751-registers version 1 file, as
+        bench_snapshot(path=...) writes it. Give absolute paths: a relative path
+        resolves against this server's working directory. role (sink or source) is
+        needed only when the snapshot has no STATUS (0x1A).
+
+        The capture is read from its wire hex. Returns one row per compared word
+        (check, wire hex, register hex, where in the register, result, note):
+        Source_Capabilities against 0x30 (sink) or 0x32 (source), the final
+        contract's Request against 0x35, the requested PDO and PDO 1 bits 29:20
+        against 0x34, the partner's Discover Identity ACK on SOP against 0x48, and
+        the meter's last VBUS against 0x6A. The board's own ACK and cable ACKs are
+        reported, not compared. Also returns the sanity notes, a verdict (pass,
+        fail, inconclusive, or no negotiation), and the rows as a Markdown table.
+        """
+        if role is not None and role not in ("sink", "source"):
+            return {"error": f"role must be sink or source, not {role!r}", "kind": "ValueError"}
+        try:
+            result = crosscheck.crosscheck(capture_path, registers_path, role)
+        except crosscheck.CrosscheckError as exc:
+            return {"error": str(exc), "kind": type(exc).__name__}
+        result["table"] = crosscheck.render_table(result)
+        return result
+
     return SimpleNamespace(bench_hello=bench_hello, bench_snapshot=bench_snapshot,
                            bench_read=bench_read, bench_task=bench_task, bench_write=bench_write,
-                           bench_renegotiate=bench_renegotiate)
+                           bench_renegotiate=bench_renegotiate, bench_crosscheck=bench_crosscheck)
 
 
 def _check_method_fits(method: str, hello: dict) -> None:
@@ -775,7 +803,8 @@ def build_server(tools: SimpleNamespace) -> MCPServer:
         version=_package_version(),
         instructions="Tools for a TPS25751 USB PD controller through the bench console firmware: "
                      "raw and decoded register reads, the cross-check snapshot, 4CC tasks, register "
-                     "writes, and renegotiation stimuli. bench_task, bench_write, and "
+                     "writes, renegotiation stimuli, and a file-only comparison of a capture with a "
+                     "snapshot (bench_crosscheck). bench_task, bench_write, and "
                      "bench_renegotiate can change the PD contract or drop VBUS.",
     )
     read_only = ToolAnnotations(readOnlyHint=True, destructiveHint=False, openWorldHint=False)
@@ -787,6 +816,7 @@ def build_server(tools: SimpleNamespace) -> MCPServer:
     server.tool(annotations=changes_board)(tools.bench_task)
     server.tool(annotations=changes_board)(tools.bench_write)
     server.tool(annotations=changes_board)(tools.bench_renegotiate)
+    server.tool(annotations=read_only)(tools.bench_crosscheck)
     return server
 
 

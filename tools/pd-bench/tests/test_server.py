@@ -10,11 +10,11 @@ def list_tools(server):
     return asyncio.run(server.list_tools())
 
 
-def test_server_registers_the_six_tools(bench):
+def test_server_registers_the_seven_tools(bench):
     server = build_server(build_tools(bench.service))
     tools = {tool.name: tool for tool in list_tools(server)}
-    assert sorted(tools) == ["bench_hello", "bench_read", "bench_renegotiate", "bench_snapshot",
-                             "bench_task", "bench_write"]
+    assert sorted(tools) == ["bench_crosscheck", "bench_hello", "bench_read", "bench_renegotiate",
+                             "bench_snapshot", "bench_task", "bench_write"]
     assert server.name == "tps25751-bench"
     for tool in tools.values():
         assert tool.description and len(tool.description) > 80
@@ -33,6 +33,8 @@ def test_tool_arguments_match_the_plan(bench):
     assert arguments("bench_task") == ({"code", "data_hex"}, {"code"})
     assert arguments("bench_write") == ({"addr", "hex"}, {"addr", "hex"})
     assert arguments("bench_renegotiate") == ({"method", "max_voltage_mv"}, {"method"})
+    assert arguments("bench_crosscheck") == ({"capture_path", "registers_path", "role"},
+                                             {"capture_path", "registers_path"})
 
 
 def test_only_the_reading_tools_are_marked_read_only(bench):
@@ -44,6 +46,7 @@ def test_only_the_reading_tools_are_marked_read_only(bench):
             else annotations.readOnlyHint
 
     assert read_only("bench_hello") is True and read_only("bench_read") is True
+    assert read_only("bench_crosscheck") is True
     for name in ("bench_snapshot", "bench_task", "bench_write", "bench_renegotiate"):
         assert read_only(name) is False, name
 

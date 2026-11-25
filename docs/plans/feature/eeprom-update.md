@@ -917,7 +917,7 @@ Decisions of 2026-11-24 on these points and on the other open items:
 | `PBMs` timeout byte | Changed to 0x32 on 2026-11-24 (session 2). Checked against TRM Table 4-15 (page 76: "recommended to always use 0x32 ... 5 seconds, LSB of 100 ms") and SLVAFV8A (Table 4-1 lists 0x31 as "3.1 seconds"; the byte listings of steps 4 and 5 send 0x32; the step 9 read-back shows 0x31). Retested on hardware the same day, see stage 7 |
 | Is the branch finished | Not yet. `scripts/integrate.py` stays unrun until the user confirms |
 | `PBMe`, DATA read-back, and ReadyForPatch | Decided in session 3, see below |
-| Coverage of `TPS25751.cpp`; `Wire2` restore sketch; stage 4 with a power cycle | Deferred by the user to later sessions, each to be decided there. Stage 4 with a power cycle was taken up in session 4 as stage 9 |
+| Coverage of `TPS25751.cpp`; `Wire2` restore sketch; stage 4 with a power cycle | Deferred by the user to later sessions, each to be decided there. Stage 4 with a power cycle was taken up in session 4 as stage 9, which passed on the second board |
 
 Decisions of 2026-11-24, session 3, on three of the loader's departures from TI's flow.
 Burst transaction spacing and the 500 us before `PBMc` stay out of scope by the user's
@@ -1159,7 +1159,8 @@ Ordered from safe to destructive. Each stage states its recovery.
    EEPROM write interrupted in the middle of a task. The cuts fall between tasks, and
    a `GAID` restart keeps the supply up. The power-on boot path is the same code as far
    as the documents say, and BOOT_FLAGS after a `GAID` restart of the full-flash layout
-   equals the value stage 1 read, but neither is a test of a power cycle.
+   equals the value stage 1 read, but neither is a test of a power cycle. Stage 9
+   (2026-11-24, second board) covers both with real power cycles and passed.
 5. Blank programming. Erase the EEPROM with `minipro`, confirm PTCH mode, load the
    bundle with `TPS25751PatchLoader`, run `programBlank()`, `coldReset()`, and compare a
    dump with `..._fullFlash.bin`. Recovery: `write-flash.zsh`.
@@ -1509,7 +1510,7 @@ loss of power, and that an update cut by power loss inside step 2 leaves the oth
 bootable and changes nothing outside the target region. What it cannot show: a cut inside
 a pointer write, and more than one sample of the mid-write cut.
 
-Result, 2026-11-24, branch commit `a4b5a65`, in progress.
+Result, 2026-11-24, branch commit `a4b5a65` (plan only; the code is unchanged since `aed9e27`): passed.
 
 Second board. Stage 9 runs on a second carrier and Teensy 4.0, which the user describes as
 an exact copy of the board of stages 1 to 8. Its Teensy enumerates as
@@ -1582,6 +1583,34 @@ result is judged from `r`.
 The S6 start-up report read `APP ` with the Low pointer 0 and the High pointer valid, which
 keeps the pattern noted after S5: the report has caught a load in progress only while the
 High pointer was 0.
+
+| Step | Result |
+|---|---|
+| S7, flash | The F8091166 build (header SHA-256 `60c6cdd8...add77772c`) flashed through the Teensy Loader; the EEPROM and the controller are untouched by a flash |
+| S7, `b` | Plan named `Low, then High` and the F8091166 image (14336 bytes), Low pointer 0, High pointer valid; the script confirmed. `updateBothRegions()` returned Success in 52730 ms, both pointers valid. Tasks: `FLrd` 1824 (maximum 20.2 ms), `FLad` 9, `FLwd` 901 at 20.8 ms (maximum 21.2 ms), `FLvy` 2 at 603 ms; every call Success, no busy result |
+| S7, `r` | Dump identical to `..._F8091166_fullFlash.bin` (SHA-256 `a3e549ca...3096fdaec3`); both pointers valid; both AppConfigOffset words 0; `FLvy` Success on both. VERSION still 0xF8091164, the bundle the controller booted; target Low, from the stale Region 0 Invalid flag of the S6 boot (Figure 2-2) |
+| S7, power-on | Port back 20 s after it left. Start-up report and `r`: MODE `APP `; VERSION 0xF8091166; BOOT_FLAGS `18 00 F0 A2 C1`, Dead Battery Flag 0, Region 1 Attempted 0; both pointers valid; both AppConfigOffset words 0; `FLvy` Success on both; target High. Dump identical to `..._F8091166_fullFlash.bin` (SHA-256 `a3e549ca...3096fdaec3`). The board is back in its starting state |
+
+Stage 9 passed on the second board, 2026-11-24.
+
+Verified by this stage: after a loss of power, the controller boots the region the status
+table predicts from each of the four states of stage 4 (Low after `c1`, `c2`, and `c3`;
+High after `c4`, with Region 0 Invalid), with the BOOT_FLAGS stage 4 read after `GAID`
+restarts. A power cut inside step 2 of an update, after 227 of 446 chunks, left the Low
+region, both pointers, and both AppConfigOffset words untouched; the controller booted
+Low, `FLvy` reported the partial High bundle not valid, and `c2` then rewrote the region
+and passed its step 2 checks over it. On this board the Teensy, the controller, and the
+EEPROM lose power together on the bench supply, and no boot read the Dead Battery Flag.
+
+Not shown by this stage: a cut inside a pointer write; a chunk caught inside the
+24LC256's write cycle (the one mid-write cut ended on a chunk boundary with no undefined
+byte); more than one sample of the mid-write cut; the effect of the power cycle on a USB
+PD contract, since the USB-C port was unconnected; and the first board under a power
+cycle.
+
+Open for the user after this stage: the example's start-up advice for a PTCH read that is
+a load in progress (see the note after S2), and the cause of the start-up report's PTCH
+reads, which so far occur only while the High pointer is 0.
 
 Two physical points were confirmed on 2026-11-22. First, the EEPROM can be reprogrammed
 in place with a SOIC8 clip, so `write-flash.zsh` (`24LC256@SOIC8`) is a recovery path

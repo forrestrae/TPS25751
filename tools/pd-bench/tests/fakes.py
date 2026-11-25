@@ -41,6 +41,7 @@ def default_registers() -> dict[int, bytes]:
         0x26: bytes(5),
         0x27: bytes.fromhex("050914001c03" + "00" * 8),     # as read on the bench board
         0x28: bytes.fromhex("02002201" + "00" * 13),
+        0x29: bytes.fromhex("725081da"),                    # as read on 2026-11-25, 0xDA815072
         0x30: SOURCE_CAPS_140W,
         0x31: bytes(53),
         0x32: bytes(63),
@@ -162,8 +163,8 @@ class FakeConsole:
                     + ["int_clear=ok", "OK"])
         if command == "WR":
             address = int(words[1], 16)
-            if address not in (0x27, 0x28, 0x37, 0x42):
-                return ["ERR REFUSED register is not on the write allowlist (0x27, 0x28, 0x37, 0x42)"]
+            if address not in (0x27, 0x28, 0x29, 0x37, 0x42):
+                return ["ERR REFUSED register is not on the write allowlist (0x27, 0x28, 0x29, 0x37, 0x42)"]
             data = bytes.fromhex(words[2])
             if len(data) != len(self.registers[address]):
                 return [f"ERR BADARG the register is {len(self.registers[address])} bytes, got {len(data)}"]

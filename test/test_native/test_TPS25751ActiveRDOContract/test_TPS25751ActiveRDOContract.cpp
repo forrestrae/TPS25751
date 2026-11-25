@@ -26,6 +26,8 @@
 #include "TPS25751Register.h"
 #include "TPS25751RegisterAddress.h"
 #include "CaptureStdout.h"
+#include "TPS25751TransmitSourceCaps.h"
+#include "fixtures/PdCapture_2026_11_25_tps25751_iphone.h"
 #include "fixtures/PdCapture_2026_11_23_apple_140w_tps25751.h"
 
 namespace {
@@ -81,6 +83,10 @@ bool contains(const std::string &haystack, const char *needle)
 
 // The real capture of the 140 W charger (test/fixtures/pd-captures/).
 namespace cap = PdCapture_2026_11_23_apple_140w_tps25751;
+
+// The real source-role capture: the board as Source, an iPhone as Sink, after a
+// port_reset, with registers from a bench SNAP (test/fixtures/pd-captures/).
+namespace iphone = PdCapture_2026_11_25_tps25751_iphone;
 
 }  // namespace
 
@@ -300,9 +306,9 @@ void test_short_buffer_returns_zero_requested_rdo()
 // board is sinking, so bits 127:96 read the same word (see BOARD_SINKING).
 //
 // Because both words are equal here, these tests cannot catch a decoder that swaps the
-// own RDO (bits 31:0) and the requested RDO (bits 127:96). The source-role bundle that
-// Phase 7 of docs/plans/km003c-pd-analyzer-toolset.md adds, with the board as source
-// and an iPhone as sink, puts the partner's Request in bits 127:96 and covers it.
+// own RDO (bits 31:0) and the requested RDO (bits 127:96). The source-role bundle of
+// 2026-11-25, with the board as source and an iPhone as sink, does not either: the
+// controller reported the iPhone's Request in both words there too.
 
 void test_capture_own_rdo_is_the_wire_request()
 {
@@ -335,6 +341,44 @@ void test_capture_own_rdo_fields_per_table_6_19()
     TEST_ASSERT_EQUAL_UINT16(3000, own.maximumOperatingCurrent_mA());
 }
 
+// ---------------------------------------------------------------------------
+// Source-role capture: the board as Source, an iPhone as Sink
+// ---------------------------------------------------------------------------
+//
+// STATUS reported the port role as Source, so bits 127:96 hold the partner's request:
+// the iPhone's final Request on the wire, 0x1384B12C (header 0x1A82, bit 8 = 0, sent
+// as Sink). By hand from USB PD R3.3 Table 6.19 (Object Position 1 names the board's
+// Fixed 5 V PDO): Object Position 1, USB Communications Capable (bit 25), No USB
+// Suspend (bit 24), Unchunked (bit 23), Operating Current 300 (3000 mA), and the
+// deprecated Maximum Operating Current copy 300.
+//
+// On this hardware bits 31:0 read the same word, so this bundle, like the sink one,
+// cannot catch a decoder that swaps the two words; the assertion below records that.
+
+void test_capture_sourcing_requested_rdo_is_the_partners_final_request()
+{
+    TPS25751ActiveRDOContract reg(iphone::kRegister0x35, iphone::kRegister0x35Length);
+    TPS25751TransmitSourceCaps caps(iphone::kRegister0x32, iphone::kRegister0x32Length);
+
+    TEST_ASSERT_EQUAL_HEX16(0, iphone::kRequestHeader & 0x0100);  // sent as Sink
+    TEST_ASSERT_EQUAL_HEX32(iphone::kRequestRdo, reg.rawRequestedRdo());
+    TEST_ASSERT_EQUAL_HEX32(0x1384B12C, reg.rawRequestedRdo());
+    TEST_ASSERT_EQUAL_HEX32(iphone::kRequestRdo, reg.rawOwnRdo());  // observed: the same word
+
+    const RdoKind kind = rdoKindFor(caps.getPDO(1 - 1));
+    TEST_ASSERT_TRUE(RdoKind::FixedVariable == kind);
+    const TPS25751Rdo requested = reg.requestedRdo(kind);
+    TEST_ASSERT_EQUAL_UINT8(1, requested.objectPosition());
+    TEST_ASSERT_FALSE(requested.capabilityMismatch());
+    TEST_ASSERT_TRUE(requested.usbCommunicationsCapable());
+    TEST_ASSERT_TRUE(requested.noUsbSuspend());
+    TEST_ASSERT_TRUE(requested.unchunkedExtendedMessages());
+    TEST_ASSERT_FALSE(requested.eprCapable());
+    TEST_ASSERT_EQUAL_UINT16(3000, requested.operatingCurrent_mA());
+    TEST_ASSERT_EQUAL_UINT16(3000, requested.maximumOperatingCurrent_mA());
+    TEST_ASSERT_TRUE(reg.isSemanticallyValid());
+}
+
 int main(int, char **)
 {
     UNITY_BEGIN();
@@ -359,5 +403,6 @@ int main(int, char **)
     RUN_TEST(test_capture_own_rdo_is_the_wire_request);
     RUN_TEST(test_capture_own_rdo_fields_per_table_6_19);
 
+    RUN_TEST(test_capture_sourcing_requested_rdo_is_the_partners_final_request);
     return UNITY_END();
 }

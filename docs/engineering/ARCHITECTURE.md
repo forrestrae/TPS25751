@@ -974,7 +974,10 @@ Decision:
 - `TPS25751.h` does not include the console, so firmware that leaves it out does not
   compile it in.
 - Default deny. `CMD` runs only the tasks on the allowlist, and `WR` writes only 0x27,
-  0x28, 0x37, and 0x42, as a whole register. The role swaps need
+  0x28, 0x29, 0x37, and 0x42, as a whole register. 0x29 joined on 2026-11-25 so the bench
+  can keep a sourcing board from swapping to sink: bit 5 (Initiate Swap to Sink) makes it
+  send PR_Swap and bit 4 (Process Swap to Sink) makes it accept one. A 0x29 write takes effect
+  at the next policy event and does not disconnect the port, unlike 0x27 and 0x28. The role swaps need
   `-D TPS25751_BENCH_ALLOW_SWAPS`. The patch tasks, `GO2P`, the flash tasks, and `I2Cw`
   are always refused.
 - The console adds no I2C code. Every task goes through `TPS25751::executeCommand()`, and

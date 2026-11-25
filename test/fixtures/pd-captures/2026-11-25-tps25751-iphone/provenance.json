@@ -1,0 +1,62 @@
+{
+  "format": "tps25751-pd-capture-provenance",
+  "version": 1,
+  "bundle": "2026-11-25-tps25751-iphone",
+  "summary": "The TPS25751 test board as source and an iPhone as sink, after a port_reset. Both the capture and registers.json are real: the tps25751-pd-verify skill recorded the capture and took the bench console's SNAP after the contract.",
+  "setup": {
+    "source": "TPS25751 test board on its battery, configured from its EEPROM, held in the Source role for the session (see session_writes)",
+    "sink": "iPhone (Apple, USB Vendor ID 0x05AC, Product ID 0x710C, bcdDevice 0x2166 in its Discover Identity ACK)",
+    "cabling": "Board into the KM003C's receptacle (input), the meter's plug into the iPhone; the meter's host USB cable connected throughout",
+    "cable": "The passive cable of Phase 6. Its SOP' Discover Identity ACK reports VDOs 1c0020c2 00000000 00070310 31082052: USB Vendor ID 0x20C2, Product ID 0x0007, bcdDevice 0x0310, Passive Cable, with a PD 2.0 header and SVDM version 1.0",
+    "stimulus": "bench_renegotiate port_reset (rewrite of 0x28 with its current value), skill argument stop identity",
+    "firmware": "examples/pd-bench of library 3.2.0 with the bench console of branch feat/pd-verify-skill; controller VERSION 0xF8091166",
+    "operator": "Library maintainer at the bench; the tps25751-pd-verify skill ran headless in Claude Code"
+  },
+  "session_writes": [
+    {"address": "0x28", "name": "PORT_CONFIGURATION", "written": "01012e01...01", "original": "02012e01...01", "why": "TypeC State Machine (bits 1:0) Source only instead of DRP, so the board attaches as Source to the iPhone", "restored": true},
+    {"address": "0x29", "name": "PORT_CONTROL", "written": "0xDA815042", "original": "0xDA815072", "why": "Bits 5 (Initiate Swap to Sink) and 4 (Process Swap to Sink) cleared, so the board neither sends nor accepts a PR_Swap to Sink", "restored": true}
+  ],
+  "capture": {
+    "file": "capture.jsonl",
+    "real": true,
+    "format": "km003c-capture",
+    "format_version": 1,
+    "started_utc": "2026-11-25T20:16:14.086Z",
+    "stopped_utc": "2026-11-25T20:16:50.204Z",
+    "stop_reason": "manual",
+    "command": "km003c MCP server pd_capture_start with stop_on none, timeout_s 120; stopped by the skill with pd_capture_stop",
+    "meter": {
+      "model": "KM003C",
+      "serial": "053893",
+      "fw_version": "2.0.0",
+      "hw_version": "2.3"
+    },
+    "copied_from": {
+      "path": "captures/km003c-20261125T201614Z-pd-verify-port_reset.jsonl",
+      "modified": false
+    },
+    "notes": [
+      "The header's provenance names stimulus port_reset, stop identity, role source, lib 3.2.0, version f8091166.",
+      "The board sent Source_Capabilities with PDO 1 0x0301912C, where 0x32 holds 0x2001912C: bits 29 (Dual-Role Power), 25 (Dual-Role Data), and 24 (Unchunked Extended Messages) differ, set by the controller at runtime. PDOs 2 to 5 equal 0x32.",
+      "The iPhone made two contracts on PDO 1: Request RDO 0x1784B12C, then 0x1384B12C. Its Discover Identity ACK (VID 0x05AC) came between them, and the board's own ACK (VID 0x0451) after the second."
+    ]
+  },
+  "registers": {
+    "file": "registers.json",
+    "synthesized": false,
+    "read_from_board_at_capture": true,
+    "read_utc": "2026-11-25T20:16:53.013Z",
+    "how": "bench_snapshot(path=...) of the tps25751-bench MCP server: the console's SNAP command, length bytes as read",
+    "copied_from": {
+      "path": "captures/km003c-20261125T201614Z-pd-verify-port_reset.registers.json",
+      "modified": false
+    },
+    "notes": [
+      "STATUS (0x1A) 6f00200000: plug present, port role Source.",
+      "0x34 reads 0x0301912C in bits 31:0, the PDO 1 the board sent, and 0x200 in bits 41:32, which equals 0x32 PDO 1 bits 29:20 rather than the 0x030 of the PDO 1 on the wire.",
+      "0x35 reads the iPhone's final Request, 0x1384B12C, in both bits 31:0 and bits 127:96.",
+      "0x30 reads one PDO of 0x00000000: the board received no Source_Capabilities in this attach."
+    ],
+    "omitted": []
+  }
+}

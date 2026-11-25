@@ -616,7 +616,7 @@ void TPS25751BenchConsole::handleWrite(const TPS25751BenchRequest &request)
     const char *id = request.id;
     if (!Protocol::isWriteAllowed(request.address)) {
         fail(id, TPS25751BenchError::Refused,
-             F("register is not on the write allowlist (0x27, 0x28, 0x37, 0x42)"));
+             F("register is not on the write allowlist (0x27, 0x28, 0x29, 0x37, 0x42)"));
         return;
     }
 

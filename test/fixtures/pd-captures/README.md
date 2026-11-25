@@ -10,6 +10,7 @@ them is Phase 5 of [km003c-pd-analyzer-toolset.md](../../../docs/plans/km003c-pd
 | Bundle | Wire | Registers | Covers | Notes |
 |---|---|---|---|---|
 | `2026-11-23-apple-140w-tps25751` | Real: cold attach, Apple 140 W charger as source, the TPS25751 board as sink, KM003C serial 053893 firmware 2.0.0 | Synthesized from bench words in the native tests | 0x30, 0x34, 0x35 | No partner Discover Identity ACK on the wire, so no 0x48 check. Phase 7 replaces the registers with a bench `SNAP`. |
+| `2026-11-25-tps25751-iphone` | Real: `port_reset`, the TPS25751 board as source (0x28 Source only, 0x29 swaps to Sink off for the session), an iPhone as sink, KM003C serial 053893 firmware 2.0.0 | Real: bench `SNAP` after the contract | 0x32, 0x34, 0x35, 0x48 | The iPhone's Discover Identity ACK checks 0x48. The board's PDO 1 flags in bits 29:23 differ from 0x32 at runtime. 0x35 holds the iPhone's Request in both words, so an own/requested swap still passes. |
 
 ## Bundle layout
 

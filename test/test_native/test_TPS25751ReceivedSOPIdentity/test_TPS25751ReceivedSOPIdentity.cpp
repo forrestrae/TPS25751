@@ -19,6 +19,7 @@
 #include "TPS25751Register.h"
 #include "TPS25751RegisterAddress.h"
 #include "CaptureStdout.h"
+#include "fixtures/PdCapture_2026_11_25_tps25751_iphone.h"
 #include "fixtures/PdCapture_2026_11_23_apple_140w_tps25751.h"
 
 namespace {
@@ -43,6 +44,10 @@ TPS25751ReceivedSOPIdentity make(uint8_t byte0, const uint32_t *vdos, unsigned n
 
 // The real capture of the 140 W charger (test/fixtures/pd-captures/).
 namespace cap = PdCapture_2026_11_23_apple_140w_tps25751;
+
+// The real source-role capture: the board as Source, an iPhone as Sink, after a
+// port_reset, with registers from a bench SNAP (test/fixtures/pd-captures/).
+namespace iphone = PdCapture_2026_11_25_tps25751_iphone;
 
 }  // namespace
 
@@ -506,6 +511,54 @@ void test_wire_cable_identity_ack_shared_fields()
 
 // --- Runner ----------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// Source-role capture: 0x48 against the iPhone's Discover Identity ACK
+// ---------------------------------------------------------------------------
+//
+// The board, as Source and DFP, asked the iPhone for its identity. The iPhone's ACK
+// (header 0x448F: Vendor_Defined, bit 5 = 0 UFP, bit 8 = 0 Sink, 4 objects; VDM header
+// 0xFF00A041, structured, ACK, Discover Identity) carries three VDOs. By hand:
+//   ID Header 0xD50005AC (Table 6.34): bit 31 USB Host 1, bit 30 USB Device 1, bits
+//     29:27 Product Type (UFP) 010b PDUSB Peripheral, bit 26 Modal Operation 1, bits
+//     25:23 Product Type (DFP) 010b PDUSB Host, bits 22:21 Connector Type 00b (the
+//     deprecated "unknown"), bits 15:0 USB Vendor ID 0x05AC (Apple)
+//   Cert Stat 0x00000000 (Table 6.38): XID 0
+//   Product 0x710C2166 (Table 6.39): USB Product ID 0x710C, bcdDevice 0x2166
+
+void test_capture_iphone_identity_ack_is_0x48()
+{
+    TEST_ASSERT_EQUAL_HEX16(0x448F, iphone::kIdentityAckSopSinkUfpHeader);
+    TEST_ASSERT_EQUAL_HEX32(0xFF00A041, iphone::kIdentityAckSopSinkUfpVdmHeader);
+    TEST_ASSERT_EQUAL_size_t(SOP_SIZE, iphone::kRegister0x48Length);
+    TPS25751ReceivedSOPIdentity reg(iphone::kRegister0x48);
+
+    TEST_ASSERT_TRUE(reg.responseType() == RT::Ack);
+    TEST_ASSERT_EQUAL_UINT8(iphone::kIdentityAckSopSinkUfpVdoCount, reg.numberValidVdos());
+    TEST_ASSERT_EQUAL_UINT8(3, reg.numberValidVdos());
+    for (uint8_t i = 0; i < 3; ++i) {
+        TEST_ASSERT_EQUAL_HEX32(iphone::kIdentityAckSopSinkUfpVdos[i], reg.vdo(i));
+    }
+    TEST_ASSERT_EQUAL_HEX32(0, reg.vdo(3));
+    TEST_ASSERT_TRUE(reg.isSemanticallyValid());
+}
+
+void test_capture_iphone_identity_decodes_per_tables_6_34_6_38_6_39()
+{
+    TPS25751ReceivedSOPIdentity reg(iphone::kRegister0x48);
+
+    TEST_ASSERT_EQUAL_HEX32(0xD50005AC, reg.idHeaderVdo());
+    TEST_ASSERT_TRUE(reg.usbHostCapable());
+    TEST_ASSERT_TRUE(reg.usbDeviceCapable());
+    TEST_ASSERT_TRUE(reg.productTypeUfp() == TPS25751ReceivedSOPIdentity::ProductTypeUfp::PdusbPeripheral);
+    TEST_ASSERT_TRUE(reg.alternateModesSupported());
+    TEST_ASSERT_TRUE(reg.productTypeDfp() == TPS25751ReceivedSOPIdentity::ProductTypeDfp::PdusbHost);
+    TEST_ASSERT_TRUE(reg.connectorType() == TPS25751ReceivedSOPIdentity::ConnectorType::Unknown);
+    TEST_ASSERT_EQUAL_HEX16(0x05AC, reg.usbVendorId());
+    TEST_ASSERT_EQUAL_HEX32(0x00000000, reg.xid());
+    TEST_ASSERT_EQUAL_HEX16(0x710C, reg.usbProductId());
+    TEST_ASSERT_EQUAL_HEX16(0x2166, reg.bcdDevice());
+}
+
 int main(int, char **)
 {
     UNITY_BEGIN();
@@ -547,5 +600,7 @@ int main(int, char **)
     RUN_TEST(test_wire_cable_identity_ack_headers);
     RUN_TEST(test_wire_cable_identity_ack_shared_fields);
 
+    RUN_TEST(test_capture_iphone_identity_ack_is_0x48);
+    RUN_TEST(test_capture_iphone_identity_decodes_per_tables_6_34_6_38_6_39);
     return UNITY_END();
 }

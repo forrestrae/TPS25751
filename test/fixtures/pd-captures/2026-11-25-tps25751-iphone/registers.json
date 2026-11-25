@@ -1,0 +1,109 @@
+{
+  "format": "tps25751-registers",
+  "version": 1,
+  "read_utc": "2026-11-25T20:16:53.013Z",
+  "registers": [
+    {
+      "address": "0x03",
+      "name": "MODE",
+      "length": 4,
+      "data": "41505020"
+    },
+    {
+      "address": "0x14",
+      "name": "INT_EVENT1",
+      "length": 11,
+      "data": "0000000000000000000000"
+    },
+    {
+      "address": "0x1A",
+      "name": "STATUS",
+      "length": 5,
+      "data": "6f00200000"
+    },
+    {
+      "address": "0x26",
+      "name": "POWER_PATH_STATUS",
+      "length": 5,
+      "data": "0320000040"
+    },
+    {
+      "address": "0x30",
+      "name": "RECEIVED_SOURCE_CAPABILITIES",
+      "length": 53,
+      "data": "0100000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"
+    },
+    {
+      "address": "0x31",
+      "name": "RECEIVED_SINK_CAPABILITIES",
+      "length": 53,
+      "data": "0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"
+    },
+    {
+      "address": "0x32",
+      "name": "TRANSMIT_SOURCE_CAPABILITIES",
+      "length": 63,
+      "data": "05aa2a2c9101202cd102002cb10400f4410600f4b104e000000000000000000000000000000000000000000000000000000000000000000000000000000000"
+    },
+    {
+      "address": "0x33",
+      "name": "TRANSMIT_SINK_CAPABILITIES",
+      "length": 53,
+      "data": "042c9101102cd102002cb104002c410600000000000000000000000000000000000000000000000000000000000000000000000000"
+    },
+    {
+      "address": "0x34",
+      "name": "ACTIVE_PDO_CONTRACT",
+      "length": 6,
+      "data": "2c9101030002"
+    },
+    {
+      "address": "0x35",
+      "name": "ACTIVE_RDO_CONTRACT",
+      "length": 16,
+      "data": "2cb1841300000000000000002cb18413"
+    },
+    {
+      "address": "0x37",
+      "name": "AUTONEGOTIATE_SINK",
+      "length": 24,
+      "data": "3bc01241907d210000000000000000000000000000000000"
+    },
+    {
+      "address": "0x3F",
+      "name": "POWER_STATUS",
+      "length": 2,
+      "data": "0d01"
+    },
+    {
+      "address": "0x40",
+      "name": "PD_STATUS",
+      "length": 4,
+      "data": "6000c008"
+    },
+    {
+      "address": "0x42",
+      "name": "PD3_CONFIGURATION",
+      "length": 4,
+      "data": "1a000800"
+    },
+    {
+      "address": "0x48",
+      "name": "RECEIVED_SOP_IDENTITY",
+      "length": 25,
+      "data": "43ac0500d50000000066210c71000000000000000000000000"
+    },
+    {
+      "address": "0x69",
+      "name": "TYPEC_STATE",
+      "length": 4,
+      "data": "01020160"
+    },
+    {
+      "address": "0x6A",
+      "name": "ADC_RESULTS",
+      "length": 13,
+      "data": "0000ea30000000eaea00000000"
+    }
+  ]
+}

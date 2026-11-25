@@ -24,6 +24,8 @@
 #include "TPS25751Register.h"
 #include "TPS25751RegisterAddress.h"
 #include "CaptureStdout.h"
+#include "TPS25751TransmitSourceCaps.h"
+#include "fixtures/PdCapture_2026_11_25_tps25751_iphone.h"
 #include "fixtures/PdCapture_2026_11_23_apple_140w_tps25751.h"
 
 namespace {
@@ -73,6 +75,10 @@ bool contains(const std::string &haystack, const char *needle)
 
 // The real capture of the 140 W charger (test/fixtures/pd-captures/).
 namespace cap = PdCapture_2026_11_23_apple_140w_tps25751;
+
+// The real source-role capture: the board as Source, an iPhone as Sink, after a
+// port_reset, with registers from a bench SNAP (test/fixtures/pd-captures/).
+namespace iphone = PdCapture_2026_11_25_tps25751_iphone;
 
 }  // namespace
 
@@ -347,6 +353,43 @@ void test_capture_first_pdo_control_bits_are_wire_pdo1_bits_29_20()
     TEST_ASSERT_EQUAL(PdoPeakCurrent::IoC, first.peakCurrent());  // bits 21:20
 }
 
+// ---------------------------------------------------------------------------
+// Source-role capture: the board as Source, an iPhone as Sink
+// ---------------------------------------------------------------------------
+//
+// The iPhone's final Request, 0x1384B12C, has Object Position 1 (bits 31:28, Table
+// 6.19), so the active PDO is PDO 1 as the board sent it, 0x0301912C: Fixed 5 V 3.0 A.
+
+void test_capture_sourcing_active_pdo_is_the_pdo1_the_board_sent()
+{
+    TPS25751ActivePDOContract reg(iphone::kRegister0x34, iphone::kRegister0x34Length);
+
+    TEST_ASSERT_EQUAL_UINT32(1, iphone::kRequestRdo >> 28);
+    TEST_ASSERT_EQUAL_HEX32(iphone::kSourceCapabilitiesPdos[1 - 1], reg.rawActivePdo());
+    const TPS25751Pdo active = reg.activePdo();
+    TEST_ASSERT_EQUAL(PDOType::FixedSupply, active.type());
+    TEST_ASSERT_EQUAL_UINT16(5000, active.fixedVoltage_mV());
+    TEST_ASSERT_EQUAL_UINT16(3000, active.fixedCurrent_mA());
+    TEST_ASSERT_TRUE(reg.isSemanticallyValid());
+}
+
+// Present behavior, from one hardware observation (2026-11-25): with the board as
+// Source, bits 41:32 read 0x200, which equals bits 29:20 of PDO 1 in 0x32
+// (0x2001912C), not of the PDO 1 the board sent on the wire (0x0301912C, giving 0x030).
+// With the board sinking, two chargers showed bits 41:32 equal to the received PDO 1
+// (test_capture_first_pdo_control_bits_are_wire_pdo1_bits_29_20). The TRM states
+// neither; if a later observation differs, this test records what changed.
+void test_capture_sourcing_first_pdo_control_bits_follow_0x32()
+{
+    TPS25751ActivePDOContract reg(iphone::kRegister0x34, iphone::kRegister0x34Length);
+    TPS25751TransmitSourceCaps caps(iphone::kRegister0x32, iphone::kRegister0x32Length);
+
+    TEST_ASSERT_EQUAL_HEX16(0x200, reg.rawFirstPdoControlBits());
+    TEST_ASSERT_EQUAL_HEX16((caps.getPDO(0) >> 20) & 0x3FF, reg.rawFirstPdoControlBits());
+    TEST_ASSERT_EQUAL_HEX16(0x030, (iphone::kSourceCapabilitiesPdos[0] >> 20) & 0x3FF);
+    TEST_ASSERT_TRUE(reg.firstPdoControl().dualRolePower());  // 0x32's bit 29
+}
+
 int main(int, char **)
 {
     UNITY_BEGIN();
@@ -372,5 +415,7 @@ int main(int, char **)
     RUN_TEST(test_capture_active_pdo_is_the_requested_wire_pdo);
     RUN_TEST(test_capture_first_pdo_control_bits_are_wire_pdo1_bits_29_20);
 
+    RUN_TEST(test_capture_sourcing_active_pdo_is_the_pdo1_the_board_sent);
+    RUN_TEST(test_capture_sourcing_first_pdo_control_bits_follow_0x32);
     return UNITY_END();
 }

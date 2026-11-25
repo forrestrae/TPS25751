@@ -100,7 +100,8 @@ Phase 5 facts, for later phases:
 - The generator's final contract follows the fork's `final_contract()`: PS_RDY after the
   Accept, Soft_Reset abandoning a negotiation, retransmissions ignored, EPR handled.
 - In this bundle 0x35 bits 31:0 and 127:96 hold the same word, so its tests cannot catch
-  an own/requested swap; the Phase 7 source-role bundle covers that.
+  an own/requested swap. The Phase 7 source-role bundle does not cover it either: both
+  words held the iPhone's Request there too.
 - The cable answers Discover Identity with a PD 2.0 header and SVDM version 1.0, so its
   connector type reads 00b. Phase 7's SOP' report should expect it.
 - `captures/` and `tools/pd-bench/.venv/` are now in this library's `.gitignore`.
@@ -170,6 +171,84 @@ Phase 6 known gaps:
 - The restart facts above are in the console header, ADR-015, and the tools README, not
   in `CONSTRAINTS.md`.
 - CI builds only `example-read-registers`; the gate builds `example-pd-bench` too.
+
+Phase 7 complete 2026-11-25: `feat/pd-verify-skill` is integrated after an independent
+review and a re-review of its follow-up commits. It adds the `tps25751-pd-verify` skill and
+the `pd-capture-analyst` agent as the Claude Code plugin `plugins/tps25751-bench`, the
+`.agents/skills/tps25751-pd-verify` symlink for Codex, the read-only `bench_crosscheck`
+tool and `tps25751-pd-crosscheck` command, `sync_skill.py` for downstream copies, 0x29 in
+the console's `WR` allowlist, and the source-role bundle `2026-11-25-tps25751-iphone`.
+Native tests pass 1614 of 1614 and the bench server's 197 of 197. Next: Phase 8.
+
+Phase 7 verification, meter firmware 2.0.0, board on its battery:
+
+| Run | Agent | Verdict |
+|---|---|---|
+| `gsrc`, `aneg` (with the analyst's message-by-message review), `port_reset`, `restart`, `restart_cold`, 140 W charger | Claude Code, headless | pass |
+| `gsrc` with 0x34 bits 41:32 decoded one bit off in a scratch build | Claude Code, headless | fail, naming the field and the four wrong flags |
+| `gsrc` | Codex, interactive | pass |
+| `gsrc` with the same scratch build | Codex, `codex exec` | fail, naming the field and the shift |
+| `port_reset` with `stop=identity`, then `ssrc`, board as source to an iPhone | Claude Code, headless | pass; 0x48 equals the iPhone's Discover Identity ACK |
+
+The servers were loaded for each run only, with `claude --mcp-config <file> --plugin-dir
+plugins/tps25751-bench` and `codex -c mcp_servers...` overrides; no configuration file
+was written. The headless Claude Code runs used an `--allowedTools` list of the meter,
+bench, and documentation tools the skill calls, without `bench_write` or `bench_task`.
+Before each stimulus that drops VBUS the user approved it in the orchestrating session.
+
+Phase 7 facts, for later phases:
+- Codex 0.171.0 follows a relative symlink under `.agents/skills/` and reads the skill
+  through it, so no synced copy or gate check is needed in this repository.
+- Claude Code accepts the namespaced agent type `tps25751-bench:pd-capture-analyst`, and
+  an agent's `tools` frontmatter accepts a single named MCP tool
+  (`mcp__km003c__pd_capture_read`), so the analyst never gets the tools that claim the
+  meter.
+- Under `codex exec` with the default `on-request` approval policy, Codex ran every
+  meter and bench tool without asking, `bench_renegotiate` included. Phase 9 must set
+  per-tool approval for the tools that change the board, and check it.
+- With the board as DRP, an iPhone takes the source role. With 0x28 TypeC State Machine
+  source only, the board attached as source and then sent PR_Swap itself, because 0x29
+  bit 5 (Initiate Swap to Sink) is set; bit 4 (Process Swap to Sink) is set too. With
+  both cleared (0x29 = 0xDA815042 for the session; the reset of the board is 0xDA815072)
+  the board stayed source. Both registers were restored and read back.
+- A 0x28 write does not always reconnect the port: while the board sank from the iPhone a
+  write to source only changed the register and left the port Attached.SNK; while
+  preparing the source session the same write reconnected it.
+- The controller sets PDO 1 flag bits at runtime in the Source_Capabilities it sends:
+  as DRP the wire PDO 1 was 0x2301912C, as source only 0x0301912C, against 0x2001912C in
+  0x32. Bits 29, 25, and 24 differ; the likely sources (0x28, 0x29, and 0x42 bit 4) are
+  inferred, not TRM text. The skill reports those flags and requires every other bit to
+  match.
+- While the board sources, 0x34 bits 41:32 read 0x200, equal to 0x32 PDO 1 bits 29:20,
+  not the wire's 0x030 (one observation). The skill reports it against 0x32.
+- While the board sources, 0x35 bits 31:0 and 127:96 both held the iPhone's Request
+  0x1384B12C. Neither bundle therefore tests an own/requested swap of 0x35; the Phase 5
+  note that the source-role bundle covers it is withdrawn. A partner pair where the two
+  words differ is still needed.
+- The iPhone made two contracts on attach (RDO 0x1784B12C, then 0x1384B12C) and sent its
+  Discover Identity ACK between them; the skill now accepts a partner ACK after the first
+  contract of the latest attach.
+- The iPhone's identity ACK reports connector type 00b, like the cable.
+- The meter reports an attach bounce on firmware 2.0.0: a disconnect of 100 to 112 ms
+  between two connects. Real detaches measured 232 ms (`port_reset`), 268 ms (warm
+  restart), 828 ms (`port_reset` with the iPhone), and 1192 ms (cold restart), and VBUS
+  does not separate the two cases. The skill and `bench_crosscheck` therefore start a new
+  attach only after a disconnect of at least 150 ms, and compare only the latest attach.
+  The threshold rests on this one meter.
+- `aneg` sends no Source_Capabilities, so the skill compares the requested PDO with 0x30.
+- Every capture starts with `stop_on` none and ends on evidence: three quiet 2 s waits
+  after the final PS_RDY, an identity wait bounded at about 16 s after it, or 30 s with no
+  contract.
+
+Phase 7 known gaps:
+- The `human` stimulus and `save_fixture` were not run by an agent on hardware; the
+  source-role bundle was assembled from a run's files by the skill's Step 9 rules.
+- The headless run polled for the background analyst with `grep` and `sleep`; the skill
+  does not yet say to run the analyst in the foreground.
+- The library's basic 0x35 print omits the RDO's Maximum Operating Current, which USB PD
+  R3.3 marks deprecated; the typed print includes it.
+- Codex wrote the meter's VBUS in hex (`502d` mV) in one report; display only.
+- In the source-role snapshot 0x30 holds one zero PDO left from an earlier contract.
 
 Correction found in Phase 0, affecting Phase 5: since `ci/verify-launcher`, `verify.py`
 is a launcher that runs `main`'s copy of `scripts/verify_gate.py`, and agents may edit
@@ -747,7 +826,7 @@ host keeps them separately. Asynchronous events are `! <text>` lines.
 | `DEC <addr>` | Raw hex, then the library's `debugPrint()` output for that register |
 | `SNAP` | Raw hex of 0x03, 0x14, 0x1A, 0x26, 0x30 to 0x35, 0x37, 0x3F, 0x40, 0x42, 0x48, 0x69, 0x6A, then clears INT_EVENT1 |
 | `CMD <4cc> [hex]` | Task status, then the DATA output as hex. Allowed: `GSrC`, `GSkC`, `ANeg`, `SSrC`, `GPPI`, `MBRd`, `Gaid`, `GAID`, `SRDY`, `SRYR`, `DBfg`, `I2Cr`. Refused: `PBM*`, `GO2P`, `FL*`, `I2Cw`, and the swaps unless built with `-D TPS25751_BENCH_ALLOW_SWAPS`. |
-| `WR <addr> <hex>` | Allowed only for 0x27, 0x28, 0x37, 0x42; reads back and returns the new raw hex |
+| `WR <addr> <hex>` | Allowed only for 0x27, 0x28, 0x29, 0x37, 0x42 (0x29 added in Phase 7); reads back and returns the new raw hex |
 
 `SNAP` is the cross-check channel. 0x30 to 0x35 hold the capabilities and the contract,
 0x37 explains which PDO the board chose, 0x48 holds the partner's identity, STATUS
@@ -809,11 +888,11 @@ Branch `feat/pd-verify-skill`.
 - `plugins/tps25751-bench/skills/tps25751-pd-verify/SKILL.md`: the one source of the
   skill.
 - `plugins/tps25751-bench/agents/pd-capture-analyst.md`: Claude Code only.
-- `.agents/skills/tps25751-pd-verify/`: what Codex reads. A symlink to the plugin's
-  skill directory if Codex follows symlinked skill directories (checked in this phase);
-  otherwise a copy written by `tools/pd-bench/sync_skill.py`, whose `--check` mode
-  `verify.py` runs beside the fixture check. The same script writes the copy into a
-  downstream Codex project (`--dest <project>`), from the library tag that project pins.
+- `.agents/skills/tps25751-pd-verify/`: what Codex reads. A relative symlink to the
+  plugin's skill directory: codex-cli 0.171.0 lists and reads a skill through such a
+  link (checked 2026-11-24). `tools/pd-bench/sync_skill.py` writes a copy only into a
+  downstream Codex project (`--dest <project>`), from the library tag that project pins;
+  it has no `--check` mode and no gate step.
 
 The skill names tools as server plus tool (`km003c` `pd_capture_start`), which reads
 correctly in both agents, and never assumes the analyst agent exists.
@@ -1026,7 +1105,7 @@ server-wide allow cannot cover them:
     "mcp__km003c__stream_start", "mcp__km003c__stream_status",
     "mcp__km003c__stream_samples", "mcp__km003c__stream_stop",
     "mcp__tps25751-bench__bench_hello", "mcp__tps25751-bench__bench_snapshot",
-    "mcp__tps25751-bench__bench_read"
+    "mcp__tps25751-bench__bench_read", "mcp__tps25751-bench__bench_crosscheck"
   ],
   "ask": [
     "mcp__km003c__trigger_detect", "mcp__km003c__trigger_enter",

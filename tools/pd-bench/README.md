@@ -68,8 +68,9 @@ The server speaks MCP over stdio. It needs Python 3.11 or later, `mcp` 2.x, and
 | `bench_snapshot(path?)` | Clears INT_EVENT1 | Reads 0x03, 0x14, 0x1A, 0x26, 0x30 to 0x35, 0x37, 0x3F, 0x40, 0x42, 0x48, 0x69, and 0x6A in the `tps25751-registers` version 1 format, then clears the INT_EVENT1 bits it reported. With `path`, writes that document as `registers.json`. |
 | `bench_read(addr, decode=False)` | No | One register: the length byte as read and the data as hex. With `decode=True`, also the lines of the library's `debugPrint()`. |
 | `bench_task(code, data_hex?)` | Yes | Runs one 4CC task and returns its return code and the 64 DATA bytes. |
-| `bench_write(addr, hex)` | Yes | Writes the whole of 0x27, 0x28, 0x37, or 0x42 and returns the readback. |
+| `bench_write(addr, hex)` | Yes | Writes the whole of 0x27, 0x28, 0x29, 0x37, or 0x42 and returns the readback. A 0x27 or 0x28 write disconnects and reconnects the port; a 0x29 (PORT_CONTROL) write does not, and takes effect at the next policy event, such as whether the board next initiates or accepts a PR_Swap (bits 5 and 4). |
 | `bench_renegotiate(method, max_voltage_mv?)` | Yes | Starts a negotiation and returns each step with UTC times. |
+| `bench_crosscheck(capture_path, registers_path, role?, stimulus?)` | No, and opens no port | Compares a `km003c-capture` file with a `registers.json` snapshot, word for word, and returns the rows, the sanity notes, a verdict, and a Markdown table. See "Compare a capture with a snapshot". |
 
 A result carries `owner_check: unavailable: ...` when `lsof` is missing or did not
 finish, which means the server could not see whether another program has the port open.
@@ -124,6 +125,70 @@ whether the contract moved to a PDO at or under the temporary maximum, and
 `restored_contract` whether the original PDO is active again at the end. Neither makes
 the call fail: `stepped_down: false` means the method ran and the controller kept its
 contract, so the capture holds no Request from it.
+
+## Compare a capture with a snapshot
+
+`bench_crosscheck` and the command `tps25751-pd-crosscheck` run the same comparison,
+`crosscheck.py`. They read the capture's wire hex themselves, so a decode error in the
+meter server cannot hide a mismatch, and they follow the fixture generator's rules for
+retransmissions and the final contract, counting only Source_Capabilities sent with the
+Source power role. Each row compares one wire word with the register bits that should
+hold it:
+
+- Source_Capabilities against 0x30 when the partner sent them, or 0x32 when the board
+  did. Against 0x32, PDO 1 flags in bits 29:23 are reported, not compared: the
+  controller sets them at runtime (on 2026-11-25 the board sent bits 25 and 24 set with
+  0x32 holding them clear). Bits 31:30 and 22:0 and the other PDOs must match.
+- After a completed PR_Swap (the other port's Accept, then the new Source's PS_RDY),
+  the board's role before the swap is the opposite of the one STATUS reports. The final
+  contract is compared as usual, and the other side's Source_Capabilities from before
+  the swap are compared with their own register in rows marked "Before PR_Swap". Only
+  the latest attach is compared. A connect starts an attach unless the disconnect before
+  it lasted under 150 ms: the meter reports such an attach bounce (100 to 112 ms) right
+  after a connect, while real detaches measured 232 ms to 1.2 s.
+- The final Request against 0x35 bits 31:0 (sinking) or 127:96 (sourcing).
+- The requested PDO against 0x34 bits 31:0. With the board sinking, PDO 1 bits 29:20
+  against 0x34 bits 41:32, which two chargers confirmed. With the board sourcing, one
+  observation found 0x34 bits 41:32 equal to 0x32 PDO 1 bits 29:20 rather than to the
+  PDO 1 sent on the wire, so that row reports 0x32 PDO 1 bits 29:20 against 0x34 bits
+  41:32 and is not compared.
+- The partner's Discover Identity ACK on SOP against 0x48.
+- The meter's last VBUS against 0x6A, unless STATUS reports no plug.
+
+The board's own ACK and cable ACKs are reported, not compared. The board's role comes
+from STATUS (0x1A) bit 5; `--role` is needed only for a snapshot without STATUS. `aneg`
+sends Requests without Source_Capabilities, so for it the requested PDO comes from the
+snapshot's 0x30, and the rows say so. The stimulus is read from the capture header's
+`provenance.stimulus`; `--stimulus` sets it for a capture that does not record it.
+
+```bash
+uv run tps25751-pd-crosscheck <capture.jsonl> <registers.json>
+```
+
+The verdict is `pass`, `fail`, `inconclusive` (no completed contract, a late start, or a
+register missing from the snapshot), or `no negotiation`. The command exits 1 on `fail`
+and 2 when a file cannot be read, including a data message shorter than its header
+declares; the tool returns the same cases as an error with kind `CrosscheckError`. The `tps25751-pd-verify` skill in
+`plugins/tps25751-bench` drives the whole check and adds the field-by-field decode.
+
+## Copy the skill into a downstream project
+
+Codex reads skills from `<project>/.agents/skills/`. This library links its own entry to
+the plugin's skill directory; a project that consumes the library gets a copy instead,
+written from a library checkout at the tag the project pins, so the skill matches the
+bench server from that tag. Run it from the library root:
+
+```bash
+python3 tools/pd-bench/sync_skill.py --dest <project>
+```
+
+`<project>` is the downstream project's root. The script replaces
+`<project>/.agents/skills/tps25751-pd-verify` as a whole and records the library version
+and commit in `.synced-from.json` inside it. It refuses a directory it did not write, and
+a symlink, unless `--force` is given, and refuses a `.agents` or `.agents/skills` that
+links into the library even then. The old copy is removed only after the new one is in
+place. `--dry-run` lists the files without writing.
+Claude Code projects get the skill from the plugin instead (Phase 8 of the toolset plan).
 
 ## How the server finds and shares the port
 
@@ -235,6 +300,7 @@ The console does not pace `I2Cr`; the TRM asks for 5 s between two of them.
 ## Tests
 
 The tests use a simulated console behind a fake serial port and never open a real one.
+The comparison and `sync_skill.py` tests use files in a temporary directory.
 The verify gate of the library runs them with the locked dependencies:
 
 ```bash

@@ -53,9 +53,9 @@ how to build them.
 
 ## Documentation
 
-- [AGENTS.md](AGENTS.md): the developer guide, covering the register list,
-  architecture, 4CC and downstream-device interface, patch loading, build and test
-  commands, and the git workflow.
+- [AGENTS.md](AGENTS.md): the developer guide, covering the rules for every change,
+  the 4CC interface, build and test commands, and the git workflow, with pointers to
+  the engineering documents in `docs/engineering/`.
 - [TPS25751 Technical Reference Manual](https://www.ti.com/lit/pdf/slvucr8): the
   register reference the library implements.
 

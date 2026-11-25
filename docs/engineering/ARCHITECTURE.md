@@ -155,8 +155,8 @@ it apart because three other components depend on it alone.
 
 #### Register layer
 
-- 37 register classes, one per register in TRM SLVUCR8B; `AGENTS.md` lists them with
-  their addresses and decode notes.
+- 37 register classes, one per register in TRM SLVUCR8B. `include/AGENTS.md` indexes
+  them, and each header documents its own register.
 - Field accessors decode from the raw bytes; R/W classes add setters built on `setBits()`
   and a `static constexpr kAddress`.
 - Three validation tiers: `isValid()`, `hasValidData()`, and `isSemanticallyValid()`
@@ -398,7 +398,7 @@ I2Cc Downstream-Device Proxy).
 ### Patch Load Flow
 
 `TPS25751PatchLoader::loadPatchBundle()` loads an image into a controller in PTCH. The
-step numbers are those of SLVAFV8A; `AGENTS.md` (Patch Loading) lists all 17, and ADR-011
+step numbers are those of SLVAFV8A; `TPS25751PatchLoader.h` documents each, and ADR-011
 records where the loader departs from TI's flow.
 
 ```mermaid
@@ -571,7 +571,7 @@ dependency:
    clear the event through INT_CLEAR1. `waitForCommandClear()` is a single private
    method so that a variant can replace it without touching DATA staging or any task's
    encoding. `TPS25751PatchLoader` already takes an IRQ pin for its Ready for Patch wait.
-2. Additional platforms, ESP32 and RP2040 (`AGENTS.md`, Publishing the Library).
+2. Additional platforms, ESP32 and RP2040 (not started).
 3. Moving `TPS25751PatchLoader` and `TPS25751DownstreamDevice` onto the
    `TPS25751CommandExecutor` seam. The EEPROM-update plan lists it as out of scope; the
    loader already has native tests through the Wire fake, so the gain is smaller than it

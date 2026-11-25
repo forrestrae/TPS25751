@@ -30,6 +30,7 @@
 #include "TPS25751Register.h"
 #include "TPS25751RegisterAddress.h"
 #include "CaptureStdout.h"
+#include "fixtures/PdCapture_2026_11_25_tps25751_iphone.h"
 
 namespace {
 
@@ -52,6 +53,10 @@ bool contains(const std::string &hay, const char *needle)
 {
     return hay.find(needle) != std::string::npos;
 }
+
+// The real source-role capture: the board as Source, an iPhone as Sink, after a
+// port_reset, with registers from a bench SNAP (test/fixtures/pd-captures/).
+namespace iphone = PdCapture_2026_11_25_tps25751_iphone;
 
 }  // namespace
 
@@ -727,6 +732,52 @@ void test_semantic_pps_rules()
     TEST_ASSERT_FALSE(make({FIXED_5V_3A, 0xC042D23Cu}).isSemanticallyValid());  // max 3.3 V is not 11, 16, or 21 V
 }
 
+// ---------------------------------------------------------------------------
+// Source-role capture: 0x32 against the Source_Capabilities the board sent
+// ---------------------------------------------------------------------------
+//
+// The board sent PDO 1 0x0301912C; 0x32 holds 0x2001912C. By hand from USB PD R3.3
+// Table 6.8: both are Fixed (bits 31:30 00b), 5 V (bits 19:10 = 100), 3.0 A (bits 9:0
+// = 300), Peak Current 00b. They differ only in flags the controller sets at runtime:
+// Dual-Role Power (bit 29) is set in 0x32 and clear on the wire, where the session ran
+// the Type-C state machine as Source only; Dual-Role Data (bit 25) and Unchunked
+// Extended Messages (bit 24) are clear in 0x32 and set on the wire. PDOs 2 to 5 are
+// equal: Fixed 9 V 3.0 A, 15 V 3.0 A, 20 V 5.0 A (Table 6.10), and the SPR AVS APDO
+// 0xE004B1F4, 3.0 A up to 15 V and 5.0 A up to 20 V (Table 6.15).
+
+void test_capture_board_source_caps_match_the_wire_but_pdo1_flags()
+{
+    TEST_ASSERT_EQUAL_size_t(63, iphone::kRegister0x32Length);
+    TPS25751TransmitSourceCaps reg(iphone::kRegister0x32, iphone::kRegister0x32Length);
+
+    TEST_ASSERT_EQUAL_UINT8(iphone::kSourceCapabilitiesPdoCount, reg.pdoCount());
+    TEST_ASSERT_EQUAL_UINT8(5, reg.pdoCount());
+    for (uint8_t i = 1; i < 5; ++i) {
+        TEST_ASSERT_EQUAL_HEX32(iphone::kSourceCapabilitiesPdos[i], reg.getPDO(i));
+    }
+    const uint32_t notFlags = 0xC07FFFFFu;  // bits 31:30 and 22:0
+    TEST_ASSERT_EQUAL_HEX32(iphone::kSourceCapabilitiesPdos[0] & notFlags, reg.getPDO(0) & notFlags);
+    TEST_ASSERT_EQUAL_HEX32(0x2001912C, reg.getPDO(0));
+    TEST_ASSERT_EQUAL_HEX32(0x0301912C, iphone::kSourceCapabilitiesPdos[0]);
+
+    const TPS25751Pdo registerPdo1 = reg.pdo(0);
+    const TPS25751Pdo wirePdo1(iphone::kSourceCapabilitiesPdos[0], 1, PdoRole::Source);
+    TEST_ASSERT_EQUAL_UINT16(5000, registerPdo1.fixedVoltage_mV());
+    TEST_ASSERT_EQUAL_UINT16(3000, registerPdo1.fixedCurrent_mA());
+    TEST_ASSERT_TRUE(registerPdo1.dualRolePower());
+    TEST_ASSERT_FALSE(wirePdo1.dualRolePower());
+    TEST_ASSERT_FALSE(registerPdo1.dualRoleData());
+    TEST_ASSERT_TRUE(wirePdo1.dualRoleData());
+    TEST_ASSERT_FALSE(registerPdo1.unchunkedExtendedMessages());
+    TEST_ASSERT_TRUE(wirePdo1.unchunkedExtendedMessages());
+
+    const TPS25751Pdo avs = reg.pdo(4);
+    TEST_ASSERT_EQUAL(PdoKind::SprAvs, avs.kind());
+    TEST_ASSERT_EQUAL_UINT16(3000, avs.avsCurrent15V_mA());
+    TEST_ASSERT_EQUAL_UINT16(5000, avs.avsCurrent20V_mA());
+    TEST_ASSERT_TRUE(reg.isSemanticallyValid());
+}
+
 int main(int, char **)
 {
     UNITY_BEGIN();
@@ -791,5 +842,7 @@ int main(int, char **)
     RUN_TEST(test_semantic_battery_rules);
     RUN_TEST(test_semantic_variable_rules);
     RUN_TEST(test_semantic_pps_rules);
+    RUN_TEST(test_capture_board_source_caps_match_the_wire_but_pdo1_flags);
+
     return UNITY_END();
 }

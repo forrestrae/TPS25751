@@ -218,10 +218,23 @@ codex \
   -c 'mcp_servers.km003c.tools.trigger_raw.approval_mode="prompt"'
 ```
 
-Non-interactive `codex exec` under the default `on-request` policy ran prompt-gated tools
-without asking. For `codex exec`, add `-c approval_policy="never"`, which refuses them.
-The flag is the primary guard under Codex. With `approvals_reviewer = "auto_review"` in
-the user configuration, the prompts may go to the automatic reviewer instead of the user.
+On Codex 0.172 with a ChatGPT workspace account, the interactive app refused to start with
+any `-c mcp_servers...` override ("failed to load workspace requirements"), although
+`codex exec` accepts them. Until that changes, run trigger sessions in Claude Code.
+
+Who answers a prompt-gated tool in Codex depends on the permission mode, checked on
+2026-11-25 with `bench_renegotiate`:
+
+| Mode | Result |
+|---|---|
+| Interactive, "Approve for me" (`/status` shows it) | The automatic reviewer approved the call; no prompt reached the user |
+| Interactive, a `/permissions` mode where the user approves | The prompt reached the user, who declined it |
+| `codex exec`, default `on-request` | Ran without asking |
+| `codex exec -c approval_policy="never"` | Refused: "MCP tool call requires approval, but approval policy is never" |
+
+Before any work that drops VBUS or writes registers, switch Codex with `/permissions` to a
+mode where you approve, and run `codex exec` only with `approval_policy="never"`. The
+environment flag stays the primary guard for the trigger tools.
 
 For a trigger session in Claude Code, start `claude` with the variable set in that shell:
 

@@ -187,14 +187,22 @@ Stop waiting when one of these holds:
    partner may answer between two contracts (an iPhone did, between its first and second
    Request), so do not require the ACK after the final P. Check in each step after the
    contract condition holds with `km003c` `pd_capture_read`, `mode` `messages`, `types`
-   `["connect", "PS_RDY", "Discover_Identity"]`, and `limit` 50 (no `sop`, which would
-   drop the connect lines). The latest attach starts at the last `connect` line, or at
-   the start of the capture without one; its first contract ends at the first `PS_RDY`
-   line after that. Count a `Discover_Identity ACK` line on SOP after that PS_RDY when it
-   reads `from source/...` with the board sink, or `from sink/...` with the board source;
-   a line from the board's own role is the board's identity and does not count.
-   `bench_crosscheck` applies the same rule and states in its sanity notes which ACK it
-   found.
+   `["connect", "PS_RDY", "PR_Swap", "Accept", "Discover_Identity"]`, and `limit` 50 (no
+   `sop`, which would drop the connect lines). Page with `after` set to the previous
+   page's `next_after` until a page has no `next_after`, so the latest attach is read to
+   its end. The latest attach starts at the last `connect` line, or at the start of the
+   capture without one; its first contract ends at the first `PS_RDY` line after that.
+   Count a `Discover_Identity ACK` line on SOP after that PS_RDY when its sender's power
+   role (`from source/...` or `from sink/...`) differs from the board's role at that line;
+   the same role is the board's own identity and does not count. Find the board's role
+   at a line as `bench_crosscheck` does: call `tps25751-bench` `bench_hello` once when
+   the contract condition first holds (it only reads), take its `role` as the role now,
+   and flip it once for each completed PR_Swap of the latest attach after that line. A
+   PR_Swap is completed when the next message is an `Accept` from the other side and a
+   PS_RDY from the new Source follows. The line's hex is the little-endian message
+   header: the new Source's PS_RDY has header bit 8 set (`[8607]`, header 0x0786), and
+   the old Source's, sent first, has it clear (`[a60a]`, header 0x0AA6). When in doubt, decide after the capture from
+   `bench_crosscheck`, which states in its sanity notes which ACK the rule accepts.
 4. 15 steps (about 30 s) have passed without any P. No contract completed.
 
 Then, if `running` is still true, call `km003c` `pd_capture_stop`. Record the final

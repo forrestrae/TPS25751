@@ -1544,6 +1544,21 @@ Consequences:
   poll MODE until it leaves PTCH or a timeout passes, or check Patch Config Source and the
   region flags) before it prints that advice.
 
+| Step | Result |
+|---|---|
+| S3, cut M | `u` ran in a Terminal tab. Plan named target High and the F8091164 image, Low pointer valid, High pointer 0, both AppConfigOffset words 0; the script confirmed. Progress lines reached `High write 50% (7136/14272)`; the user then switched the supply off, and the port went away at 16:54:43, 5.8 s after the command was sent and before the 60% line. The cut therefore fell after chunk 223 and before chunk 268 of 446 |
+| S3, power-on | Start-up report again in mid-load: MODE `PTCH`, VERSION 0xF8091100, BOOT_FLAGS `18 00 30 02 C1`. `r`: MODE `APP `; VERSION 0xF8091166; BOOT_FLAGS `18 00 F0 A2 C1`, Dead Battery Flag 0, Region 1 Attempted 0; Low pointer valid, High pointer 0; both AppConfigOffset words 0; `FLvy` Low Success, High `VerifyFailed`. Dump: no byte outside 0x4400 to 0x7BFF and the High pointer differs from the full-flash image. The High region holds F8091164 from 0x4400 to 0x605F (7264 bytes, 227 whole chunks, 51%) and F8091166 from 0x6060 on, with no byte that matches neither image. Passed |
+
+Reading of cut M. The supply went off after 227 chunks had been written: four more than the
+last progress line reported, about 83 ms of writes at 20.7 ms a chunk. The boundary falls on
+a chunk boundary and no byte matches neither image, so the chunk in flight at the cut, if
+any, left no trace: either its I2C transfer never reached the STOP that starts the
+24LC256's write cycle, or the cut fell between tasks. This sample cannot tell those apart.
+The Low region, both pointers, and both AppConfigOffset words were untouched, the
+controller booted Low, and `FLvy` reported the half-written High bundle as not valid,
+which is the second `FLvy` failure observed (stage 3 on the first board was the first). One
+sample, on the second board.
+
 Two physical points were confirmed on 2026-11-22. First, the EEPROM can be reprogrammed
 in place with a SOIC8 clip, so `write-flash.zsh` (`24LC256@SOIC8`) is a recovery path
 that needs no rework. Second, the board runs from the 18650 battery pack, so the Teensy

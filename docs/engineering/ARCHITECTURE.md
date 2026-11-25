@@ -536,11 +536,11 @@ The caller owns every register object the library returns, either in a `std::uni
 from `read<Name>Register()` and the factory, or as an object the caller passes to
 `read<Name>(T&)`.
 
+A register object owns its byte buffer (`uint8_t* _raw`, `size_t _len`), allocated with
 `new[]` and freed in the destructor. `TPS25751` and the sequencers allocate nothing on the
 heap for a transaction: their buffers, such as the 64-byte DATA image and the updater's
 32-byte chunks, are on the stack. `readRegisterByAddress()` is the exception, with a
 `std::make_unique<uint8_t[]>` scratch buffer that it frees on return.
-
 
 The base class implements the Rule of Five. A move transfers `_raw` and leaves the source
 empty (`isValid()` false); a copy allocates and copies. Register subclasses add no members

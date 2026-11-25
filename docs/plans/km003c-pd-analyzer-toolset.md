@@ -288,6 +288,42 @@ a Claude Code local-scope `km003c` entry takes precedence over the project entry
 writes the user's `~/.claude.json`, so it needs the user's go-ahead); and that the
 relative `--directory` docs entries start under Codex when a docs tool is called.
 
+Phase 9 complete 2026-11-25: `docs/pd-trigger-permissions` is integrated. The tools
+README has the cabling rules and the trigger-session commands, the skill keeps trigger
+tools off during verification, and the user applied the Claude Code permission rules
+(`allow` for the read-only meter and bench tools including `bench_crosscheck`, `ask` for
+the eight trigger tools, `bench_task`, `bench_write`, and `bench_renegotiate`). Next:
+Phase 10.
+
+Phase 9 verification, with both sides of the meter unplugged for the trigger checks:
+
+| Check | Result |
+|---|---|
+| Trigger flag off, Claude Code | No `trigger_*` tools in the tool list |
+| Trigger flag on, Claude Code headless | All eight trigger tools listed; `trigger_detect` stopped by the `ask` rule, nothing sent to the meter |
+| Interactive Codex with any `-c mcp_servers...` override | Fails at start: "failed to load workspace requirements" (Codex 0.172, ChatGPT workspace account); `codex exec` accepts the same overrides |
+| Interactive Codex, "Approve for me", `bench_renegotiate` | The automatic reviewer approved it; no prompt reached the user (the bench refused it for lack of a partner) |
+| Interactive Codex, a mode where the user approves | The prompt reached the user, who declined |
+| Claude Code local-scope `km003c` entry | Takes precedence over the project entry; removed again. Claude Code filed it under the main checkout's path, not the worktree's |
+| Plugin from the GitHub marketplace | Installed and enabled interactively after the push; a headless session does not install it |
+| Scratch downstream project outside `lib/`, `gsrc` | Pass under Claude Code (plugin from the GitHub install, servers from the project `.mcp.json` at `v0.2.0` and `v3.4.0`) and under `codex exec` (skill copied by `sync_skill.py --dest`, servers by `-c`) |
+
+Open question 1 is answered: with "Approve for me", Codex's automatic reviewer answers
+the per-tool prompts. The README tells the user to switch to a mode where they approve
+before work that drops VBUS or writes registers, and to run `codex exec` only with
+`approval_policy="never"`. Trigger sessions run in Claude Code until the interactive
+Codex override failure is resolved.
+
+Phase 9 facts, for later phases:
+- Without `usb-pd-docs` in the downstream project, Claude Code decoded the specification
+  column by hand, and Codex fetched a third-party copy of USB PD R3.2 from the web. The
+  skill now forbids fetching the specification and carries the R3.3 bit layouts it
+  compares in `compare-rules.md`. A downstream project that wants the docs servers
+  needs a distribution for `device-register-mcp-server`, which the plan does not cover.
+- The guard blocks writing a `.codex/` path even in the scratchpad, so the downstream
+  Codex run used `-c` overrides rather than a project `.codex/config.toml`.
+- Claude Code reorders `.claude/settings.json` keys when it saves plugin settings.
+
 Correction found in Phase 0, affecting Phase 5: since `ci/verify-launcher`, `verify.py`
 is a launcher that runs `main`'s copy of `scripts/verify_gate.py`, and agents may edit
 `verify_gate.py` on a topic branch. The two Phase 5 checks therefore go into

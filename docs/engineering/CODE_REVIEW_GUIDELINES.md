@@ -1,6 +1,6 @@
 # Code Review Guidelines
 
-This document outlines guidelines for reviewing TPS25751 library code changes, with emphasis on embedded C++ concerns specific to the Teensy 4.x platform and TPS25751 I2C protocol.
+A checklist for reviewing changes to the TPS25751 library. Most entries record a defect that reached review or hardware in this repository; the rest are the platform rules of the Teensy 4.x build and the controller's I2C protocol.
 
 ## Platform-Specific Correctness
 
@@ -136,11 +136,11 @@ Review these when a downstream R/W register class adds field setters or a driver
 - **Reserved bit masking**: Reserved bits must be masked out before comparing or validating field values; raw reads may have non-zero reserved bits set by hardware
 - **Integer overflow in bitfield math**: Shifting or multiplying `uint8_t` values before casting to a wider type can overflow; cast first
 - **Null pointer on factory miss**: `createRegister()` returns `nullptr` for addresses without a decoder class. Callers must check before dereferencing
-- **Validation tier skipping**: `validateData()` must call `validateBasic()` first; `validateSemantic()` must call `validateData()` first. Breaking this chain produces misleading results
+- **Validation tier skipping**: `isSemanticallyValid()` must start with `isValid()`, `hasValidData()`, and the size check before it reads a field. A semantic check on an empty or wrong-size buffer produces misleading results
 - **Move-after-use**: After moving a `std::unique_ptr` into a factory return, the source is null. Ensure moved-from objects are not accessed
 - **Incomplete Rule of Five**: If any of copy constructor, copy assignment, move constructor, move assignment, or destructor is user-defined, all five must be considered — missing one leads to double-free or shallow copies
 - **Signed/unsigned comparison warnings**: Comparing `int` loop indices against `size_t` lengths can wrap; use consistent types
-- **PDO count vs data length mismatch**: In capability registers, verify that `getPDOCount()` * bytes-per-PDO + header never exceeds the actual data buffer size
+- **PDO count vs data length mismatch**: In capability registers, verify that `pdoCount()` * bytes-per-PDO + header never exceeds the actual data buffer size
 - **Incomplete transcription of a mirrored register's bit set** *(caught in Batch B)*: When a register mirrors another's layout (INT_MASK1/INT_CLEAR1 mirror INT_EVENT1), a *dropped* named source compiles cleanly and passes every round-trip/preservation test — the missing bit is simply absent, so nothing fails. Spot-checking a few bit offsets will not catch it. **Count the named accessors/setters against the reference class** (e.g. `grep -c extractBits` on both) and reconcile the total, and prefer the granular reference register (INT_EVENT1) over the terser MCP MASK/CLEAR field tables, which may lump maskable bits into "Reserved". Root cause is usually an incomplete bit list in the delegated work order (see plan amendment 3) — the review gate, not the compiler, is the only thing that catches it.
 - **PDO byte-offset shift from an embedded header** *(caught in Batch D)*: Do NOT assume every capability register puts PDO 1 at byte 1. TRANSMIT_SOURCE_CAPS (0x32) inserts two Power-Path bytes after the count byte, so PDO 1 starts at **byte 3** (`getPDO`/`setPDO` offset `3 + index*4`), whereas TRANSMIT_SINK_CAPS (0x33) and the Received caps put PDO 1 at byte 1 (`1 + index*4`). Copy-pasting the Received-caps `getPDO` into the source-side class silently reads/writes PDOs two bytes low, corrupting the Power-Path bytes and shifting every PDO. Verify the register's own field table, and unit-test that PDO 0 lands at the expected byte and does not disturb the header bytes.
 - **Boolean getter/parameter for a multi-bit field silently truncates** *(caught in Batch D)*: A field wider than 1 bit modeled as `bool` (e.g. the Fast-Role-Swap-Required-Current field, bits 24:23, a 2-bit value 0–3) collapses values ≥1 to `true`/1 and cannot round-trip an encoded value of 2 or 3. On a read-only decoder this merely loses information; on a **R/W** register it makes encode↔decode non-invertible. Model any field of width > 1 as `uint8_t`/`uint16_t`, not `bool`. (The read-only `TPS25751ReceivedSinkCaps::getFixedFastRoleSwapCurrent()` returned `bool` until 6627be1; since ADR-013 every capability class reads the field as `TPS25751Pdo::fastRoleSwapCurrent()`.)
@@ -162,12 +162,12 @@ For an embedded I2C library, the relevant attack surface is different from web a
 
 Verify that new code follows all mandatory standards from [STANDARDS.md](STANDARDS.md):
 
-- **Class structure**: Inherits from `TPS25751Register`; implements all pure virtual methods (`getAddress`, `getExpectedSize`, `isReadOnly`, `validateBasic`, `validateData`, `validateSemantic`, `debugPrint`)
-- **Three-tier validation**: All three levels implemented and chained correctly
-- **Debug print format**: Follows the exact `========================================` header/footer format with `F()` macros
+- **Class structure**: Inherits `TPS25751Register` directly, has the four constructors of the reference classes, and overrides only `isSemanticallyValid()` and `debugPrint(Stream&)`. No destructor, copy, or move members
+- **Validation**: `isSemanticallyValid()` chains the base checks, accepts the documented reset value, and checks a reserved bit only where hardware confirmed it reads 0
+- **Debug print format**: Prints to the `Stream&` it is given, with the `========================================` banner, `F()` strings, and `printHex()` for fixed-width hex
 - **Factory integration**: For host registers — address present in `TPS25751Registers::Address` (with `RegisterInfo` size), forward declaration added, all `createRegister()` variants updated with a `case` for the new address. For downstream device registers — address present in `<Device>::Registers::Address`, all `<Device>::RegisterFactoryImpl::createRegister()` variants have a `case`; the host factory is untouched
-- **Magic numbers**: Bitfield masks and shift counts defined as `static constexpr` named constants, not inline literals
-- **Doxygen**: Every public method has `@brief`, `@return`, and a `@see` reference to the TI datasheet section
+- **Field access**: Every field is read through `extractBits*()` or `extractEnum*()` and written through `setBits()`. No indexing of `_raw[]` and no restated field mask
+- **Doxygen**: Every public method cites the TRM document, table, page, and bit range, and for a USB PD field the specification table
 
 ## Unintended Code
 
@@ -176,11 +176,11 @@ Verify that new code follows all mandatory standards from [STANDARDS.md](STANDAR
 - **TODO/FIXME without tracking**: Incomplete work must be tracked in the implementation plan, not left as comments
 - **Hardcoded test data in production code**: Magic byte arrays that are clearly test vectors
 - **Disabled validation**: Validation methods that always `return true` as a placeholder
-- **Builder pattern usage**: `TPS25751RegisterBuilder` is deprecated (ADR-001). New code must not use it
+- **Direct construction in library code**: The main class creates registers through the factory, so a test can replace it. `TPS25751RegisterBuilder` no longer exists
 
 ## Code Style
 
-- **Inconsistent naming**: All register classes use `TPS25751[RegisterName]` prefix; factory enums use `UPPER_SNAKE_CASE`; accessors use `get[FieldName]()`
+- **Inconsistent naming**: Register classes are `TPS25751<RegisterName>`; `Address` enumerators are `UPPER_SNAKE_CASE`; accessors are `fieldName()` with `raw` and unit-suffixed forms, and setters are `set<Accessor>()`
 - **String duplication**: The same string literal appearing in multiple `Serial.print` calls — extract to a helper function or use a lookup table
 - **Missing `override` keyword**: All overridden virtual methods must be marked `override` to catch base class signature changes at compile time
 - **Raw pointer ownership ambiguity**: If a raw pointer is owning, it must be converted to `std::unique_ptr`. Raw pointers are for non-owning references only
@@ -192,8 +192,8 @@ Verify that new code follows all mandatory standards from [STANDARDS.md](STANDAR
 - **Coverage below 90%**: Every register class requires >90% code coverage. New code without tests should be blocked
 - **Missing edge case tests**: At minimum, test all-zeros, all-ones, and each field at its maximum valid value
 - **Missing negative tests**: Each validation level must have tests for both passing and failing cases
-- **Factory creation untested**: Every new register must include factory creation tests (with and without data)
-- **Tests that always pass**: Watch for tests with incorrect `EXPECT_*` calls that never actually exercise the failure path
+- **Factory creation untested**: Every new register needs its line in the `kAll` table of `test_TPS25751RegisterFactory` and its typed reads in `test_TPS25751Typed`
+- **Tests that always pass**: Watch for a `TEST_ASSERT_*` call that never exercises the failure path, and for a test function missing from `RUN_TEST`
 - **A cached build proves nothing about warnings** (caught in Batch G of the rev B plan): `platformio.ini` sets `build_cache_dir = .pio/buildcache`, so `pio run` and even `pio run -t clean` followed by `pio run` retrieve unchanged objects from the cache ("Retrieved ... from cache") and print none of their warnings. A "warning-free" claim needs a compile that bypasses the cache, for example `PLATFORMIO_BUILD_CACHE_DIR=<empty scratch dir> pio run -e example-read-registers` after `-t clean`, with the log showing a `Compiling` line for each new source file
 - **A saturating fixture cannot catch a wrong shift** (caught in Batch L of the rev B plan): a packed-word fixture such as 0xFFF9 sets every sub-field to its maximum, so a decode with the wrong shift or mask can still produce the expected numbers. For each multi-field word, add one fixture whose sub-fields hold distinct, non-maximal values, and derive the expected values by hand from the specification table
 

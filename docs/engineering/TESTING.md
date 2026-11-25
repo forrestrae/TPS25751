@@ -1,80 +1,13 @@
-# TPS25751 Library - Testing Strategy
+# TPS25751 library: testing
 
-**Last Updated:** 2026-11-24
-**Status:** Active
+The library is tested in two ways. Native unit tests run on the host with
+`pio test -e native` (Unity, no hardware, no Arduino framework) and are a hard gate for
+every change. Hardware tests run the example sketches against a board, in the stages each
+feature plan defines.
 
-## Overview
-
-This document defines the comprehensive testing strategy for the TPS25751 library. Our testing approach follows a multi-layered strategy: unit tests, integration tests, and hardware validation.
-
-**The unit-test harness is real and running:** `pio test -e native` executes
-host-run Unity tests (no hardware, no Arduino framework) from
-`test/test_native/`. Every register batch must keep this run green — see the
-[Implementation Plan](../plans/plan-impl-v01.md) per-batch loop. The `test/`
-directory is excluded from the published registry tarball via `export.exclude`
-in `library.json`.
-
-**Quality Target:** >90% line coverage for all register implementations,
-measured with `test/coverage.sh` (see Test Coverage Tracking). Not every file
-meets it yet; the report lists the gaps.
-
-## Table of Contents
-
-1. [Testing Layers](#testing-layers)
-2. [Unit Testing](#unit-testing)
-3. [Integration Testing](#integration-testing)
-4. [Hardware Testing](#hardware-testing)
-5. [Test Organization](#test-organization)
-6. [Running Tests](#running-tests)
-7. [Test Data Management](#test-data-management)
-8. [Continuous Testing](#continuous-testing)
-
-## Testing Layers
-
-### 1. Unit Testing (Isolation)
-
-**Purpose:** Test individual register classes in complete isolation
-**Framework:** PlatformIO native testing framework
-**Scope:** Each register class independently
-
-**Coverage:**
-- Constructor behavior
-- All validation levels (basic, data, semantic)
-- All accessor methods
-- Edge cases and boundary conditions
-- Factory creation
-
-**Dependencies:** None (or mocked)
-
-### 2. Integration Testing (Interaction)
-
-**Purpose:** Test interactions between components
-**Framework:** PlatformIO native testing framework
-**Scope:** Multiple components working together
-
-**Coverage:**
-- Factory creation for all register types
-- Round-trip read/write for R/W registers
-- Interaction with main TPS25751 controller class
-- Multiple register reads in sequence
-- Error handling across component boundaries
-
-**Dependencies:** Real implementations, mocked I2C
-
-### 3. Hardware Testing (Validation)
-
-**Purpose:** Validate against actual TPS25751 hardware
-**Framework:** Manual testing with example sketches
-**Scope:** Real-world behavior verification
-
-**Coverage:**
-- Actual I2C communication
-- Real register values from hardware
-- Various USB-C devices and chargers
-- Power negotiation sequences
-- Edge cases with real devices
-
-**Dependencies:** Physical hardware, USB-C test devices
+The target is more than 90% line coverage of every file in `src/`, measured with
+`test/coverage.sh`. The `test/` directory is excluded from the published package by
+`export.exclude` in `library.json`.
 
 ## Unit Testing
 
@@ -339,48 +272,7 @@ its commands: `r` (stage 1 and every later check), `p` and `p2` (stage 2), `u`, 
 region pointers to 0 in place of an external erase, with `l`, `pb`, and `x`. The plan sets
 the order of each stage.
 
-## Integration Testing
-
-> **Status: design guidance, not yet implemented.** No mock-`Wire` layer or
-> integration suites exist yet; the sketches below are targets for when they
-> are added (they would live under `test/test_native/` and run in the same
-> native env, with the mock replacing the stub transport).
-
-### I2C Mock Testing
-
-Create mock I2C layer for testing without hardware:
-
-```cpp
-class MockI2C {
-public:
-    void setNextReadData(const uint8_t* data, size_t length) {
-        readData_.assign(data, data + length);
-        readIndex_ = 0;
-    }
-
-    uint8_t read() {
-        if (readIndex_ < readData_.size()) {
-            return readData_[readIndex_++];
-        }
-        return 0;
-    }
-
-    void write(uint8_t data) {
-        writeData_.push_back(data);
-    }
-
-    const std::vector<uint8_t>& getWrittenData() const {
-        return writeData_;
-    }
-
-private:
-    std::vector<uint8_t> readData_;
-    std::vector<uint8_t> writeData_;
-    size_t readIndex_ = 0;
-};
-```
-
-### Factory Integration Tests
+### Factory suite
 
 `test_TPS25751RegisterFactory` runs natively. For every address in the TRM it
 checks that each of the three `createRegister()` overloads returns a non-null
@@ -392,209 +284,22 @@ agree on which addresses exist. A new register needs one line in the suite's
 `kAll` table, mapping its `Address` to its class; the suite then fails until
 all three factory switches have the case.
 
-### Multi-Register Sequence Tests
+### Not covered natively
 
-```cpp
-void test_read_multiple_registers_sequence() {
-    // Mock I2C controller
-    MockI2C mockI2C;
+`TPS25751DownstreamDevice.cpp` and `TPS25751HostExecutor.cpp` are not in the native
+build, so the `I2Cr` and `I2Cw` payload encoding, the 7-bit address mask, the 11-byte
+write cap, and the 5 s spacing warning have no host test. They were verified on hardware
+against a BQ25798 (CONSTRAINTS.md, 4CC Command Interface).
 
-    // Set up mock data for multiple register reads
-    uint8_t statusData[] = {0x05, 0x02, 0x00, 0x01, 0x00, 0x00};  // 5 bytes + length prefix
-    uint8_t modeData[] = {0x04, 0x01, 0x02, 0x03, 0x04};         // 4 bytes + length prefix
+## Hardware testing
 
-    // Simulate reading STATUS then MODE
-    mockI2C.setNextReadData(statusData, sizeof(statusData));
-    auto status = readStatusRegister(mockI2C);
-    TEST_ASSERT_TRUE(status->validateData());
-
-    mockI2C.setNextReadData(modeData, sizeof(modeData));
-    auto mode = readModeRegister(mockI2C);
-    TEST_ASSERT_TRUE(mode->validateData());
-}
-```
-
-### Round-Trip R/W Testing
-
-```cpp
-void test_port_control_round_trip() {
-    MockI2C mockI2C;
-
-    // Create register with specific values
-    TPS25751PortControl control;
-    control.setPortEnabled(true);
-    control.setDataRoleSwapEnabled(true);
-
-    // Write to mock I2C
-    control.writeToI2C(mockI2C);
-
-    // Verify written data
-    auto writtenData = mockI2C.getWrittenData();
-    TEST_ASSERT_GREATER_THAN(0, writtenData.size());
-
-    // Read back
-    mockI2C.setNextReadData(writtenData.data(), writtenData.size());
-    TPS25751PortControl readBack;
-    readBack.readFromI2C(mockI2C);
-
-    // Verify values match
-    TEST_ASSERT_EQUAL(control.isPortEnabled(), readBack.isPortEnabled());
-    TEST_ASSERT_EQUAL(control.isDataRoleSwapEnabled(), readBack.isDataRoleSwapEnabled());
-}
-```
-
-### 4CC Command-Task / I2Cc Proxy Test Cases (required)
-
-These cover the write path, executor, and downstream-device codec added for the
-4CC command-task interface (TRM Sec 4.4.2/4.4.3). Required, regardless of unit
-test harness availability:
-
-- **Write-path framing**: mock `Wire` and assert `writeRegister()` sends
-  `[regAddr][length][data...]` — i.e. the length byte is *sent*, mirroring the
-  read path's *received* length byte. Assert failure is returned (and no crash)
-  when `Wire.write()`'s return value is short or `endTransmission()` is non-zero.
-- **Executor reject path**: mock COMMAND read-back as `"!CMD"` after a write;
-  assert `executeCommand()` returns `TPS25751TaskStatus::Rejected`, not `Success`
-  or `Timeout`.
-- **Executor success path**: mock COMMAND clearing to all-zero after N polls and
-  DATA containing a known payload; assert `TPS25751TaskResult.returnCode == DATA[0]`
-  and `outData` is filled starting at `DATA[0]` (not offset 1 — that offset is an
-  I2Cr-specific convention applied by the caller, not by `executeCommand()` itself).
-- **Executor timeout path**: mock COMMAND that never clears/rejects; assert
-  `TPS25751TaskStatus::Timeout` after `timeoutMs` and that the loop actually exits
-  (no hang).
-- **I2Cr encode/decode round-trip**: assert `TPS25751DownstreamDevice::readRegister()`
-  builds the 3-byte input `{addr, devReg, len}` correctly (including masking bit 7
-  off `addr`), and that returned bytes are copied from **DATA offset 1**
-  (`raw[1..len]`), not offset 0.
-- **I2Cw encode/decode round-trip**: assert the input payload is
-  `{addr, len, 0, devReg, payload...}` and that `len > 10` is rejected by the
-  caller before ever reaching `executeCommand()`.
-- **5-second spacing (logical, non-hardware)**: assert `TPS25751DownstreamDevice`
-  logs/warns (rather than blocking) when two same-type (I2Cr or I2Cw) calls are
-  issued less than 5 s apart, using an injectable/mockable `millis()` if the test
-  harness supports it.
-
-## Hardware Testing
-
-### Hardware Test Setup
-
-**Required Hardware:**
-- Teensy 4.0 or 4.1 development board
-- TPS25751 evaluation board or device
-- Various USB-C cables and devices for testing:
-  - USB-C chargers (5V, 9V, 12V, 15V, 20V capable)
-  - USB-C power banks
-  - USB-C devices (phones, laptops, etc.)
-  - USB-C to USB-A adapters
-  - USB-C debug accessory (if available)
-
-### Test Sketches
-
-Create example sketches for hardware validation:
-
-```cpp
-// examples/register_dump.ino
-// Dumps all register values from connected TPS25751
-
-#include <TPS25751.h>
-
-TPS25751 tps;
-
-void setup() {
-    Serial.begin(115200);
-    while (!Serial) delay(10);
-
-    Serial.println("TPS25751 Register Dump");
-    Serial.println("======================");
-
-    if (!tps.begin()) {
-        Serial.println("ERROR: Failed to initialize TPS25751");
-        return;
-    }
-}
-
-void loop() {
-    // Read and print all registers
-    auto status = tps.readStatusRegister();
-    if (status) {
-        status->debugPrint();
-    }
-
-    auto mode = tps.readModeRegister();
-    if (mode) {
-        mode->debugPrint();
-    }
-
-    // ... read all other registers ...
-
-    delay(1000);
-}
-```
-
-### Hardware Validation Checklist
-
-For each register implementation:
-
-- [ ] Register reads successfully from hardware
-- [ ] Parsed values match expected behavior
-- [ ] Changes in hardware state reflected in register
-- [ ] Write operations (if applicable) modify hardware correctly
-- [ ] Validation passes with real hardware data
-- [ ] No I2C communication errors
-- [ ] Values match datasheet descriptions
-- [ ] Edge cases tested (connect/disconnect, power changes, etc.)
-
-### I2Cc Downstream-Device Proxy Hardware Checklist
-
-Requires a real device on the TPS25751's I2Cc bus (e.g. a BQ25798 charger) and,
-ideally, a logic analyzer on the I2Cc lines:
-
-- [ ] `executeCommand(TPS25751FourCC::of("!XYZ"))` smoke test returns `Rejected`
-      (no device required; validates the COMMAND/DATA handshake itself)
-- [ ] `TPS25751DownstreamDevice::readRegister()` against a known-value register
-      (e.g. a part-ID register) returns the expected bytes
-- [ ] Logic-analyzer capture confirms the I2Cr input payload on the wire matches
-      `{addr, devReg, len}` and that read bytes really start at DATA offset 1
-- [ ] `TPS25751DownstreamDevice::writeRegister()` against a scratch/writable
-      downstream register, confirmed via a subsequent read or logic-analyzer
-      capture — this also confirms the I2Cw "Length" field's exact interpretation
-      (the TRM wording leaves whether it counts the register-offset byte mildly
-      ambiguous; resolve against the capture, not the TRM text alone)
-- [ ] Two consecutive I2Cr calls (or two consecutive I2Cw calls) issued <5 s apart
-      produce the `DEBUG_CAT_TASK` warning and confirm the call still proceeds
-      (not hard-blocked)
-- [ ] 7-bit target address masking verified against the capture (bit 7 of the
-      address byte is 0 on the wire even if a caller passes an 8-bit value in)
-
-### Power Delivery Test Scenarios
-
-**Test various PD negotiation scenarios:**
-
-1. **5V Fixed Supply**
-   - Connect 5V USB-C charger
-   - Verify ACTIVE_PDO shows 5V contract
-   - Verify VBUS present
-
-2. **Multi-Voltage Charger**
-   - Connect PD charger with multiple voltages (5V, 9V, 12V, 15V, 20V)
-   - Verify RECEIVED_SOURCE_CAPABILITIES shows all PDOs
-   - Verify correct negotiation to expected voltage
-
-3. **Role Swap**
-   - Test DFP to UFP transition
-   - Verify STATUS register reflects role changes
-   - Check TYPEC_STATE transitions
-
-4. **Debug Accessory Mode**
-   - Connect debug accessory
-   - Verify connection state reflects debug mode
-   - Check orientation detection
-
-5. **Disconnection**
-   - Hot plug/unplug scenarios
-   - Verify clean state transitions
-   - Check interrupt events
+There is no automated test against a device. A feature plan under `docs/plans/` defines
+numbered hardware stages, each run with an example sketch on a Teensy 4.0 and the TPS25751
+board, and records the result of each stage. For a new register, read it on hardware with
+`examples/read-registers`, compare the decode with the TRM, and record any difference in
+the class header and in CONSTRAINTS.md. A difference between hardware and the TRM is a
+finding, not a bus error: the firmware sets reserved bits and reports length bytes the
+TRM does not document.
 
 ## Test Organization
 
@@ -661,59 +366,6 @@ output is reproducible and compiles as C++17, and that the script applies the ch
 writes no header for a rejected file. The other files test the git workflow tooling. The
 verify gate runs this suite.
 
-### Test Output
-
-Expected output format (from the seed suite):
-
-```
-test/test_native/test_TPS25751Status/test_TPS25751Status.cpp:285: test_default_constructor_allocates_zeroed_buffer	[PASSED]
-...
-=================================== SUMMARY ===================================
-Environment    Test                             Status    Duration
--------------  -------------------------------  --------  ------------
-native         test_native/test_TPS25751Status  PASSED    00:00:04.911
-================= 22 test cases: 22 succeeded in 00:00:04.911 =================
-```
-
-## Test Data Management
-
-### Test Data Organization
-
-Create reusable test data:
-
-```cpp
-namespace TestData {
-    namespace Status {
-        // Valid data samples
-        constexpr uint8_t CONNECTED_DFP[] = {0x01, 0x01, 0x00, 0x00, 0x00};
-        constexpr uint8_t CONNECTED_UFP[] = {0x02, 0x01, 0x01, 0x00, 0x00};
-        constexpr uint8_t NOT_CONNECTED[] = {0x00, 0x00, 0x00, 0x00, 0x00};
-
-        // Invalid data samples
-        constexpr uint8_t RESERVED_BITS_SET[] = {0xC0, 0x00, 0x00, 0x00, 0x00};
-        constexpr uint8_t INVALID_STATE[] = {0x0F, 0x00, 0x00, 0x00, 0x00};
-    }
-
-    namespace PowerPathStatus {
-        // ... test data for power path status
-    }
-}
-```
-
-### Real Hardware Captures
-
-Save actual hardware register dumps for testing:
-
-```cpp
-// Captured from real TPS25751 connected to Apple 87W charger
-constexpr uint8_t APPLE_87W_SOURCE_CAPS[] = {
-    0x03,  // 3 PDOs
-    0x2C, 0x91, 0x01, 0x08,  // PDO1: 5V @ 3A
-    0x0C, 0xB1, 0x02, 0x00,  // PDO2: 9V @ 3A
-    0xB4, 0xB1, 0x03, 0x00,  // PDO3: 20V @ 4.35A
-};
-```
-
 ### USB PD Capture Bundles
 
 `test/fixtures/pd-captures/` holds USB PD captures from a ChargerLAB KM003C, each
@@ -739,24 +391,7 @@ python3 test/support/pd_capture_fixture.py --check
 python3 -m unittest discover -s test/support -p "test_*.py"
 ```
 
-## Continuous Testing
-
-### Pre-Commit Testing
-
-Run tests before every commit:
-
-```bash
-# Add to .git/hooks/pre-commit
-#!/bin/bash
-echo "Running unit tests..."
-pio test -e native
-if [ $? -ne 0 ]; then
-    echo "Tests failed. Commit aborted."
-    exit 1
-fi
-```
-
-### Test Coverage Tracking
+## Coverage
 
 `test/coverage.sh` measures line coverage of the native suites and prints one
 line per file in `src/`, sorted with the least-covered file first. Run it from
@@ -782,120 +417,9 @@ Only sources compiled by `[env:native]` appear in the report, so
 and `TPS25751PatchLoader.cpp` are, through the Wire fake. Neither the verify gate nor CI runs the coverage step; the >90%
 target is checked by running the script at review.
 
-First measurement, 2026-11-19 (727 tests): 84% of lines overall. Files under
-90%, lowest first: `TPS25751PowerStatus.cpp` 11%, `TPS25751Debug.cpp` 26%,
-`TPS25751PDStatus.cpp` 36%, `TPS25751TypeCState.cpp` 38%, `TPS25751Data.cpp`
-42%, `TPS25751PowerPathStatus.cpp` 51%, `TPS25751InterruptClear.cpp` 54%,
-`TPS25751Mode.cpp` 56%, `TPS25751Command.cpp` 63%, `TPS25751BootFlags.cpp` 68%,
-`TPS25751ReceivedSinkCaps.cpp` 74%, `TPS25751TransmitSinkCaps.cpp` 77%,
-`TPS25751ReceivedSourceCaps.cpp` 78%, `TPS25751PortConfig.cpp` 82%,
-`TPS25751PortControl.cpp` 83%, `TPS25751Status.cpp` 84%,
-`TPS25751InterruptMask.cpp` 85%, and `TPS25751TransmitSourceCaps.cpp` 86%. Nine
-of the ten lowest have no suite of their own and are reached only through the
-factory suite; the rest miss mostly `debugPrint()` branches and semantic-check
-failure paths.
-
-Second measurement, 2026-11-19 (1063 tests): 98% of lines overall, every file at
-93% or more. New suites cover PowerStatus, PDStatus, PowerPathStatus, BootFlags,
-TypeCState, Mode, Command, Data, and Debug, and eleven existing suites gained
-tests. Most of the lines still missed cannot be reached by any input: `default:`
-returns in `toString()` switches over enums that `extractEnum()` clamps, and
-`> max` checks in `isSemanticallyValid()` on fields too narrow to exceed the
-maximum (for example `TPS25751Status.cpp` 220 and 227, `TPS25751TypeCState.cpp`
-71 and 75, `TPS25751PDStatus.cpp` 241 and 247). Files at or above 90% that the
-second pass did not target, such as `TPS25751InterruptEvent.cpp` (93%) and
-`TPS25751ActivePDOContract.cpp` (95%), were left as they were.
-
-Third measurement, 2026-11-23 (1303 tests), the first recorded here with
-`TPS25751EepromUpdater.cpp` in the report, after the AppConfigOffset checks of
-`updateRegion()`: 98% of lines overall, every file at 93% or more, and the updater
-at 100% (527 of 527 lines, 155 tests in its suite).
-
-Fourth measurement, 2026-11-23 (1336 tests), with `TPS25751.cpp` and
-`TPS25751PatchLoader.cpp` in the native build: 93% of lines overall (5614 of 6026).
-`TPS25751PatchLoader.cpp` is at 99% (171 of 172 lines, 19 tests); it misses only the
-`default:` of `mapTaskStatus()`, which no caller reaches.
-`TPS25751.cpp` is at 32% (165 of 515 lines, 14 tests in `test_TPS25751Core`): the
-register read and write, the task calls, and the burst are covered; the typed
-`read*()` and `write*()` wrappers and the factory-based `read*Register()` functions,
-which each forward to those paths, `begin()`, the debug setters, and two unreachable
-branches after a full-length read are not, and no test calls them only to count lines.
-`TPS25751EepromUpdater.cpp` stays at 100% (527 of 527 lines, 155 tests). Every other
-file is at 93% or more.
-
-Fifth measurement, 2026-11-24 (1348 tests), after the loader gained the Ready for Patch
-and MODE polls, the PBMs configuration read-back, and `PBMe`: 93% of lines overall (5673
-of 6078). `TPS25751PatchLoader.cpp` is at 99% (217 of 218 lines, 30 tests), still missing
-only the `default:` of `mapTaskStatus()`. `TPS25751.cpp` is at 34% (178 of 521 lines, 15
-tests in `test_TPS25751Core`); the new `writeCommandData()` is covered, and the missed
-lines are the same wrappers as in the fourth measurement. `TPS25751EepromUpdater.cpp`
-stays at 100%, and every other file is at 93% or more.
-
-Sixth measurement, 2026-11-24 (1441 tests), after `test_TPS25751Typed` (93 tests): 98%
-of lines overall (5987 of 6078). `TPS25751.cpp` is at 94% (492 of 521 lines), up from 34%.
-The 29 lines still missed are two kinds. Lines 42-43 and 61-62 test `available()` after a
-`requestFrom()` that returned the full count, which the fake and the driver never
-contradict. Lines 401-402 test a null factory result for an address that has register
-info, which cannot happen while the factory covers every address. The other 23 are the
-`return nullptr` after an `if (reg)` that cannot be false, one in each of 23 `read*Register()`
-functions. Changing `src/` to remove them is outside this
-change. `TPS25751PatchLoader.cpp` stays at 99% and `TPS25751EepromUpdater.cpp` at 100%.
-
-Seventh measurement, 2026-11-24 (1444 tests): 99% of lines overall (5841 of 5900), with
-`TPS25751.cpp` at 100% (343 of 343 lines). The 23 dead lines of the sixth measurement are
-gone: the typed `read*Register()` functions now call one private `readAndValidateAs<T>()`
-template, which cut the measured lines of `TPS25751.cpp` from 521 to 343. Three new tests in
-`test_TPS25751Typed` reach the other six lines, one with an injected null factory and two
-with `Wire.rxMissing`. `TPS25751PatchLoader.cpp` stays at 99% and
-`TPS25751EepromUpdater.cpp` at 100%.
-
-### Regression Testing
-
-Maintain a regression test suite:
-
-```cpp
-// test_regression.cpp
-// Tests for previously discovered bugs to prevent regressions
-
-void test_issue_001_status_vbus_parsing() {
-    // Issue: VBUS bit was being read from wrong byte
-    // Expected: byte 1, bit 0
-    uint8_t data[] = {0x00, 0x00, 0x10, 0x00, 0x00};  // bit 20 set
-    TPS25751Status status(data, 5);
-    TEST_ASSERT_EQUAL(VBUS_AT_VSAFE5V, status.vbusStatus());
-}
-```
-
-## Success Criteria
-
-Tests are successful when:
-
-- ✅ All unit tests pass
-- ✅ Code coverage > 90%
-- ✅ Integration tests pass
-- ✅ No compiler warnings in test code
-- ✅ Hardware tests verify expected behavior
-- ✅ Edge cases handled correctly
-- ✅ Regression tests prevent old bugs
-
-## Revision History
-
-| Version | Date | Author | Changes |
-|---------|------|--------|---------|
-| 1.0 | 2025-10-20 | Claude Code | Initial testing strategy document extracted from implementation plan |
-| 1.1 | 2026-07-06 | Claude Code | Batch 0: replaced aspirational unit-test sections with the real, working `pio test -e native` harness (Unity, native env, Arduino stubs in `test/support/native/`, seed suite for TPS25751Status); corrected fictional API in examples; marked coverage tooling as pending |
-| 1.2 | 2026-11-19 | Claude Code | The native build compiles every register class and the factory; factory and base-class suites; line coverage with `test/coverage.sh` and `[env:native-coverage]`, with the first per-file numbers |
-| 1.3 | 2026-11-19 | Claude Code | Second coverage measurement: 98% of lines, every file at 93% or more, and the kinds of line that remain unreachable |
-| 1.4 | 2026-11-23 | Claude Code | USB PD capture bundles and their generated headers |
-| 1.5 | 2026-11-23 | Claude Code | EEPROM updater suite and `FakeCommandExecutor` (what it models and which behaviours are assumptions), the updater in the native build and the coverage report, script tests for `bin_to_header.py` |
-| 1.6 | 2026-11-23 | Claude Code | The `programBlank()` `FLad` sweep, the two `coldReset()` APP outcomes, and the example commands the hardware stages run, including `zero` |
-| 1.7 | 2026-11-23 | Claude Code | Tests of the AppConfigOffset checks of `updateRegion()`, and the coverage numbers after them |
-| 1.8 | 2026-11-23 | Claude Code | The Wire fake, the core and patch-loader suites, `TPS25751.cpp` and `TPS25751PatchLoader.cpp` in the native build, and the fourth coverage measurement |
-| 1.9 | 2026-11-23 | Claude Code | The Wire fake follows the Teensy 4 driver's codes and limits, with what it does not model; the new core and loader tests; the fourth measurement rerun (1334 tests) |
-| 1.10 | 2026-11-23 | Claude Code | Loader tests of a slow `PBMs` and of the IRQ ready wait across a `millis()` wrap; the fourth measurement rerun (1336 tests) |
-| 1.11 | 2026-11-24 | Claude Code | Core test of `writeCommandData()`; loader tests of the Ready for Patch and MODE polls, the PBMs configuration read-back, and `PBMe`; the fake's additions; the fifth measurement (1348 tests) |
-| 1.12 | 2026-11-24 | Claude Code | `test_TPS25751Typed`: the typed read and write wrappers and the factory read functions, and the sixth coverage measurement (1441 tests, `TPS25751.cpp` at 94%) |
-| 1.13 | 2026-11-24 | Claude Code | The `Wire.rxMissing` fault, the null-factory and short-buffer tests, and the seventh coverage measurement (1444 tests, `TPS25751.cpp` at 100%) |
-| 1.14 | 2026-11-24 | Claude Code | `test_TPS25751Typed` covers the nine typed reads added so that all 37 registers have both read forms (1453 tests) |
-
-*Comprehensive testing ensures library reliability and correctness.*
+The latest measurement, on 2026-11-24 with 1444 tests, is 99% of lines overall (5841 of
+5900): `TPS25751.cpp` and `TPS25751EepromUpdater.cpp` at 100%, `TPS25751PatchLoader.cpp`
+at 99%, and every other file at 93% or more. Most lines still missed cannot be reached by
+any input: `default:` returns in `toString()` switches over enums that `extractEnum()`
+clamps, and `> max` checks on fields too narrow to exceed the maximum. Do not add a test
+that calls a function only to count its lines.

@@ -250,6 +250,44 @@ Phase 7 known gaps:
 - Codex wrote the meter's VBUS in hex (`502d` mV) in one report; display only.
 - In the source-role snapshot 0x30 holds one zero PDO left from an earlier contract.
 
+Phase 8 complete 2026-11-25: `feat/pd-distribution` is integrated. `.mcp.json` and the
+new `.codex/config.toml` define the four servers, with `km003c` pinned to the fork's
+`v0.2.0` and `tps25751-bench` to this library's `v3.3.0`; `.claude/settings.json` enables
+both and the `tps25751` plugin marketplace; `.claude-plugin/marketplace.json` lists
+`plugins/tps25751-bench`. The user applied and committed the two guarded files. The fork's
+`main` carries version 0.2.0 and is pushed with its tag. Next: Phase 9.
+
+Phase 8 verification:
+
+| Check | Result |
+|---|---|
+| `claude mcp list` in this library | All four servers connect |
+| `codex mcp list` in this library (trusted) | All four listed: Codex reads the project `.codex/config.toml` |
+| `km003c` `measure` from Claude Code (headless) and Codex (`codex exec`) | Both return readings through the `v0.2.0` pin |
+| `tps25751-bench` `bench_hello` from Claude Code | Works through the `v3.3.0` pin |
+| `bench_renegotiate` from `codex exec`, default `on-request` policy | Ran without asking, despite `approval_mode = "prompt"` |
+| The same with `-c approval_policy="never"` | Refused: "MCP tool call requires approval, but approval policy is never" |
+| `claude plugin validate` on the marketplace and the plugin | Pass; one warning for the missing plugin icon |
+
+Phase 8 facts, for later phases:
+- The per-tool `approval_mode` keys are right and gate the tool, but non-interactive
+  `codex exec` under `on-request` does not stop for them. Phase 9 checks that interactive
+  Codex prompts, and documents `approval_policy="never"` for `codex exec` runs.
+- The `extraKnownMarketplaces` github source reads `marketplace.json` from the default
+  branch of `forrestrae/TPS25751`, so the plugin installs only once this branch is pushed.
+  A `directory` source with `path` `.` did not load the plugin in a headless session.
+  Until the push, `--plugin-dir plugins/tps25751-bench` loads it.
+- The fork's `origin` was HTTPS and asked for a password; it is now SSH, like this
+  library's.
+- Codex updated itself from 0.171 to 0.172 during the phase; the checks above ran on both.
+
+Phase 8 checks still open, carried into Phase 9: the plugin install from the GitHub
+marketplace after the push; the skill run end to end in a scratch PlatformIO project
+outside `lib/` under each agent, with the skill copied by `sync_skill.py --dest`; whether
+a Claude Code local-scope `km003c` entry takes precedence over the project entry (it
+writes the user's `~/.claude.json`, so it needs the user's go-ahead); and that the
+relative `--directory` docs entries start under Codex when a docs tool is called.
+
 Correction found in Phase 0, affecting Phase 5: since `ci/verify-launcher`, `verify.py`
 is a launcher that runs `main`'s copy of `scripts/verify_gate.py`, and agents may edit
 `verify_gate.py` on a topic branch. The two Phase 5 checks therefore go into

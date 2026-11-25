@@ -390,7 +390,9 @@ bus free and the peripheral then saw a NACK, of the address or of a data byte (t
 cannot tell which); a busy bus, lost arbitration, a pin-low timeout, and its 50 ms timeout
 return 4. A controller that did not acknowledge fits the codes. They argue against a held
 line on the host side but do not rule out a host fault, and the cause is not established.
-The current sequence has not run on hardware.
+Hardware stages 6 and 7 ran the 20 ms sequence in ten loads and stage 8 the current
+sequence in five, on the same board: all returned Success, and every later read was
+acknowledged. The fault did not recur, so those loads do not establish its cause.
 
 #### 500 µs before PBMc
 

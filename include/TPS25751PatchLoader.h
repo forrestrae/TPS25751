@@ -217,8 +217,10 @@ enum class PatchLoadStatus : uint8_t {
  * board, ran an earlier version that read DATA at once: that read returned 28
  * of 65 bytes, the call returned I2cError although the patch had loaded, and
  * every later read from the host failed with error 2 until the host
- * restarted; the cause of those failures is not established. The current
- * sequence has not run on hardware.
+ * restarted; the cause of those failures is not established. Stages 6 and 7
+ * ran the 20 ms sequence and stage 8 the current one, fifteen loads on the
+ * same board, all Success with every later read acknowledged. The PBMe paths
+ * have not run on hardware.
  *
  * The 4CC handshakes go through TPS25751::executeCommand() for PBMs, whose
  * DATA is read right after COMMAND clears (SLVAFV8A steps 8 and 9, pages 9 and

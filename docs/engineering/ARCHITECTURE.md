@@ -1304,7 +1304,8 @@ from the host failed with error 2, for a cause not established on either side of
   used; SLVAFV8A goes from DATA to MODE without it.
 - `TPS25751.cpp` and `TPS25751PatchLoader.cpp` now build in `[env:native]` against a
   TwoWire fake, and `test_TPS25751PatchLoader` pins the transaction order and the 20 ms.
-  The new sequence has not run on hardware.
+  Hardware stages 6 and 7 of the EEPROM-update plan ran this sequence in ten loads, all
+  Success, with every later read acknowledged.
 
 Amendment, 2026-11-24: three more steps follow TRM Figure 5-1 (page 88) and SLVAFV8A,
 by the user's decision recorded in the EEPROM-update plan.

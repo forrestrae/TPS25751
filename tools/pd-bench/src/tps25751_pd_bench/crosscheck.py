@@ -131,6 +131,7 @@ class Capture:
     messages: list[Message]
     conn: int
     vbus: list[int]
+    connects: list[int] = field(default_factory=list)  # meter times of connect records
 
 
 # --- reading ------------------------------------------------------------------------
@@ -158,6 +159,7 @@ def load_capture(path: str | Path) -> Capture:
     messages: list[Message] = []
     last: dict[tuple[str, int], bytes] = {}
     conn = 0
+    connects: list[int] = []
     vbus: list[int] = []
     for number, record in _json_lines(path):
         kind = record.get("type")
@@ -169,6 +171,8 @@ def load_capture(path: str | Path) -> Capture:
             footer = record
         elif kind == "conn":
             conn += 1
+            if record.get("event") == "connect" and isinstance(record.get("t_meter_ms"), int):
+                connects.append(record["t_meter_ms"])
         elif kind == "status" and isinstance(record.get("vbus_mv"), int):
             vbus.append(record["vbus_mv"])
         elif kind == "pd":
@@ -199,7 +203,7 @@ def load_capture(path: str | Path) -> Capture:
             messages.append(msg)
     if header is None:
         raise CrosscheckError(f"{path}: no header record")
-    return Capture(path, header, footer, messages, conn, vbus)
+    return Capture(path, header, footer, messages, conn, vbus, connects)
 
 
 def load_registers(path: str | Path) -> dict[int, bytes]:
@@ -620,6 +624,43 @@ def accepted_power_swaps(messages: list[Message]) -> list[tuple[Message, Message
     return swaps
 
 
+def identity_after_attach(capture: Capture, role_at) -> tuple[Message | None, Message | None]:
+    """The partner's Discover Identity ACK that the skill's identity wait accepts.
+
+    The wait ends on the first Discover Identity ACK on SOP from the partner that comes
+    after the first completed contract of the latest attach: the first PS_RDY that
+    completes a Request after the last connect record, or after the start of the capture
+    when it has none. An ACK between that contract and a later one counts; an iPhone sends
+    its ACK between its two contracts. Returns that PS_RDY and the ACK, either None.
+    """
+    attach = max(capture.connects) if capture.connects else None
+    messages = [m for m in capture.messages
+                if m.sop == "SOP" and not m.goodcrc and not m.retry
+                and (attach is None or (m.t is not None and m.t >= attach))]
+    first_ps_rdy = None
+    state = None  # None, "requested", "accepted"
+    for m in messages:
+        if m.is_data(DATA_REQUEST) or m.is_data(DATA_EPR_REQUEST):
+            state = "requested"
+        elif state == "requested" and m.is_control(CTRL_ACCEPT):
+            state = "accepted"
+        elif state == "requested" and (m.is_control(CTRL_REJECT) or m.is_control(CTRL_WAIT)):
+            state = None
+        elif m.is_control(CTRL_SOFT_RESET):
+            state = None
+        elif state == "accepted" and m.is_control(CTRL_PS_RDY):
+            first_ps_rdy = m
+            break
+    if first_ps_rdy is None:
+        return None, None
+    for m in messages:
+        if m.line > first_ps_rdy.line and is_identity_ack(m):
+            sent_as = "source" if m.header & (1 << 8) else "sink"
+            if sent_as != role_at(m.line):
+                return first_ps_rdy, m
+    return first_ps_rdy, None
+
+
 def capture_stimulus(capture: Capture) -> str | None:
     """The stimulus the skill recorded in the header's provenance, if any."""
     provenance = capture.header.get("provenance")
@@ -687,6 +728,17 @@ def crosscheck(capture_path: str | Path, registers_path: str | Path, role: str |
         if contract is not None and not contract.epr:
             rows += _contract_rows(contract, regs, board, caps_expected)
         rows += _identity_rows(capture.messages, regs, role_at)
+        provenance = capture.header.get("provenance")
+        if isinstance(provenance, dict) and provenance.get("stop") == "identity":
+            first_ps_rdy, ack = identity_after_attach(capture, role_at)
+            if ack is not None:
+                notes.append(f"stop identity: the partner's Discover Identity ACK at {ack.where()} came after "
+                             f"the attach's first contract (PS_RDY at {first_ps_rdy.where()}), as the wait accepts")
+            elif first_ps_rdy is not None:
+                notes.append(f"stop identity: no Discover Identity ACK from the partner after the attach's "
+                             f"first contract (PS_RDY at {first_ps_rdy.where()})")
+            else:
+                notes.append("stop identity: no completed contract after the last attach")
     vbus = _vbus_row(capture, regs)
     if vbus is not None:
         rows.append(vbus)

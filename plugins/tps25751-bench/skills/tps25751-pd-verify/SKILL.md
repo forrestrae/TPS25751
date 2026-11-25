@@ -182,13 +182,19 @@ Stop waiting when one of these holds:
    1.9 s after the first, and the Phase 1 cold-attach steps end at PS_RDY plus 5 s, so a
    shorter wait can miss the last negotiation.
 3. `stop` is `identity`: the contract condition of item 2 holds, and a Discover Identity
-   ACK on SOP from the partner has arrived after P, or 8 steps (about 16 s) have passed
-   since the first summary that showed the current P. Check for the ACK in each step
-   after the contract condition holds with `km003c` `pd_capture_read`, `mode` `messages`,
-   `sop` `SOP`, `types` `["Discover_Identity"]`, and `since` P. The partner's ACK is a
-   line `Discover_Identity ACK ... from source/...` when the board is sink, and
-   `... from sink/...` when it is source; a line from the board's own role is the board's
-   identity and does not count.
+   ACK on SOP from the partner has arrived after the first contract of the latest attach,
+   or 8 steps (about 16 s) have passed since the first summary that showed a P. The
+   partner may answer between two contracts (an iPhone did, between its first and second
+   Request), so do not require the ACK after the final P. Check in each step after the
+   contract condition holds with `km003c` `pd_capture_read`, `mode` `messages`, `types`
+   `["connect", "PS_RDY", "Discover_Identity"]`, and `limit` 50 (no `sop`, which would
+   drop the connect lines). The latest attach starts at the last `connect` line, or at
+   the start of the capture without one; its first contract ends at the first `PS_RDY`
+   line after that. Count a `Discover_Identity ACK` line on SOP after that PS_RDY when it
+   reads `from source/...` with the board sink, or `from sink/...` with the board source;
+   a line from the board's own role is the board's identity and does not count.
+   `bench_crosscheck` applies the same rule and states in its sanity notes which ACK it
+   found.
 4. 15 steps (about 30 s) have passed without any P. No contract completed.
 
 Then, if `running` is still true, call `km003c` `pd_capture_stop`. Record the final

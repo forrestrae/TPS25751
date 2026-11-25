@@ -560,3 +560,40 @@ def test_the_source_role_bundle_passes_with_its_runtime_differences_reported():
     assert "(bits 29:20 = 030)" in first_pdo["note"]
     assert [rows[f"Identity VDO {k}"]["wire"] for k in (1, 2, 3)] == ["d50005ac", "00000000", "710c2166"]
     assert all(rows[f"Identity VDO {k}"]["result"] == MATCH for k in (1, 2, 3))
+
+
+# ----- the identity wait's rule -----
+
+def test_the_identity_wait_accepts_an_ack_between_two_contracts(tmp_path):
+    # As the iPhone did: contract, its Discover Identity ACK, then a second contract.
+    capture = CaptureFile(provenance={"stimulus": "port_reset", "stop": "identity"}).conn("disconnect").conn()
+    capture.contract().identity_ack(source=True).request_accepted(APPLE_RDO)
+    capture.write(tmp_path / "c.jsonl")
+    loaded = crosscheck.load_capture(tmp_path / "c.jsonl")
+    first_ps_rdy, ack = crosscheck.identity_after_attach(loaded, lambda line: "sink")
+    final, _, _ = crosscheck.select_contract(loaded.messages)
+    assert first_ps_rdy is not None and ack is not None
+    assert first_ps_rdy.line < ack.line < final.request.line
+    result = run(tmp_path, capture.status(20480).footer(), sink_registers())
+    assert any(n.startswith("stop identity: the partner's") for n in result["sanity"])
+
+
+def test_the_identity_wait_ignores_the_boards_own_ack_and_earlier_attaches(tmp_path):
+    capture = CaptureFile(provenance={"stop": "identity"}).conn()
+    capture.contract().identity_ack(source=True)          # the partner's, but in an earlier attach
+    capture.conn("disconnect").conn()
+    capture.contract().identity_ack(PARTNER_VDOS, source=False)  # the board's own (it is the sink)
+    capture.write(tmp_path / "c.jsonl")
+    loaded = crosscheck.load_capture(tmp_path / "c.jsonl")
+    first_ps_rdy, ack = crosscheck.identity_after_attach(loaded, lambda line: "sink")
+    assert first_ps_rdy is not None and ack is None
+    result = run(tmp_path, capture.status(20480).footer(), sink_registers())
+    assert any(n.startswith("stop identity: no Discover Identity ACK") for n in result["sanity"])
+
+
+@pytest.mark.skipif(not SOURCE_BUNDLE.is_dir(), reason="needs the library checkout's fixture bundle")
+def test_the_identity_wait_accepts_the_iphone_ack_of_the_source_bundle():
+    loaded = crosscheck.load_capture(SOURCE_BUNDLE / "capture.jsonl")
+    first_ps_rdy, ack = crosscheck.identity_after_attach(loaded, lambda line: "source")
+    assert (first_ps_rdy.t, ack.t) == (65455685, 65455721)  # first contract's PS_RDY, the iPhone's ACK
+    assert ack.objects[1] == 0xD50005AC

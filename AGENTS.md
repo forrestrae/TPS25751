@@ -35,7 +35,7 @@ other agents load only this file, so open the sub-directory file yourself.
 | Example sketches | [examples/AGENTS.md](examples/AGENTS.md) |
 | `scripts/`, hooks, releases | [scripts/AGENTS.md](scripts/AGENTS.md) |
 | The bench console, its protocol, or the bench server | `include/TPS25751BenchProtocol.h` and `include/TPS25751BenchConsole.h`, then [tools/pd-bench/README.md](tools/pd-bench/README.md) |
-| Checking register decode against a USB PD capture | The `tps25751-pd-verify` skill, [plugins/tps25751-bench/skills/tps25751-pd-verify/SKILL.md](plugins/tps25751-bench/skills/tps25751-pd-verify/SKILL.md). Codex reads it through the `.agents/skills` symlink. Until Phase 8 of the toolset plan, nothing here configures the plugin or the `km003c` and `tps25751-bench` servers; load them for one Claude Code session with `claude --mcp-config <file> --plugin-dir plugins/tps25751-bench`, where `<file>` defines both servers |
+| Checking register decode against a USB PD capture | The `tps25751-pd-verify` skill, [plugins/tps25751-bench/skills/tps25751-pd-verify/SKILL.md](plugins/tps25751-bench/skills/tps25751-pd-verify/SKILL.md). Claude Code gets it from the plugin, Codex through the `.agents/skills` symlink. Both servers it drives are configured below |
 | The bus protocol, 4CC tasks, PBM, flash tasks, or a difference between hardware and the TRM | [CONSTRAINTS.md](docs/engineering/CONSTRAINTS.md) |
 | Structure, data flow, and the decision records (ADRs) | [ARCHITECTURE.md](docs/engineering/ARCHITECTURE.md) |
 | Reviewing a change | [CODE_REVIEW_GUIDELINES.md](docs/engineering/CODE_REVIEW_GUIDELINES.md) |
@@ -56,15 +56,33 @@ Both provide `search_register`, `explain_bitfield`, `get_register`, and `list_re
 For those thirteen registers `tps25751-docs` prints a Specification block that names the
 USB PD table and bits each field maps to; look the object up in `usb-pd-docs`
 (`get_register` takes a table number such as `6.59`) and cite both the TRM page and the
-specification table. Claude Code reads `.mcp.json` and `.claude/settings.json`. A Codex
-configuration under `.codex/config.toml` is planned and not yet in the repository.
+specification table.
 
-A third server, `tps25751-bench` in `tools/pd-bench`, talks to a board through the bench
-console instead of serving documents. No agent configuration in this repository starts it
-yet; its README says how to run it and which of its tools change the board. The Claude
-Code plugin `plugins/tps25751-bench` holds the skill that drives it with the KM003C
-meter's `km003c` server, and the `pd-capture-analyst` agent; it is not enabled in this
-repository's configuration yet either.
+Two more servers talk to hardware. `.mcp.json` (Claude Code) and `.codex/config.toml`
+(Codex, trusted project) configure all four, and each agent's own file is the
+authority on what is allowed without a prompt.
+
+| MCP server | Source | Use for |
+|---|---|---|
+| `km003c` | Fork `forrestrae/mcp-powerz-km003c`, pinned tag, run with `uvx` | The KM003C meter: measurements and USB PD captures, written under `captures/`. Trigger tools are off unless `KM003C_ENABLE_TRIGGER=1` |
+| `tps25751-bench` | `tools/pd-bench`, pinned to a release tag of this library, run with `uvx` | The board through the bench console. `bench_task`, `bench_write`, and `bench_renegotiate` can drop VBUS or reset the controller; its README lists the tools |
+
+The pinned tags are the versions tested here; keep the `tps25751-bench` tag equal to the
+library release that carries the console the firmware compiles in. Both servers claim a serial port or the meter, so only one session
+should run them at a time. The Claude Code plugin `plugins/tps25751-bench`, from the
+marketplace in `.claude-plugin/marketplace.json`, holds the `tps25751-pd-verify` skill and
+the `pd-capture-analyst` agent that drive them with `usb-pd-docs`.
+
+To work on a server itself, point the agent at the sibling checkout instead of the tag:
+
+```bash
+claude mcp add km003c --scope local -- uv --directory ../km003c-mcp run km003c-mcp
+codex -c 'mcp_servers.km003c.command="uv"' \
+  -c 'mcp_servers.km003c.args=["--directory","../km003c-mcp","run","km003c-mcp"]'
+```
+
+A local-scope entry should take precedence over the project's `km003c` entry in Claude
+Code (not yet confirmed). Remove it with `claude mcp remove km003c --scope local`.
 
 ## Rules for every change
 

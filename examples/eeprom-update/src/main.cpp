@@ -16,7 +16,10 @@
 //        pointers, both AppConfigOffset words (0x03FC and 0x07FC, as
 //        "[offset]" lines), the region an update would target, FLvy for each
 //        region, and a hex dump of 0x0000 to 0x7C00. Issues FLrd and FLvy only.
-//        The same report without the dump is printed once at start-up.
+//        The same report without the dump is printed once at start-up, after
+//        MODE reads APP or 5 s pass: the Teensy shares the controller's
+//        supply, and right after a power-on the controller can still be
+//        loading its bundle from the EEPROM, in PTCH (hardware stage 9).
 //
 // COMMAND THAT RESTARTS THE CONTROLLER (no EEPROM write)
 //   x    Prints both region pointers, then coldReset(): issues GAID, waits for
@@ -118,7 +121,9 @@
 //   note under l on what stage 5 saw and on its diagnostics. Stage 5 reaches an EEPROM with no valid
 //   pointer with zero instead of a teardown and minipro; pb then runs at once,
 //   before any reset. r at start-up and on request says so
-//   when MODE reads PTCH. SLVAFL1 (Recovering From EEPROM Failure, page 13)
+//   when MODE reads PTCH. At start-up the report first waits up to 5 s for
+//   APP, because PTCH also appears while the controller loads a good bundle
+//   after a power-on; a PTCH that outlasts the wait is the one to recover. SLVAFL1 (Recovering From EEPROM Failure, page 13)
 //   notes that this boot flow needs a host that can run and correct the
 //   EEPROM while the controller sits in PTCH; if the system needs the sink
 //   path before it can boot, the ADCINx pins must select a suitable
@@ -616,6 +621,62 @@ static bool printStatus()
     printVerify(EepromRegion::Low);
     printVerify(EepromRegion::High);
     return true;
+}
+
+/// Longest wait at start-up for MODE to read APP before the first report.
+/// A choice, matching the 5 s caps of coldReset() and the loader's MODE poll;
+/// no TI document gives a boot time.
+constexpr uint32_t BOOT_WAIT_MS = 5000;
+
+/// Polling interval of the start-up wait.
+constexpr uint32_t BOOT_POLL_MS = 10;
+
+/// Waits for the controller to finish booting before the start-up report.
+///
+/// The Teensy runs from the same +5V rail as the controller, so after a
+/// power-on it can read MODE while the controller is still loading its bundle
+/// from the EEPROM. Hardware stage 9 (2026-11-24, one board) read MODE PTCH,
+/// VERSION 0xF8091100, and BOOT_FLAGS 18 00 30 02 C1 (Patch Config Source None
+/// Loaded, Region 0 Attempted, no region Invalid) in that window on three of
+/// seven power-ons, and APP about 2 s later each time. Reported then, PTCH
+/// would bring the advice to recover with l and pb although nothing is wrong.
+///
+/// Polls MODE every BOOT_POLL_MS until it reads APP or BOOT_WAIT_MS pass,
+/// tolerating failed reads, since the controller can fail to acknowledge
+/// while it boots. A controller with no bundle it can boot stays in PTCH, so
+/// that case costs the full wait and then gets the PTCH advice.
+static void waitForBoot()
+{
+    const uint32_t started = millis();
+    uint32_t reads = 0;
+    uint32_t failedReads = 0;
+    bool app = false;
+    while (true) {
+        TPS25751Mode mode;
+        ++reads;
+        if (!pd.readMode(mode)) {
+            ++failedReads;
+        } else if (mode.isApplicationMode()) {
+            app = true;
+            break;
+        }
+        if (millis() - started >= BOOT_WAIT_MS) {
+            break;
+        }
+        delay(BOOT_POLL_MS);
+    }
+    const uint32_t elapsed = millis() - started;
+
+    Serial.print(app ? F("[setup] MODE read APP after ") : F("[setup] MODE did not read APP within "));
+    Serial.print(elapsed);
+    Serial.print(F(" ms ("));
+    Serial.print(reads);
+    Serial.print(F(" MODE reads, "));
+    Serial.print(failedReads);
+    Serial.println(F(" failed)."));
+    if (!app) {
+        Serial.println(F("[setup] The report below shows the mode the controller stayed in."));
+    }
 }
 
 static void runReport()
@@ -2154,6 +2215,7 @@ void setup()
     Serial.println(F("[setup] TPS25751 EEPROM update example"));
     Serial.println(F("[setup] r reads. x restarts the controller. l loads the image into the controller's RAM in PTCH mode. p p2 u b c1 c2 c3 c4 v pb zero write the EEPROM. l and each command that writes wait for a typed yes."));
     printImage();
+    waitForBoot();
     printStatus();
     printReady();
 }

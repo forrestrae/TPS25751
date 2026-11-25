@@ -691,7 +691,7 @@ fixed; three of the four decisions that followed it are implemented (see the tab
 below); the re-review of `c5c5376..85bab56` found the range clean and ready for stage
 5; stage 5 passed on 2026-11-23 with one deviation (see its result).
 After stage 5 the branch gained decision 3 and the PBM-load fix (see the notes
-below); both are reviewed and neither has run on hardware.
+below); both are reviewed, and stage 6 ran both on hardware.
 `src/TPS25751EepromUpdater.cpp` has 100% line coverage (527 of 527 lines), the updater
 suite has 155 tests, and the native run has 1336. The example gained `l` (a PBM load
 while MODE reads PTCH; it loads the controller's RAM only), `pb` (`programBlank()`), and `zero` (both
@@ -917,7 +917,7 @@ Decisions of 2026-11-24 on these points and on the other open items:
 | `PBMs` timeout byte | Changed to 0x32 on 2026-11-24 (session 2). Checked against TRM Table 4-15 (page 76: "recommended to always use 0x32 ... 5 seconds, LSB of 100 ms") and SLVAFV8A (Table 4-1 lists 0x31 as "3.1 seconds"; the byte listings of steps 4 and 5 send 0x32; the step 9 read-back shows 0x31). Retested on hardware the same day, see stage 7 |
 | Is the branch finished | Not yet. `scripts/integrate.py` stays unrun until the user confirms |
 | `PBMe`, DATA read-back, and ReadyForPatch | Decided in session 3, see below |
-| Coverage of `TPS25751.cpp`; `Wire2` restore sketch; stage 4 with a power cycle | Deferred by the user to later sessions, each to be decided there. Stage 4 with a power cycle was taken up in session 4 as stage 9, which passed on the second board |
+| Coverage of `TPS25751.cpp`; `Wire2` restore sketch; stage 4 with a power cycle | Deferred by the user to later sessions, each to be decided there. Stage 4 with a power cycle was taken up in session 4 as stage 9, which passed on the second board. The `Wire2` restore sketch was dropped on 2026-11-24 with the direct `Wire2` dump: the user decided against any direct `Wire2` access to the EEPROM. Coverage of `TPS25751.cpp` is taken up on `test/tps25751-core-coverage` |
 
 Decisions of 2026-11-24, session 3, on three of the loader's departures from TI's flow.
 Burst transaction spacing and the 500 us before `PBMc` stay out of scope by the user's
@@ -962,8 +962,9 @@ day, ran stage 7's procedure on hardware with the user's go-ahead: five of five 
 returned Success, and the Ready for Patch poll, the MODE poll, and the DATA read-back ran
 on the board. Neither `PBMe` path ran, because nothing failed.
 
-Still unverified, and marked so in the code: the new sequence on hardware; which pins the
-driver's pin-low flag covers. The SDA and SCL readout was removed from the `l` diagnostic
+Still unverified: either `PBMe` path on hardware, and which pins the driver's pin-low
+flag covers (CONSTRAINTS.md, Flash tasks and EEPROM update). Stage 8 ran the rest of the
+new sequence. The SDA and SCL readout was removed from the `l` diagnostic
 on 2026-11-24 (see the stage 6 result).
 
 ## Tests
@@ -1241,7 +1242,7 @@ Ordered from safe to destructive. Each stage states its recovery.
    layout; `coldReset()` under the observed-restart rule returned Success for each
    restart into APP and `ResetTimeout` for the restart into PTCH.
 
-   Defect found, fixed after this stage and not yet retested on hardware (see the
+   Defect found, fixed after this stage and retested in stages 6 to 8 (see the
    investigation note under Batch 3 and stage 6): the PBM load reports failure although
    it succeeded. The
    controller left the bus while `executeCommand()` read DATA after `PBMc`, before the
@@ -1711,11 +1712,11 @@ needs a qualification:
   stage 5 result and stage 6. The loader was changed after that.
 - The EEPROM is reachable from the Teensy directly on `Wire2`.
 
-Stages 2, 3, and 4 ran from the 18650 pack. Open, not decided: a direct `Wire2`
-restore sketch as a recovery that needs no clip. The restore sketch is outside this
-plan and writes the EEPROM on a bus the controller also masters, at boot, for the
-BQ25798, and during every flash task, so it needs its own decision, review, and
-go-ahead.
+Stages 2, 3, and 4 ran from the 18650 pack. A direct `Wire2` restore sketch, a recovery
+that needs no clip, was considered and dropped on 2026-11-24: the user decided against
+any direct `Wire2` access to the EEPROM, a bus the controller also masters at boot, for
+the BQ25798, and during every flash task. The recoveries stay the PBM load with
+`programBlank()` and `write-flash.zsh` with the clip.
 
 ## Risks
 

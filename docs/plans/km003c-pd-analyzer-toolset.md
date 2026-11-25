@@ -809,11 +809,11 @@ Branch `feat/pd-verify-skill`.
 - `plugins/tps25751-bench/skills/tps25751-pd-verify/SKILL.md`: the one source of the
   skill.
 - `plugins/tps25751-bench/agents/pd-capture-analyst.md`: Claude Code only.
-- `.agents/skills/tps25751-pd-verify/`: what Codex reads. A symlink to the plugin's
-  skill directory if Codex follows symlinked skill directories (checked in this phase);
-  otherwise a copy written by `tools/pd-bench/sync_skill.py`, whose `--check` mode
-  `verify.py` runs beside the fixture check. The same script writes the copy into a
-  downstream Codex project (`--dest <project>`), from the library tag that project pins.
+- `.agents/skills/tps25751-pd-verify/`: what Codex reads. A relative symlink to the
+  plugin's skill directory: codex-cli 0.171.0 lists and reads a skill through such a
+  link (checked 2026-11-24). `tools/pd-bench/sync_skill.py` writes a copy only into a
+  downstream Codex project (`--dest <project>`), from the library tag that project pins;
+  it has no `--check` mode and no gate step.
 
 The skill names tools as server plus tool (`km003c` `pd_capture_start`), which reads
 correctly in both agents, and never assumes the analyst agent exists.
@@ -1026,7 +1026,7 @@ server-wide allow cannot cover them:
     "mcp__km003c__stream_start", "mcp__km003c__stream_status",
     "mcp__km003c__stream_samples", "mcp__km003c__stream_stop",
     "mcp__tps25751-bench__bench_hello", "mcp__tps25751-bench__bench_snapshot",
-    "mcp__tps25751-bench__bench_read"
+    "mcp__tps25751-bench__bench_read", "mcp__tps25751-bench__bench_crosscheck"
   ],
   "ask": [
     "mcp__km003c__trigger_detect", "mcp__km003c__trigger_enter",

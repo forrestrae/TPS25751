@@ -35,6 +35,7 @@ other agents load only this file, so open the sub-directory file yourself.
 | Example sketches | [examples/AGENTS.md](examples/AGENTS.md) |
 | `scripts/`, hooks, releases | [scripts/AGENTS.md](scripts/AGENTS.md) |
 | The bench console, its protocol, or the bench server | `include/TPS25751BenchProtocol.h` and `include/TPS25751BenchConsole.h`, then [tools/pd-bench/README.md](tools/pd-bench/README.md) |
+| Checking register decode against a USB PD capture | The `tps25751-pd-verify` skill, [plugins/tps25751-bench/skills/tps25751-pd-verify/SKILL.md](plugins/tps25751-bench/skills/tps25751-pd-verify/SKILL.md); Codex reads it through the `.agents/skills` symlink |
 | The bus protocol, 4CC tasks, PBM, flash tasks, or a difference between hardware and the TRM | [CONSTRAINTS.md](docs/engineering/CONSTRAINTS.md) |
 | Structure, data flow, and the decision records (ADRs) | [ARCHITECTURE.md](docs/engineering/ARCHITECTURE.md) |
 | Reviewing a change | [CODE_REVIEW_GUIDELINES.md](docs/engineering/CODE_REVIEW_GUIDELINES.md) |
@@ -60,7 +61,9 @@ configuration under `.codex/config.toml` is planned and not yet in the repositor
 
 A third server, `tps25751-bench` in `tools/pd-bench`, talks to a board through the bench
 console instead of serving documents. No agent configuration in this repository starts it
-yet; its README says how to run it and which of its tools change the board.
+yet; its README says how to run it and which of its tools change the board. The Claude
+Code plugin `plugins/tps25751-bench` holds the skill that drives it with the KM003C
+meter's `km003c` server, and the `pd-capture-analyst` agent.
 
 ## Rules for every change
 

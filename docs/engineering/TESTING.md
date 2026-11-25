@@ -3,8 +3,6 @@
 **Last Updated:** 2026-11-24
 **Status:** Active
 
----
-
 ## Overview
 
 This document defines the comprehensive testing strategy for the TPS25751 library. Our testing approach follows a multi-layered strategy: unit tests, integration tests, and hardware validation.
@@ -20,8 +18,6 @@ in `library.json`.
 measured with `test/coverage.sh` (see Test Coverage Tracking). Not every file
 meets it yet; the report lists the gaps.
 
----
-
 ## Table of Contents
 
 1. [Testing Layers](#testing-layers)
@@ -32,8 +28,6 @@ meets it yet; the report lists the gaps.
 6. [Running Tests](#running-tests)
 7. [Test Data Management](#test-data-management)
 8. [Continuous Testing](#continuous-testing)
-
----
 
 ## Testing Layers
 
@@ -81,8 +75,6 @@ meets it yet; the report lists the gaps.
 - Edge cases with real devices
 
 **Dependencies:** Physical hardware, USB-C test devices
-
----
 
 ## Unit Testing
 
@@ -347,8 +339,6 @@ its commands: `r` (stage 1 and every later check), `p` and `p2` (stage 2), `u`, 
 region pointers to 0 in place of an external erase, with `l`, `pb`, and `x`. The plan sets
 the order of each stage.
 
----
-
 ## Integration Testing
 
 > **Status: design guidance, not yet implemented.** No mock-`Wire` layer or
@@ -485,8 +475,6 @@ test harness availability:
   issued less than 5 s apart, using an injectable/mockable `millis()` if the test
   harness supports it.
 
----
-
 ## Hardware Testing
 
 ### Hardware Test Setup
@@ -608,8 +596,6 @@ ideally, a logic analyzer on the I2Cc lines:
    - Verify clean state transitions
    - Check interrupt events
 
----
-
 ## Test Organization
 
 ### Directory Structure
@@ -638,8 +624,6 @@ test runner. Embedded/on-target suites, if ever added, would live in a sibling
 - Test file: `test_[ClassName].cpp`
 - Test function: `test_[what_it_tests]()`
 - Use snake_case for test function names
-
----
 
 ## Running Tests
 
@@ -690,8 +674,6 @@ Environment    Test                             Status    Duration
 native         test_native/test_TPS25751Status  PASSED    00:00:04.911
 ================= 22 test cases: 22 succeeded in 00:00:04.911 =================
 ```
-
----
 
 ## Test Data Management
 
@@ -756,8 +738,6 @@ fails while a header is stale. The generator has its own unit tests:
 python3 test/support/pd_capture_fixture.py --check
 python3 -m unittest discover -s test/support -p "test_*.py"
 ```
-
----
 
 ## Continuous Testing
 
@@ -886,8 +866,6 @@ void test_issue_001_status_vbus_parsing() {
 }
 ```
 
----
-
 ## Success Criteria
 
 Tests are successful when:
@@ -899,8 +877,6 @@ Tests are successful when:
 - ✅ Hardware tests verify expected behavior
 - ✅ Edge cases handled correctly
 - ✅ Regression tests prevent old bugs
-
----
 
 ## Revision History
 
@@ -921,7 +897,5 @@ Tests are successful when:
 | 1.12 | 2026-11-24 | Claude Code | `test_TPS25751Typed`: the typed read and write wrappers and the factory read functions, and the sixth coverage measurement (1441 tests, `TPS25751.cpp` at 94%) |
 | 1.13 | 2026-11-24 | Claude Code | The `Wire.rxMissing` fault, the null-factory and short-buffer tests, and the seventh coverage measurement (1444 tests, `TPS25751.cpp` at 100%) |
 | 1.14 | 2026-11-24 | Claude Code | `test_TPS25751Typed` covers the nine typed reads added so that all 37 registers have both read forms (1453 tests) |
-
----
 
 *Comprehensive testing ensures library reliability and correctness.*

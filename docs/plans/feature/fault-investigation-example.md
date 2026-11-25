@@ -60,8 +60,6 @@ Spec: `docs/specs/fault-investigation-example-spec.md`. The example:
 > VBUS may momentarily collapse. If the Teensy is powered from a TPS25751-gated
 > rail it could brown-out/reset too. Warn the user.
 
----
-
 ## New work: extend Restore mode to also cold-reset the host
 
 ### Approach
@@ -127,8 +125,6 @@ sequence. Wiring into `setup()` (`#if RESTORE_CHARGER_DEFAULTS … return;`) and
 - A separate host-reset gate (folded into the one `RESTORE_CHARGER_DEFAULTS` mode).
 - Polling `readBootFlags()`/`patchConfigSource()` for recovery — the simpler
   `readPartInfo()` liveness poll is used instead (also proves I2Cc proxying works).
-
----
 
 ## Prior-work reference (already implemented — context only, do not redo)
 

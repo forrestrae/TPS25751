@@ -2,8 +2,6 @@
 
 This file provides guidance for working with the TPS25751 USB-C Power Delivery Controller Arduino library.
 
----
-
 ## Library Overview
 
 The TPS25751 library is an object-oriented C++ library for interfacing with the Texas Instruments TPS25751 USB-C Power Delivery controller via I2C communication. It provides:
@@ -61,8 +59,6 @@ completing the interrupt-driven story alongside INT_EVENT1 and adding the base-c
 SLEEP_CONTROL/CUSTOMER_USE, the library's first host-register write path; COMMAND/DATA
 enable the 4CC command-task interface and I2Cc downstream-device proxy); native
 unit-test harness in place (`pio test -e native`, Batch 0)
-
----
 
 ## Device Register Documentation (MCP)
 
@@ -126,8 +122,6 @@ The register-docs MCP server uses the standard MCP protocol. This repo supports 
 | **Codex** | `.codex/config.toml` (trusted project) | Planned (Phase 8 of `km003c-pd-analyzer-toolset.md`); not yet in the repository |
 
 > **Note:** The `.claude/` directory contains Claude Code-specific settings (permissions, plugin config). Codex uses its own `.codex/` directory and is not affected by it.
-
----
 
 ## Engineering Standards
 
@@ -202,8 +196,6 @@ auto* status = static_cast<TPS25751Status*>(ptr);   // Use static_cast
 auto reg = factory.createRegister(addr);             // Use factory pattern (by Address)
 Serial.println(F("String in flash"));                // Use F() macro
 ```
-
----
 
 ## Implementation Status
 
@@ -302,8 +294,6 @@ is the first Product Type VDO, index 4 the all-zero Pad Object of a dual-role pa
 a UFP VDO 2, and index 5 a dual-role partner's DFP VDO (USB PD R3.3 page 158).
 - See [trm-revB-audit-remaining-registers.md](docs/plans/trm-revB-audit-remaining-registers.md) for the current roadmap
   and [plan-impl-v01.md](docs/plans/plan-impl-v01.md) for the completed rev A roadmap
-
----
 
 ## Library Architecture
 
@@ -507,8 +497,6 @@ repo's `AGENTS.md` for its API, decode/encode conventions, and examples.
 - **Validation Layer**: Multi-level validation (basic, data, semantic) across all register classes
 - **Debug Infrastructure**: Comprehensive logging system with categories and verbosity levels
 
----
-
 ## Architectural Improvements (2025)
 
 ### Factory Method Pattern Implementation
@@ -542,8 +530,6 @@ auto status = TPS25751Factory::getInstance().createRegister(TPS25751Registers::A
 auto statusReg = tps.readStatusRegister(true);  // with validation
 ```
 
----
-
 ## Architectural Decision Records (ADRs)
 
 ### ADR-001: Factory Pattern over Builder Pattern
@@ -575,8 +561,6 @@ auto statusReg = tps.readStatusRegister(true);  // with validation
 - Cannot use dynamic_cast or typeid
 - Factory pattern provides type safety
 - See [CONSTRAINTS.md](docs/engineering/CONSTRAINTS.md#no-rtti-run-time-type-information)
-
----
 
 ## Library Documentation Structure
 
@@ -626,8 +610,6 @@ Sibling repositories (side-by-side in the parent project's `lib/`):
 - **MCP Servers:** See `../device-register-mcp-server/AGENTS.md` (sibling repo)
 - **BQ25798 Driver:** See `../BQ25798/AGENTS.md` (sibling repo)
 
----
-
 ## Known Issues
 
 ### Library-Specific Issues
@@ -636,8 +618,6 @@ Sibling repositories (side-by-side in the parent project's `lib/`):
    - All dynamic_cast usage has been replaced with static_cast due to -fno-rtti compilation flag
    - Template functions must avoid static_assert(false) patterns that cause premature template instantiation
    - See [CONSTRAINTS.md](docs/engineering/CONSTRAINTS.md) for complete list
-
----
 
 ## Quick Tips for AI Assistants
 
@@ -693,8 +673,6 @@ TPS25751-specific traps to add:
 3. Use the `tps25751-docs` MCP server for TPS25751 register details
 4. Reference [Implementation Plan](docs/plans/plan-impl-v01.md) for detailed requirements
 5. Check TI TPS25751 Technical Reference Manual for register specifications
-
----
 
 ## Git Workflow
 
@@ -887,4 +865,3 @@ Publishing to the PlatformIO Registry is automated by
 
 Future plans: additional platform support (ESP32, RP2040).
 
----

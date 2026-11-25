@@ -3,15 +3,11 @@
 **Last Updated:** 2025-10-20
 **Status:** Active
 
----
-
 ## Overview
 
 This document defines the mandatory implementation standards for all TPS25751 register classes. These standards ensure consistency, maintainability, and quality across the entire library.
 
 **IMPORTANT:** All register implementations MUST follow these standards. Deviations require explicit justification and approval.
-
----
 
 ## Table of Contents
 
@@ -23,8 +19,6 @@ This document defines the mandatory implementation standards for all TPS25751 re
 6. [Memory Management](#memory-management)
 7. [Code Documentation](#code-documentation)
 8. [Anti-Patterns](#anti-patterns)
-
----
 
 ## Class Structure
 
@@ -116,8 +110,6 @@ TPS25751Status(TPS25751Status&& other) noexcept = default;
 TPS25751Status& operator=(const TPS25751Status& other) = default;
 TPS25751Status& operator=(TPS25751Status&& other) noexcept = default;
 ```
-
----
 
 ## Factory Integration
 
@@ -307,8 +299,6 @@ Setter rules (unchanged in spirit, now enforced by the primitive):
 `setSleepTime()` are one `setBits()` call each, and `writeSleepControl()` forwards
 to `writeRegister<TPS25751SleepControl>()`.
 
----
-
 ## Validation Requirements
 
 All register classes MUST implement three levels of validation:
@@ -406,8 +396,6 @@ bool TPS25751ReceivedSourceCaps::validateSemantic() const {
 }
 ```
 
----
-
 ## Debug Output Format
 
 All register classes MUST implement `debugPrint()` following this exact format:
@@ -468,8 +456,6 @@ void TPS25751Status::debugPrint() const {
 - Decode a USB PD encoding that more than one register carries through the shared
   definition in `TPS25751UsbPd.h` (the load step rate and the overload word of
   0x77 and 0x7E), so the registers cannot drift apart.
-
----
 
 ## Unit Testing Requirements
 
@@ -594,8 +580,6 @@ test/
   ...
 ```
 
----
-
 ## Memory Management
 
 ### RAII Principles
@@ -689,8 +673,6 @@ if (reg->getAddress() == static_cast<uint8_t>(TPS25751Registers::Address::STATUS
 }
 ```
 
----
-
 ## Code Documentation
 
 ### Doxygen Comments Required
@@ -749,8 +731,6 @@ class TPS25751Status : public TPS25751Register {
 - Datasheet section numbers
 - Bit field names from datasheet
 - USB PD specification sections (for PD-related registers)
-
----
 
 ## Anti-Patterns
 
@@ -815,8 +795,6 @@ Serial.println("Connection State: Not Connected");  // Duplicate!
 const char* getConnectionStateString() const;
 ```
 
----
-
 ## Checklist for New Register Implementation
 
 Use this checklist for every new register:
@@ -846,8 +824,6 @@ Use this checklist for every new register:
 - [ ] Compiles successfully on Teensy platform
 - [ ] Hardware tested (if hardware available)
 
----
-
 ## Revision History
 
 | Version | Date | Author | Changes |
@@ -855,7 +831,5 @@ Use this checklist for every new register:
 | 1.0 | 2025-10-20 | Claude Code | Initial standards document extracted from implementation plan |
 | 1.1 | 2026-06-24 | Claude Code | Added downstream device register class conventions and big-endian 16-bit assembly rule (ADR-008) |
 | 1.2 | 2026-11-19 | Claude Code | `setBits()`/`extractBits*()` take a 16-bit bit position (ADR-012); shared `printHex()` and `TPS25751UsbPd.h` for debug output and shared USB PD decode |
-
----
 
 *These standards are mandatory. Adherence ensures library quality and maintainability.*

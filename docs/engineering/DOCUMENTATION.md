@@ -3,13 +3,9 @@
 **Last Updated:** 2025-10-20
 **Status:** Active
 
----
-
 ## Overview
 
 This document defines the documentation requirements for the TPS25751 library. Comprehensive documentation ensures the library is accessible, maintainable, and usable by both current and future developers.
-
----
 
 ## Table of Contents
 
@@ -18,8 +14,6 @@ This document defines the documentation requirements for the TPS25751 library. C
 3. [Troubleshooting Guides](#troubleshooting-guides)
 4. [API Reference](#api-reference)
 5. [Documentation Standards](#documentation-standards)
-
----
 
 ## Code Documentation
 
@@ -173,8 +167,6 @@ Private methods should have brief documentation:
 uint8_t extractConnectionState() const;
 ```
 
----
-
 ## Example Sketches
 
 ### Required Examples
@@ -321,8 +313,6 @@ Each example should include:
  * - Common issues and solutions
  */
 ```
-
----
 
 ## Troubleshooting Guides
 
@@ -472,8 +462,6 @@ void foo() { static_assert(dependent_false<T>::value, "msg"); }
    - E-marked cable required for >3A
 ```
 
----
-
 ## API Reference
 
 ### Auto-Generated Documentation
@@ -509,8 +497,6 @@ doxygen Doxyfile
 # View docs
 open docs/api/html/index.html
 ```
-
----
 
 ## Documentation Standards
 
@@ -602,8 +588,6 @@ Track API changes:
  */
 ```
 
----
-
 ## Documentation Checklist
 
 For every new register class:
@@ -623,8 +607,6 @@ For every new register class:
 - [ ] Troubleshooting section added (if applicable)
 - [ ] API reference generated with Doxygen
 
----
-
 ## Documentation Maintenance
 
 ### Regular Reviews
@@ -641,8 +623,6 @@ For every new register class:
 - Update examples based on user requests
 - Clarify confusing sections
 
----
-
 ## Success Criteria
 
 Documentation is successful when:
@@ -655,14 +635,10 @@ Documentation is successful when:
 - ✅ Code examples demonstrate best practices
 - ✅ Datasheet references accurate and complete
 
----
-
 ## Revision History
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
 | 1.0 | 2025-10-20 | Claude Code | Initial documentation requirements extracted from implementation plan |
-
----
 
 *Comprehensive documentation makes the library accessible and maintainable.*

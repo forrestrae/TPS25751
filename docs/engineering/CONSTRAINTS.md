@@ -3,13 +3,9 @@
 **Last Updated:** 2026-11-23
 **Status:** Active
 
----
-
 ## Overview
 
 This document details the technical constraints and platform-specific considerations that affect the TPS25751 library implementation. Understanding these constraints is critical for writing code that compiles and runs correctly on the target platform.
-
----
 
 ## Table of Contents
 
@@ -19,8 +15,6 @@ This document details the technical constraints and platform-specific considerat
 4. [USB Power Delivery Complexity](#usb-power-delivery-complexity)
 5. [Memory Considerations](#memory-considerations)
 6. [Common Pitfalls](#common-pitfalls)
-
----
 
 ## Platform Constraints
 
@@ -163,8 +157,6 @@ Wire.beginTransmission(address);
 Wire.write(data);
 Wire.endTransmission();
 ```
-
----
 
 ## I2C Protocol Details
 
@@ -688,8 +680,6 @@ Different registers have different maximum sizes:
 Wire.setClock(400000);  // 400 kHz
 ```
 
----
-
 ## Register Access Patterns
 
 ### Read-Only Registers (R)
@@ -987,8 +977,6 @@ controller ACKs it, but a read-back 100 ms later still shows the old value (benc
 `writeRegister<TPS25751CustomerUse>()` does not compile. This is a breaking change
 for any caller of those methods. Set the bytes in the application configuration
 (the EEPROM image or the patch bundle) instead.
-
----
 
 ## USB Power Delivery Complexity
 
@@ -1296,8 +1284,6 @@ For complete details, refer to:
   VDOs, not decoded), 6.59 (Source_Capabilities_Extended), 6.64 (Battery
   Capabilities), 6.67 (PPS Status), and 6.70 (Sink_Capabilities_Extended)
 
----
-
 ## Memory Considerations
 
 ### RAM Constraints
@@ -1350,8 +1336,6 @@ auto reg = std::make_unique<TPS25751Status>();  // Heap - managed lifetime
 ```cpp
 uint8_t largeBuffer[1024];  // Too large for stack on embedded!
 ```
-
----
 
 ## Common Pitfalls
 
@@ -1483,8 +1467,6 @@ return code), the I2Cw payload is capped at **11 bytes**, and the I2Cw **`Length
 field counts the register-offset byte + payload (`payload_len + 1`)** — see
 [4CC Command Interface & I2Cc Downstream-Device Proxy](#4cc-command-interface--i2cc-downstream-device-proxy-trm-sec-442443).
 
----
-
 ## Downstream-Device Decode & Encode Conventions (moved to lib/BQ25798)
 
 The decode/encode conventions established for the BQ25798 downstream charger
@@ -1503,8 +1485,6 @@ Two things remain true on the host side regardless of the device driver:
 - `TPS25751Register::extractBits16` is **little-endian** by design (matches the
   TPS25751's own registers); big-endian downstream devices must assemble
   multi-byte fields manually.
-
----
 
 ## Platform-Specific Workarounds
 
@@ -1546,8 +1526,6 @@ void foo() {
 }
 ```
 
----
-
 ## Reference Documents
 
 1. **TI TPS25751 Technical Reference Manual**
@@ -1568,8 +1546,6 @@ void foo() {
 4. **ARM Cortex-M7 Technical Reference**
    - Processor capabilities
    - Optimization guidelines
-
----
 
 ## Revision History
 
@@ -1602,7 +1578,5 @@ void foo() {
 | 1.24 | 2026-11-23 | Claude Code | PBM: the app note spaces its separate burst transactions by 500 µs and the loader does not, an open decision; the loader's IRQ mode polls COMMAND instead of waiting for I2Ct_IRQ |
 | 1.25 | 2026-11-23 | Claude Code | PBM: SLVAFV8A shows both 0x31 and 0x32 for the `PBMs` timeout byte |
 | 1.26 | 2026-11-24 | Claude Code | PBM: the loader polls Ready for Patch (polling mode) and MODE before the load, reads the `PBMs` configuration back from DATA, and issues `PBMe` on the two paths of TRM Figure 5-1 |
-
----
 
 *Understanding these constraints is essential for successful implementation on the target platform.*

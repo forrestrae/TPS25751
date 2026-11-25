@@ -1,13 +1,20 @@
 # TPS25751 Library - System Architecture
 
-**Last Updated:** 2026-11-23
+**Last Updated:** 2026-11-24
 **Status:** Active
 
 ---
 
 ## Overview
 
-This document describes the system architecture and design patterns of the TPS25751 library. Understanding this architecture is essential for implementing new features, debugging issues, and maintaining consistency across the codebase.
+This document describes how the TPS25751 library is built: its layers, its main classes,
+the design patterns they follow, and how data moves through them. Read it before adding a
+register class, a sequencer, or a downstream device driver. The Architectural Decision
+Records at the end explain why the structure is the way it is; ADR-001 to ADR-003 are in
+`AGENTS.md`.
+
+The diagrams are Mermaid, which GitHub and most Markdown viewers render. Class and method
+names in them match the headers in `include/`.
 
 ---
 
@@ -19,6 +26,12 @@ This document describes the system architecture and design patterns of the TPS25
 4. [Class Hierarchy](#class-hierarchy)
 5. [Data Flow](#data-flow)
 6. [Extension Points](#extension-points)
+7. [Component Relationships](#component-relationships)
+8. [Memory Management Strategy](#memory-management-strategy)
+9. [Testing Architecture](#testing-architecture)
+10. [Future Architecture Considerations](#future-architecture-considerations)
+11. [Architectural Decision Records](#architectural-decision-records)
+12. [Revision History](#revision-history)
 
 ---
 
@@ -26,98 +39,175 @@ This document describes the system architecture and design patterns of the TPS25
 
 ### High-Level Architecture
 
+The application talks to one `TPS25751` object, or to a sequencer or downstream device
+built on it. Everything that touches the bus goes through the `TPS25751` class's private
+length-prefixed register transactions on a `TwoWire`, except the PBM burst, which
+`burstWrite()` sends to I2C address 0x30. Devices on the controller's I2Cc bus, the
+configuration EEPROM and the BQ25798 charger, are reached only through 4CC tasks that the
+controller runs.
+
+```mermaid
+flowchart TB
+    app["Application layer<br/>sketches and examples"]
+
+    subgraph seq["Sequencer layer"]
+        loader["TPS25751PatchLoader<br/>PBM load (ADR-011)"]
+        updater["TPS25751EepromUpdater<br/>EEPROM update (ADR-014)"]
+        seam["TPS25751CommandExecutor<br/>TPS25751HostExecutor"]
+    end
+
+    subgraph proxy["I2Cc downstream-proxy layer"]
+        ddev["TPS25751DownstreamDevice<br/>I2Cr / I2Cw (ADR-007, ADR-010)"]
+        drivers["Downstream drivers, external<br/>BQ25798::Device in lib/BQ25798"]
+    end
+
+    main["TPS25751 main class<br/>typed reads and writes, debug settings"]
+    task["4CC command-task layer<br/>executeCommand(), issueCommand(), writeCommandData(), burstWrite()"]
+    factory["Factory layer<br/>TPS25751Factory, TPS25751RegisterFactoryImpl"]
+    regs["Register layer<br/>37 register classes, TPS25751Pdo, TPS25751Rdo"]
+    i2c["I2C protocol layer<br/>private readRegister() and writeRegister() on TwoWire"]
+    util["Utility layer<br/>bit helpers on TPS25751Register, TPS25751Debug, address table"]
+
+    subgraph hw["Hardware"]
+        ctrl["TPS25751 on I2Ct"]
+        eeprom["Configuration EEPROM 0x50 on I2Cc"]
+        bq["BQ25798 on I2Cc"]
+    end
+
+    app --> main
+    app --> loader
+    app --> updater
+    app --> drivers
+    drivers --> ddev
+    updater --> seam
+    seam --> main
+    seam --> task
+    loader --> task
+    loader --> main
+    ddev --> task
+    ddev -. "direct transport" .-> bq
+    main --> factory
+    main --> i2c
+    factory --> regs
+    regs --> util
+    task --> i2c
+    i2c --> ctrl
+    ctrl -- "FLrd, FLad, FLwd, FLvy" --> eeprom
+    ctrl -- "I2Cr, I2Cw" --> bq
 ```
-┌─────────────────────────────────────────────────────────────┐
-│                     Application Layer                        │
-│                  (User Sketches / Examples)                  │
-└───────────────────────────────┬─────────────────────────────┘
-                                │
-┌───────────────────────────────▼─────────────────────────────┐
-│                    TPS25751 Main Class                       │
-│              (Convenience Methods / I2C Manager)             │
-└───────────────────────────────┬─────────────────────────────┘
-                                │
-        ┌───────────────────────┼───────────────────────┐
-        │                       │                       │
-┌───────▼────────┐    ┌────────▼─────────┐    ┌───────▼────────┐
-│  Factory Layer │    │  Register Layer  │    │  I2C Protocol  │
-│                │    │                  │    │                │
-│ - Create regs  │    │ - Validation     │    │ - Length byte  │
-│ - Type mapping │    │ - Parsing        │    │ - Wire lib     │
-│ - Registry     │    │ - Debug print    │    │ - Error handle │
-└────────┬───────┘    └────────┬─────────┘    └────────┬───────┘
-         │                     │                       │
-         └─────────────────────┼───────────────────────┘
-                               │
-                    ┌──────────▼──────────┐
-                    │   Utility Layer     │
-                    │                     │
-                    │ - Bit extraction    │
-                    │ - Debug helpers     │
-                    │ - Type traits       │
-                    └─────────────────────┘
-```
+
+Solid arrows are calls or bus transactions; the dotted arrow is the optional direct
+transport of ADR-010, which talks to a part on the MCU's own bus without the controller.
+The 4CC layer is a set of methods on `TPS25751`, not a separate class; the diagram draws
+it apart because three other components depend on it alone.
 
 ### Layer Responsibilities
 
-**Application Layer:**
-- User code / example sketches
-- High-level USB-C PD logic
-- Application-specific behavior
+#### Application layer
 
-**Main Class (TPS25751):**
-- I2C communication management
-- Register read/write coordination
-- Convenience methods for common operations
-- Error handling and retry logic
+- User sketches and the three bundled examples: `read-registers`, `load-patch-bundle`, and
+  `eeprom-update` (see `examples/README.md`).
+- USB-C PD policy and any behavior specific to the product.
 
-**Factory Layer:**
-- Register object creation
-- Type-to-address mapping
-- Dependency injection support
-- Singleton pattern for global access
+#### Main class (`TPS25751`)
 
-**Register Layer:**
-- Individual register implementations
-- Data validation (3 tiers)
-- Bitfield parsing
-- Debug output formatting
+- Owns the `TwoWire&` and the 7-bit I2Ct address (0x20 to 0x23, `TPS25751_I2CT_ADDRESS_IDX`).
+- Typed reads in two forms: `read<Name>Register(bool validate = true)` returns a
+  `std::unique_ptr` to the register class, or `nullptr` on a failed read or failed
+  validation, and `read<Name>(T&)` fills a caller-owned object. Most registers have both;
+  some have one form only (for example `readSleepControl()` and `readVersionRegister()`).
+  `readRegisterAs<T>(Address)` works for every register.
+- One typed write per writable register (`writeSleepControl()`,
+  `writeTransmitSourceCaps()`, and so on), plus the generic `writeRegister<T>(const T&)`
+  keyed on the class's `kAddress`.
+- Generic access by address: `readRegisterByAddress()`, `readRegisterAs<T>()`, and the
+  `readRegister()` and `writeRegister()` overloads that take an `Address` or a
+  `RegisterInfo`.
+- Debug configuration: `setDebugStream()`, `setDebugLevel()`, `setDebugCategories()`.
+- Errors are reported through `TPS_REPORT_I2C_ERROR` and `TPS_DEBUG_*` and returned as
+  `false` or `nullptr`. The class does not retry; callers that need a retry, such as the
+  patch loader's MODE poll, implement it.
 
-**I2C Protocol Layer:**
-- TPS25751-specific protocol handling
-- Length-prefixed reads and writes
-- Wire library abstraction
-- Communication error handling
+#### 4CC command-task layer
 
-**4CC Command-Task Layer:**
-- Generic command-task executor (`TPS25751::executeCommand()`) over the COMMAND
-  (0x08) / DATA (0x09) registers (TRM Sec 4.4.2)
-- `TPS25751Command` / `TPS25751Data` register classes (COMMAND/DATA decoders)
-- `TPS25751Task.h` value types: `TPS25751FourCC`, `TPS25751TaskStatus`,
-  `TPS25751TaskResult`
-- DATA write → COMMAND write → poll-to-clear/reject → DATA read handshake
+- `TPS25751::writeCommandData()` writes DATA (0x09) at the input's own length, 1 to 64
+  bytes.
+- `TPS25751::issueCommand()` writes DATA, writes the 4CC to COMMAND (0x08), and polls
+  COMMAND every 5 ms until it clears, reads `"!CMD"`, or the timeout passes (default
+  200 ms). It reads no DATA.
+- `TPS25751::executeCommand()` is `issueCommand()` followed by a read of all 64 DATA bytes;
+  DATA byte 0 is the task's return code (TRM SLVUCR8B, 4CC Task Detailed Descriptions).
+- `TPS25751::burstWrite()` sends raw chunks to the PBM receive address, 0x30, with no
+  register number and no length byte (ADR-011).
+- `TPS25751Command` and `TPS25751Data` decode the two registers; `TPS25751Task.h` holds the
+  value types `TPS25751FourCC`, `TPS25751TaskStatus`, and `TPS25751TaskResult`.
 
-**I2Cc Downstream-Proxy Layer:**
-- `TPS25751DownstreamDevice` — proxies register access to a device on the
-  TPS25751's secondary I2C bus (I2Cc_SDA/SCL) via the I2Cr/I2Cw 4CC tasks
-- Encodes/decodes the I2Cr/I2Cw DATA payloads (target address, register offset,
-  length, payload)
-- Downstream device register classes reuse the same `TPS25751Register` decoder base
-  as the host-side registers
+#### Sequencer layer
 
-**Downstream Device Driver Tier (external):**
-- Typed per-device drivers build on the I2Cc downstream-proxy layer: each inherits
-  `TPS25751DownstreamDevice`, keeps its own namespace/Address enum/factory, and reuses
-  `TPS25751Register` as its decoder base (ADR-008/009)
-- The reference implementation is the **BQ25798 buck-boost charger driver**
-  (`BQ25798::Device`, 57 register classes), maintained in the sibling
-  **`lib/BQ25798`** repository — it depends on this library, not vice versa
+- `TPS25751PatchLoader` loads a firmware and configuration image into a controller in PTCH
+  through Patch Burst Mode, following SLVAFV8A and TRM Figure 5-1 (ADR-011).
+- `TPS25751EepromUpdater` reads, updates, and blank-programs the configuration EEPROM
+  through the `FLrd`, `FLad`, `FLwd`, and `FLvy` tasks, following SLVAFL1 (ADR-014).
+- `TPS25751CommandExecutor` is the five-call interface the updater depends on;
+  `TPS25751HostExecutor` adapts a `TPS25751` to it, and the native tests use
+  `FakeCommandExecutor`.
+- Neither sequencer is a register: neither inherits `TPS25751Register` nor appears in the
+  factory.
 
-**Utility Layer:**
-- Bit manipulation helpers
-- Debug infrastructure
-- Common type definitions
-- Platform-specific utilities
+#### I2Cc downstream-proxy layer
+
+- `TPS25751DownstreamDevice` reads and writes registers of a part on the controller's I2Cc
+  bus through the `I2Cr` and `I2Cw` tasks, encoding their DATA payloads (ADR-007). A second
+  constructor selects a direct transport on a `TwoWire` instead (ADR-010).
+- It composes a `const TPS25751&`; it is not a `TPS25751` subclass.
+- It warns through `DEBUG_CAT_TASK` when two `I2Cr` or two `I2Cw` commands come less than
+  5 s apart, the TRM's minimum spacing, but does not block them.
+
+#### Downstream device driver tier (external)
+
+- Typed per-device drivers inherit `TPS25751DownstreamDevice`, keep their own namespace,
+  `Address` enum, and factory, and reuse `TPS25751Register` as their decoder base
+  (ADR-008, ADR-009).
+- The reference implementation is the BQ25798 charger driver (`BQ25798::Device`, 57
+  register classes) in the sibling `lib/BQ25798` repository. It depends on this library;
+  nothing here depends on it.
+
+#### Factory layer
+
+- `TPS25751RegisterFactory` is the abstract factory; `TPS25751RegisterFactoryImpl` creates
+  one class per `TPS25751Registers::Address` and returns `nullptr` for an address without
+  a decoder.
+- `TPS25751Factory` holds the process-wide instance and lets tests replace it.
+- `TPS25751RegisterCreator::create()` is a free-function shorthand for the same calls.
+
+#### Register layer
+
+- 37 register classes, one per register in TRM SLVUCR8B; `AGENTS.md` lists them with
+  their addresses and decode notes.
+- Field accessors decode from the raw bytes; R/W classes add setters built on `setBits()`
+  and a `static constexpr kAddress`.
+- Three validation tiers: `isValid()`, `hasValidData()`, and `isSemanticallyValid()`
+  (ADR-005).
+- `debugPrint(Stream&)` in the format of `STANDARDS.md`.
+- USB PD objects decode through value types rather than per-register getters:
+  `TPS25751Pdo`, `TPS25751Rdo`, and the `TPS25751UsbPd` namespace of data-block enums
+  (ADR-013).
+
+#### I2C protocol layer
+
+- The private `TPS25751::readRegister(uint8_t, uint8_t*, size_t)` and
+  `TPS25751::writeRegister(uint8_t, const uint8_t*, size_t)`: the controller's
+  length-prefixed protocol on the injected `TwoWire`. See the Data Flow section.
+- Every other access path in the library ends in these two methods, except `burstWrite()`
+  and the direct transport of `TPS25751DownstreamDevice`.
+
+#### Utility layer
+
+- Bitfield helpers on `TPS25751Register`: `extractBits*()`, `extractEnum*()`, `setBits()`,
+  with a 16-bit bit position (ADR-012).
+- `TPS25751Debug`: leveled, categorized logging with a compile-time ceiling.
+- `TPS25751RegisterAddress.h`: the `Address` enum, the `RegisterInfo` size table, and
+  `getRegisterInfo()` and `getRegisterSize()`.
 
 ---
 
@@ -127,197 +217,179 @@ This document describes the system architecture and design patterns of the TPS25
 
 #### 1. TPS25751 Main Controller
 
-**File:** `lib/TPS25751/src/TPS25751.cpp`
+Files: `include/TPS25751.h`, `src/TPS25751.cpp`. An excerpt of the public interface, one
+example per group:
 
-**Purpose:** Central coordination of I2C communication and register access
-
-**Key Methods:**
 ```cpp
 class TPS25751 {
 public:
-    bool begin(uint8_t address = 0x20);
+    explicit TPS25751(TwoWire &wire = Wire, uint8_t address = TPS25751_I2CT_ADDRESS_IDX[0]);
+    bool begin() const;
 
-    // Register read convenience methods
-    std::unique_ptr<TPS25751Status> readStatusRegister(bool validate = false);
-    std::unique_ptr<TPS25751Mode> readModeRegister(bool validate = false);
-    // ... one per register type
+    // Typed reads: most registers have both forms
+    bool readStatus(TPS25751Status &statusOut) const;
+    std::unique_ptr<TPS25751Status> readStatusRegister(bool validate = true) const;
 
-    // Generic register access
-    bool readRegister(uint8_t regAddr, uint8_t* buffer, size_t bufferSize);
-    bool writeRegister(uint8_t regAddr, const uint8_t* data, size_t length);
+    // Typed writes: one per writable register, and a generic one keyed on kAddress
+    bool writeSleepControl(const TPS25751SleepControl &sleepControl) const;
+    template<typename RegisterT> bool writeRegister(const RegisterT &reg) const;
+
+    // Generic access by address
+    std::unique_ptr<TPS25751Register> readRegisterByAddress(TPS25751Registers::Address addr) const;
+    template<typename T> std::unique_ptr<T> readRegisterAs(TPS25751Registers::Address addr) const;
+    bool readRegister(TPS25751Registers::Address addr, uint8_t *buffer, size_t length) const;
+    bool writeRegister(TPS25751Registers::Address addr, const uint8_t *data, size_t length) const;
+
+    // 4CC command tasks and the PBM burst
+    bool writeCommandData(const uint8_t *data, size_t length) const;
+    TPS25751TaskStatus issueCommand(TPS25751FourCC cmd, const uint8_t *inData, size_t inLen,
+                                    uint32_t timeoutMs = 200) const;
+    TPS25751TaskResult executeCommand(TPS25751FourCC cmd, const uint8_t *inData, size_t inLen,
+                                      uint8_t *outData, size_t outLen,
+                                      uint32_t timeoutMs = 200) const;
+    bool burstWrite(uint8_t targetAddr, const uint8_t *data, size_t length,
+                    size_t chunk = PBM_BURST_CHUNK, uint16_t interChunkDelayUs = 0) const;
+
+    // Debug configuration
+    static void setDebugLevel(uint8_t level);
 
 private:
-    uint8_t i2cAddress_;
-    TwoWire* wire_;  // I2C interface (Wire or Wire1)
+    TwoWire &_wire;
+    uint8_t _address;
+    bool readRegister(uint8_t regAddr, uint8_t *buffer, size_t length) const;
+    bool writeRegister(uint8_t regAddr, const uint8_t *data, size_t length) const;
+    TPS25751TaskStatus waitForCommandClear(uint32_t timeoutMs) const;
 };
 ```
 
-**Responsibilities:**
-- Initialize I2C communication
-- Manage device address
-- Provide type-safe register access
-- Handle I2C protocol details
-- Error detection and reporting
+Every method is `const`: the object holds only the bus reference and the address, and all
+device state lives in the controller. `TPS25751.h` includes every register header, the
+factory, and `TPS25751Task.h`, and at its end `TPS25751PatchLoader.h`,
+`TPS25751HostExecutor.h`, and `TPS25751EepromUpdater.h`, so one `#include` gives a sketch
+the whole API.
 
 #### 2. TPS25751Register Base Class
 
-**File:** `lib/TPS25751/src/TPS25751Register.cpp`
+Files: `include/TPS25751Register.h`, `src/TPS25751Register.cpp`. The base owns the raw
+bytes and supplies validation, bitfield, and debug helpers. It has no address of its own:
+a register's identity is the `Address` it was created for, and an R/W class's `kAddress`.
 
-**Purpose:** Abstract base for all register implementations
-
-**Class Hierarchy:**
 ```cpp
 class TPS25751Register {
 public:
-    // Pure virtual - must override
-    virtual uint8_t getAddress() const = 0;
-    virtual uint8_t getExpectedSize() const = 0;
-    virtual bool isReadOnly() const = 0;
-    virtual bool validateBasic() const = 0;
-    virtual bool validateData() const = 0;
-    virtual bool validateSemantic() const = 0;
-    virtual void debugPrint() const = 0;
+    explicit TPS25751Register();
+    explicit TPS25751Register(size_t len);           // zero-filled buffer of len bytes
+    TPS25751Register(const uint8_t *data, size_t len);
 
-    // Implemented in base
-    uint8_t getDataLength() const;
-    const uint8_t* getData() const;
-
-    // Rule of Five
-    virtual ~TPS25751Register() = default;
+    // Rule of Five: deep copy, move transfers the buffer
     TPS25751Register(const TPS25751Register& other);
-    TPS25751Register(TPS25751Register&& other) noexcept;
     TPS25751Register& operator=(const TPS25751Register& other);
+    TPS25751Register(TPS25751Register&& other) noexcept;
     TPS25751Register& operator=(TPS25751Register&& other) noexcept;
+    virtual ~TPS25751Register();
+
+    virtual void debugPrint(Stream &s = Serial) const = 0;
+
+    // Validation tiers (ADR-005)
+    bool isValid() const;                            // buffer present and non-empty
+    bool hasValidData() const;                       // not all 0xFF
+    virtual bool isSemanticallyValid() const;        // field rules; overridden per class
+    bool isValidSize(size_t expectedSize) const;
+
+    const uint8_t* raw() const;
+    size_t size() const;
 
 protected:
-    TPS25751Register(uint8_t address, uint8_t expectedSize);
-    TPS25751Register(uint8_t address, uint8_t expectedSize,
-                     const uint8_t* data, size_t length);
-
-    // Data storage
-    std::vector<uint8_t> data_;
-    uint8_t address_;
-    uint8_t expectedSize_;
+    uint8_t *_raw;
+    size_t _len;
+    // extractBits*(), extractEnum*(), setBits(): see the Utility Components section
 };
 ```
 
-**Responsibilities:**
-- Define register interface contract
-- Manage raw register data storage
-- Provide RAII memory management
-- Enable polymorphic register handling
+The bitfield helpers are protected, and public in a native test build (`PIO_UNIT_TESTING`)
+so the suites can call them directly.
 
 #### 3. Concrete Register Classes
 
-**Example:** `TPS25751Status`
+Each register class decodes one register. `TPS25751Status` (0x1A, 5 bytes) is the
+reference:
 
 ```cpp
 class TPS25751Status : public TPS25751Register {
 public:
-    TPS25751Status();
-    TPS25751Status(const uint8_t* data, size_t length);
+    explicit TPS25751Status() : TPS25751Register(TPS25751Registers::Registers::STATUS.size) {}
+    explicit TPS25751Status(const uint8_t *data);
+    TPS25751Status(const uint8_t *data, size_t len);
 
-    // Accessor methods for each field
-    uint8_t getConnectionState() const;
-    const char* getConnectionStateString() const;
-    bool isVBUSPresent() const;
-    uint8_t getPowerRole() const;
-    // ... more accessors
+    bool plugPresent() const;
+    ConnectionState connectionState() const;
+    PortRole portRole() const;
+    VbusStatus vbusStatus() const;
+    // ... one accessor per field, enums with toString()
 
-    // Override base class pure virtuals
-    uint8_t getAddress() const override { return 0x1A; }
-    uint8_t getExpectedSize() const override { return 5; }
-    bool isReadOnly() const override { return true; }
-    bool validateBasic() const override;
-    bool validateData() const override;
-    bool validateSemantic() const override;
-    void debugPrint() const override;
-
-private:
-    // Helper methods
-    uint8_t extractConnectionState() const;
-    uint8_t extractPowerRole() const;
-    // ... more helpers
+    void debugPrint(Stream &s = Serial) const override;
+    bool isSemanticallyValid() const override;
 };
 ```
 
-**Current Implementations:** (9 total)
-- TPS25751Status (0x1A)
-- TPS25751Mode (0x03)
-- TPS25751PowerPathStatus (0x26)
-- TPS25751BootFlags (0x2D)
-- TPS25751PortConfig (0x28)
-- TPS25751TypeCState (0x69)
-- TPS25751InterruptEvent (0x14)
-- TPS25751PowerStatus (0x3F)
-- TPS25751PDStatus (0x40)
+The library has 37 register classes, one for each register in TRM SLVUCR8B. `AGENTS.md`
+(Register Classes) lists them with their addresses, sizes, and decode notes; the factory
+in `src/TPS25751RegisterFactory.cpp` is the authoritative mapping from address to class.
+Read-only classes have accessors only. R/W classes add setters that call `setBits()` and a
+`static constexpr TPS25751Registers::Address kAddress`, which `writeRegister<T>()` uses
+so a class can be written only to its own register.
+
+The six registers that carry USB PD PDOs and RDOs (0x30 to 0x35) hand out
+`TPS25751Pdo` and `TPS25751Rdo` values instead of decoding the words themselves (ADR-013).
 
 #### 4. Factory Pattern Implementation
 
-**Files:**
-- `lib/TPS25751/include/TPS25751RegisterFactory.h`
-- `lib/TPS25751/src/TPS25751RegisterFactory.cpp`
+Files: `include/TPS25751RegisterFactory.h`, `src/TPS25751RegisterFactory.cpp`.
 
-**Components:**
+Registers are identified by their hardware address. `TPS25751Registers::Address` in
+`TPS25751RegisterAddress.h` is the single source of truth and the key the factory switches
+on; there is no separate type enum.
 
-**A. Register Identity — `TPS25751Registers::Address`:**
-
-Registers are identified by their hardware address. There is no separate factory
-type enum; `TPS25751Registers::Address` (in `TPS25751RegisterAddress.h`) is the
-single source of truth and the key the factory dispatches on.
-
-**B. Abstract Factory Interface:**
 ```cpp
 class TPS25751RegisterFactory {
 public:
     virtual ~TPS25751RegisterFactory() = default;
-
-    virtual std::unique_ptr<TPS25751Register>
-        createRegister(TPS25751Registers::Address addr) = 0;
-
-    virtual std::unique_ptr<TPS25751Register>
-        createRegister(TPS25751Registers::Address addr, const uint8_t* data, size_t length) = 0;
-
-    virtual std::unique_ptr<TPS25751Register>
-        createRegister(const TPS25751Registers::RegisterInfo& regInfo) = 0;
+    virtual std::unique_ptr<TPS25751Register> createRegister(TPS25751Registers::Address addr) = 0;
+    virtual std::unique_ptr<TPS25751Register> createRegister(TPS25751Registers::Address addr,
+                                                             const uint8_t* data, size_t length) = 0;
+    virtual std::unique_ptr<TPS25751Register> createRegister(const TPS25751Registers::RegisterInfo& regInfo) = 0;
 };
-```
 
-An address without a decoder class returns `nullptr` from `createRegister()` — that
-is how un-decoded registers are reported (previously the `RegisterType::UNKNOWN`
-sentinel).
-
-**C. Concrete Factory:**
-```cpp
 class TPS25751RegisterFactoryImpl : public TPS25751RegisterFactory {
-public:
-    std::unique_ptr<TPS25751Register> createRegister(TPS25751Registers::Address addr) override;
-    // ... other overrides
-
-private:
+    // Three createRegister() overrides, each a switch with one case per Address,
+    // and two private creators per register:
     std::unique_ptr<TPS25751Register> createStatusRegister() const;
-    std::unique_ptr<TPS25751Register> createModeRegister() const;
-    // ... one per register type
+    std::unique_ptr<TPS25751Register> createStatusRegister(const uint8_t* data, size_t length) const;
+    // ...
 };
-```
 
-**D. Singleton Access:**
-```cpp
 class TPS25751Factory {
 public:
-    static TPS25751RegisterFactory& getInstance();
+    static TPS25751RegisterFactory& getInstance();   // creates the Impl on first use
     static void setFactory(std::unique_ptr<TPS25751RegisterFactory> factory);
-
 private:
     static std::unique_ptr<TPS25751RegisterFactory> instance_;
 };
+
+namespace TPS25751RegisterCreator {
+    std::unique_ptr<TPS25751Register> create(TPS25751Registers::Address addr);
+    // ... and the (addr, data, length) and RegisterInfo forms
+}
 ```
+
+An address without a decoder class returns `nullptr` from `createRegister()`; that is how
+an undecoded register is reported.
 
 #### 5. Utility Components
 
-**Bit helpers (on `TPS25751Register`):** the bitfield helpers live on the register
-base class, not in a separate utility class. Each has an instance form that reads the
-register's own buffer and a static form that takes a buffer and its length:
+Bit helpers live on the register base class, not in a separate utility. Each has an
+instance form that reads the register's own buffer and a static form that takes a buffer
+and its length:
 
 ```cpp
 // Bit n of a register is bit n % 8 of byte n / 8; multi-byte fields are little-endian.
@@ -326,7 +398,8 @@ uint16_t extractBits16(uint16_t bitPos, uint8_t bitLen) const;  // 1..16 bits
 uint32_t extractBits32(uint16_t bitPos, uint8_t bitLen) const;  // 1..32 bits
 uint64_t extractBits64(uint16_t bitPos, uint8_t bitLen) const;  // 1..64 bits
 void     setBits      (uint16_t bitPos, uint8_t bitLen, uint32_t value);  // 1..32 bits
-template<typename E> E extractEnum(uint16_t bitPos, uint8_t bitLen, uint8_t maxValid, E dflt) const;
+template<typename E> E extractEnum(uint16_t bitPos, uint8_t bitLen, uint8_t maxValidValue, E defaultValue) const;
+// extractEnum16/32/64() take a wider maximum
 static void printHex(Stream& s, uint32_t value, uint8_t digits);  // zero-padded hex for debugPrint()
 ```
 
@@ -335,54 +408,69 @@ written. These helpers are the library's only bit-extraction API: the legacy
 `include/util/TPS25751BitUtils.h` free function `extractBits(const uint8_t*, uint8_t,
 uint8_t)`, with an 8-bit position and no bounds check, was removed on 2026-11-19.
 
-**TPS25751Debug:**
+`TPS25751Debug` is a namespace in `include/TPS25751Debug.h`:
+
 ```cpp
-// Debug categories
-#define DEBUG_CAT_I2C        0x01
-#define DEBUG_CAT_REGISTER   0x02
-#define DEBUG_CAT_VALIDATION 0x04
-#define DEBUG_CAT_FACTORY    0x08
+// Categories, combined as a bit mask
+#define DEBUG_CAT_I2C         0x01  // I2C communication
+#define DEBUG_CAT_REGISTER    0x02  // Register operations
+#define DEBUG_CAT_VALIDATION  0x04  // Validation failures
+#define DEBUG_CAT_PARSING     0x08  // Data parsing and extraction
+#define DEBUG_CAT_TASK        0x10  // 4CC tasks, the downstream proxy, the sequencers
+#define DEBUG_CAT_ALL         0xFF
 
-// Debug levels
-#define DEBUG_LEVEL_NONE     0
-#define DEBUG_LEVEL_ERROR    1
-#define DEBUG_LEVEL_WARN     2
-#define DEBUG_LEVEL_INFO     3
-#define DEBUG_LEVEL_DEBUG    4
-#define DEBUG_LEVEL_TRACE    5
+// Levels
+#define DEBUG_LEVEL_NONE   0
+#define DEBUG_LEVEL_ERROR  1
+#define DEBUG_LEVEL_WARN   2
+#define DEBUG_LEVEL_INFO   3
+#define DEBUG_LEVEL_DEBUG  4
+#define DEBUG_LEVEL_TRACE  5
 
-class TPS25751Debug {
-public:
-    static void print(uint8_t category, uint8_t level, const char* message);
-    static void setLevel(uint8_t level);
-    static void enableCategory(uint8_t category);
-    static void disableCategory(uint8_t category);
-};
+namespace TPS25751Debug {
+    void setDebugStream(Stream* stream);
+    void setDebugLevel(uint8_t level);
+    void setDebugCategories(uint8_t categories);
+    void enableCategory(uint8_t category);
+    void disableCategory(uint8_t category);
+    void hexDump(Stream& s, const uint8_t* data, size_t length, const char* prefix = nullptr);
+    void debugPrint(uint8_t level, uint8_t category, const char* format, ...);
+    void debugPrintF(uint8_t level, uint8_t category, const __FlashStringHelper* format, ...);
+    void reportI2CError(uint8_t address, uint8_t registerAddr, const char* operation, int errorCode);
+    void reportValidationError(const char* registerName, const char* validation, const char* details = nullptr);
+}
 ```
 
-**Compile-time vs. runtime debug control.** The verbosity is governed by two
-*independent* macros so that runtime control works out of the box while builds can
-still strip debug code for size:
+Code logs through the `TPS_DEBUG_ERROR`, `TPS_DEBUG_WARN`, `TPS_DEBUG_INFO`, `TPS_DEBUG`,
+`TPS_DEBUG_TRACE`, and `TPS_DEBUG_HEXDUMP` macros (with `_F` forms for flash strings) and
+`TPS_REPORT_I2C_ERROR`, not by calling the namespace directly.
 
-- `DEBUG_LEVEL` — the **runtime default**, the initial value of
-  `TPS25751Debug::currentDebugLevel` before `setDebugLevel()` is called. Defaults
-  to `DEBUG_LEVEL_NONE` (silent).
-- `DEBUG_LEVEL_MAX` — the **compile-time ceiling**. The `TPS_DEBUG_*` macros are
-  gated by `#if DEBUG_LEVEL_MAX >= <level>`; anything above the ceiling expands to
-  nothing and is removed from the binary. Defaults to `DEBUG_LEVEL_TRACE` so all
-  levels are compiled in and `setDebugLevel()` can enable any of them with no
-  build flag.
+Compile-time and runtime control are independent:
 
-Because the ceiling defaults to `TRACE`, `TPS25751::setDebugLevel(level)` is fully
-effective at runtime without `-DDEBUG_LEVEL=...`. For **size-constrained / release
-builds**, lower the ceiling (e.g. `-DDEBUG_LEVEL_MAX=DEBUG_LEVEL_NONE`) to strip
-the higher-level debug code — `setDebugLevel()` then cannot raise verbosity above
-the ceiling, since that code no longer exists.
+- `DEBUG_LEVEL` is the runtime default, the initial value of
+  `TPS25751Debug::currentDebugLevel` before `setDebugLevel()` is called. It defaults to
+  `DEBUG_LEVEL_NONE`.
+- `DEBUG_LEVEL_MAX` is the compile-time ceiling. The `TPS_DEBUG_*` macros are gated by
+  `#if DEBUG_LEVEL_MAX >= <level>`; anything above the ceiling expands to nothing. It
+  defaults to `DEBUG_LEVEL_TRACE`, so `setDebugLevel()` can enable any level with no build
+  flag.
 
-> Historical note: `DEBUG_LEVEL` alone used to gate compilation (defaulting to 0),
-> so without `-DDEBUG_LEVEL=5` every `TPS_DEBUG_*` call was stripped and
-> `setDebugLevel()` had no effect. Splitting the ceiling into `DEBUG_LEVEL_MAX`
-> fixed that.
+For a size-constrained build, lower the ceiling, for example
+`-DDEBUG_LEVEL_MAX=DEBUG_LEVEL_NONE`. `setDebugLevel()` then cannot raise verbosity above
+it, because that code is not in the binary. Before the split, `DEBUG_LEVEL` alone gated
+compilation and defaulted to 0, so `setDebugLevel()` had no effect without
+`-DDEBUG_LEVEL=5`.
+
+#### 6. Command-Task and Sequencer Components
+
+| Component | Files | Role |
+|---|---|---|
+| `TPS25751FourCC`, `TPS25751TaskStatus`, `TPS25751TaskResult` | `include/TPS25751Task.h` | A 4-character task code, the executor's outcome (`Success`, `Rejected`, `Timeout`, `I2CError`), and the outcome with DATA byte 0 |
+| `TPS25751PatchLoader` | `include/TPS25751PatchLoader.h`, `src/TPS25751PatchLoader.cpp` | `loadPatchBundle(image, length)` runs the PBM flow and returns one `PatchLoadStatus` per failure point. Constructed with a `TPS25751&` and an optional IRQ pin |
+| `TPS25751CommandExecutor` | `include/TPS25751CommandExecutor.h` | Interface: `executeCommand()`, `readMode()`, `readBootFlags()`, `delayMs()`, `nowMs()`. Does not include `Wire.h` |
+| `TPS25751HostExecutor` | `include/TPS25751HostExecutor.h`, `src/TPS25751HostExecutor.cpp` | Forwards each call to a `TPS25751` and the Arduino clock |
+| `TPS25751EepromUpdater` | `include/TPS25751EepromUpdater.h`, `src/TPS25751EepromUpdater.cpp` | Task primitives (`readFlash()`, `setWriteAddress()`, `writeData()`, `verifyBundle()`), checked region-pointer writes, `updateRegion()`, `updateInactiveRegion()`, `updateBothRegions()`, `programBlank()`, `compareRegion()`, `dump()`, and `coldReset()`. Returns `EepromUpdateStatus`; `lastStep()` names the step that failed |
+| `TPS25751DownstreamDevice` | `include/TPS25751DownstreamDevice.h`, `src/TPS25751DownstreamDevice.cpp` | `readRegister()` and `writeRegister()` for a part on I2Cc, by proxy or direct transport |
 
 ---
 
@@ -390,162 +478,121 @@ the ceiling, since that code no longer exists.
 
 ### 1. Factory Method Pattern
 
-**Intent:** Centralize object creation and type management without RTTI
+Intent: create register objects by address without RTTI. The platform builds with
+`-fno-rtti`, so neither `dynamic_cast` nor `typeid` is available (ADR-003).
 
-**Why:** Platform compiles with `-fno-rtti`, cannot use `dynamic_cast` or `typeid`
-
-**Implementation:**
 ```cpp
-// Create by address (the single register identity)
+// Create by address, the single register identity
 auto reg = TPS25751Factory::getInstance()
     .createRegister(TPS25751Registers::Address::STATUS);
 
-// Type-safe casting — dispatch on the register's address
-if (reg && reg->getAddress() == static_cast<uint8_t>(TPS25751Registers::Address::STATUS)) {
-    auto* statusPtr = static_cast<TPS25751Status*>(reg.get());
+// The address you asked for fixes the class, so static_cast is safe
+if (reg) {
+    auto* status = static_cast<TPS25751Status*>(reg.get());
 }
+
+// Or let the main class read, create, and cast in one call
+auto status = tps.readRegisterAs<TPS25751Status>(TPS25751Registers::Address::STATUS);
 ```
 
-**Benefits:**
-- Type safety without RTTI
-- Centralized creation logic
-- Easy to add new register types
-- Testable (can inject mock factory)
+The factory centralizes the address-to-class mapping, and a test can replace it through
+`TPS25751Factory::setFactory()`.
 
 ### 2. Template Method Pattern
 
-**Intent:** Define validation skeleton, let subclasses implement steps
+Intent: one validation sequence, with the field rules supplied per class. The base class
+implements the first two tiers; each register overrides only the third.
 
-**Implementation:**
 ```cpp
-// Base class defines the template
-class TPS25751Register {
-public:
-    bool validate() const {
-        return validateBasic() && validateData() && validateSemantic();
-    }
+// TPS25751 runs the tiers in order (include/TPS25751.h)
+template<typename T>
+bool validateRegister(const T& reg) const {
+    return reg.isValid() && reg.hasValidData() && reg.isSemanticallyValid();
+}
 
-    // Steps implemented by subclasses
-    virtual bool validateBasic() const = 0;
-    virtual bool validateData() const = 0;
-    virtual bool validateSemantic() const = 0;
-};
-
-// Subclass implements steps
-class TPS25751Status : public TPS25751Register {
-    bool validateBasic() const override {
-        return getDataLength() == getExpectedSize();
-    }
-
-    bool validateData() const override {
-        return checkReservedBits() && checkFieldRanges();
-    }
-
-    bool validateSemantic() const override {
-        return checkLogicalConsistency();
-    }
-};
+// A register supplies its own rules
+bool TPS25751Status::isSemanticallyValid() const {
+    if (!isValid()) return false;
+    // reserved bits, enum ranges, cross-field rules
+    ...
+}
 ```
 
-**Benefits:**
-- Consistent validation flow
-- Each level independently testable
-- Performance flexibility (choose validation depth)
+`read<Name>Register(true)` and `readAndValidateRegister()` call `validateRegister()` and
+return `nullptr` or `false` when a tier fails.
 
 ### 3. Singleton Pattern
 
-**Intent:** Single global factory instance with injection capability
+Intent: one process-wide factory that tests can replace.
 
-**Implementation:**
 ```cpp
-class TPS25751Factory {
-public:
-    static TPS25751RegisterFactory& getInstance() {
-        if (!instance_) {
-            instance_ = std::make_unique<TPS25751RegisterFactoryImpl>();
-        }
-        return *instance_;
+TPS25751RegisterFactory& TPS25751Factory::getInstance() {
+    if (!instance_) {
+        instance_ = std::make_unique<TPS25751RegisterFactoryImpl>();
     }
+    return *instance_;
+}
 
-    static void setFactory(std::unique_ptr<TPS25751RegisterFactory> factory) {
-        instance_ = std::move(factory);
-    }
-
-private:
-    static std::unique_ptr<TPS25751RegisterFactory> instance_;
-};
+void TPS25751Factory::setFactory(std::unique_ptr<TPS25751RegisterFactory> factory) {
+    instance_ = std::move(factory);
+}
 ```
 
-**Benefits:**
-- Global access point
-- Lazy initialization
-- Testable (can inject mock factory)
-- Thread-safe on embedded (single-threaded)
+The instance is created on first use. The library runs on a single thread, so the lazy
+creation needs no lock.
 
 ### 4. RAII (Resource Acquisition Is Initialization)
 
-**Intent:** Automatic resource management
+Intent: no manual memory management in caller code. A register object allocates its
+buffer with `new[]` in the constructor and frees it in the destructor; the Rule of Five
+makes copies deep and moves transfer the pointer. Callers hold registers by value or in a
+`std::unique_ptr`, so nothing leaks on an early return.
 
-**Implementation:**
 ```cpp
-class TPS25751Register {
-public:
-    TPS25751Register(uint8_t address, uint8_t expectedSize,
-                     const uint8_t* data, size_t length)
-        : address_(address)
-        , expectedSize_(expectedSize)
-        , data_(data, data + length)  // Copy into vector
-    {
-        // Resource acquired in constructor
+TPS25751Register::TPS25751Register(const uint8_t *data, size_t len)
+    : _raw(nullptr), _len(len)
+{
+    if (_len > 0) {
+        _raw = new uint8_t[_len]();
     }
-
-    ~TPS25751Register() {
-        // Automatic cleanup (vector destructor)
+    if (data && _raw && _len > 0) {
+        memcpy(_raw, data, _len);
     }
-
-private:
-    std::vector<uint8_t> data_;  // RAII container
-};
+}
+// ~TPS25751Register() releases _raw with delete[]
 ```
 
-**Benefits:**
-- No manual memory management
-- Exception-safe (if exceptions enabled)
-- Automatic cleanup
-- No memory leaks
+ADR-006 explains why the buffer is a raw array and not the `std::vector` first planned.
 
-### 5. Strategy Pattern (Validation)
+### 5. Three-Tier Validation
 
-**Intent:** Select validation strategy at runtime
+Intent: let the caller choose how much checking a read costs. The tiers are separate
+methods, so a caller can stop at any of them:
 
-**Implementation:**
+| Tier | Method | Checks | Where implemented |
+|---|---|---|---|
+| Basic | `isValid()`, `isValidSize(n)` | A buffer is present, non-empty, and of the expected size | Base class |
+| Data | `hasValidData()` | The bytes are not all 0xFF, the pattern of a bus with no device | Base class |
+| Semantic | `isSemanticallyValid()` | Reserved bits, enum ranges, units, and cross-field rules from the TRM and USB PD R3.3 | Each register class |
+
+Reading with `validate = false` skips all three; `validateRegister()` runs them in order.
+
+### 6. Command-Executor Seam
+
+Intent: test a sequencer on the host without `Wire`. `TPS25751EepromUpdater` calls a
+`TPS25751CommandExecutor&` instead of a `TPS25751&`. On the target,
+`TPS25751HostExecutor` forwards to a `TPS25751`; in the native tests,
+`FakeCommandExecutor` models the EEPROM and can fail any task. Virtual calls need no RTTI
+(ADR-014).
+
 ```cpp
-// Different validation strategies
-enum class ValidationLevel {
-    BASIC,      // Fast, minimal checks
-    DATA,       // Medium, field validation
-    SEMANTIC    // Slow, full logical checks
-};
-
-class TPS25751Register {
-public:
-    bool validate(ValidationLevel level) const {
-        switch (level) {
-            case ValidationLevel::BASIC:
-                return validateBasic();
-            case ValidationLevel::DATA:
-                return validateBasic() && validateData();
-            case ValidationLevel::SEMANTIC:
-                return validateBasic() && validateData() && validateSemantic();
-        }
-    }
-};
+TPS25751 pd(Wire);
+TPS25751HostExecutor exec(pd);
+TPS25751EepromUpdater updater(exec);
 ```
 
-**Benefits:**
-- Performance tuning
-- Different validation in production vs. debug
-- Progressive validation
+The patch loader and the downstream device take a `TPS25751` directly. Since the TwoWire
+fake of 2026-11-23, `TPS25751.cpp` and the loader also build in `[env:native]`.
 
 ---
 
@@ -553,69 +600,104 @@ public:
 
 ### Inheritance Tree
 
+```mermaid
+classDiagram
+    direction LR
+
+    class TPS25751Register {
+        <<abstract>>
+        #uint8_t* _raw
+        #size_t _len
+        +isValid() bool
+        +hasValidData() bool
+        +isSemanticallyValid() bool
+        +debugPrint(Stream&)*
+        +raw() const uint8_t*
+        +size() size_t
+    }
+    TPS25751Register <|-- TPS25751Status
+    TPS25751Register <|-- TPS25751Mode
+    TPS25751Register <|-- TPS25751Command
+    TPS25751Register <|-- TPS25751Data
+    TPS25751Register <|-- TPS25751TransmitSourceCaps
+    TPS25751Register <|-- OtherRegisterClasses
+    TPS25751Register <|-- DownstreamRegisterClasses
+    class OtherRegisterClasses {
+        32 more TPS25751 register classes
+    }
+    class DownstreamRegisterClasses {
+        external, for example 57 in lib/BQ25798
+    }
+
+    class TPS25751RegisterFactory {
+        <<abstract>>
+        +createRegister(Address)*
+    }
+    TPS25751RegisterFactory <|-- TPS25751RegisterFactoryImpl
+
+    class TPS25751CommandExecutor {
+        <<interface>>
+        +executeCommand()*
+        +readMode()*
+        +readBootFlags()*
+        +delayMs()*
+        +nowMs()*
+    }
+    TPS25751CommandExecutor <|-- TPS25751HostExecutor
+    TPS25751CommandExecutor <|-- FakeCommandExecutor
+
+    class TPS25751DownstreamDevice {
+        +readRegister()
+        +writeRegister()
+    }
+    TPS25751DownstreamDevice <|-- DeviceDriver
+    class DeviceDriver {
+        external, for example BQ25798::Device
+    }
 ```
-TPS25751Register (abstract base — shared decoder base for ALL register classes)
-├── TPS25751Status
-├── TPS25751Mode
-├── TPS25751PowerPathStatus
-├── TPS25751BootFlags
-├── TPS25751PortConfig
-├── TPS25751TypeCState
-├── TPS25751InterruptEvent
-├── TPS25751PowerStatus
-├── TPS25751PDStatus
-├── TPS25751Command           (COMMAND, 0x08 — 4CC command-task control)
-├── TPS25751Data              (DATA, 0x09 — generic 4CC task payload)
-└── ... (downstream device register classes extend this same base — e.g. the 57
-         BQ25798 register classes in the sibling lib/BQ25798 repo)
 
-TPS25751RegisterFactory (abstract factory)
-└── TPS25751RegisterFactoryImpl (concrete factory)
+`FakeCommandExecutor` lives in `test/support/native/` and is not part of the library.
+Classes that inherit nothing: `TPS25751`, `TPS25751Factory`, `TPS25751PatchLoader`,
+`TPS25751EepromUpdater`, the value types `TPS25751Pdo` and `TPS25751Rdo`, and the
+`TPS25751Task.h` structs.
 
-TPS25751Factory (singleton)
-
-TPS25751 (main controller)
-└── executeCommand() — 4CC command-task executor (COMMAND/DATA handshake)
-
-TPS25751DownstreamDevice (I2Cc proxy; composes a TPS25751 host, not a subclass)
-└── <Device>::Device (typed per-device drivers inherit this — reference
-                      implementation: BQ25798::Device, sibling lib/BQ25798 repo)
-
-TPS25751Debug (utility, all static)
-```
-
-**Note:** `TPS25751Register` is a device-agnostic decoder base — downstream device
-register classes (for parts on the TPS25751's I2Cc bus) extend it exactly like
-host-side registers. Each device maintains its own Address enum, RegisterInfo table,
-and factory (mirroring `TPS25751RegisterFactory` / `TPS25751Factory`); the host
-factory is unaffected by downstream additions.
+`TPS25751Register` is a device-agnostic decoder base. Register classes for parts on the
+I2Cc bus extend it exactly as host registers do. Each downstream device keeps its own
+`Address` enum, `RegisterInfo` table, and factory, mirroring `TPS25751RegisterFactory` and
+`TPS25751Factory`; the host factory is unaffected by them.
 
 ### Relationship Diagram
 
+```mermaid
+classDiagram
+    direction TB
+    class TPS25751
+    class TPS25751Factory
+    class TPS25751RegisterFactoryImpl
+    class TPS25751Register
+    class TPS25751Pdo
+    class TPS25751Rdo
+    class TPS25751PatchLoader
+    class TPS25751EepromUpdater
+    class TPS25751CommandExecutor
+    class TPS25751HostExecutor
+    class TPS25751DownstreamDevice
+
+    TPS25751 ..> TPS25751Factory : creates registers through
+    TPS25751Factory o-- TPS25751RegisterFactoryImpl : holds one
+    TPS25751RegisterFactoryImpl ..> TPS25751Register : creates
+    TPS25751 ..> TPS25751Register : returns unique_ptr
+    TPS25751Register ..> TPS25751Pdo : 0x30 to 0x34 hand out
+    TPS25751Register ..> TPS25751Rdo : 0x35 hands out
+    TPS25751PatchLoader --> TPS25751 : composes
+    TPS25751HostExecutor --> TPS25751 : composes
+    TPS25751EepromUpdater --> TPS25751CommandExecutor : composes
+    TPS25751CommandExecutor <|-- TPS25751HostExecutor
+    TPS25751DownstreamDevice --> TPS25751 : composes, proxied transport
 ```
-┌────────────────┐
-│   TPS25751     │
-│                │
-│ Main Controller│
-└───────┬────────┘
-        │ uses
-        ▼
-┌────────────────────┐      ┌──────────────────┐
-│ TPS25751Factory    │      │ TPS25751Register │
-│                    │      │  (abstract base) │
-│ Singleton          │◄─────┤                  │
-└─────────┬──────────┘      └────────▲─────────┘
-          │ manages                   │
-          ▼                           │ inherits
-┌──────────────────────┐              │
-│ TPS25751Register     │              │
-│ FactoryImpl          │        ┌─────┴──────────┐
-│                      │        │                │
-│ creates───────────────────────►│ TPS25751Status │
-└──────────────────────┘        │ TPS25751Mode   │
-                                │ ...            │
-                                └────────────────┘
-```
+
+Composition everywhere above the main class: the sequencers and the downstream device each
+hold a reference to the object they drive and never subclass it.
 
 ---
 
@@ -623,167 +705,194 @@ factory is unaffected by downstream additions.
 
 ### Register Read Flow
 
+The controller answers a register read with a length byte followed by the data. The
+library requests the register size plus one in a single read and checks the length byte
+against the expected size.
+
+```mermaid
+sequenceDiagram
+    participant App as Application
+    participant PD as TPS25751
+    participant F as TPS25751Factory
+    participant W as TwoWire
+    participant C as Controller
+
+    App->>PD: readStatusRegister(validate)
+    PD->>F: createRegister(STATUS)
+    Note over PD,F: confirms a decoder exists before any bus traffic
+    PD->>W: beginTransmission(addr), write(0x1A)
+    PD->>W: endTransmission(false)
+    Note over W,C: repeated start
+    PD->>W: requestFrom(addr, 5 + 1)
+    W->>C: read 6 bytes
+    C-->>W: length byte, then 5 data bytes
+    PD->>PD: length byte must equal 5
+    PD->>F: createRegister(STATUS, buffer, 5)
+    F-->>PD: unique_ptr to TPS25751Register
+    opt validate
+        PD->>PD: isValid(), hasValidData(), isSemanticallyValid()
+    end
+    PD-->>App: unique_ptr to TPS25751Status, or nullptr
+    App->>App: status->connectionState() and other accessors
 ```
-1. Application calls TPS25751::readStatusRegister()
-        │
-        ▼
-2. TPS25751 calls readRegister(0x1A, buffer, 5)
-        │
-        ▼
-3. I2C Protocol Layer:
-   - Wire.beginTransmission(address)
-   - Wire.write(0x1A)  // Register address
-   - Wire.endTransmission(false)  // Repeated start
-   - Wire.requestFrom(address, 1)  // Read length byte
-   - length = Wire.read()
-   - Wire.requestFrom(address, length)  // Read data
-   - Read 'length' bytes into buffer
-        │
-        ▼
-4. Factory creates register object:
-   - factory.createRegister(TPS25751Registers::Address::STATUS, buffer, length)
-   - Returns std::unique_ptr<TPS25751Status>
-        │
-        ▼
-5. Application validates if needed:
-   - status->validateData()
-        │
-        ▼
-6. Application accesses data:
-   - status->getConnectionState()
-   - status->isVBUSPresent()
-        │
-        ▼
-7. Bitfield extraction (internal):
-   - TPS25751Register::extractBits*(bitPos, bitLen)
-        │
-        ▼
-8. Return value to application
-```
+
+A failed transaction, a short read, or a length byte that differs from the register size
+ends the read with `TPS_REPORT_I2C_ERROR` and `nullptr`. The accessors decode through
+`extractBits*()` on the object's own buffer and touch the bus no more.
 
 ### Register Write Flow
 
-The write path mirrors the read path's length-prefixed framing, but **sends** the
-length byte instead of receiving it. Implemented as `TPS25751::writeRegister()`
-(private raw overload + two public type-safe overloads, `include/TPS25751.h`,
-`src/TPS25751.cpp`):
+The write path sends the length byte instead of receiving it.
 
-```
-1. Application calls a type-safe overload:
-   - tps.writeRegister(TPS25751Registers::Address::COMMAND, data, length)
-   - tps.writeRegister(TPS25751Registers::RegisterInfo, data)
-        │
-        ▼
-2. Size guard (Address overload only):
-   - getRegisterSize(addr) must equal `length` (0 = unknown address, skip check)
-        │
-        ▼
-3. Private raw writeRegister(regAddr, data, length):
-   - Wire.beginTransmission(address)
-   - Wire.write(regAddr)
-   - Wire.write((uint8_t)length)        // length byte, sent (not received)
-   - Wire.write(data, length)            // verify return == length
-   - Wire.endTransmission(true)          // verify return == 0
-        │
-        ▼
-4. TPS_REPORT_I2C_ERROR / TPS_DEBUG_* on any failure; bool success returned
+```mermaid
+sequenceDiagram
+    participant App as Application
+    participant PD as TPS25751
+    participant W as TwoWire
+
+    App->>PD: readSleepControl(reg)
+    App->>App: reg.set...(value)
+    Note over App: setters change only their field's bits
+    App->>PD: writeRegister(reg), or writeSleepControl(reg)
+    PD->>PD: getRegisterInfo(RegisterT::kAddress)
+    PD->>PD: reg.isValid() and reg.isValidSize(info.size)
+    PD->>W: beginTransmission(addr)
+    PD->>W: write(regAddr), write(length), write(data, length)
+    PD->>W: endTransmission(true)
+    PD-->>App: true, or false on any failure
 ```
 
-### 4CC Command-Task Flow (`executeCommand`, TRM Sec 4.4.2)
+The other entry points join the same private `writeRegister(uint8_t, ...)`:
+`writeRegister(Address, data, length)` first checks `length` against the register size
+(0, an unknown address, skips the check), and `writeRegister(RegisterInfo, data)` takes the
+size from the `RegisterInfo`. The library does not read a register back after writing it;
+callers that need confirmation read it again, as the EEPROM updater does for its region
+pointers.
 
-```
-1. Application calls:
-   - tps.executeCommand(TPS25751FourCC::of("I2Cr"), inData, inLen, outData, outLen)
-        │
-        ▼
-2. If inData: write it to DATA via the private raw writeRegister(uint8_t, data, inLen)
-   - (NOT the public Address overload — that requires length == 64 for DATA and
-     would reject a short payload)
-        │
-        ▼
-3. Write the 4CC to COMMAND:
-   - writeRegister(Address::COMMAND, cmd.code, 4)
-        │
-        ▼
-4. waitForCommandClear(timeoutMs) polls COMMAND (~5 ms between reads):
-   - TPS25751Command(buf,4).isClear()    → Success
-   - TPS25751Command(buf,4).isRejected() → Rejected ("!CMD")
-   - elapsed > timeoutMs                 → Timeout
-   - I2C read failure                    → I2CError
-        │
-        ▼
-5. On Success, read the full 64-byte DATA register back (private raw readRegister)
-        │
-        ▼
-6. returnCode = DATA[0]; if outData, memcpy(outData, DATA, min(outLen, 64))
-        │
-        ▼
-7. Return TPS25751TaskResult{status, returnCode}
+### 4CC Command-Task Flow
+
+`executeCommand()` is the generic executor (TRM SLVUCR8B, 4CC Task Detailed Descriptions).
+`issueCommand()` is the same flow without the final DATA read, for a task whose DATA must
+not be read at once (ADR-011 amendment of 2026-11-23).
+
+```mermaid
+sequenceDiagram
+    participant Caller
+    participant PD as TPS25751
+    participant C as Controller
+
+    Caller->>PD: executeCommand(cmd, inData, inLen, outData, outLen, timeoutMs)
+    opt inData not null and inLen > 0
+        PD->>C: writeCommandData(): write DATA 0x09, inLen bytes
+    end
+    PD->>C: write COMMAND 0x08, the 4CC
+    loop waitForCommandClear(), every 5 ms
+        PD->>C: read COMMAND
+        alt COMMAND reads 0
+            Note over PD: Success
+        else COMMAND reads "!CMD"
+            Note over PD: Rejected
+        else timeoutMs passed
+            Note over PD: Timeout
+        else read failed
+            Note over PD: I2CError
+        end
+    end
+    Note over Caller,PD: issueCommand() returns the status here
+    PD->>C: read DATA, 64 bytes
+    PD->>PD: returnCode = DATA[0], copy min(outLen, 64) bytes to outData
+    PD-->>Caller: TPS25751TaskResult{status, returnCode}
 ```
 
-This handshake is the basis for `TPS25751DownstreamDevice`'s I2Cr/I2Cw codec (see
-[I2Cc Downstream-Proxy Layer](#layer-responsibilities) and CONSTRAINTS.md's
-"4CC Command Interface & I2Cc Downstream-Device Proxy" section) — `readRegister()`/
-`writeRegister()` there call `executeCommand()` with the I2Cr/I2Cw input payload and
-unpack the task-specific output layout (e.g. I2Cr's read bytes starting at DATA
-offset 1) themselves, keeping `executeCommand()` itself task-agnostic.
+DATA is written through `writeCommandData()` at the input's own length, not through the
+public `writeRegister(Address, ...)`, which would require all 64 bytes. The executor knows
+nothing about any task: `TPS25751DownstreamDevice`, `TPS25751PatchLoader`, and
+`TPS25751HostExecutor` supply the payloads and unpack the results themselves, for example
+I2Cr's read data, which starts at DATA byte 1 (CONSTRAINTS.md, 4CC Command Interface and
+I2Cc Downstream-Device Proxy).
 
+### Patch Load Flow
+
+`TPS25751PatchLoader::loadPatchBundle()` loads an image into a controller in PTCH. The
+step numbers are those of SLVAFV8A; `AGENTS.md` (Patch Loading) lists all 17, and ADR-011
+records where the loader departs from TI's flow.
+
+```mermaid
+flowchart TD
+    s1["Steps 1 and 2: wait for Ready for Patch<br/>IRQ pin, or INT_EVENT1 bit 81 every 10 ms;<br/>then poll MODE every 10 ms until PTCH"]
+    s3["Step 3, IRQ mode only: set INT_MASK1, clear INT_CLEAR1"]
+    s4["Steps 4 and 5: writeCommandData() with the 6-byte PBMs configuration,<br/>wait 500 us, read DATA back and compare; up to 3 attempts"]
+    s6["Steps 6 to 9: executeCommand(PBMs) with no input;<br/>DATA[0] is PatchStartStatus"]
+    s10["Step 10: burstWrite() to 0x30 in 32-byte chunks,<br/>then at least 500 us"]
+    s12["Steps 11 to 14: issueCommand(PBMc)"]
+    s15["Steps 15 and 16: wait 20 ms, read DATA,<br/>retried every 10 ms; DATA[0] must be 0"]
+    s17["Step 17: poll MODE every 10 ms until APP"]
+    ok(["Success"])
+    pbme["PBMe, best effort"]
+    fail(["BurstFailed or PbmcRejected"])
+
+    s1 --> s3 --> s4 --> s6 --> s10 --> s12 --> s15 --> s17 --> ok
+    s10 -- "chunk not acknowledged" --> pbme
+    s12 -- "!CMD" --> pbme
+    pbme --> fail
 ```
-Superseded sketch (kept for reference; not the real API
-— there is no TPS25751::writeRegister(registerObject) overload):
-1. Application creates/modifies register object:
-   - TPS25751PortControl control;
-   - control.setPortEnabled(true);
-        │
-        ▼
-2. Application calls TPS25751::writeRegister(control)
-        │
-        ▼
-3. Validate before write:
-   - control.validateData()
-        │
-        ▼
-4. I2C Protocol Layer:
-   - Wire.beginTransmission(address)
-   - Wire.write(registerAddress)
-   - Wire.write(data, length)
-   - Wire.endTransmission()
-        │
-        ▼
-5. Verify write (optional):
-   - Read back and compare
+
+Every other failure returns its own `PatchLoadStatus` at the step where it happens.
+
+### EEPROM Region Update Flow
+
+`TPS25751EepromUpdater::updateRegion()` writes one region with the four steps of SLVAFL1
+Figure 2-3, with a read-back added to step 2 (ADR-014). The header documents the state the
+EEPROM is left in for every status.
+
+```mermaid
+flowchart TD
+    pre["Pre-flight: MODE is APP, EEPROM present, image header and length,<br/>the kept region bootable, the target's AppConfigOffset word 0"]
+    e1["Step 1: write the target pointer to 0, with read-back and neighbor check"]
+    e2a["Step 2: FLad to the bundle start; FLwd the first two 32-byte chunks"]
+    e2b["Read back the pointer row and the two chunks; compare"]
+    e2c["Fresh FLad; FLwd the remaining chunks"]
+    e3["Step 3: FLvy; FLrd compare with the image;<br/>re-read the AppConfigOffset word; write the target pointer"]
+    e4["Step 4, optional: write the other region's pointer to 0"]
+    done(["Success"])
+    stop(["A status from the header's table;<br/>the other region still boots"])
+
+    pre --> e1 --> e2a --> e2b --> e2c --> e3 --> e4 --> done
+    pre -- "check fails" --> stop
+    e1 -- "failure" --> stop
+    e2b -- "mismatch" --> stop
+    e3 -- "failure" --> stop
 ```
+
+`updateInactiveRegion()` picks the target with `selectTargetRegion()`, which reads the
+region pointers first and BOOT_FLAGS only when both are valid. `updateBothRegions()` runs
+the update twice, and `programBlank()` writes both AppConfigOffset words and then steps 1
+to 3 for each region. `coldReset()` (`GAID`) is a separate call, so the application chooses
+when the port disconnects.
 
 ### Downstream-Device Typed Write Flow (ADR-009)
 
-The typed write tier defined by ADR-009 is a **read-modify-write of a value object**
-layered on the I2Cw proxy: read the register live via I2Cr, apply a field setter that
-mutates only its own bits, write the whole buffer back via an I2Cw task
-(`len ≤ 11`, `Length = payload + 1`; see ADR-007). The step-by-step walkthrough of
-this flow through the reference implementation (`BQ25798::Device`) moved with the
-driver to the sibling **`lib/BQ25798`** repository — see
-`docs/engineering/CONVENTIONS.md` there.
+The typed write tier of ADR-009 is a read-modify-write of a value object on the I2Cw
+proxy: read the register through I2Cr, apply a field setter that changes only its own
+bits, and write the whole buffer back through one I2Cw task (`len <= 11`,
+`Length = payload + 1`; see ADR-007). The step-by-step walkthrough through the reference
+implementation, `BQ25798::Device`, moved with the driver to the sibling `lib/BQ25798`
+repository; see `docs/engineering/CONVENTIONS.md` there.
 
 ### Factory Creation Flow
 
+```mermaid
+flowchart LR
+    req["createRegister(Address::STATUS)"] --> sw{"switch on addr"}
+    sw -- "case STATUS" --> mk["createStatusRegister()"]
+    mk --> obj["std::make_unique&lt;TPS25751Status&gt;()"]
+    obj --> ret["returned as std::unique_ptr&lt;TPS25751Register&gt;"]
+    sw -- "no case" --> null["nullptr"]
 ```
-1. Request: createRegister(TPS25751Registers::Address::STATUS)
-        │
-        ▼
-2. Factory lookup: switch(addr)
-        │
-        ▼
-3. Call type-specific creator:
-   - createStatusRegister()
-        │
-        ▼
-4. Construct object:
-   - return std::make_unique<TPS25751Status>();
-        │
-        ▼
-5. Return as base class pointer:
-   - std::unique_ptr<TPS25751Register>
-```
+
+The `(addr, data, length)` overload follows the same switch into the creator that copies
+the bytes, and the `RegisterInfo` overload creates an empty object of the size the table
+gives.
 
 ---
 
@@ -791,108 +900,95 @@ driver to the sibling **`lib/BQ25798`** repository — see
 
 ### Adding a New Register Class
 
-**Required Steps:**
+`STANDARDS.md` has the class template and `CONSTRAINTS.md` the platform rules. The steps:
 
-1. **Create register class** inheriting from `TPS25751Register`
-2. **Ensure the address exists** in `TPS25751Registers::Address` (+ `RegisterInfo` size)
-3. **Add forward declaration** in factory header
-4. **Implement factory methods** (create with/without data)
-5. **Update factory switch statements** in all createRegister() variants (one `case` per address)
-6. **Add convenience method** to TPS25751 main class (optional)
-7. **Write unit tests**
-8. **Document with Doxygen**
+1. Make sure the address is in `TPS25751Registers::Address` and has a `RegisterInfo` with
+   its size and a `case` in `getRegisterInfo()` (`include/TPS25751RegisterAddress.h`). A
+   missing case makes `readRegisterByAddress()` return `nullptr` for that register.
+2. Create `include/TPS25751<Name>.h` and `src/TPS25751<Name>.cpp`, inheriting
+   `TPS25751Register`: the constructors, field accessors, `isSemanticallyValid()`,
+   `debugPrint()`, and for an R/W register setters on `setBits()` and `kAddress`.
+3. Add a forward declaration and the two private creators to
+   `include/TPS25751RegisterFactory.h`, and a `case` to each of the three
+   `createRegister()` switches in `src/TPS25751RegisterFactory.cpp`.
+4. Include the header in `include/TPS25751.h` and add `read<Name>()` and
+   `read<Name>Register()`, and for an R/W register `write<Name>()`.
+5. Add the source to `build_src_filter` of `[env:native]` in `platformio.ini`.
+6. Add a suite `test/test_native/test_TPS25751<Name>/` with more than 90% line coverage of
+   the new file (`TESTING.md`, `test/coverage.sh`).
+7. Document with Doxygen (`DOCUMENTATION.md`) and add the class to `AGENTS.md`.
 
-**Extension Points:**
-- New register types via factory registration
-- Custom validation logic via override
-- Custom debug output via debugPrint()
-- Additional accessor methods in subclass
+Extension points within a class: custom validation by overriding
+`isSemanticallyValid()`, custom output by overriding `debugPrint()`, and any further
+accessors the register needs.
 
 ### Adding a Downstream Device Driver
 
-The BQ25798 driver (`BQ25798::Device`, maintained in the sibling **`lib/BQ25798`**
-repository) is the reference implementation — follow its layout when adding a new
-downstream device. A driver is a separate library that depends on this one; it
-needs no changes to any TPS25751 host file.
+The BQ25798 driver (`BQ25798::Device`, in the sibling `lib/BQ25798` repository) is the
+reference implementation; follow its layout. A driver is a separate library that depends
+on this one and needs no change to any TPS25751 host file.
 
-**Recipe (concrete steps mirroring the BQ25798 implementation):**
-
-1. **Create `include/<Device>/` and `src/<Device>/`** for all device-specific headers
-   and sources. Use a `namespace <Device>` throughout.
-2. **Define `<Device>::Registers::Address`** (enum of hardware register addresses)
-   and a `RegisterInfo` table — mirrors `TPS25751Registers` and
-   `TPS25751RegisterAddress.h`.
-3. **Implement register classes** under `include/<Device>/` (one class per register),
-   each inheriting `TPS25751Register`. Follow the same mandatory template as
-   host-side registers: default constructor + `(const uint8_t*, size_t)` constructor,
-   three-tier validation (`isSemanticallyValid()`, or `validateBasic/Data/Semantic`
-   as appropriate), `debugPrint()` with `F()`. Keep read-only registers decode-only;
-   for R/W registers add a `static constexpr Registers::Address kAddress` and field
-   setters following the write-encoder pattern (ADR-009, STANDARDS.md).
-   - **Multi-byte (16-bit) registers on big-endian downstream devices**: assemble
-     `(raw[0] << 8) | raw[1]`, NOT `TPS25751Register::extractBits16` (little-endian;
-     will silently byte-swap the value).
-   - **Signed ADC channels**: reinterpret the assembled uint16_t via `int16_t` (2's
-     complement); do not treat as unsigned.
-   - **ADC LSB step sizes**: use values from the device datasheet directly; MCP
-     register definitions may not include conversion factors.
-4. **Create `<Device>::RegisterFactory` / `RegisterFactoryImpl` / `Factory`**
-   (same abstract interface + singleton pattern as `TPS25751RegisterFactory` /
-   `TPS25751Factory`, but scoped to the device). The factory switch dispatches on
-   `<Device>::Registers::Address`; unknown addresses return `nullptr`.
-5. **Create `<Device>::Device : public TPS25751DownstreamDevice`** in
-   `include/<Device>/<Device>Device.h`. Add one typed `read<Register>()` method per
-   register (calls the inherited `readRegister<T>()` template; returns
-   `std::unique_ptr<T>`). For write-capable registers, add the typed write tier:
-   a generic `writeRegister<T>()` (keyed on `T::kAddress`, sends `reg.raw()/reg.size()`
-   via the inherited raw `writeRegister(addr, data, len)`), an `updateRegister<T>()`
-   read-modify-write helper, and optional L3 convenience setters (see ADR-009).
-6. **Respect the TRM's 5-second minimum spacing** between consecutive I2Cr (or
-   consecutive I2Cw) commands — `TPS25751DownstreamDevice` warns via
-   `DEBUG_CAT_TASK` if violated but does not block the call.
-7. **Register the device's MCP docs server** in the driver repo's `.mcp.json`,
-   pointing the generic server in the sibling `lib/device-register-mcp-server` repo
-   (`uv --directory ../device-register-mcp-server run server.py`) at a new `devices/<device>/`
-   manifest authored there, and update the MCP table in the driver repo's
-   `AGENTS.md`.
+1. Create `include/<Device>/` and `src/<Device>/` for the device's headers and sources, and
+   use a `namespace <Device>` throughout.
+2. Define `<Device>::Registers::Address` and a `RegisterInfo` table, mirroring
+   `TPS25751Registers` and `TPS25751RegisterAddress.h`.
+3. Implement one register class per register under `include/<Device>/`, each inheriting
+   `TPS25751Register`, with the same template as host registers: a default constructor and
+   a `(const uint8_t*, size_t)` constructor, the three validation tiers, and `debugPrint()`
+   with `F()`. Keep read-only registers decode-only; for R/W registers add a
+   `static constexpr Registers::Address kAddress` and field setters following ADR-009.
+   - Assemble a 16-bit register of a big-endian device as `(raw[0] << 8) | raw[1]`, not
+     with `extractBits16()`, which is little-endian and would swap the bytes.
+   - Reinterpret a signed ADC channel's assembled `uint16_t` as `int16_t`.
+   - Take ADC LSB sizes from the device datasheet; the register-docs server may not carry
+     conversion factors.
+4. Create `<Device>::RegisterFactory`, `RegisterFactoryImpl`, and `Factory`, with the same
+   abstract interface and singleton as the host, switching on `<Device>::Registers::Address`
+   and returning `nullptr` for an unknown address.
+5. Create `<Device>::Device : public TPS25751DownstreamDevice` in
+   `include/<Device>/<Device>Device.h`, with one typed `read<Register>()` per register
+   through the inherited `readRegister<T>()`. For writable registers add a generic
+   `writeRegister<T>()` keyed on `T::kAddress`, an `updateRegister<T>()` read-modify-write
+   helper, and optional convenience setters (ADR-009). Forward the `(TwoWire&, addr)`
+   constructor to get the direct transport (ADR-010).
+6. Respect the TRM's 5 s minimum spacing between consecutive I2Cr, or consecutive I2Cw,
+   commands. `TPS25751DownstreamDevice` warns through `DEBUG_CAT_TASK` but does not block.
+7. Define the device for the register-docs MCP server under `devices/<device>/` in the
+   sibling `lib/device-register-mcp-server` repository, point an entry in the driver repo's
+   `.mcp.json` at it (`uv --directory ../device-register-mcp-server run server.py`), and add
+   it to the MCP table in the driver repo's `AGENTS.md`.
 
 ### Dependency Injection Points
 
-**Factory Injection:**
 ```cpp
-// Replace global factory for testing
-auto mockFactory = std::make_unique<MockRegisterFactory>();
-TPS25751Factory::setFactory(std::move(mockFactory));
-
-// Use mock factory
+// Factory: replace the process-wide factory, for example in a test
+TPS25751Factory::setFactory(std::make_unique<MyTestFactory>());
 auto reg = TPS25751Factory::getInstance().createRegister(TPS25751Registers::Address::STATUS);
-// Returns mock object instead of real one
-```
 
-**I2C Injection:**
-```cpp
-// TPS25751 can use Wire or Wire1
-TPS25751 tps(&Wire1);  // Use alternate I2C bus
+// Bus and address: any TwoWire and any of the four I2Ct addresses
+TPS25751 pd(Wire1, TPS25751_I2CT_ADDRESS_IDX[1]);   // 0x21 on Wire1
+
+// Command executor: the EEPROM updater runs on any TPS25751CommandExecutor
+TPS25751HostExecutor exec(pd);
+TPS25751EepromUpdater updater(exec);
+
+// Downstream transport: proxied through the controller, or direct on a bus
+TPS25751DownstreamDevice proxied(pd, 0x6B);
+TPS25751DownstreamDevice direct(Wire2, 0x6B);
 ```
 
 ### Customization Points
 
-**Validation Levels:**
 ```cpp
-class MyCustomRegister : public TPS25751Register {
-    bool validateSemantic() const override {
-        // Add application-specific validation
-        return baseValidation() && myCustomChecks();
+class MyRegister : public TPS25751Register {
+public:
+    bool isSemanticallyValid() const override {
+        if (!isValid()) return false;
+        return myFieldRulesHold();          // application-specific rules
     }
-};
-```
 
-**Debug Output:**
-```cpp
-class MyCustomRegister : public TPS25751Register {
-    void debugPrint() const override {
-        // Custom format for specific needs
-        printInMyFormat();
+    void debugPrint(Stream &s = Serial) const override {
+        // any format; STANDARDS.md defines the one the library uses
     }
 };
 ```
@@ -903,41 +999,64 @@ class MyCustomRegister : public TPS25751Register {
 
 ### Module Dependencies
 
-```
-Application
-    ↓ uses
-TPS25751 (main class)
-    ↓ uses
-    ├─→ TPS25751Factory (register creation)
-    ├─→ TPS25751Register subclasses (data access)
-    └─→ Wire (I2C communication)
+```mermaid
+flowchart TB
+    App["Application"]
+    PD["TPS25751"]
+    PL["TPS25751PatchLoader"]
+    EU["TPS25751EepromUpdater"]
+    CE["TPS25751CommandExecutor"]
+    HE["TPS25751HostExecutor"]
+    DD["TPS25751DownstreamDevice"]
+    F["TPS25751Factory and RegisterFactoryImpl"]
+    R["Register classes"]
+    V["TPS25751Pdo, TPS25751Rdo, TPS25751UsbPd"]
+    B["TPS25751Register base: bit helpers, validation"]
+    D["TPS25751Debug"]
+    W["TwoWire"]
 
-TPS25751Factory
-    ↓ creates
-TPS25751Register subclasses
-    ↓ uses
-TPS25751Register bit helpers (bit extraction)
+    App --> PD
+    App --> PL
+    App --> EU
+    App --> DD
+    PL --> PD
+    EU --> CE
+    HE -- implements --> CE
+    HE --> PD
+    DD --> PD
+    DD -. direct transport .-> W
+    PD --> F
+    PD --> W
+    F --> R
+    R --> B
+    R --> V
+    B --> D
+    PD --> D
 ```
 
 ### Compile-Time Dependencies
 
+```mermaid
+flowchart BT
+    Reg["TPS25751Register.h"] --> Dbg["TPS25751Debug.h"]
+    Regs["37 register headers"] --> Reg
+    Regs --> Addr["TPS25751RegisterAddress.h"]
+    Regs -- "0x30 to 0x35, 0x77, 0x7E only" --> Pdo["TPS25751Pdo.h, TPS25751Rdo.h, TPS25751UsbPd.h"]
+    Fac["TPS25751RegisterFactory.h<br/>forward-declares the register classes"] --> Addr
+    Main["TPS25751.h"] --> Regs
+    Main --> Fac
+    Main --> Task["TPS25751Task.h"]
+    Main --> Wire["Wire.h"]
+    Seqs["TPS25751PatchLoader.h, TPS25751HostExecutor.h,<br/>TPS25751EepromUpdater.h, included at the end of TPS25751.h"] --> Task
+    Exe["TPS25751CommandExecutor.h, no Wire.h"] --> Task
+    Seqs --> Exe
+    App["Application code"] --> Main
 ```
-TPS25751Register.h (base class)
-    ↑ depends on
-    │
-    ├─ TPS25751Status.h
-    ├─ TPS25751Mode.h
-    └─ ... (all register headers)
-        ↑ used by
-        │
-    TPS25751RegisterFactory.h
-        ↑ used by
-        │
-    TPS25751.h (main class)
-        ↑ used by
-        │
-    Application code
-```
+
+The sequencer headers forward-declare `TPS25751` and are included at the end of
+`TPS25751.h`, so an application needs one `#include` and the headers have no include
+cycle. `TPS25751CommandExecutor.h` does not include `Wire.h`, which is what lets the
+updater build on the host.
 
 ---
 
@@ -945,76 +1064,74 @@ TPS25751Register.h (base class)
 
 ### Ownership Model
 
-**Factory creates, user owns:**
-```cpp
-// Factory creates with std::unique_ptr
-auto status = factory.createRegister(TPS25751Registers::Address::STATUS);
-// User owns, automatic cleanup when out of scope
-```
+The caller owns every register object the library returns:
 
-**Main class convenience methods:**
 ```cpp
-// TPS25751 creates and returns ownership
+// Factory and main class hand over ownership in a unique_ptr
 auto status = tps.readStatusRegister();
-// Caller owns returned object
+auto reg = TPS25751Factory::getInstance().createRegister(TPS25751Registers::Address::MODE);
+
+// Or the caller supplies the object
+TPS25751Status s;
+tps.readStatus(s);
 ```
 
-**Data storage:**
-```cpp
-class TPS25751Register {
-private:
-    std::vector<uint8_t> data_;  // Owned by register object
-    // Automatic cleanup in destructor
-};
-```
+A register object owns its byte buffer (`uint8_t* _raw`, `size_t _len`), allocated with
+`new[]` and freed in the destructor. `TPS25751` and the sequencers allocate nothing on the
+heap for a transaction: their buffers, such as the 64-byte DATA image and the updater's
+32-byte chunks, are on the stack. `readRegisterByAddress()` is the exception, with a
+`std::make_unique<uint8_t[]>` scratch buffer that it frees on return.
 
 ### Move Semantics
 
-**Prefer moving over copying:**
+The base class implements the Rule of Five. A move transfers `_raw` and leaves the source
+empty (`isValid()` false); a copy allocates and copies. Register subclasses add no members
+that own memory, so they use the base's copy and move operations and declare none of their
+own.
+
 ```cpp
-// Factory returns by value (move)
-std::unique_ptr<TPS25751Register> createRegister(TPS25751Registers::Address addr) {
-    return std::make_unique<TPS25751Status>();  // Move, not copy
+// unique_ptr<Derived> converts to unique_ptr<Base> without a copy
+std::unique_ptr<TPS25751Register> TPS25751RegisterFactoryImpl::createStatusRegister() const {
+    return std::make_unique<TPS25751Status>();
 }
 
-// Move constructor
-TPS25751Status(TPS25751Status&& other) noexcept
-    : TPS25751Register(std::move(other)) {
-    // Move members
-}
+// A typed read assigns a temporary, so the buffer is moved, not copied
+registerOut = RegisterT(buffer, regInfo.size);
 ```
 
 ---
 
 ## Testing Architecture
 
+`TESTING.md` is the full description; this section shows how the tests attach to the
+architecture.
+
 ### Unit Test Structure
 
-```
-Each register class has:
-    - Constructor tests
-    - Validation tests (3 levels)
-    - Accessor tests (all public methods)
-    - Edge case tests
-    - Factory integration tests
-```
+The native tests run on the host with `pio test -e native` (Unity). There is one suite per
+class under `test/test_native/test_TPS25751<Name>/`, plus `test_TPS25751Core` for the I2C
+paths of `TPS25751`, `test_TPS25751RegisterAddress`, `test_TPS25751RegisterFactory`, and
+`test_TPS25751Debug`. A register suite covers the constructors, every accessor and setter,
+each validation tier, `debugPrint()`, and the factory case. `test/coverage.sh` reports line
+coverage per file in `src/`; the target is more than 90% per file.
 
 ### Integration Test Structure
 
-```
-Cross-component tests:
-    - Factory creation for all types
-    - Round-trip read/write
-    - Multi-register sequences
-    - Error handling chains
-```
+There is no automated integration test against a device. Integration is tested on
+hardware with the example sketches, in the stages each feature plan defines, for example
+the ten hardware stages of `docs/plans/feature/eeprom-update.md`. The verify gate builds
+`example-read-registers` so a change that breaks a sketch is caught before merge.
 
 ### Mock Points
 
-**Mockable interfaces:**
-- TPS25751RegisterFactory (abstract factory)
-- I2C communication (can wrap Wire)
-- Register classes (virtual methods)
+| Seam | Test double | Location |
+|---|---|---|
+| `TwoWire` | A Wire fake with a scriptable target and the Teensy driver's return codes | `test/support/native/Wire.h`, `FakeTps25751Target.h` |
+| Arduino API | `millis()`, `delay()`, `micros()`, `Serial`, and `Stream` stubs with a controllable clock | `test/support/native/Arduino.h`, `Stream.h` |
+| `TPS25751CommandExecutor` | `FakeCommandExecutor`, a modelled EEPROM with fault injection per task | `test/support/native/FakeCommandExecutor.h` |
+| `TPS25751RegisterFactory` | Any subclass passed to `TPS25751Factory::setFactory()` | In the test |
+
+`TPS25751DownstreamDevice.cpp` and `TPS25751HostExecutor.cpp` are not in the native build.
 
 ---
 
@@ -1022,35 +1139,27 @@ Cross-component tests:
 
 ### Planned Enhancements
 
-1. **Caching Layer**
-   - Cache frequently-read registers
-   - Invalidate on write or interrupt
-   - Reduce I2C traffic
+1. Interrupt-driven `executeCommand()` completion, deferred under ADR-007. An optional
+   IRQ pin on `TPS25751` would let the executor wait for INT_EVENT1 bit 30 (Command 1
+   Complete) instead of polling COMMAND, then read bit 82 (I2C Controller NACKed) and
+   clear the event through INT_CLEAR1. `waitForCommandClear()` is a single private
+   method so that a variant can replace it without touching DATA staging or any task's
+   encoding. `TPS25751PatchLoader` already takes an IRQ pin for its Ready for Patch wait.
+2. Additional platforms, ESP32 and RP2040 (`AGENTS.md`, Publishing the Library).
+3. Moving `TPS25751PatchLoader` and `TPS25751DownstreamDevice` onto the
+   `TPS25751CommandExecutor` seam. The EEPROM-update plan lists it as out of scope; the
+   loader already has native tests through the Wire fake, so the gain is smaller than it
+   was.
 
-2. **Async I2C**
-   - Non-blocking register reads
-   - Callback notification
-   - Better performance
+### Ideas Not Scheduled
 
-3. **Register Subscriptions**
-   - Observer pattern
-   - Notify on register changes
-   - Event-driven architecture
+These have no plan or owner. Each would change a guarantee the library makes today, which
+is that a read always reflects the device at the time of the call.
 
-4. **Configuration Profiles**
-   - Save/restore device state
-   - Profile management
-   - Factory reset capability
-
-5. **Interrupt-driven `executeCommand()` completion** *(deferred — see ADR-007)*
-   - Optional `irqPin` on the `TPS25751` constructor
-   - ISR sets a volatile flag on `cmd1Complete` (INT_EVENT1 bit 30) instead of
-     busy-polling COMMAND
-   - Executor waits on the flag, then reads INT_EVENT1 for the result +
-     `i2cControllerNacked` (bit 82) and clears via INT_CLEAR1
-   - `waitForCommandClear()` is already isolated as a single private helper in
-     `TPS25751` specifically so this variant can replace it without touching the
-     DATA staging / encode-decode logic
+- A cache of frequently read registers, invalidated on write or interrupt.
+- Non-blocking register reads with a completion callback.
+- Change notification for subscribed registers.
+- Saving and restoring a set of register values as a profile.
 
 ---
 
@@ -1080,8 +1189,13 @@ Cross-component tests:
 - Validation can be skipped in production if needed
 - Better test coverage
 
+Note, 2026-11-24: as built, the base class implements the first two tiers, `isValid()`
+and `hasValidData()`, and each register overrides only the third,
+`isSemanticallyValid()`. `TPS25751::validateRegister()` runs the three in order. See
+Design Patterns, Three-Tier Validation.
+
 ### ADR-006: std::vector for Data Storage
-**Status:** Accepted
+**Status:** Superseded by the implementation; see the note below
 **Decision:** Use std::vector<uint8_t> instead of raw arrays
 **Rationale:**
 - Automatic memory management
@@ -1091,6 +1205,11 @@ Cross-component tests:
 - Small heap overhead
 - No manual memory management
 - Exception-safe (if enabled)
+
+Note, 2026-11-24: the code does not use `std::vector`. `TPS25751Register` holds a
+`uint8_t* _raw` and a `size_t _len`, allocates with `new[]`, and implements the Rule of
+Five, so ownership is still automatic for callers. The record does not say when or why
+the decision changed. See Memory Management Strategy.
 
 ### ADR-007: 4CC Command-Task Layer + I2Cc Downstream-Device Proxy
 **Status:** Accepted
@@ -1104,15 +1223,16 @@ tasks are this interface's read/write proxy to the I2Cc bus.
 **Decision:**
 - Add a generic, task-agnostic executor (`TPS25751::executeCommand()`) on the
   host, plus `TPS25751Command`/`TPS25751Data` register classes wired into the
-  existing factory like the other 15 registers.
+  existing factory like the other 15 registers then implemented.
 - Add `TPS25751DownstreamDevice` as a *separate, composed* abstraction (not a
   `TPS25751Register` subclass, not part of `TPS25751RegisterFactory`) that
   encodes/decodes the I2Cr/I2Cw DATA payloads on top of `executeCommand()`.
 - Downstream device register classes reuse the existing `TPS25751Register`
   decoder base, so they look and behave like host-side registers from the
-  caller's perspective, without requiring a second factory.
-- Completion detection is a simple ~200 ms busy-poll on COMMAND
-  (`waitForCommandClear()`); an interrupt-driven variant is deferred (see
+  caller's perspective, without requiring a second factory. (ADR-008 later gave
+  each downstream device driver its own factory.)
+- Completion detection is a busy-poll of COMMAND every 5 ms with a 200 ms default
+  timeout (`waitForCommandClear()`); an interrupt-driven variant is deferred (see
   Planned Enhancements) because the TRM's 5-second inter-command spacing is a
   separate constraint an IRQ does not eliminate — so async polling is a
   latency/CPU optimization, not a correctness fix, and isn't worth the
@@ -1283,9 +1403,9 @@ to start the session, `PBMc` to commit it) plus a raw burst write to I2C address
 - The `0x30` argument to `burstWrite()` is a 7-bit I2C *device address* (the PBM receive
   port), not a TPS25751 register offset — these happen to share the numeric value with
   `TPS25751Registers::Address::RECEIVED_SOURCE_CAPABILITIES` but are entirely unrelated.
-- BQ25798 `bundleSize` in the `PBMs` config is **little-endian** (4 bytes, LSB first),
-  consistent with host-register byte order but opposite to BQ25798 downstream registers
-  (which are big-endian). See CONSTRAINTS.md "Patch Burst Mode (PBM)".
+- The `bundleSize` field of the `PBMs` configuration is **little-endian** (4 bytes, LSB
+  first), consistent with host-register byte order and opposite to the BQ25798 downstream
+  registers, which are big-endian. See CONSTRAINTS.md "Patch Burst Mode (PBM)".
 
 Amendment, 2026-11-23: `PBMc` no longer goes through `executeCommand()`, which reads
 DATA the instant COMMAND clears. SLVAFV8A (step 15, page 11, and its code on page 18) and
@@ -1411,7 +1531,10 @@ four-step update in which an erased region pointer keeps the controller from loa
 region while it is written. An ordering error can leave no bootable region; recovery then
 needs a PBM load (ADR-011) or an external programmer. The sequencing therefore needs
 host-run tests that inject a fault at every task, and `src/TPS25751.cpp`, which owns
-`executeCommand()`, cannot run on the host because it needs `Wire`.
+`executeCommand()`, could not run on the host because it needs `Wire`. (The TwoWire fake
+added the same day for the ADR-011 amendment later brought `TPS25751.cpp` into
+`[env:native]`; the seam stays, because a fake executor models the EEPROM far more simply
+than a fake bus.)
 **Decision:**
 - `TPS25751EepromUpdater` is a sequencer, not a register, beside `TPS25751PatchLoader`: it
   does not inherit `TPS25751Register` and is not in the factory. It provides the task
@@ -1487,10 +1610,17 @@ host-run tests that inject a fault at every task, and `src/TPS25751.cpp`, which 
   The `GAID` sequence the `ResetNotObserved` rule relies on was seen on one board with the
   F8091164 and the F8091166 bundle running; whether the two differ in firmware is not
   recorded.
+- Stages 6 to 10 (2026-11-23 and 24) added: `programBlank()` after five PBM loads; a power
+  cut after each step of an update and one inside step 2, after which the controller
+  booted the region the status table predicts (stage 9, on a second board); and the
+  example's start-up wait for APP (stage 10). Not shown on hardware: a cut inside a pointer
+  write or inside a 24LC256 write cycle, and the refusals for a nonzero AppConfigOffset
+  word.
 - A region update blocks for about 26 s and both regions for about 52 s (stage 3). An
   application with a watchdog services it from the progress callback.
 - `TPS25751PatchLoader` and `TPS25751DownstreamDevice` still call `TPS25751` directly.
-  Moving them to the executor seam would give them native tests too; it is not planned.
+  The loader has native tests through the TwoWire fake; the downstream device has none.
+  Moving either to the executor seam is not planned.
 
 ---
 
@@ -1508,7 +1638,5 @@ host-run tests that inject a fault at every task, and `src/TPS25751.cpp`, which 
 | 1.7 | 2026-11-22 | Claude Code | Added ADR-013: USB PD PDO and RDO words decode through the TPS25751Pdo and TPS25751Rdo value types |
 | 1.8 | 2026-11-23 | Claude Code | Added ADR-014: TPS25751EepromUpdater, a non-register flash-task sequencer on the TPS25751CommandExecutor seam |
 | 1.9 | 2026-11-23 | Claude Code | ADR-011 amendment: PBMc through issueCommand(), 20 ms before the DATA read, native tests through a TwoWire fake |
-
----
-
-*Understanding this architecture ensures consistent, maintainable implementations.*
+| 1.10 | 2026-11-24 | Claude Code | ADR-011 amendment: Ready for Patch and MODE polls, PBMs configuration read-back, PBMe on failure |
+| 1.11 | 2026-11-24 | Claude Code | Sections before the ADRs brought up to the code: diagrams redrawn in Mermaid, sequencer layer and executor seam added, API excerpts, validation tiers, memory model, and test seams corrected; notes on ADR-005, ADR-006, ADR-007, ADR-011, and ADR-014 |

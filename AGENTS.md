@@ -15,13 +15,13 @@ The TPS25751 library is an object-oriented C++ library for interfacing with the 
 - RAII memory management for embedded systems
 - Platform-optimized for Teensy 4.x (ARM Cortex-M7, no RTTI)
 
-**Last Updated:** 2026-11-23
+**Last Updated:** 2026-11-24
 **Current Phase:** EEPROM update over I2Ct on `feat/eeprom-update`
 ([eeprom-update.md](docs/plans/feature/eeprom-update.md)): `TPS25751EepromUpdater` updates,
 reads back, and blank-programs the configuration EEPROM through the flash 4CC tasks
-(ADR-014). Batches 1 to 3 are implemented. Hardware stages 1 to 5 passed on 2026-11-22
-and 23; the AppConfigOffset checks added to `updateRegion()` afterwards have not run on
-hardware. Before that: Rev B
+(ADR-014). Batches 1 to 3 are implemented. Hardware stages 1 to 10 passed on 2026-11-22
+to 24, including the AppConfigOffset reads of `updateRegion()` (stage 6), the reworked
+PBM load (stages 6 to 8), and power cuts during an update (stage 9). Before that: Rev B
 register coverage complete, 37 of the 37 registers in TRM SLVUCR8B,
 with typed USB PD decode (Batch L).
 [trm-revB-audit-remaining-registers.md](docs/plans/trm-revB-audit-remaining-registers.md)

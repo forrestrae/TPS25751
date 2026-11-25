@@ -752,7 +752,8 @@ public:
      * A 14336-byte update with the defaults and no retry issues 1368 tasks:
      * 5 FLad, 451 FLwd, 911 FLrd, and 1 FLvy. Hardware stages 3 and 4 ran the
      * sequence before the three AppConfigOffset reads were added, at 908 FLrd
-     * and 1365 tasks; the three reads have not run on hardware.
+     * and 1365 tasks. Stage 6 part A (2026-11-23) ran updateBothRegions() with
+     * the three reads, on words that were 0, and stages 9 and 10 ran it again.
      *
      * The call blocks for the whole update. Stage 1 measured 17.7 ms per FLrd,
      * so the compare alone takes about 16 s for a 14336-byte image. An

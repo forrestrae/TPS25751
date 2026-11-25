@@ -1482,7 +1482,8 @@ host-run tests that inject a fault at every task, and `src/TPS25751.cpp`, which 
   after a PBM load with a 14336-byte image (2732 tasks, 52118 ms), the I2C
   EEPROM Present flag after a PBM boot, and PTCH after a restart with no valid pointer.
   The three AppConfigOffset reads `updateRegion()` makes since 2026-11-23, which bring the
-  update to 1368 tasks, have not run on hardware.
+  update to 1368 tasks, ran in stage 6 part A, on words that were 0; the refusals for a
+  word that is not 0 have not run on hardware.
   The `GAID` sequence the `ResetNotObserved` rule relies on was seen on one board with the
   F8091164 and the F8091166 bundle running; whether the two differ in firmware is not
   recorded.

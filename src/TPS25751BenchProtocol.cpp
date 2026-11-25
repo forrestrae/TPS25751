@@ -10,9 +10,11 @@ constexpr uint32_t kGetMessageTaskTimeoutMs = 5000;
 constexpr uint32_t kLocalTaskTimeoutMs = 1000;
 
 // The registers `WR` may write. 0x27 and 0x28 disconnect and reconnect the
-// port when written (SLVUCR8B p.28, p.29); 0x37 steers the sink request (p.40);
+// port when written (SLVUCR8B p.28, p.29); 0x29 takes effect "the next time the
+// appropriate policy is invoked" and does not disconnect (p.31), for example
+// whether the port initiates or accepts a PR_Swap; 0x37 steers the sink request (p.40);
 // 0x42 enables the PD 3.x replies (p.46).
-constexpr uint8_t kWritableRegisters[] = {0x27, 0x28, 0x37, 0x42};
+constexpr uint8_t kWritableRegisters[] = {0x27, 0x28, 0x29, 0x37, 0x42};
 
 constexpr size_t kMaxCommandWordLength = 8;
 

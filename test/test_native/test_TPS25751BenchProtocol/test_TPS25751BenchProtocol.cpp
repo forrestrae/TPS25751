@@ -409,21 +409,23 @@ void test_same_task()
 // Write allowlist and snapshot list
 // ---------------------------------------------------------------------------
 
-void test_write_allowlist_is_exactly_four_registers()
+void test_write_allowlist_is_exactly_five_registers()
 {
     unsigned allowed = 0;
     for (unsigned address = 0; address <= 0xFF; ++address) {
         if (Protocol::isWriteAllowed(static_cast<uint8_t>(address))) ++allowed;
     }
-    TEST_ASSERT_EQUAL(4, allowed);
+    TEST_ASSERT_EQUAL(5, allowed);
     TEST_ASSERT_TRUE(Protocol::isWriteAllowed(0x27));
     TEST_ASSERT_TRUE(Protocol::isWriteAllowed(0x28));
+    TEST_ASSERT_TRUE(Protocol::isWriteAllowed(0x29));  // PORT_CONTROL
     TEST_ASSERT_TRUE(Protocol::isWriteAllowed(0x37));
     TEST_ASSERT_TRUE(Protocol::isWriteAllowed(0x42));
     // Neighbors and the registers a careless write would hurt most.
     TEST_ASSERT_FALSE(Protocol::isWriteAllowed(0x08));  // COMMAND
     TEST_ASSERT_FALSE(Protocol::isWriteAllowed(0x09));  // DATA
-    TEST_ASSERT_FALSE(Protocol::isWriteAllowed(0x29));  // PORT_CONTROL
+    TEST_ASSERT_FALSE(Protocol::isWriteAllowed(0x2A));  // above PORT_CONTROL
+    TEST_ASSERT_FALSE(Protocol::isWriteAllowed(0x2D));  // BOOT_FLAGS
     TEST_ASSERT_FALSE(Protocol::isWriteAllowed(0x32));  // TRANSMIT_SOURCE_CAPABILITIES
     TEST_ASSERT_FALSE(Protocol::isWriteAllowed(0x33));  // TRANSMIT_SINK_CAPABILITIES
 }
@@ -643,7 +645,7 @@ int main(int, char **)
     RUN_TEST(test_task_timeouts);
     RUN_TEST(test_same_task);
 
-    RUN_TEST(test_write_allowlist_is_exactly_four_registers);
+    RUN_TEST(test_write_allowlist_is_exactly_five_registers);
     RUN_TEST(test_snapshot_register_list);
     RUN_TEST(test_error_codes);
 

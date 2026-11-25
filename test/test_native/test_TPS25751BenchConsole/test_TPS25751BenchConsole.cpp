@@ -669,12 +669,12 @@ void test_write_refuses_registers_off_the_allowlist()
 {
     Bench b;
     const char *refused[] = {"@5 WR 0x33 00", "@5 WR 0x32 00", "@5 WR 0x08 47414944",
-                             "@5 WR 0x09 00", "@5 WR 0x29 00000000", "@5 WR 0x70 01"};
+                             "@5 WR 0x09 00", "@5 WR 0x2A 00000000", "@5 WR 0x2D 00", "@5 WR 0x70 01"};
     for (const char *line : refused) {
         const Lines lines = b.run(line);
         TEST_ASSERT_EQUAL(1, lines.size());
         TEST_ASSERT_EQUAL_STRING(
-            "@5 ERR REFUSED register is not on the write allowlist (0x27, 0x28, 0x37, 0x42)",
+            "@5 ERR REFUSED register is not on the write allowlist (0x27, 0x28, 0x29, 0x37, 0x42)",
             lines[0].c_str());
     }
     // A refusal costs no I2C traffic at all.
@@ -697,7 +697,7 @@ void test_write_returns_the_readback()
     TEST_ASSERT_EQUAL_HEX8_ARRAY(expected, b.fake.writes[0].data.data(), 4);
 }
 
-void test_write_accepts_all_four_allowed_registers()
+void test_write_accepts_all_five_allowed_registers()
 {
     Bench b;
     const std::string zeros14(28, '0');
@@ -705,9 +705,33 @@ void test_write_accepts_all_four_allowed_registers()
     const std::string zeros24(48, '0');
     TEST_ASSERT_EQUAL_STRING("@5 OK", b.run(("@5 WR 0x27 " + zeros14).c_str()).back().c_str());
     TEST_ASSERT_EQUAL_STRING("@5 OK", b.run(("@5 WR 0x28 " + zeros17).c_str()).back().c_str());
+    TEST_ASSERT_EQUAL_STRING("@5 OK", b.run("@5 WR 0x29 00000000").back().c_str());
     TEST_ASSERT_EQUAL_STRING("@5 OK", b.run(("@5 WR 0x37 " + zeros24).c_str()).back().c_str());
     TEST_ASSERT_EQUAL_STRING("@5 OK", b.run("@5 WR 0x42 00000000").back().c_str());
-    TEST_ASSERT_EQUAL(4, b.fake.writes.size());
+    TEST_ASSERT_EQUAL(5, b.fake.writes.size());
+}
+
+void test_write_port_control_returns_the_readback()
+{
+    // PORT_CONTROL as the bench board read it on 2026-11-25 (0xDA815072), with
+    // bits 5 (Initiate Swap to Sink) and 4 (Process Swap to Sink) cleared, so a
+    // sourcing board neither sends nor accepts a PR_Swap to sink.
+    Bench b;
+    b.fake.setRegister(0x29, {0x72, 0x50, 0x81, 0xDA});
+    const Lines lines = b.run("@5 WR 0x29 425081da");
+    TEST_ASSERT_EQUAL(2, lines.size());
+    TEST_ASSERT_EQUAL_STRING("@5 reg=0x29 len=4 data=425081da match=1", lines[0].c_str());
+    TEST_ASSERT_EQUAL_STRING("@5 OK", lines[1].c_str());
+    TEST_ASSERT_EQUAL(1, b.fake.writes.size());
+    TEST_ASSERT_EQUAL_HEX8(0x29, b.fake.writes[0].reg);
+    const uint8_t expected[] = {0x42, 0x50, 0x81, 0xDA};
+    TEST_ASSERT_EQUAL(4, b.fake.writes[0].data.size());
+    TEST_ASSERT_EQUAL_HEX8_ARRAY(expected, b.fake.writes[0].data.data(), 4);
+
+    // Whole register only, as for the others.
+    const Lines partial = b.run("@6 WR 0x29 4250");
+    TEST_ASSERT_EQUAL_STRING("@6 ERR BADARG the register is 4 bytes, got 2", partial[0].c_str());
+    TEST_ASSERT_EQUAL(1, b.fake.writes.size());
 }
 
 void test_write_reports_a_readback_that_differs()
@@ -1951,7 +1975,8 @@ int main(int, char **)
 
     RUN_TEST(test_write_refuses_registers_off_the_allowlist);
     RUN_TEST(test_write_returns_the_readback);
-    RUN_TEST(test_write_accepts_all_four_allowed_registers);
+    RUN_TEST(test_write_accepts_all_five_allowed_registers);
+    RUN_TEST(test_write_port_control_returns_the_readback);
     RUN_TEST(test_write_reports_a_readback_that_differs);
     RUN_TEST(test_write_requires_the_whole_register);
     RUN_TEST(test_write_reports_i2c_failures);

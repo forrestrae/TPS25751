@@ -467,9 +467,12 @@ def build_tools(service: BenchService) -> SimpleNamespace:
     def bench_write(addr: int | str, hex: str) -> dict:  # noqa: A002 (the tool's argument name)
         """Write a whole TPS25751 register and return the readback. Can drop VBUS.
 
-        The console allows 0x27, 0x28, 0x37, and 0x42 only. hex must be the whole
-        register, as many bytes as its length byte. A write to 0x27 or 0x28
-        disconnects and reconnects the port. Start a 0x27 write from a fresh
+        The console allows 0x27, 0x28, 0x29, 0x37, and 0x42 only. hex must be the
+        whole register, as many bytes as its length byte. A write to 0x27 or 0x28
+        disconnects and reconnects the port. A write to 0x29 (PORT_CONTROL) does
+        not: it takes effect the next time the policy it governs runs, such as the
+        board initiating (bit 5) or accepting (bit 4) the next PR_Swap to sink. Start a
+        0x27 write from a fresh
         bench_read: the firmware keeps values in bits the TRM calls reserved.
         Host-written values last until the next restart.
 

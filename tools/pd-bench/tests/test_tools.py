@@ -196,9 +196,19 @@ def test_write(bench):
     assert bench.requests[-1] == "WR 0x42 1a000810"
 
 
+def test_write_port_control(bench):
+    # Bits 5 and 4 of 0x29 (Initiate and Process Swap to Sink) cleared: a sourcing board
+    # then neither sends nor accepts a PR_Swap to sink.
+    result = bench.tools.bench_write("0x29", "425081da")
+    assert result["name"] == "PORT_CONTROL"
+    assert (result["data"], result["match"]) == ("425081da", True)
+    assert bench.requests[-1] == "WR 0x29 425081da"
+
+
 def test_write_refusals_and_errors(bench):
     refused = bench.tools.bench_write("0x33", "00")
     assert refused["code"] == "REFUSED"
+    assert bench.tools.bench_write("0x2a", "00000000")["code"] == "REFUSED"
     short = bench.tools.bench_write("0x42", "1a0008")
     assert short["code"] == "BADARG" and "4 bytes, got 3" in short["error"]
     assert bench.tools.bench_write("0x42", "")["kind"] == "ValueError"

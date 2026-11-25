@@ -212,10 +212,14 @@ public:
      * @brief Whether `WR` may write a register
      *
      * Allowed: GLOBAL_SYSTEM_CONFIGURATION (0x27), PORT_CONFIGURATION (0x28),
-     * AUTONEGOTIATE_SINK (0x37), and PD3_CONFIGURATION (0x42).
+     * PORT_CONTROL (0x29), AUTONEGOTIATE_SINK (0x37), and PD3_CONFIGURATION
+     * (0x42), each as a whole register. A write to 0x27 or 0x28 disconnects and
+     * reconnects the port. A write to 0x29 does not; it takes effect the next
+     * time the policy it governs runs (SLVUCR8B p.31), such as whether the port
+     * next initiates or accepts a PR_Swap (bits 5 and 4).
      *
      * @param address Register address
-     * @return true for the four addresses above
+     * @return true for the five addresses above
      */
     static bool isWriteAllowed(uint8_t address);
 

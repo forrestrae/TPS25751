@@ -45,7 +45,7 @@ def test_hello_reports_a_pending_patch_without_loading_it(bench):
     bench.console.patch_bundle = True
     result = bench.tools.bench_hello()
     assert (result["mode"], result["patch_bundle"], result["patch_pending"]) == ("PTCH", True, True)
-    assert "bench_renegotiate('restart')" in result["warning"]
+    assert "bench_renegotiate('restart_cold')" in result["warning"]
     assert "patch_reload" not in result
     assert bench.requests == ["HELLO"]
 

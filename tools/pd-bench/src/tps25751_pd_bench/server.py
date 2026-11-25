@@ -130,7 +130,8 @@ def parse_hello(reply: Reply, port: str) -> dict:
         hello["warning"] = "the console answers but the TPS25751 does not answer on I2C"
     elif hello["patch_pending"]:
         hello["warning"] = ("MODE is PTCH and the firmware holds a patch bundle. HELLO does not load "
-                            "it; bench_renegotiate('restart') does, and so does a reset of the Teensy")
+                            "it; bench_renegotiate('restart_cold') does (verified on hardware), and so does a reset of "
+                            "the Teensy")
     return hello
 
 
@@ -365,7 +366,7 @@ def build_tools(service: BenchService) -> SimpleNamespace:
         bundle is compiled in, where the running configuration came from (eeprom,
         i2c, none), and whether the firmware allows role swaps. patch_pending is
         true when MODE reads PTCH and a bundle is compiled in: the controller
-        waits for the patch, which bench_renegotiate("restart") loads.
+        waits for the patch, which bench_renegotiate("restart_cold") loads.
         """
         with service.session(fresh_hello=True) as session:
             return dict(session.hello)

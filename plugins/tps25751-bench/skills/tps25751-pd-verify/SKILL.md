@@ -17,7 +17,7 @@ Tools are named as server plus tool: `km003c` `pd_capture_start` is the tool
 
 | Server | Tools this skill calls | Touches hardware |
 |---|---|---|
-| `km003c` | `device_info`, `measure`, `pd_capture_start`, `pd_capture_mark`, `pd_capture_wait`, `pd_capture_stop`, `pd_capture_read` | All but `pd_capture_read` claim the meter |
+| `km003c` | `device_info`, `measure`, `pd_capture_start`, `pd_capture_mark`, `pd_capture_wait`, `pd_capture_stop`, `pd_capture_read` | `device_info`, `measure`, `pd_capture_start`, and `pd_capture_stop` claim the meter. `pd_capture_mark`, `pd_capture_wait`, and `pd_capture_read` hold no claim; they work on the running capture or a file |
 | `tps25751-bench` | `bench_hello`, `bench_snapshot`, `bench_read`, `bench_renegotiate`, `bench_crosscheck` | All but `bench_crosscheck`, which reads two files |
 | `usb-pd-docs` | `get_register`, `explain_bitfield` | No |
 
@@ -31,15 +31,16 @@ rules in [compare-rules.md](compare-rules.md) by hand, which give the same rows.
   in the negotiation it is meant to observe, and it can raise VBUS on its output.
 - Never call `tps25751-bench` `bench_write` or `bench_task` in this skill. Every stimulus
   goes through `bench_renegotiate`, which checks the power role and restores what it
-  changes.
+  changes. When a result names a `bench_write` call as the recovery, give it to the user;
+  do not run it.
 - Before any stimulus that drops VBUS (`port_reset`, `restart`, `restart_cold`), tell the
   user in one sentence that VBUS will drop to vSafe0V and anything powered from VBUS
   will lose power, then wait for their go-ahead. If the user says the board running the
   console is powered from VBUS, offer only `gsrc`, `aneg`, and `ssrc`.
 - Start the capture before the stimulus, always. The meter records only what happens
   after `pd_capture_start` returns.
-- Read only `summary` and `facts` of a capture in the main session. Both are bounded.
-  Deeper reads follow the Large captures section.
+- Read only `summary`, `facts`, and the narrow `messages` reads of Step 4 in the main
+  session. Deeper reads follow the Large captures section.
 - Every value you report sits beside the hex it came from.
 
 ## Arguments
@@ -52,18 +53,25 @@ rules in [compare-rules.md](compare-rules.md) by hand, which give the same rows.
 
 Which stimulus fits the board, from `bench_hello`:
 
-| Stimulus | Power role | Also needs | Drops VBUS |
-|---|---|---|---|
-| `gsrc` | sink | `plug` true, `mode` APP | No |
-| `aneg` | sink | `plug` true, `mode` APP | No; steps between PDO voltages |
-| `ssrc` | source | `plug` true, `mode` APP | No |
-| `port_reset` | either | `mode` APP | Yes |
-| `restart` | either | none | Yes |
-| `restart_cold` | either | an EEPROM (`patch_source` eeprom) or a patch bundle (`patch_bundle` true) | Yes |
-| `human` | either | a person at the bench | Yes, by unplugging |
+| Stimulus | Power role | Also needs | Drops VBUS | Sends Source_Capabilities | Ends with an attach (Discover Identity can follow) |
+|---|---|---|---|---|---|
+| `gsrc` | sink | `plug` true, `mode` APP | No | Yes | No |
+| `aneg` | sink | `plug` true, `mode` APP | No; steps between PDO voltages | No | No |
+| `ssrc` | source | `plug` true, `mode` APP | No | Yes, from the board | No |
+| `port_reset` | either | `mode` APP | Yes | Yes | Yes |
+| `restart` | either | none | Yes | Yes | Yes |
+| `restart_cold` | either | an EEPROM (`patch_source` eeprom) or a patch bundle (`patch_bundle` true) | Yes | Yes | Yes |
+| `human` | either | a person at the bench | Yes, by unplugging | Yes | Yes |
 
 Refuse a stimulus that does not fit, name the one that does, and stop. `bench_renegotiate`
 refuses the same cases; do not rely on that alone.
+
+`stop` `identity` needs a stimulus that ends with an attach: only then does a Discover
+Identity exchange follow the contract. With `gsrc`, `aneg`, or `ssrc` and `stop`
+`identity`, tell the user that this stimulus starts no Discover Identity, so 0x48 cannot
+be compared against the wire, and offer `port_reset` (drops VBUS) or `human` instead. If
+the user keeps the stimulus, run it with `stop` `contract` and say in the report that the
+identity comparison was not attempted.
 
 ## Step 1: Preflight
 
@@ -75,7 +83,7 @@ refuses the same cases; do not rely on that alone.
    INT_EVENT1 in PTCH removes Ready for Patch and the next patch load writes nothing.
    The recovery is `restart_cold`; offer it (it drops VBUS) and stop until the user
    answers. If `mode` is anything else but APP, report it and stop.
-4. Check the stimulus against the table in Arguments.
+4. Check the stimulus and `stop` against the Arguments section.
 5. Call `km003c` `measure` once and `tps25751-bench` `bench_snapshot` once, without
    `path`. When STATUS (0x1A) bit 0 reads 1 (a plug is present), the meter's `vbus_v`
    times 1000 and 0x6A byte 3 times 98 mV must differ by at most 98 mV plus 1% of the
@@ -86,23 +94,26 @@ refuses the same cases; do not rely on that alone.
 ## Step 2: Start the capture
 
 For `human`, first give the user the steps in Step 3 and complete the unplug; then
-start the capture here. Call `km003c` `pd_capture_start` with a `label` such as `pd-verify gsrc` and a
-`provenance` object holding the stimulus, the board role, and the `bench_hello` fields
-`lib` and `version`. Choose the stop condition from the stimulus:
+start the capture here.
 
-| Stimulus | `stop_on` | `stop_after_messages` | `settle_ms` | `timeout_s` | How the capture ends |
-|---|---|---|---|---|---|
-| `gsrc`, `ssrc` | `contract` or `identity` per `stop` | the count, when `stop` is one | 1000 | 30 | On its own |
-| `aneg`, `port_reset`, `restart` | `none` | the count, when `stop` is one | 0 | 60 | You stop it, step 4 |
-| `restart_cold` | `none` | the count, when `stop` is one | 0 | 90 | You stop it, step 4 |
-| `human` | `contract` or `identity` per `stop` | the count, when `stop` is one | 5000 | 30 | On its own |
+Call `km003c` `pd_capture_start` with:
 
-`aneg` runs two negotiations, and a restart can attach twice about 2 s apart, so a
-`contract` stop would end the capture on the first one while the registers show the
-last. With a message count, `stop_on` is `none`.
+- `label`: `pd-verify <stimulus>`.
+- `provenance`: an object with `stimulus`, `stop`, the board `role`, and the
+  `bench_hello` fields `lib` and `version`. `bench_crosscheck` reads `stimulus` from it.
+- `stop_on`: `none`. The meter's own `contract` stop would end the capture on the first
+  of several negotiations (`aneg` runs two, and a restart can attach twice about 1.9 s
+  apart), and its `identity` stop fires on a Discover Identity ACK from either port,
+  including the board's own. Step 4 ends the capture on evidence instead.
+- `stop_after_messages`: the count, when `stop` is one; otherwise leave it out.
+- `timeout_s`: 60 for `gsrc`, `aneg`, and `ssrc`; 120 for `port_reset`, `restart`, and
+  `restart_cold`; for `human`, 30 with `stop` `contract` (as the quoted step 4 says) and
+  45 with `stop` `identity`, which you tell the user before the steps.
 
-Record the absolute `path` the result returns. If `pd_monitor` reports a refusal, carry
-on: on meter firmware 2.0.0 the capture works without the monitor enabled.
+If the result is an error (for example `PdMonitorNotEnabledError` or `DeviceBusyError`),
+run no stimulus: report the error and its kind and stop. If the result's `pd_monitor`
+reports a refusal, carry on: on meter firmware 2.0.0 the capture works without the
+monitor enabled. Record the absolute `path` the result returns.
 
 ## Step 3: Stimulus
 
@@ -112,10 +123,20 @@ For every stimulus except `human`:
 2. Call `tps25751-bench` `bench_renegotiate` with `method` set to the stimulus.
 3. Call `km003c` `pd_capture_mark` with `stimulus <method> returned`.
 
-If `bench_renegotiate` returns `error`, stop the capture with `pd_capture_stop`, report
-the error and its `reply_lines`, and stop. For `aneg`, record `stepped_down`,
-`restored_contract`, and `cleared_bit6`; `stepped_down` false means the controller kept
-its contract and the capture holds no step-down Request.
+Then check the result before going on:
+
+- `error` present: call `km003c` `pd_capture_stop`, report `error`, `kind`, and
+  `reply_lines`, and stop.
+- For `aneg`, `restored_0x37` false: 0x37 still holds the temporary value. Call
+  `km003c` `pd_capture_stop`, give the user `restore_error` word for word (it names the
+  recovery), and stop. Take no snapshot and make no comparison.
+- For `aneg`, `second_aneg_error` present: 0x37 is restored but the contract may still be
+  the temporary one. Call `km003c` `pd_capture_stop`, give the user `second_aneg_error`
+  word for word, and stop without a snapshot or comparison.
+- For `aneg`, record `stepped_down`, `restored_contract`, and `cleared_bit6`.
+  `stepped_down` false means the controller kept its contract and the capture holds no
+  step-down Request; `restored_contract` false means the final contract is not the one
+  before the call. Report both.
 
 For `human`, the cold-attach steps depend on the board's role.
 
@@ -141,17 +162,38 @@ meter's plug into the partner, for example an iPhone. Give the same four steps w
 "charger" read as the board and "board" read as the partner, and say that trigger tools
 stay off while anything is on the meter's plug.
 
-## Step 4: Wait
+## Step 4: Wait for the evidence, then stop the capture
 
-- A capture that ends on its own: call `km003c` `pd_capture_wait` with `timeout_s` equal
-  to the capture's `timeout_s` plus 10.
-- A capture you stop: call `km003c` `pd_capture_wait` with `timeout_s` 5, which returns
-  with `running` true after 5 s and lets the last negotiation and a Discover Identity
-  that follows it reach the file, then call `km003c` `pd_capture_stop`.
+The capture runs until you stop it, its message count is reached, or its timeout. Wait
+in steps, each one call to `km003c` `pd_capture_wait` with `timeout_s` 2, which returns
+the summary after 2 s with `running` true, or earlier with `running` false once the
+capture has stopped on its own. Start right after Step 3 (for `human`, after the user's
+"done"). In each summary:
 
-Both return the summary. Record `reason`, `counts`, `vbus_mv`, `contract`, `warnings`,
-and `lines`. A `reason` of `timeout` with a `stop_on` other than `none` means the stop
-condition was not met.
+- P is `contract.t_ps_rdy`, the PS_RDY of the latest completed contract, or none.
+- A step is quiet when P is the same as in the previous step and no `disconnect` line
+  with a time after P has appeared.
+
+Stop waiting when one of these holds:
+
+1. `running` is false. The capture ended by itself (message count or timeout).
+2. `stop` is `contract` or a count: P is set and the last 3 steps were quiet, which puts
+   the end at least 6 s after the final PS_RDY. A restart can attach a second time about
+   1.9 s after the first, and the Phase 1 cold-attach steps end at PS_RDY plus 5 s, so a
+   shorter wait can miss the last negotiation.
+3. `stop` is `identity`: the contract condition of item 2 holds, and a Discover Identity
+   ACK on SOP from the partner has arrived after P, or 8 steps (about 16 s) have passed
+   since the first summary that showed the current P. Check for the ACK in each step
+   after the contract condition holds with `km003c` `pd_capture_read`, `mode` `messages`,
+   `sop` `SOP`, `types` `["Discover_Identity"]`, and `since` P. The partner's ACK is a
+   line `Discover_Identity ACK ... from source/...` when the board is sink, and
+   `... from sink/...` when it is source; a line from the board's own role is the board's
+   identity and does not count.
+4. 15 steps (about 30 s) have passed without any P. No contract completed.
+
+Then, if `running` is still true, call `km003c` `pd_capture_stop`. Record the final
+summary's `reason`, `counts`, `vbus_mv`, `contract`, `warnings`, and `lines`, and whether
+the identity wait ended on the partner's ACK or on its bound.
 
 ## Step 5: Sanity rules, before any comparison
 
@@ -161,7 +203,8 @@ Read the summary's `warnings` and `lines`:
 |---|---|---|
 | No Source_Capabilities, no Request, and VBUS flat (max minus min under 500 mV) | No negotiation happened in this window | Report a stimulus or operator problem, not a protocol bug, and stop |
 | Only connection records, no PD messages | No PD traffic, for example a non-PD source. The warning text says PD monitoring was not active; on firmware 2.0.0 the meter captures with monitoring disabled, so read it as no traffic. Quote the header's `pd_monitor` | Report and stop |
-| A Request with no Source_Capabilities before it | The capture started late | Compare what remains, mark the verdict inconclusive |
+| A Request with no Source_Capabilities before it, stimulus other than `aneg` | The capture started late | Compare what remains, mark the verdict inconclusive |
+| A Request with no Source_Capabilities before it, stimulus `aneg` | Expected: `aneg` sends Requests only. The meter's "capture started late" warning does not apply | None. The requested PDO comes from the snapshot's 0x30 |
 | Lines ending in `(retry)` | Retransmissions; each counts once | None. During a cold restart into PTCH the charger repeats Source_Capabilities about 25 times without a GoodCRC for about 1.8 s before the contract: expected |
 
 When a rule fires and the cause is not clear from the summary, read the Large captures
@@ -169,17 +212,25 @@ section.
 
 ## Step 6: Snapshot
 
-Call `tps25751-bench` `bench_snapshot` with `path` set to the capture path with `.jsonl`
-replaced by `.registers.json`. The capture has ended, so PS_RDY and the settle time have
-passed. Record `written_to`. Take one snapshot only: it clears INT_EVENT1.
+1. After `restart` or `restart_cold`, call `tps25751-bench` `bench_hello` first. If
+   `mode` is PTCH and `patch_pending` is true, take no snapshot (Step 1 item 3 says why):
+   report the capture with the summary only, offer `restart_cold`, and stop. If `mode` is
+   anything else but APP, report it and stop.
+2. Call `tps25751-bench` `bench_snapshot` with `path` set to the capture path with
+   `.jsonl` replaced by `.registers.json`. The capture has ended, so PS_RDY and the wait
+   of Step 4 have passed. Record `written_to`. Take one snapshot only: it clears
+   INT_EVENT1.
 
 ## Step 7: Compare
 
 1. Call `tps25751-bench` `bench_crosscheck` with `capture_path` set to the capture's
-   absolute path and `registers_path` set to `written_to`. It reads the capture's wire
-   hex itself and returns `rows`, `sanity`, `verdict`, and `table`. Without that tool,
-   build the same rows by hand from `km003c` `pd_capture_read` with `mode` `facts` and
-   the snapshot, following [compare-rules.md](compare-rules.md).
+   absolute path, `registers_path` set to `written_to`, and `stimulus` set to the
+   stimulus. It reads the capture's wire hex itself and returns `rows`, `sanity`,
+   `verdict`, and `table`. For `aneg` the requested PDO rows say `from 0x30`: they compare
+   the snapshot's 0x30 with 0x34, register with register, because the wire carried no
+   Source_Capabilities. Without that tool, build the same rows by hand from `km003c`
+   `pd_capture_read` with `mode` `facts` and the snapshot, following
+   [compare-rules.md](compare-rules.md).
 2. Call `km003c` `pd_capture_read` with `mode` `facts` for the meter server's decode of
    each object.
 3. For each register a row compares, call `tps25751-bench` `bench_read` with
@@ -198,9 +249,10 @@ A disagreement names the word, the field, the three values, and the raw hex, for
 
 Report in this order:
 
-1. One line each: meter serial and firmware, board role and `lib`, stimulus, capture
-   path, snapshot path.
-2. The sanity notes, if any.
+1. One line each: meter serial and firmware, board role and `lib`, stimulus and `stop`,
+   capture path, snapshot path.
+2. The sanity notes, if any, and for `aneg` the `stepped_down` and `restored_contract`
+   values.
 3. One table, one row per compared or reported word:
 
    | Word | Wire hex | Register hex | Where | Raw | Fields (facts / library / spec) |
@@ -208,7 +260,8 @@ Report in this order:
 
    `Raw` is the row's result from step 7.1. `Fields` is `agree` or names each
    disagreeing field with its three values. Reported rows (the board's own ACK, cable
-   ACKs, 0x35 bits 127:96 on a sink) carry `report` and no field check.
+   ACKs, 0x35 bits 127:96 on a sink, 0x34 bits 41:32 on a source) carry `report` and no
+   field check.
 4. The verdict: `pass` when every compared word matches and every field agrees, `fail`
    when any word or field disagrees, `inconclusive` when something needed is missing
    (no completed contract, a late start, a register absent from the snapshot), `no
@@ -222,17 +275,18 @@ The bundle format is in `test/fixtures/pd-captures/README.md` of the TPS25751 li
 
 1. In the TPS25751 library itself (it has `test/support/pd_capture_fixture.py`), the
    bundle goes in `test/fixtures/pd-captures/<save_fixture>/`. In any other project, ask
-   the user where to put it and skip items 4 and 5.
+   the user where to put it and skip items 4 to 6.
 2. Copy the capture file there as `capture.jsonl`, unchanged, and the snapshot file as
    `registers.json`. Do not take a second snapshot.
 3. Write `provenance.json` in the format of the existing bundle's file: source, sink,
    cable, stimulus, meter serial and firmware, operator, and how `registers.json` was
    made (`synthesized` false, `read_from_board_at_capture` true). Record the cable by its
    SOP' Discover Identity VDOs from `facts`, since the bench cable has changed before.
-4. Run `python3 test/support/pd_capture_fixture.py` from the library root, then
-   `python3 test/support/pd_capture_fixture.py --check`, and add the bundle's row to the
-   index in the README.
-5. Tell the user the native tests that assert the bundle's words by hand from the
+4. Add the bundle's row to the index in the README. `--check` fails for a bundle the
+   index does not list.
+5. Run `python3 test/support/pd_capture_fixture.py` from the library root, then
+   `python3 test/support/pd_capture_fixture.py --check`.
+6. Tell the user the native tests that assert the bundle's words by hand from the
    `usb-pd-docs` tables are still to write; the generator does not write them.
 
 ## Large captures

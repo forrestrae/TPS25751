@@ -21,8 +21,15 @@ present.
   `facts.requests`. That entry names its Source_Capabilities by `source_capabilities_i`,
   the `i` of an entry in `facts.source_capabilities`. Retransmissions are already
   counted once.
-- With no `contract`, there is no completed negotiation: compare the latest
-  Source_Capabilities only, and the verdict is at best inconclusive.
+- With no `contract`, there is no completed negotiation (a Request that was rejected,
+  waited, abandoned by a Soft_Reset, or never reached PS_RDY does not count): compare the
+  latest Source_Capabilities only, and the verdict is at best inconclusive.
+- Only Source_Capabilities sent with the Source power role count (`sender` `source/...`).
+  A board that sinks never has its own capabilities compared against 0x30.
+- With no Source_Capabilities before the contract's Request (`aneg` sends none; any other
+  stimulus means a late start), take the PDOs from the snapshot instead: 0x30 when the
+  board sinks, 0x32 when it sources. Those rows compare register with register and say so.
+  For `aneg` the verdict can still be pass; for a late start it is inconclusive.
 - An EPR contract (`msg` EPR_Source_Capabilities, or an EPR_Request) is not compared by
   these rules; report it.
 - Discover Identity ACKs are in `facts.discover_identity_acks`, keyed by SOP and then by
@@ -43,13 +50,14 @@ present.
 | Request RDO | 0x35 bits 127:96 (bytes 12 to 15) | source | equal. Bits 127:96 are the partner's request only while STATUS reports Source |
 | none | 0x35 bits 127:96 | sink | report only. On the sink bench they read the same word as bits 31:0 |
 | PDO at the RDO's Object Position (RDO bits 31:28) | 0x34 bits 31:0 | either | equal; a position naming no PDO is a mismatch |
-| PDO 1 bits 29:20 | 0x34 bits 41:32 | either | equal. The TRM does not state this mapping; two chargers confirmed it on hardware |
+| PDO 1 bits 29:20 | 0x34 bits 41:32 | sink | equal. The TRM does not state this mapping; two chargers confirmed it on hardware with the board sinking |
+| PDO 1 bits 29:20 | 0x34 bits 41:32 | source | report only: the mapping is unconfirmed with the board sourcing |
 | Partner's ACK, `ACK` | 0x48 bits 7:6 | either | value 1 (Responder ACK received) |
 | Partner's ACK, `vdo_count` | 0x48 bits 2:0 | either | equal |
 | Partner's ACK, VDO k from 1 (`vdos[k-1].hex`) | 0x48 bits 8 + 32(k - 1) + 31 to 8 + 32(k - 1), that is the word at byte 1 + 4(k - 1) | either | equal |
 | No partner ACK on the wire | 0x48 | either | report only: it may hold an earlier exchange |
 | Board's own ACK on SOP, every SOP' and SOP'' ACK | none | either | report only, with the VDOs |
-| Last `status` VBUS of the capture, or `measure` | 0x6A byte 3 x 98 mV | either | at most 98 mV plus 1% of the meter reading apart |
+| Last `status` VBUS of the capture, or `measure` | 0x6A byte 3 x 98 mV | either | at most 98 mV plus 1% of the meter reading apart. Skipped when STATUS bit 0 reads no plug: 0x6A is not updated in Unconnected Sleep |
 
 The cable on this bench answers Discover Identity with a PD 2.0 header and SVDM version
 1.0, so its ID Header's connector type (bits 22:21) reads 00b. That is the cable, not a

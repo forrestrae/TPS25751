@@ -1,205 +1,144 @@
-# Code Review Guidelines
+# Code review guidelines
 
-This document outlines guidelines for reviewing TPS25751 library code changes, with emphasis on embedded C++ concerns specific to the Teensy 4.x platform and TPS25751 I2C protocol.
+A checklist for reviewing changes to the TPS25751 library. Most entries record a defect
+that reached review or hardware in this repository. Each one compiles cleanly and passes
+a round-trip test, so the review is the only gate that catches it. The rules themselves
+are in [STANDARDS.md](STANDARDS.md) and [CONSTRAINTS.md](CONSTRAINTS.md).
 
-## Platform-Specific Correctness
+## Platform
 
-The most critical review category for this codebase. Many bugs here cause silent runtime failures or non-compiling builds.
+- `dynamic_cast` and `typeid` do not compile under `-fno-rtti`.
+- `static_assert(false, ...)` in a template body fails even when the template is unused.
+- A string literal passed to a `Stream` without `F()` costs RAM.
+- A buffer larger than about 64 bytes does not belong on the stack.
 
-- **RTTI usage**: Any `dynamic_cast<>` or `typeid()` call will **not compile** (`-fno-rtti`). Use `static_cast<>` with factory-based type verification
-- **`static_assert(false)` in templates**: Causes compilation errors even for unused template specializations. Use SFINAE/dependent types instead
-- **Missing `F()` macro**: String literals passed to `Serial.print/println` without `F()` waste RAM. All string literals in debug output must use `F()`
-- **I2C length byte**: The TPS25751 protocol prefixes responses with a byte count. Forgetting to skip byte 0 when parsing register data is a common bug
-- **I2C write length byte**: Writes mirror reads — the length byte must be *sent* (`Wire.write((uint8_t)length)` right after the register address), not just expected on reads. A write that omits it will desync the controller's framing
-- **PDO unit mismatch**: Fixed-supply and PPS (Programmable Power Supply) PDOs use different voltage/current units. Always verify the conversion factor matches the PDO type
-- **Stack usage**: Deep call stacks and large stack-allocated arrays can overflow the limited RAM. Prefer `std::unique_ptr` and heap allocation for buffers > ~64 bytes
-- **I2Cr read data offset**: The I2Cr 4CC task's result bytes start at **DATA offset 1**, not 0 — `DATA[0]` is the task return code. Copying from `raw[0]` instead of `raw[1]` silently shifts every byte
-- **I2Cw payload length cap**: I2Cw payloads are capped at **11 bytes** (DATA bytes 4-14); bytes beyond DATA byte 14 are silently ignored by the controller, not rejected — verify callers bounds-check `len <= 11` before calling
-- **I2Cw `Length` counts the register-offset byte**: The I2Cw `Length` field (`DATA[1]`) is `payload_len + 1`, not `payload_len` — the controller transmits exactly `Length` bytes starting at the offset byte (`DATA[2]`). Setting `Length == payload_len` sends only the offset, a pointer-only write that is ACKed (no NACK) but changes nothing. Note I2Cw `{addr, Length, regOffset, payload}` is **not** symmetric with I2Cr `{addr, regOffset, numBytes}`
-- **I2Cr read length cap**: A single I2Cr returns at most **63** data bytes (the 64-byte DATA register reserves `DATA[0]` for the return code); bounds-check `len <= 63`
-- **I2Cr/I2Cw target address must be 7-bit**: Bit 7 of the target-address byte in the I2Cr/I2Cw input payload is reserved and must be 0. Passing a raw 8-bit address (e.g. one that already has a R/W bit baked in) corrupts the target device lookup
-- **`executeCommand()` 5-second spacing is not enforced by the executor**: The TRM's 5 s minimum spacing between consecutive I2Cr (or consecutive I2Cw) commands is tracked by `TPS25751DownstreamDevice`, not `TPS25751::executeCommand()` itself. Code that calls `executeCommand()` directly with `"I2Cr"`/`"I2Cw"` (bypassing `TPS25751DownstreamDevice`) gets no spacing protection at all
-- **Downstream 16-bit registers are big-endian — `extractBits16` byte-swaps them**: `TPS25751Register::extractBits16` assembles `raw[0]` as LSB. Downstream devices (e.g. BQ25798) store 16-bit registers big-endian (`raw[0]` = MSB). Always assemble downstream 16-bit fields manually: `(static_cast<uint16_t>(raw[0]) << 8) | raw[1]`
-- **Signed downstream ADC channels**: some downstream ADC values (e.g. BQ25798 IBUS/IBAT/TDIE) are 2's-complement signed. After big-endian assembly, reinterpret as `int16_t` before converting to physical units; treating as `uint16_t` produces wrong sign for negative currents
-- **Downstream factory switch completeness**: Every value in `<Device>::Registers::Address` must have a `case` in all three `createRegister()` overloads; a missing `case` silently returns `nullptr` and causes a null-dereference at the call site
-- **ADC LSB unit-conversion sourced from datasheet, not MCP**: The register-docs MCP servers do not carry ADC step sizes; conversion factors must come from the device datasheet. Using the wrong LSB produces silently wrong physical values
+## Bus framing
 
-Reviewing BQ25798 driver code? That driver lives in the sibling `lib/BQ25798` repo —
-see its `docs/engineering/CONVENTIONS.md` for the device-specific review traps.
+- The first byte of a register read is the length byte. A write must send one after the
+  register number, or the controller's framing desynchronizes.
+- Never use a length byte from the wire as an index or allocation size without checking
+  it against the register's known size.
+- `I2Cr` results start at `DATA[1]`, and one `I2Cr` returns at most 63 bytes.
+- The `I2Cw` `Length` field is the payload length plus 1, because it counts the
+  register-offset byte. A `Length` equal to the payload length sends only the offset: the
+  write is acknowledged and changes nothing.
+- An `I2Cw` payload is at most 11 bytes. The controller drops the excess without an
+  error, so the caller must check.
+- The `I2Cr` and `I2Cw` target address is 7 bits. A raw 8-bit address corrupts the lookup.
+- `executeCommand()` does not enforce the TRM's 5 s spacing between two `I2Cr` or two
+  `I2Cw` commands. Only `TPS25751DownstreamDevice` tracks it.
 
-### Patch Burst Mode (PBM) Traps (ADR-011)
+## Bit fields
 
-Review these when touching `TPS25751PatchLoader`, `TPS25751::burstWrite()`, or
-any code that directly implements the SLVAFV8A PBM sequence:
+- Check every bit position and width against the TRM table, not against a neighbouring
+  accessor.
+- `extractBits()` returns `uint8_t` and reads 0 for a width above 8. Assigning it to a
+  wider type compiles and always yields 0; `TPS25751ActivePDOContract` and
+  `TPS25751ActiveRDOContract` shipped that way. Use `extractBits16`, `extractBits32`, or
+  `extractBits64`, and check with `grep -n "extractBits(" src/` that every width is 8 or
+  less.
+- A bit position held in `uint8_t` wraps past bit 255. Keep computed positions in
+  `uint16_t` or wider (ADR-012).
+- A multi-bit field modeled as `bool` truncates. The 2-bit Fast Role Swap current read as
+  `bool` until 6627be1.
+- A register that mirrors another's bit map can drop a named source and still pass every
+  test, because the missing bit is simply absent. For INT_MASK1 and INT_CLEAR1, count the
+  accessors against INT_EVENT1 and reconcile the totals.
+- Cast before shifting or multiplying a `uint8_t`. `pdoCount * 4` overflows in 8 bits.
+- A raw enum value from hardware can be out of range. Do not index or switch on it
+  without the clamp that `extractEnum*()` provides.
 
-- **`bundleSize` must be little-endian in the 6-byte PBMs config**: bytes 0-3 are
-  `length[0..3]` LSB first.  Big-endian encoding silently sends the wrong size,
-  causing `PatchStartStatus == 0x04 (BadBundleSize)` with no other indication.
-- **The raw burst has NO register number and NO byte-count byte**: `burstWrite()`
-  calls `beginTransmission(0x30) / write(data, N) / endTransmission(true)` with
-  nothing before the image bytes.  Adding a regNum or length prefix corrupts the
-  image at offset 0 and every subsequent byte is shifted.
-- **Final short chunk must be bounded correctly**: the loop condition must be
-  `thisChunk = min(chunk, remaining)` (not `chunk`), so the last transaction does
-  not read past the end of the image array.
-- **PatchStartStatus codes must map to distinct `PatchLoadStatus` values**:
-  `0x04 → BadBundleSize`, `0x05 → BadTargetAddress`, `0x06 → BadTimeout`.
-  Collapsing them all to a single "PBMs failed" hides which config byte was wrong.
-- **`0x30` is a 7-bit I2C device address, not a TPS25751 register offset**: pass it
-  to `beginTransmission()` / `burstWrite()`; do not confuse it with the
-  `TPS25751Registers::Address::RECEIVED_SOURCE_CAPABILITIES` register (which
-  coincidentally has the same numeric value as a register *offset*).
-- **PBMc timeout must be generous**: `executeCommand(PBMc, …, 5000)` is typical;
-  the device may need several seconds to verify the bundle before clearing COMMAND.
-  Using the default 200 ms `executeCommand` timeout risks a spurious `CommandTimeout`.
-- **The PBMs configuration is read back before PBMs**: SLVAFV8A step 5 shows an
-  acknowledged DATA write that did not take effect. Stage it with
-  `writeCommandData()`, read DATA 500 µs later, compare all 6 bytes, and only then
-  issue `PBMs` with no input, so `executeCommand()` does not write DATA again.
-- **PBMe only where TRM Figure 5-1 puts it**: after a burst chunk that is not
-  acknowledged and after "!CMD" on `PBMc`. Not after a `PBMc` timeout or I2C failure,
-  where the task may still be running, and it must not change the returned status.
-- **Step 16 DATA read-back is a separate call after the delay**: do not use
-  `pbmcResult.returnCode` alone to confirm the apply — a separate `readDataRegister()`
-  after `delay(PATCH_APPLY_DELAY_MS)` is required (the spec says "read DATA, confirm
-  PatchStartStatus cleared").
-- **`TPS25751PatchLoader` is not a register class**: do not expect it to inherit
-  `TPS25751Register`, implement three-tier validation, or appear in the factory.  It
-  is a sequencer; applying register-class review criteria to it is incorrect.
+## Register classes
 
-### Host-Register Write-Path Traps (Batch A onward)
+- The class inherits `TPS25751Register` directly, has the four constructors of the
+  reference classes, and overrides only `isSemanticallyValid()` and `debugPrint(Stream&)`.
+- `isSemanticallyValid()` starts with the base checks and the size check, and accepts the
+  documented reset value.
+- Every field is read through `extractBits*()` or `extractEnum*()` and written through
+  `setBits()`. No indexing of `_raw[]` and no restated field mask.
+- A new `Address` needs a case in both `getRegisterSize()` and `getRegisterInfo()`. Both
+  switches end in `default`, so the compiler reports nothing. A missing
+  `getRegisterInfo()` case makes `readRegisterByAddress()` return null while the typed
+  read still works; CUSTOMER_USE lacked it until a bench walk over all 37 addresses.
+- All three `createRegister()` switches need the case. A missing one returns `nullptr`.
+- The size in `RegisterInfo` must match the controller's length byte, which can differ
+  from the TRM width. GLOBAL_SYSTEM_CONFIGURATION is 116 bits in the TRM and 14 bytes on
+  hardware. Do not sign off a size before a hardware read.
+- `debugPrint()` prints to the stream it is given, uses the banner format, and uses
+  `printHex()` for fixed-width hex.
+- Every public method cites the TRM document, table, page, and bit range, and the USB PD
+  table for a specification field.
 
-Review these when a **host** R/W register class (SLEEP_CONTROL and the Batch B+
-registers) adds field setters or a `TPS25751::writeX()` method:
+## Write paths
 
-- **Setters must read-modify-write, never whole-byte assign**: a host setter must
-  mask out only its field and OR in the shifted value, preserving reserved and
-  sibling bits (`_raw[i] = (_raw[i] & ~fieldMask) | (value << shift)`). A setter
-  that assigns the whole byte from one field zeroes reserved bits the controller
-  expects unchanged — the same defect class as the downstream RMW trap below.
-- **Setters guard `!isValid()`**: a moved-from or default-constructed-then-failed
-  register has no buffer; an unguarded setter dereferences null `_raw`.
-- **Derive field-position masks, don't restate them**: a `fieldMask` that is
-  independently written (e.g. `0x06`) instead of derived (`valueMask << shift`)
-  drifts when the class is copied for a field at a different bit position — the
-  setter then clears the wrong bits while decode (using shift+width) still reads
-  correctly, so set-then-get round-trip tests pass and the corruption is
-  write-only. Flag any hand-restated field-position mask.
-- **`writeX()` convenience methods and register-class↔address pairing**: until the
-  planned typed `writeRegister<T>()` (keyed on a class-level `kAddress`) lands, the
-  hand-written `writeSleepControl`-style methods pair a class
-  with a `RegisterInfo` by hand. The `isValidSize()` guard cannot catch a wrong
-  **same-size** pairing (INT_MASK1 0x16 and INT_CLEAR1 0x18 are both
-  11 bytes; RECEIVED_SINK_CAPS and TRANSMIT_SINK_CAPS are both 53). Verify each
-  `writeX()` names the register whose bytes it actually writes.
-- **Firmware data in reserved bits must stay visible**: when hardware shows the
-  firmware storing values in TRM-reserved bits and the class drops those checks
-  (PD3_CONFIGURATION bits 3:0, every reserved range of GLOBAL_SYSTEM_CONFIGURATION),
-  `debugPrint()` must still show those bits, and the `writeX()` Doxygen must say
-  to start from a fresh read. Otherwise a write that clears them looks identical
-  to one that preserved them. Caught in the Batch H gate.
-- **The TRM width is not the wire length**: `RegisterInfo` must match the
-  controller's length byte, which can differ from the TRM's bit width rounded up
-  (GLOBAL_SYSTEM_CONFIGURATION: 116 bits in the TRM, 14 bytes on hardware). Do not
-  sign off a new register's size until a hardware read has confirmed the length byte.
-- **A new `Address` needs a case in both lookup switches**: `getRegisterSize()` and
-  `getRegisterInfo()` in `TPS25751RegisterAddress.h` both end in `default`, so the
-  compiler does not report a missing enumerator. A missing `getRegisterInfo()` case
-  makes `readRegisterByAddress()` return null and `writeRegister<T>()` return false
-  without writing, while the direct `readX()` path still works. CUSTOMER_USE lacked
-  that case from the first commit until Batch K's bench walk over all 37 addresses
-  found it. `test_TPS25751RegisterAddress` lists every register and checks both
-  switches; add each new register to its table.
-- **Check the TRM access type before adding a write path**: the TRM can mark a
-  register read-only at runtime even when it looks like host storage. CUSTOMER_USE
-  is `[R]` in rev B ("can only be changed during application customization"), and
-  the controller ACKs a write and keeps the old value, so a successful I2C write is
-  not evidence the register changed. Confirm R/W on hardware with a read-back. The
-  library shipped `writeCustomerUse()` from Batch A until its removal on 2026-11-19.
+- Check the TRM access type before adding a write path, and confirm it on hardware with a
+  read-back. The controller acknowledges a write to read-only CUSTOMER_USE and keeps the
+  old value; the library shipped `writeCustomerUse()` until 2026-11-19.
+- A reserved-bit check must be confirmed on hardware. The firmware sets TRM-reserved bits
+  in PD3_CONFIGURATION and GLOBAL_SYSTEM_CONFIGURATION, and a check on them rejects every
+  valid read.
+- Where the firmware keeps data in reserved bits, `debugPrint()` must still show them and
+  the `write<Name>()` comment must say to start from a fresh read. Otherwise a write that
+  clears them looks the same as one that kept them.
+- A `write<Name>()` method forwards to `writeRegister<T>()`, which takes the address from
+  the class's `kAddress`. Check that `kAddress` names the class's own register.
 
-### Downstream-Device Write-Path Traps (ADR-009)
+## USB PD decode
 
-Review these when a downstream R/W register class adds field setters or a driver adds typed writes:
+- PDO 1 is not at byte 1 in every capability register. TRANSMIT_SOURCE_CAPS (0x32) puts
+  it at byte 3.
+- PPS fields use 100 mV and 50 mA; the other PDO types use 50 mV and 10 mA. Not every
+  Augmented PDO is a PPS PDO: bits 29:28 select the subtype.
+- The port's flags exist only in PDO 1. Bits 29:22 of any other Fixed PDO are reserved,
+  and reading them from the active contract's PDO printed Unconstrained Power: No for a
+  charger that sets it. Decode through `TPS25751Pdo`, which takes the position.
+- Some specification fields are reserved unless another field has a given value. A
+  `debugPrint()` that prints them unconditionally reported "Charging" for a battery that
+  does not exist. Check each typed debug line against the condition column of its table.
 
-- **Encode must use big-endian `setField16BE` for 16-bit registers**: Mirror the decode side — `setField16BE` writes `raw[0]` as MSB. A little-endian encode helper byte-swaps the value, exactly the inverse of the `extractBits16` decode bug
-- **Inverse unit conversion must reuse the class's own decode LSB/offset constant**: An engineering-unit setter (e.g. `setMillivolts`) must invert the *same* `kLsbMv`/`kOffsetMv` the decode accessor uses. A hand-recomputed constant lets encode and decode silently disagree
-- **RMW must preserve reserved bits**: Each setter touches only its field's bits via `setField8`/`setField16BE`. Reject any setter that rebuilds the whole register from a subset of fields — it zeroes reserved bits the device expects unchanged
-- **Field value masked/clamped to width**: The encode helpers mask the value to the field width; confirm the setter does not pre-shift or pass an out-of-range value expecting a wider field. Offset-based setters must guard unsigned underflow (clamp inputs below the offset to 0)
-- **`kAddress` matches the register**: The `static constexpr Registers::Address kAddress` that `writeRegister<T>()`/`updateRegister<T>()` key on must equal the register's actual address; a mismatch writes the right bytes to the wrong register
-- **Self-clearing bits read back 0**: REG_RST, WD_RST, FORCE_* are written as `setX(true)` and cleared by hardware. Do not assert they read back 1, and do not loop expecting them to stay set
-- **Typed writes obey the I2Cw framing**: `len <= 11` and `Length = payload + 1` (counts the offset byte) apply to typed writes exactly as to raw I2Cw — see the I2Cw bullets above
+## Patch loader and EEPROM updater
 
-## Hard-to-Notice Bugs
+Neither class is a register; do not apply the register criteria to them.
 
-- **Off-by-one in bitfield extraction**: Verify bit positions match the TI datasheet exactly — bit 0 vs bit 1 shifts are easy to transpose
-- **Byte order in multi-byte fields**: Confirm endianness matches the target register layout. TPS25751 host registers are little-endian; BQ25798 downstream registers are big-endian. `extractBits16` is always little-endian — do not use it for big-endian downstream registers
-- **Reserved bit masking**: Reserved bits must be masked out before comparing or validating field values; raw reads may have non-zero reserved bits set by hardware
-- **Integer overflow in bitfield math**: Shifting or multiplying `uint8_t` values before casting to a wider type can overflow; cast first
-- **Null pointer on factory miss**: `createRegister()` returns `nullptr` for addresses without a decoder class. Callers must check before dereferencing
-- **Validation tier skipping**: `validateData()` must call `validateBasic()` first; `validateSemantic()` must call `validateData()` first. Breaking this chain produces misleading results
-- **Move-after-use**: After moving a `std::unique_ptr` into a factory return, the source is null. Ensure moved-from objects are not accessed
-- **Incomplete Rule of Five**: If any of copy constructor, copy assignment, move constructor, move assignment, or destructor is user-defined, all five must be considered — missing one leads to double-free or shallow copies
-- **Signed/unsigned comparison warnings**: Comparing `int` loop indices against `size_t` lengths can wrap; use consistent types
-- **PDO count vs data length mismatch**: In capability registers, verify that `getPDOCount()` * bytes-per-PDO + header never exceeds the actual data buffer size
-- **Incomplete transcription of a mirrored register's bit set** *(caught in Batch B)*: When a register mirrors another's layout (INT_MASK1/INT_CLEAR1 mirror INT_EVENT1), a *dropped* named source compiles cleanly and passes every round-trip/preservation test — the missing bit is simply absent, so nothing fails. Spot-checking a few bit offsets will not catch it. **Count the named accessors/setters against the reference class** (e.g. `grep -c extractBits` on both) and reconcile the total, and prefer the granular reference register (INT_EVENT1) over the terser MCP MASK/CLEAR field tables, which may lump maskable bits into "Reserved". Root cause is usually an incomplete bit list in the delegated work order (see plan amendment 3) — the review gate, not the compiler, is the only thing that catches it.
-- **PDO byte-offset shift from an embedded header** *(caught in Batch D)*: Do NOT assume every capability register puts PDO 1 at byte 1. TRANSMIT_SOURCE_CAPS (0x32) inserts two Power-Path bytes after the count byte, so PDO 1 starts at **byte 3** (`getPDO`/`setPDO` offset `3 + index*4`), whereas TRANSMIT_SINK_CAPS (0x33) and the Received caps put PDO 1 at byte 1 (`1 + index*4`). Copy-pasting the Received-caps `getPDO` into the source-side class silently reads/writes PDOs two bytes low, corrupting the Power-Path bytes and shifting every PDO. Verify the register's own field table, and unit-test that PDO 0 lands at the expected byte and does not disturb the header bytes.
-- **Boolean getter/parameter for a multi-bit field silently truncates** *(caught in Batch D)*: A field wider than 1 bit modeled as `bool` (e.g. the Fast-Role-Swap-Required-Current field, bits 24:23, a 2-bit value 0–3) collapses values ≥1 to `true`/1 and cannot round-trip an encoded value of 2 or 3. On a read-only decoder this merely loses information; on a **R/W** register it makes encode↔decode non-invertible. Model any field of width > 1 as `uint8_t`/`uint16_t`, not `bool`. (The read-only `TPS25751ReceivedSinkCaps::getFixedFastRoleSwapCurrent()` returned `bool` until 6627be1; since ADR-013 every capability class reads the field as `TPS25751Pdo::fastRoleSwapCurrent()`.)
-- **A bit position narrowed to 8 bits wraps past bit 255** *(caught in Batch E; base class widened by ADR-012)*: `extractBits*()`, `setBits()`, and `extractEnum*()` took `uint8_t bitPos` until 2026-11-19, so a field at bit 256 or above wrapped to a low bit or was unreachable, with no compiler warning. IO_CONFIG (fields to bit 391) and TX_BATTERY_CAPABILITIES (battery 3 at bits 287:216) carried their own byte assembly to work around it. Since ADR-012 the position is `uint16_t` and those classes call the base helpers. The trap that remains is in the caller: a bit position computed in, stored in, or cast to `uint8_t` (a `uint8_t` local, a `static_cast<uint8_t>(byteOffset * 8)`, a `uint8_t` constant for a bit past 255) wraps before the helper sees it. On any register longer than 31 bytes, check that every computed bit position stays `uint16_t` or wider, and test the highest field by a known value.
-- **`extractBits()` is 8 bits wide; a wider field silently reads 0** *(caught in the Rev. B pass)*: `extractBits()` returns `uint8_t` and rejects `bitLen > 8` by returning 0. Assigning the result to a `uint16_t`/`uint32_t` compiles cleanly, so `extractBits(10, 10)` or `extractBits(0, 32)` looks right and always yields 0. ActiveRDOContract and ActivePDOContract shipped this way from their first version: currents, voltages, power, `activePDO()`, and `hasActiveContract()` all read 0 on hardware. Use `extractBits16` for widths 9-16, `extractBits32` for 17-32, and `extractBits64` above that. The instance `extractBits()` now emits a `TPS_DEBUG_WARN` (category `DEBUG_CAT_PARSING`) when `bitLen > 8`, but that is visible only with warnings compiled in; the review gate is a `grep -n "extractBits(" src/` pass that checks every width argument is 8 or less, plus a known-value test for every multi-bit accessor.
-- **A per-port flag read from a per-offer word** (caught in the 2026-11-22 USB PD cross-check): USB PD puts the port's flags (Dual-Role Power, Unconstrained Power, USB Communications Capable, Dual-Role Data, Unchunked, EPR Capable) only in PDO 1, the vSafe5V PDO (Tables 6.8, 6.9); bits 29:22 of every other Fixed PDO are reserved Device Flags (Table 6.10). Reading them from the PDO at hand, or from the active contract's PDO, returns reserved bits: on the bench, 0x34 printed Unconstrained Power: No from the 20 V PDO of a charger whose PDO 1 sets it. Per-offer fields (Peak Current, voltage, current) do belong to each PDO. When a register holds one PDO word, check which of its fields describe the offer and which describe the port, and take the port's from PDO 1 (in 0x34, First PDO Control Bits). `TPS25751Pdo` encodes this rule; new code should not decode PDO flags itself.
-- **Printing a USB PD field the specification makes conditional** (caught in Batch L of the rev B plan): some specification fields are reserved unless another field has a given value. BSDO Charging Status is reserved when Battery Present is 0 or the capacity is FFFFh; Source_Capabilities_Extended Source Inputs bit 1 is ignored when bit 0 is 0. An accessor may decode the bits regardless, but a `debugPrint()` that prints them unconditionally reports "Charging" or "capacity 0 mWh" for a battery that does not exist, as the first Batch L output did for the 0x7B reset value. Check every typed debug line against the condition column of its specification table.
+- `bundleSize` in the `PBMs` configuration is 4 bytes, least significant first.
+- The burst to 0x30 has no register number and no length byte, and 0x30 there is an I2C
+  device address, not the register of the same value.
+- The last burst chunk is `min(chunk, remaining)` bytes.
+- Each `PatchStartStatus` code maps to its own `PatchLoadStatus` value.
+- The `PBMs` configuration is read back and compared before `PBMs` is issued.
+- `PBMc` goes through `issueCommand()`, and DATA is read only after the 20 ms wait.
+- `PBMe` follows only a burst chunk that is not acknowledged or a rejected `PBMc`, and it
+  does not change the returned status.
+- An EEPROM region is chosen from the region pointers, not from BOOT_FLAGS alone, and no
+  pointer is written before its region has been compared with the image.
 
-## Security Vulnerabilities
+## Tests
 
-For an embedded I2C library, the relevant attack surface is different from web applications:
+- Every new register has a suite, a line in the `kAll` table of
+  `test_TPS25751RegisterFactory`, its typed reads in `test_TPS25751Typed`, and a row in
+  `test_TPS25751RegisterAddress`.
+- Each validation tier has a passing and a failing case, and each multi-bit accessor has
+  a known-value test.
+- A fixture that sets every sub-field to its maximum cannot catch a wrong shift. Each
+  multi-field word needs a fixture with distinct values below the maximum.
+- A round trip is exact only for inputs that are multiples of the field's LSB.
+- Every test function is listed in `RUN_TEST`, and each `TEST_ASSERT_*` can fail.
+- Coverage of each new file is above 90% in `test/coverage.sh`.
+- A cached build proves nothing about warnings. `platformio.ini` sets a build cache, so
+  unchanged objects are retrieved without their warnings. A warning-free claim needs
+  `PLATFORMIO_BUILD_CACHE_DIR=<empty scratch dir> pio run -e example-read-registers`
+  after `-t clean`, with a `Compiling` line for each new source file in the log.
 
-- **Buffer overflow from I2C data**: Never use the length byte from the wire directly as a buffer index or allocation size without bounds checking against the known maximum register size
-- **Integer overflow in size calculations**: `pdoCount * 4` can overflow `uint8_t`; promote to `size_t` before arithmetic
-- **Unvalidated enum values from hardware**: Hardware may return out-of-range enum values. Code that indexes arrays or switch statements using raw hardware values without range checks can access out-of-bounds memory
-- **Hardcoded I2C addresses**: I2C device addresses should use the named constants in the register map, not magic numbers, to avoid silent address collisions
+## Leftovers
 
-## Standards Compliance
+- `Serial.print` calls outside `debugPrint()`.
+- A validation method that returns `true` as a placeholder.
+- A field omitted without a comment saying why.
+- A changed value of an existing `Address` enumerator or status enumerator. Additions go
+  at the end.
 
-Verify that new code follows all mandatory standards from [STANDARDS.md](STANDARDS.md):
+## Downstream device drivers
 
-- **Class structure**: Inherits from `TPS25751Register`; implements all pure virtual methods (`getAddress`, `getExpectedSize`, `isReadOnly`, `validateBasic`, `validateData`, `validateSemantic`, `debugPrint`)
-- **Three-tier validation**: All three levels implemented and chained correctly
-- **Debug print format**: Follows the exact `========================================` header/footer format with `F()` macros
-- **Factory integration**: For host registers — address present in `TPS25751Registers::Address` (with `RegisterInfo` size), forward declaration added, all `createRegister()` variants updated with a `case` for the new address. For downstream device registers — address present in `<Device>::Registers::Address`, all `<Device>::RegisterFactoryImpl::createRegister()` variants have a `case`; the host factory is untouched
-- **Magic numbers**: Bitfield masks and shift counts defined as `static constexpr` named constants, not inline literals
-- **Doxygen**: Every public method has `@brief`, `@return`, and a `@see` reference to the TI datasheet section
-
-## Unintended Code
-
-- **Debug print statements left in**: `Serial.print` calls that are not inside `debugPrint()` or guarded by a debug flag
-- **Commented-out register fields**: Fields commented out because "not needed yet" — either implement them or document why they're omitted
-- **TODO/FIXME without tracking**: Incomplete work must be tracked in the implementation plan, not left as comments
-- **Hardcoded test data in production code**: Magic byte arrays that are clearly test vectors
-- **Disabled validation**: Validation methods that always `return true` as a placeholder
-- **Builder pattern usage**: `TPS25751RegisterBuilder` is deprecated (ADR-001). New code must not use it
-
-## Code Style
-
-- **Inconsistent naming**: All register classes use `TPS25751[RegisterName]` prefix; factory enums use `UPPER_SNAKE_CASE`; accessors use `get[FieldName]()`
-- **String duplication**: The same string literal appearing in multiple `Serial.print` calls — extract to a helper function or use a lookup table
-- **Missing `override` keyword**: All overridden virtual methods must be marked `override` to catch base class signature changes at compile time
-- **Raw pointer ownership ambiguity**: If a raw pointer is owning, it must be converted to `std::unique_ptr`. Raw pointers are for non-owning references only
-- **Excessive nesting**: Validation logic with more than 2-3 levels of nesting should be flattened with early returns
-- **Unused `#include`s**: Unnecessary headers increase compile time and can cause unexpected namespace pollution
-
-## Testing
-
-- **Coverage below 90%**: Every register class requires >90% code coverage. New code without tests should be blocked
-- **Missing edge case tests**: At minimum, test all-zeros, all-ones, and each field at its maximum valid value
-- **Missing negative tests**: Each validation level must have tests for both passing and failing cases
-- **Factory creation untested**: Every new register must include factory creation tests (with and without data)
-- **Tests that always pass**: Watch for tests with incorrect `EXPECT_*` calls that never actually exercise the failure path
-- **A cached build proves nothing about warnings** (caught in Batch G of the rev B plan): `platformio.ini` sets `build_cache_dir = .pio/buildcache`, so `pio run` and even `pio run -t clean` followed by `pio run` retrieve unchanged objects from the cache ("Retrieved ... from cache") and print none of their warnings. A "warning-free" claim needs a compile that bypasses the cache, for example `PLATFORMIO_BUILD_CACHE_DIR=<empty scratch dir> pio run -e example-read-registers` after `-t clean`, with the log showing a `Compiling` line for each new source file
-- **A saturating fixture cannot catch a wrong shift** (caught in Batch L of the rev B plan): a packed-word fixture such as 0xFFF9 sets every sub-field to its maximum, so a decode with the wrong shift or mask can still produce the expected numbers. For each multi-field word, add one fixture whose sub-fields hold distinct, non-maximal values, and derive the expected values by hand from the specification table
-
-## Additional Concerns
-
-- **Performance**: Unnecessary copies of register data (pass `const TPS25751Register*` or `const TPS25751Register&` instead of by value)
-- **Backwards compatibility**: Changes to `TPS25751Registers::Address` enum values (not just additions) break binary compatibility with serialized data
-- **Missing datasheet reference**: Any bitfield constant or enum value without a `@see` TI TRM section reference makes future verification impossible
-- **Hardware test status**: Note in the PR whether changes have been validated on physical TPS25751 hardware
+Review traps for drivers on the I2Cc bus are in `docs/engineering/CONVENTIONS.md` of the
+sibling `lib/BQ25798` repository. One originates here: `extractBits16()` is
+little-endian, so it byte-swaps a big-endian device's 16-bit register.

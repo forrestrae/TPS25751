@@ -312,7 +312,7 @@ void test_debug_print_spr_avs_path()
 //   (bits 31:30 00b), 20 V (bits 19:10 = 400), 4.7 A (bits 9:0 = 470), Table 6.10.
 // - Bits 41:32 equal bits 29:20 of wire PDO 1, 0x0981912C: 0x098, which is bit 27
 //   Unconstrained Power, bit 24 Unchunked, bit 23 EPR Capable, Peak Current 00b
-//   (Table 6.8). The TRM does not state this mapping (AGENTS.md, ACTIVE_PDO_CONTRACT).
+//   (Table 6.8). The TRM does not state this mapping (TPS25751ActivePDOContract.h).
 
 void test_capture_active_pdo_is_the_requested_wire_pdo()
 {

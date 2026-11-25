@@ -92,8 +92,8 @@ constexpr uint32_t PBM_PTCH_POLL_CAP_MS = 5000;
 
 /// Longest time (ms), from the first DATA read after PBMc, that failed DATA
 /// reads are retried. Neither TI document bounds this wait; 5000 ms is a
-/// choice. The only timing reference on the test board is GAID to APP at about
-/// 1.9 s.
+/// choice. The only timing reference measured on hardware is GAID to APP at
+/// about 1.9 s.
 constexpr uint32_t PBM_DATA_READ_CAP_MS = 5000;
 
 /// Longest time (ms), from the first MODE read after the DATA check, that MODE

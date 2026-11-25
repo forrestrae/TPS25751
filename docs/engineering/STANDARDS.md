@@ -1,835 +1,144 @@
-# TPS25751 Library - Implementation Standards
-
-**Last Updated:** 2025-10-20
-**Status:** Active
-
-## Overview
-
-This document defines the mandatory implementation standards for all TPS25751 register classes. These standards ensure consistency, maintainability, and quality across the entire library.
-
-**IMPORTANT:** All register implementations MUST follow these standards. Deviations require explicit justification and approval.
-
-## Table of Contents
-
-1. [Class Structure](#class-structure)
-2. [Factory Integration](#factory-integration)
-3. [Validation Requirements](#validation-requirements)
-4. [Debug Output Format](#debug-output-format)
-5. [Unit Testing Requirements](#unit-testing-requirements)
-6. [Memory Management](#memory-management)
-7. [Code Documentation](#code-documentation)
-8. [Anti-Patterns](#anti-patterns)
-
-## Class Structure
-
-> **Note on the current codebase:** the template below shows the intended
-> long-term shape (`getAddress()`/`getExpectedSize()`/`isReadOnly()`,
-> `validateBasic()`/`validateData()`/`validateSemantic()`). The actual base class
-> (`TPS25751Register`) and all implemented registers — including `TPS25751Command`
-> and `TPS25751Data` — instead expose `isValid()`, `isValidSize(expectedSize)`,
-> `hasValidData()` from the base, and only override the single virtual
-> `isSemanticallyValid() const` (chaining the base checks internally) plus
-> `debugPrint(Stream& s = Serial) const override`. New register classes should
-> match this **real, in-use** pattern, not the template's separate three-method
-> spelling, until/unless the base class itself is migrated.
-
-### Mandatory Class Template
-
-Every register class MUST follow this structure:
-
-```cpp
-class TPS25751[RegisterName] : public TPS25751Register {
-public:
-    // Constructors
-    TPS25751[RegisterName]();
-    TPS25751[RegisterName](const uint8_t* data, size_t length);
-
-    // Rule of Five (implement if managing resources)
-    ~TPS25751[RegisterName]() override;
-    TPS25751[RegisterName](const TPS25751[RegisterName]& other);
-    TPS25751[RegisterName](TPS25751[RegisterName]&& other) noexcept;
-    TPS25751[RegisterName]& operator=(const TPS25751[RegisterName]& other);
-    TPS25751[RegisterName]& operator=(TPS25751[RegisterName]&& other) noexcept;
-
-    // Register interface - MUST override
-    uint8_t getAddress() const override;
-    uint8_t getExpectedSize() const override;
-    bool isReadOnly() const override;
-
-    // Validation - MUST override all three
-    bool validateBasic() const override;
-    bool validateData() const override;
-    bool validateSemantic() const override;
-
-    // Debug - MUST override
-    void debugPrint() const override;
-
-    // Register-specific accessors
-    // ... (based on register fields)
-
-private:
-    // Helper methods for bitfield extraction
-    // Use the base-class extractBits*() helpers for multi-bit fields
-};
-```
-
-### Constructor Requirements
-
-**Default Constructor:**
-```cpp
-TPS25751[RegisterName]::TPS25751[RegisterName]()
-    : TPS25751Register(TPS25751Registers::Address::[REGISTER_NAME],
-                       TPS25751Registers::Registers::[REGISTER_NAME].size) {
-    // Initialize with default/zero values
-}
-```
-
-**Data Constructor:**
-```cpp
-TPS25751[RegisterName]::TPS25751[RegisterName](const uint8_t* data, size_t length)
-    : TPS25751Register(TPS25751Registers::Address::[REGISTER_NAME],
-                       TPS25751Registers::Registers::[REGISTER_NAME].size,
-                       data, length) {
-    // Data is already copied by base class
-}
-```
-
-### Rule of Five
-
-Implement the Rule of Five if:
-- Managing dynamic resources beyond what base class handles
-- Need custom copy/move behavior
-- Need custom cleanup
-
-If base class handles everything, you can use `= default`:
-
-```cpp
-~TPS25751Status() override = default;
-TPS25751Status(const TPS25751Status& other) = default;
-TPS25751Status(TPS25751Status&& other) noexcept = default;
-TPS25751Status& operator=(const TPS25751Status& other) = default;
-TPS25751Status& operator=(TPS25751Status&& other) noexcept = default;
-```
-
-## Factory Integration
-
-Registers are identified solely by their hardware address
-(`TPS25751Registers::Address`) — there is no separate type enum. The factory
-dispatches object creation directly on the address.
-
-### Step 1: Add the Address
-
-A new register adds four entries to `TPS25751RegisterAddress.h`:
-
-1. An `Address` enumerator, in address order, with a `///` comment giving the TRM
-   title and rev B page, for example
-   `/// PD3 Configuration (SLVUCR8B Rev. B, p.46).`
-2. A `Registers::` `RegisterInfo` constant pairing the address with its size in
-   bytes. The size is the TRM width rounded up to whole bytes, unless hardware
-   reports a different length byte (see CONSTRAINTS.md).
-3. A case in `getRegisterSize()`.
-4. A case in `getRegisterInfo()`.
-
-Check the address first. Registers the library already decodes have all four
-entries, and a register that only lacked a class needs none of them.
-
-### Step 2: Add Forward Declaration
-
-At the top of `TPS25751RegisterFactory.h`:
-
-```cpp
-class TPS25751[NewRegisterName];
-```
-
-### Step 3: Implement Factory Helper Methods
-
-In `TPS25751RegisterFactoryImpl` (both .h and .cpp):
-
-```cpp
-// In .h - private section
-std::unique_ptr<TPS25751Register> create[NewRegisterName]Register() const;
-std::unique_ptr<TPS25751Register> create[NewRegisterName]Register(const uint8_t* data, size_t length) const;
-
-// In .cpp
-std::unique_ptr<TPS25751Register> TPS25751RegisterFactoryImpl::create[NewRegisterName]Register() const {
-    return std::make_unique<TPS25751[NewRegisterName]>();
-}
-
-std::unique_ptr<TPS25751Register> TPS25751RegisterFactoryImpl::create[NewRegisterName]Register(
-    const uint8_t* data, size_t length) const {
-    return std::make_unique<TPS25751[NewRegisterName]>(data, length);
-}
-```
-
-### Step 4: Add a case to each createRegister() switch
-
-Add one `case` keyed on the register's `Address` to each of the three
-`createRegister()` variants (no-arg, `(data, length)`, and `(const RegisterInfo&)`):
-
-```cpp
-std::unique_ptr<TPS25751Register> TPS25751RegisterFactoryImpl::createRegister(TPS25751Registers::Address addr) {
-    switch (addr) {
-        // ... existing cases ...
-        case TPS25751Registers::Address::[NEW_REGISTER_ADDRESS]:
-            return create[NewRegisterName]Register();
-        // ...
-    }
-}
-```
-
-Addresses without a `case` fall through to `default:` and return `nullptr`, which is
-how un-decoded registers are reported.
-
-**COMMAND (0x08) and DATA (0x09)** now have classes (`TPS25751Command`,
-`TPS25751Data`) wired in exactly this way — see them for a worked example of the
-four-step checklist above. `TPS25751Data` is a generic 64-byte register with **no
-fixed field layout** (its interpretation depends on which 4CC command-task is in
-flight; see `TPS25751::executeCommand()` and `TPS25751DownstreamDevice` in
-ARCHITECTURE.md), so its semantic validation is intentionally minimal — just the
-inherited size/non-null checks (`isValid() && isValidSize(64)`) — rather than
-field-specific checks. `TPS25751Command`'s semantic validation accepts the clear
-(all-zero) state, the `"!CMD"` rejection code, or any 4-character printable-ASCII
-task code.
-
-### Downstream Device Register Classes
-
-Register classes for downstream devices (e.g. `BQ25798::REG00h` in the sibling
-`lib/BQ25798` repo, the reference implementation) follow the **same
-mandatory template** as host-side registers: default constructor + `(const uint8_t*,
-size_t)` constructor, three-tier validation (or the equivalent `isSemanticallyValid()`
-chain), `debugPrint()` using `F()`. They inherit `TPS25751Register` — not any
-TPS25751-specific subclass. Read-only registers are decode-only; read/write registers
-add field setters and a `kAddress` per the **Write-encoder pattern** below.
-
-The per-device factory mirrors the host factory exactly: `<Device>::RegisterFactory`
-(abstract interface) → `<Device>::RegisterFactoryImpl` (switch on
-`<Device>::Registers::Address`, `default` returns `nullptr`) → `<Device>::Factory`
-(singleton). The host `TPS25751RegisterFactory` and its switch statements are
-**not modified** when adding a downstream device.
-
-#### Big-Endian 16-Bit Assembly Rule
-
-`TPS25751Register::extractBits16` is **little-endian** (assembles `raw[0]` as LSB).
-Downstream devices such as the BQ25798 store 16-bit registers big-endian. Always
-assemble multi-byte downstream fields manually:
-
-```cpp
-// CORRECT for big-endian downstream devices (e.g. BQ25798 16-bit registers)
-uint16_t raw16 = (static_cast<uint16_t>(data_[0]) << 8) | data_[1];
-
-// WRONG — extractBits16 is little-endian; silently byte-swaps the value
-uint16_t raw16 = extractBits16(0, 16);
-```
-
-For signed ADC channels (e.g. BQ25798 IBUS/IBAT/TDIE), reinterpret the assembled
-`uint16_t` as `int16_t` for correct 2's-complement interpretation:
-
-```cpp
-int16_t current_raw = static_cast<int16_t>(raw16);
-```
-
-#### Write-encoder pattern (read/write downstream registers)
-
-A read/write downstream register adds *encode* support alongside its decode accessors.
-The model is **read-modify-write of a value object**: the register owns its raw bytes
-(`TPS25751Register::raw()` / `size()`), a setter mutates only its field's bits, and the
-whole buffer is written back via `Device::writeRegister<T>()`. See ADR-009 in
-[ARCHITECTURE.md](ARCHITECTURE.md). Rules:
-
-- **Add `static constexpr Registers::Address kAddress`** to the class — the single
-  source of register identity that `writeRegister<T>()` / `updateRegister<T>()` key on.
-- **One setter per decode accessor (1:1).** Mirror the read API: a `fooRaw()` decoder
-  gets `setFooRaw(...)`; a `millivolts()` decoder gets `setMillivolts(...)`. Use the
-  `set<DecoderName>` naming so the pair is obvious.
-- **Guard `if (!isValid()) return;`** at the top of every setter (matches the decoders'
-  validity discipline).
-- **Use `setField8` / `setField16BE`** (`include/BQ25798/BQ25798Encode.h`, `lib/BQ25798` repo) — never write
-  the raw byte directly. They read-modify-write only the field's bits (reserved and
-  sibling bits preserved) and mask the value to the field width. `setField16BE` is
-  **big-endian** to match the decode-side `(raw[0]<<8)|raw[1]` assembly — never a
-  little-endian helper.
-- **Invert the class's *own* decode constant.** An engineering-unit setter reuses the
-  same `kLsbMv` / `kOffsetMv` its decode accessor uses (e.g. `VREG = mV / kLsbMv`), so
-  encode and decode can never drift apart.
-- **Guard unsigned underflow on offset conversions.** Where decode adds an offset
-  (`mV = kOffset + code * kLsb`), the inverse must clamp inputs below the offset to 0
-  before subtracting (e.g. `(mV <= kOffsetMv) ? 0 : (mV - kOffsetMv) / kLsbMv`).
-- **Self-clearing command bits** (e.g. `WD_RST`, `REG_RST`, `FORCE_*`) get a plain
-  `setX(bool)` that sets the bit; the device clears it in hardware, so it reads back 0.
-
-Canonical examples (sibling `lib/BQ25798` repo): `BQ25798ChargerControl0`
-(single-bit setters), `BQ25798ChargeVoltageLimit` (16-bit big-endian + unit
-inversion), `BQ25798MinimalSystemVoltage` (offset inversion with underflow guard).
-
-### Host-register write path (Batch B onward)
-
-The write-encoder pattern above was written for **downstream** device registers,
-whose `setField8`/`setField16BE` helpers live in the `lib/BQ25798` repo. Host R/W
-registers (`TPS25751SleepControl` and the Batch B+
-interrupt registers) use the host side's own equivalents, landed before Batch B:
-
-- **`TPS25751Register::setBits(bitPos, bitLen, value)`** — the base-class write
-  primitive, symmetric to `extractBits()`. It guards `!isValid()`,
-  read-modify-writes **only** the field's bits (reserved and sibling bits
-  preserved), and masks `value` to `bitLen` bits so an over-wide value cannot
-  bleed into a neighbour. **Every host bitfield setter builds on it** instead of
-  hand-poking `_raw[...]`; there are no per-class field masks to keep in sync, so
-  the "hand-restated field-position mask drifts" defect class is designed out.
-  Fields wider than 32 bits with no sub-structure to preserve are written
-  byte-wise by the owning class instead. `bitPos` is `uint16_t` (ADR-012), so
-  `setBits()` and `extractBits*()` reach any field in the buffer, including past
-  bit 255; keep computed bit positions in `uint16_t` or wider, never `uint8_t`.
-- **`static constexpr TPS25751Registers::Address kAddress`** on every host R/W
-  register class — the single source of register identity.
-- **`TPS25751::writeRegister<T>(const T&)`** (keyed on `T::kAddress`) is the write
-  path: it validates `isValid()` + `isValidSize()` and writes the raw bytes back
-  to the register the class *is*. Because the address comes from the class, a
-  class can only be written to its own register — same-size mis-pairing (INT_MASK1
-  0x16 vs INT_CLEAR1 0x18, both 11 B) is unrepresentable. Any
-  `TPS25751::write<Register>()` convenience method is a thin forwarder to it.
-
-Setter rules (unchanged in spirit, now enforced by the primitive):
-
-- Guard `if (!isValid()) return;` — `setBits()` already does this, so a setter
-  that is *only* a `setBits()` call inherits the guard.
-- One setter per decode accessor (1:1), named `set<DecoderName>`.
-- Never assign a whole byte from one field.
-
-`TPS25751SleepControl` is the worked example: `setSleepModeAllowed()` /
-`setSleepTime()` are one `setBits()` call each, and `writeSleepControl()` forwards
-to `writeRegister<TPS25751SleepControl>()`.
-
-## Validation Requirements
-
-All register classes MUST implement three levels of validation:
-
-### 1. Basic Validation
-
-**Purpose:** Check fundamental data integrity
-**When:** Always run first
-
-**Requirements:**
-- Verify data length matches expected size
-- Check that data pointer is not null (if applicable)
-- Verify register address is correct
-
-**Example:**
-```cpp
-bool TPS25751Status::validateBasic() const {
-    // Check data length
-    if (getDataLength() != getExpectedSize()) {
-        return false;
-    }
-
-    // Check address
-    if (getAddress() != static_cast<uint8_t>(TPS25751Registers::Address::STATUS)) {
-        return false;
-    }
-
-    return true;
-}
-```
-
-### 2. Data Validation
-
-**Purpose:** Verify field-level data validity
-**When:** After basic validation passes
-
-**Requirements:**
-- Check reserved bits are 0
-- Verify enum values are within valid ranges
-- Check field constraints (e.g., max values)
-- Validate that multi-bit fields don't exceed their bit width
-
-**Example:**
-```cpp
-bool TPS25751Status::validateData() const {
-    if (!validateBasic()) {
-        return false;
-    }
-
-    // Check reserved bits (example: bits 7-6 of byte 0 must be 0)
-    if ((data_[0] & 0xC0) != 0) {
-        return false;
-    }
-
-    // Check enum validity
-    uint8_t connectionState = extractBits(0, 3, 0);
-    if (connectionState > 0x07) {  // Max valid value
-        return false;
-    }
-
-    return true;
-}
-```
-
-### 3. Semantic Validation
-
-**Purpose:** Verify logical consistency across fields
-**When:** After data validation passes
-
-**Requirements:**
-- Check inter-field dependencies
-- Verify state combinations make sense
-- Validate counts match actual data (e.g., PDO count matches PDO array)
-
-**Example:**
-```cpp
-bool TPS25751ReceivedSourceCaps::validateSemantic() const {
-    if (!validateData()) {
-        return false;
-    }
-
-    // Check PDO count consistency
-    uint8_t pdoCount = getPDOCount();
-    if (pdoCount > 7) {  // USB PD max
-        return false;
-    }
-
-    // Verify we have data for all advertised PDOs
-    size_t expectedSize = 1 + (pdoCount * 4);  // 1 byte count + 4 bytes per PDO
-    if (getDataLength() < expectedSize) {
-        return false;
-    }
-
-    return true;
-}
-```
-
-## Debug Output Format
-
-All register classes MUST implement `debugPrint()` following this exact format:
-
-### Standard Format
-
-```
-========================================
-[REGISTER NAME] (0xXX) - XX bytes
-========================================
-Field Name 1: value (0xHEX)
-Field Name 2: value
-Field Name 3: descriptive text
-  Subfield 1: value
-  Subfield 2: value
-========================================
-```
-
-### Implementation Example
-
-```cpp
-void TPS25751Status::debugPrint() const {
-    Serial.println(F("========================================"));
-    Serial.print(F("STATUS (0x"));
-    Serial.print(getAddress(), HEX);
-    Serial.print(F(") - "));
-    Serial.print(getDataLength());
-    Serial.println(F(" bytes"));
-    Serial.println(F("========================================"));
-
-    // Print each field with descriptive name
-    Serial.print(F("Connection State: "));
-    Serial.print(getConnectionStateString());
-    Serial.print(F(" (0x"));
-    Serial.print(getConnectionState(), HEX);
-    Serial.println(F(")"));
-
-    Serial.print(F("VBUS Status: "));
-    Serial.println(getVBUSStatus() ? F("Present") : F("Not Present"));
-
-    // ... more fields ...
-
-    Serial.println(F("========================================"));
-}
-```
-
-### Guidelines
-
-- Use `F()` macro for string literals to save RAM
-- Include hex values for numeric fields
-- Provide human-readable interpretations
-- Indent sub-fields with 2 spaces
-- Keep alignment consistent
-- Always print field names, even if value is unknown
-- Print fixed-width hex with `TPS25751Register::printHex(s, value, digits)`, which
-  zero-pads to exactly `digits` hex digits (`Stream`'s `HEX` output drops leading
-  zeros). Do not add a per-class hex helper.
-- Decode a USB PD encoding that more than one register carries through the shared
-  definition in `TPS25751UsbPd.h` (the load step rate and the overload word of
-  0x77 and 0x7E), so the registers cannot drift apart.
-
-## Unit Testing Requirements
-
-Every register class MUST have comprehensive unit tests with >90% code coverage.
-
-### Required Test Categories
-
-#### 1. Constructor Tests
-
-```cpp
-TEST(TPS25751StatusTest, DefaultConstructor) {
-    TPS25751Status status;
-    EXPECT_EQ(status.getAddress(), 0x1A);
-    EXPECT_EQ(status.getExpectedSize(), 5);
-    EXPECT_TRUE(status.isReadOnly());
-}
-
-TEST(TPS25751StatusTest, DataConstructor) {
-    uint8_t data[] = {0x01, 0x02, 0x03, 0x04, 0x05};
-    TPS25751Status status(data, sizeof(data));
-    EXPECT_EQ(status.getDataLength(), 5);
-    EXPECT_TRUE(status.validateBasic());
-}
-```
-
-#### 2. Validation Tests
-
-```cpp
-TEST(TPS25751StatusTest, ValidateBasic_CorrectLength) {
-    uint8_t data[5] = {0};
-    TPS25751Status status(data, 5);
-    EXPECT_TRUE(status.validateBasic());
-}
-
-TEST(TPS25751StatusTest, ValidateBasic_IncorrectLength) {
-    uint8_t data[3] = {0};
-    TPS25751Status status(data, 3);
-    EXPECT_FALSE(status.validateBasic());
-}
-
-TEST(TPS25751StatusTest, ValidateData_ReservedBitsZero) {
-    uint8_t data[] = {0x00, 0x00, 0x00, 0x00, 0x00};
-    TPS25751Status status(data, 5);
-    EXPECT_TRUE(status.validateData());
-}
-
-TEST(TPS25751StatusTest, ValidateData_ReservedBitsSet) {
-    uint8_t data[] = {0xC0, 0x00, 0x00, 0x00, 0x00};  // Reserved bits set
-    TPS25751Status status(data, 5);
-    EXPECT_FALSE(status.validateData());
-}
-```
-
-#### 3. Accessor Tests
-
-Test EVERY public accessor method:
-
-```cpp
-TEST(TPS25751StatusTest, GetConnectionState) {
-    uint8_t data[] = {0x05, 0x00, 0x00, 0x00, 0x00};  // State = 5
-    TPS25751Status status(data, 5);
-    EXPECT_EQ(status.getConnectionState(), 5);
-}
-
-TEST(TPS25751StatusTest, GetConnectionStateString) {
-    uint8_t data[] = {0x05, 0x00, 0x00, 0x00, 0x00};
-    TPS25751Status status(data, 5);
-    EXPECT_STREQ(status.getConnectionStateString(), "Connected.UFP");
-}
-```
-
-#### 4. Edge Case Tests
-
-```cpp
-TEST(TPS25751StatusTest, AllBitsSet) {
-    uint8_t data[] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
-    TPS25751Status status(data, 5);
-    // Verify behavior with all bits set
-}
-
-TEST(TPS25751StatusTest, AllBitsZero) {
-    uint8_t data[] = {0x00, 0x00, 0x00, 0x00, 0x00};
-    TPS25751Status status(data, 5);
-    // Verify behavior with all bits zero
-}
-
-TEST(TPS25751StatusTest, BoundaryValues) {
-    // Test max valid values for each field
-}
-```
-
-#### 5. Factory Creation Tests
-
-```cpp
-TEST(TPS25751StatusTest, FactoryCreation) {
-    auto reg = TPS25751Factory::getInstance().createRegister(TPS25751Registers::Address::STATUS);
-    EXPECT_NE(reg, nullptr);
-
-    // Cast and verify type
-    auto* status = static_cast<TPS25751Status*>(reg.get());
-    EXPECT_NE(status, nullptr);
-    EXPECT_EQ(status->getAddress(), 0x1A);
-}
-
-TEST(TPS25751StatusTest, FactoryCreationWithData) {
-    uint8_t data[] = {0x01, 0x02, 0x03, 0x04, 0x05};
-    auto reg = TPS25751Factory::getInstance().createRegister(
-        TPS25751Registers::Address::STATUS, data, sizeof(data));
-    EXPECT_NE(reg, nullptr);
-    EXPECT_EQ(reg->getDataLength(), 5);
-}
-```
-
-### Test Organization
-
-```
-test/
-  test_TPS25751Status/
-    test_TPS25751Status.cpp      # Main test file
-  test_TPS25751Mode/
-    test_TPS25751Mode.cpp
-  ...
-```
-
-## Memory Management
-
-### RAII Principles
-
-**Always follow RAII (Resource Acquisition Is Initialization):**
-
-✅ **DO:**
-```cpp
-class TPS25751Status : public TPS25751Register {
-public:
-    TPS25751Status(const uint8_t* data, size_t length)
-        : TPS25751Register(address, size, data, length) {
-        // Base class handles data copying
-        // No manual memory management needed
-    }
-};
-```
-
-❌ **DON'T:**
-```cpp
-class TPS25751Status : public TPS25751Register {
-private:
-    uint8_t* manualBuffer_;  // Manual memory management
-public:
-    TPS25751Status() {
-        manualBuffer_ = new uint8_t[5];  // Manual allocation - avoid!
-    }
-};
-```
-
-### Smart Pointers
-
-**Use `std::unique_ptr` for ownership:**
-
-✅ **DO:**
-```cpp
-std::unique_ptr<TPS25751Register> reg =
-    TPS25751Factory::getInstance().createRegister(TPS25751Registers::Address::STATUS);
-```
-
-**Use raw pointers ONLY for non-owning references:**
-
-```cpp
-void processRegister(const TPS25751Register* reg) {  // Non-owning
-    // Use reg, but don't delete it
-}
-```
-
-### Move Semantics
-
-**Prefer moving over copying for efficiency:**
-
-```cpp
-// Move constructor
-TPS25751Status(TPS25751Status&& other) noexcept
-    : TPS25751Register(std::move(other)) {
-    // Move any additional members
-}
-
-// Move assignment
-TPS25751Status& operator=(TPS25751Status&& other) noexcept {
-    if (this != &other) {
-        TPS25751Register::operator=(std::move(other));
-        // Move any additional members
-    }
-    return *this;
-}
-```
-
-### Platform Constraint: No RTTI
-
-**CRITICAL:** Platform compiles with `-fno-rtti`
-
-❌ **NEVER use:**
-```cpp
-auto* status = dynamic_cast<TPS25751Status*>(reg.get());  // FAILS!
-if (typeid(*reg) == typeid(TPS25751Status)) { }          // FAILS!
-```
-
-✅ **ALWAYS use:**
-```cpp
-auto* status = static_cast<TPS25751Status*>(reg.get());  // OK
-```
-
-**Safe casting pattern:**
-```cpp
-// Dispatch on the register's address (the single register identity)
-if (reg->getAddress() == static_cast<uint8_t>(TPS25751Registers::Address::STATUS)) {
-    auto* status = static_cast<TPS25751Status*>(reg.get());
-    // Now safe to use status
-}
-```
-
-## Code Documentation
-
-### Doxygen Comments Required
-
-**Every public method MUST have Doxygen documentation:**
-
-```cpp
-/**
- * @brief Get the Type-C connection state
- *
- * The connection state indicates the current state of the Type-C state machine,
- * including whether the device is connected, the role (UFP/DFP), and debug
- * accessory mode status.
- *
- * @return uint8_t Connection state value (0-7)
- *
- * @see TI TPS25751 Technical Reference Manual, Section 8.6.2.2, Table 8-35
- *
- * Possible values:
- * - 0x00: Not connected
- * - 0x01: Connected.DFP
- * - 0x02: Connected.UFP
- * - 0x03: Connected.Debug Accessory (DFP)
- * - 0x04: Connected.Debug Accessory (UFP)
- * - 0x05: Audio Accessory
- * - 0x06-0x07: Reserved
- */
-uint8_t getConnectionState() const;
-```
-
-### Class Documentation
-
-```cpp
-/**
- * @file TPS25751Status.h
- * @brief STATUS register (0x1A) class implementation
- *
- * The STATUS register provides real-time information about the Type-C connection
- * state, VBUS status, power role, data role, and plug orientation.
- *
- * Register Details:
- * - Address: 0x1A
- * - Size: 5 bytes
- * - Access: Read-only
- *
- * @see TI TPS25751 Technical Reference Manual, Section 8.6.2.2
- */
-class TPS25751Status : public TPS25751Register {
-    // ...
-};
-```
-
-### Reference Documentation
-
-**Always reference:**
-- Datasheet section numbers
-- Bit field names from datasheet
-- USB PD specification sections (for PD-related registers)
-
-## Anti-Patterns
-
-### ❌ Things You Must NEVER Do
-
-#### 1. No Dynamic Cast
-```cpp
-// WRONG - will not compile
-auto* status = dynamic_cast<TPS25751Status*>(reg.get());
-```
-
-#### 2. No Type ID
-```cpp
-// WRONG - will not compile
-if (typeid(*reg) == typeid(TPS25751Status)) { }
-```
-
-#### 3. No static_assert(false) in Templates
-```cpp
-// WRONG - causes compilation errors
-template<typename T>
-void foo() {
-    static_assert(false, "Not implemented");  // Fails immediately!
-}
-```
-
-Use SFINAE instead:
-```cpp
-template<typename T, typename = void>
-struct is_register : std::false_type {};
-
-template<typename T>
-struct is_register<T, std::void_t<decltype(T::getAddress())>> : std::true_type {};
-```
-
-#### 4. No Manual Memory Management
-```cpp
-// WRONG
-uint8_t* buffer = new uint8_t[64];
-// ... use buffer ...
-delete[] buffer;  // Easy to forget or leak!
-```
-
-#### 5. No Magic Numbers
-```cpp
-// WRONG
-uint8_t state = data_[0] & 0x07;
-
-// RIGHT
-static constexpr uint8_t CONNECTION_STATE_MASK = 0x07;
-uint8_t state = data_[0] & CONNECTION_STATE_MASK;
-```
-
-#### 6. No String Duplication in Flash
-```cpp
-// WRONG - wastes flash memory
-Serial.println("Connection State: Not Connected");
-// ... later ...
-Serial.println("Connection State: Not Connected");  // Duplicate!
-
-// RIGHT - use helper functions or lookup tables
-const char* getConnectionStateString() const;
-```
-
-## Checklist for New Register Implementation
-
-Use this checklist for every new register:
-
-- [ ] Class inherits from `TPS25751Register`
-- [ ] Default and data constructors implemented
-- [ ] Rule of Five implemented (or defaulted)
-- [ ] `getAddress()` returns correct register address
-- [ ] `getExpectedSize()` returns correct size
-- [ ] `isReadOnly()` returns correct access type
-- [ ] `validateBasic()` checks length and address
-- [ ] `validateData()` checks reserved bits and field ranges
-- [ ] `validateSemantic()` checks logical consistency
-- [ ] `debugPrint()` follows standard format
-- [ ] All accessor methods have Doxygen comments
-- [ ] Register address present in `TPS25751Registers::Address` (+ `RegisterInfo` size entry)
-- [ ] Forward declaration added to factory header
-- [ ] Factory creation methods implemented
-- [ ] All `createRegister()` variants handle the new address (`case` added to each switch)
-- [ ] Unit tests written with >90% coverage
-- [ ] Constructor tests pass
-- [ ] Validation tests pass
-- [ ] Accessor tests pass
-- [ ] Edge case tests pass
-- [ ] Factory creation tests pass
-- [ ] No compiler warnings
-- [ ] Compiles successfully on Teensy platform
-- [ ] Hardware tested (if hardware available)
-
-## Revision History
-
-| Version | Date | Author | Changes |
-|---------|------|--------|---------|
-| 1.0 | 2025-10-20 | Claude Code | Initial standards document extracted from implementation plan |
-| 1.1 | 2026-06-24 | Claude Code | Added downstream device register class conventions and big-endian 16-bit assembly rule (ADR-008) |
-| 1.2 | 2026-11-19 | Claude Code | `setBits()`/`extractBits*()` take a 16-bit bit position (ADR-012); shared `printHex()` and `TPS25751UsbPd.h` for debug output and shared USB PD decode |
-
-*These standards are mandatory. Adherence ensures library quality and maintainability.*
+# TPS25751 library: implementation standards
+
+The code is the reference. This document names the classes to copy and states the rules
+that the code alone does not make obvious. It carries no class templates, because a
+template in a document drifts from the base class it describes.
+
+## Reference classes
+
+Copy the closest existing class instead of starting from a blank file.
+
+| To write | Copy | Why this one |
+|---|---|---|
+| A read-only register | `TPS25751Version`, `TPS25751ADCResults` | Accessors only, raw and unit-converted forms |
+| A read/write register | `TPS25751SleepControl`, `TPS25751AutoNegotiateSink` | `setBits()` setters, `kAddress`, a cross-field semantic rule |
+| A register with fields past bit 255 | `TPS25751TransmitBatteryCapabilities` | Bit positions computed in `uint16_t` |
+| A register that carries PDOs or RDOs | `TPS25751TransmitSourceCaps` | Hands out `TPS25751Pdo` values (ADR-013) |
+| A register test suite | `test/test_native/test_TPS25751SleepControl` | Every required case for a read/write register |
+
+## Register class rules
+
+- Inherit `TPS25751Register` directly. The base owns the byte buffer and implements the
+  copy and move operations, so a register class declares no destructor and no copy or
+  move members, and adds no member that owns memory.
+- Provide the four constructors the reference classes have: default (a zeroed buffer of
+  the register's `RegisterInfo` size), `(const uint8_t*)`, `(const uint8_t*, size_t)`,
+  and `(RegisterInfo)`.
+- Read every field through `extractBits*()` or `extractEnum*()`, and write every field
+  through `setBits()`. Do not index `_raw[]` or restate a field mask. Keep a computed bit
+  position in `uint16_t` or wider (ADR-012).
+- Give each field a raw accessor. Add a unit accessor (`*_mV()`, `*Millivolts()`, and so
+  on) when the TRM gives a scale, and an `enum class` with a free `toString()` when it
+  gives named values.
+- Cite the TRM in the Doxygen comment of the class and of each accessor: document
+  number, revision, table, page, and bit range. For a field the TRM defers to USB PD,
+  cite the specification table as well.
+
+## Read/write registers
+
+- Declare `static constexpr TPS25751Registers::Address kAddress`. `writeRegister<T>()`
+  takes the address from the class, so a class can be written only to its own register.
+- Write one setter per accessor, named `set<Accessor>`. A setter is one `setBits()` call,
+  which guards an invalid buffer, preserves the neighbouring bits, and masks the value to
+  the field width. A unit setter rounds down and clamps to the field maximum.
+- Add a `write<Name>()` method to `TPS25751` that forwards to `writeRegister<T>()`.
+- A register with no runtime write path (`TPS25751IOConfig`, `TPS25751CustomerUse`) has
+  no setters and no `kAddress`.
+
+## Wiring a new register in
+
+A register is identified by its `TPS25751Registers::Address`; there is no separate type
+enum. A new class touches these places, and a missed one fails silently by returning
+`nullptr`:
+
+1. `include/TPS25751RegisterAddress.h`: the `Address` enumerator, the `Registers::`
+   `RegisterInfo` constant, a case in `getRegisterSize()`, and a case in
+   `getRegisterInfo()`. The size is the TRM width rounded up to whole bytes unless
+   hardware reports a different length byte (CONSTRAINTS.md, Read/Write Registers).
+2. `include/TPS25751RegisterFactory.h`: a forward declaration and the two private
+   `create<Name>Register()` declarations.
+3. `src/TPS25751RegisterFactory.cpp`: the `#include`, the two creators, and a case in
+   each of the three `createRegister()` switches.
+4. `include/TPS25751.h` and `src/TPS25751.cpp`: the `#include`, `read<Name>(T&)`,
+   `read<Name>Register(bool validate)`, and for a read/write register `write<Name>()`.
+5. `platformio.ini`: the new `.cpp` in `build_src_filter` of `[env:native]`, which lists
+   its sources one by one.
+6. `test/test_native/test_TPS25751<Name>/`: the suite (TESTING.md, Required Test Cases).
+7. `test/test_native/test_TPS25751RegisterFactory` and `test_TPS25751Typed`: the new
+   address in each.
+
+## Validation
+
+The base class implements the first two tiers, `isValid()` and `hasValidData()`. A
+register overrides only `isSemanticallyValid()`, which starts with the base checks and
+the size check, then applies the field rules:
+
+- Reserved bits read 0, but only after hardware confirms it. The firmware sets
+  TRM-reserved bits in some registers, and a reserved-bit check then rejects every valid
+  read (CONSTRAINTS.md, Read/Write Registers).
+- Enum fields hold a defined value.
+- Cross-field rules the TRM or USB PD R3.3 states, such as low threshold at most high
+  threshold.
+
+The documented reset value of a register must pass. Do not add a rule the TRM does not
+state; record an inferred rule as inferred in the header comment.
+
+## Debug output
+
+`debugPrint(Stream &s = Serial) const` prints to the stream it is given, never to
+`Serial` directly. Follow `TPS25751SleepControl::debugPrint()`:
+
+- A banner of 40 `=`, then `NAME (0xNN) - N bytes`, then the banner again, and a closing
+  banner.
+- One line per field: the name, the decoded text, and the raw value in hex in
+  parentheses.
+- Every string literal in `F()`.
+- Fixed-width hex through `TPS25751Register::printHex()`, because `Stream`'s `HEX` drops
+  leading zeros. Booleans through `yesNo()`.
+- A USB PD encoding that more than one register carries decodes through the shared
+  definition in `TPS25751UsbPd.h`.
+
+Older classes such as `TPS25751Status` use a shorter `=== Name (0xNN) ===` header. Do not
+copy it into new classes.
+
+## Platform rules
+
+CONSTRAINTS.md explains each of these.
+
+- No RTTI: use `static_cast` on an object whose address you chose, or
+  `readRegisterAs<T>()`. `dynamic_cast` and `typeid` do not compile.
+- No `static_assert(false, ...)` in a template body.
+- No `new` or `delete` outside the register base class. Return ownership in a
+  `std::unique_ptr`.
+- No large buffers on the stack. The largest in the library is the 64-byte DATA image.
+
+## Doxygen
+
+Every public class, method, and enumerator has a Doxygen comment. A comment states what
+the TRM says, the unit, the reset value where it matters, and anything hardware showed
+that the TRM does not say. It does not restate the method name. Mark a renamed or
+superseded name `[[deprecated]]` with the replacement and keep it for one major version.
+
+The repository has no Doxyfile and does not publish generated API pages; the headers are
+the API reference.
+
+## Downstream device drivers
+
+Drivers for parts on the I2Cc bus live in their own repositories and follow the
+conventions in `docs/engineering/CONVENTIONS.md` of the sibling `lib/BQ25798` repository,
+the reference implementation (ADR-008, ADR-009). The one rule that originates here:
+`extractBits16()` is little-endian, so a big-endian device assembles its multi-byte
+fields by hand.
+
+## Checklist for a new register
+
+- [ ] Field layout taken from the `tps25751-docs` MCP server, and from `usb-pd-docs` for
+      a USB PD object
+- [ ] Class copied from the closest reference class
+- [ ] Every place in "Wiring a new register in" updated
+- [ ] `isSemanticallyValid()` accepts the documented reset value
+- [ ] Native suite covers every accessor and setter, each validation tier, and
+      `debugPrint()`; `test/coverage.sh` shows the file above 90%
+- [ ] `pio test -e native` and `pio run -e example-read-registers` pass
+- [ ] Read on hardware where a board is available, and any difference from the TRM
+      recorded in the header and in CONSTRAINTS.md

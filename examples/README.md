@@ -91,5 +91,5 @@ published to the PlatformIO Registry.
 ## Further Reading
 
 - [`../README.md`](../README.md) — library overview and quick start
-- [`../AGENTS.md`](../AGENTS.md) — developer guide (architecture, register list, 4CC /
-  downstream-device interface)
+- [`../AGENTS.md`](../AGENTS.md) — developer guide (rules for every change, 4CC interface,
+  git workflow)

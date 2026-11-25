@@ -1,255 +1,56 @@
-# TPS25751 Library - Technical Constraints
+# TPS25751 library: technical constraints
 
-**Last Updated:** 2026-11-23
-**Status:** Active
+This document records what the code cannot say for itself: the platform rules that shape
+it, the controller's bus protocol, and every place where the hardware, the TRM, and the
+USB PD specification disagree or leave a gap. Most entries exist because a board
+contradicted a document. Sources are TRM SLVUCR8B rev B, TI application notes SLVAFV8A
+and SLVAFL1, and USB PD R3.3 through the `usb-pd-docs` MCP server.
 
-## Overview
+## Platform constraints
 
-This document details the technical constraints and platform-specific considerations that affect the TPS25751 library implementation. Understanding these constraints is critical for writing code that compiles and runs correctly on the target platform.
-
-## Table of Contents
-
-1. [Platform Constraints](#platform-constraints)
-2. [I2C Protocol Details](#i2c-protocol-details)
-3. [Register Access Patterns](#register-access-patterns)
-4. [USB Power Delivery Complexity](#usb-power-delivery-complexity)
-5. [Memory Considerations](#memory-considerations)
-6. [Common Pitfalls](#common-pitfalls)
-
-## Platform Constraints
-
-### Teensy 4.x Embedded Platform
-
-The library targets Teensy 4.0 and 4.1 microcontrollers with the following characteristics:
-
-**Processor:**
-- ARM Cortex-M7 @ 600 MHz
-- 1 MB Flash
-- 512 KB RAM (Teensy 4.0) / 1024 KB RAM (Teensy 4.1)
-
-**Implications:**
-- Limited memory compared to desktop systems
-- No virtual memory or paging
-- Real-time constraints
-- Limited standard library support
+The library targets the Arduino framework on any MCU and is not tied to a board. The
+rules below come from the development build, a Teensy 4.0, and keep the code portable to
+smaller targets. The platform-independent sources also build on the host for the native
+tests. Hardware findings in this document come from one test setup, a Teensy 4.0 host and
+a TPS25751 with a 24LC256 configuration EEPROM, unless an entry says otherwise.
 
 ### No RTTI (Run-Time Type Information)
 
-**CRITICAL:** The platform compiles with `-fno-rtti` flag.
-
-**What this means:**
-- `dynamic_cast<T>()` will **NOT** compile
-- `typeid()` will **NOT** compile
-- Virtual function overhead reduced
-- Smaller binary size
-
-**❌ NEVER do this:**
-```cpp
-// COMPILATION ERROR - dynamic_cast requires RTTI
-auto* status = dynamic_cast<TPS25751Status*>(reg.get());
-
-// COMPILATION ERROR - typeid requires RTTI
-if (typeid(*reg) == typeid(TPS25751Status)) { }
-```
-
-**✅ ALWAYS do this:**
-```cpp
-// Use static_cast, dispatching on the register's address
-if (reg->getAddress() == static_cast<uint8_t>(TPS25751Registers::Address::STATUS)) {
-    auto* status = static_cast<TPS25751Status*>(reg.get());
-    // Now safe to use status
-}
-
-// Or use the factory directly (keyed on Address)
-auto status = TPS25751Factory::getInstance()
-    .createRegister(TPS25751Registers::Address::STATUS);
-auto* statusPtr = static_cast<TPS25751Status*>(status.get());
-```
-
-**Why this matters:**
-- Code must rely on factory pattern for type safety
-- Use address-based type identification
-- Design must work without runtime type queries
+The platform compiles with `-fno-rtti`, so `dynamic_cast` and `typeid` do not compile.
+The factory creates a register by `Address`, and the address the caller asked for fixes
+the class, so a `static_cast` to that class is safe. `readRegisterAs<T>()` and the typed
+`read<Name>Register()` methods do the cast for the caller.
 
 ### Template Constraints
 
-**Problem:** `static_assert(false)` in template causes immediate compilation failure
+`static_assert(false, "...")` in a template body fails when the template is parsed, even
+if it is never instantiated. Make the condition depend on a template parameter, or select
+the overload with `std::enable_if`.
 
-**❌ DON'T:**
-```cpp
-template<typename T>
-void processRegister(T* reg) {
-    static_assert(false, "Not implemented");  // FAILS IMMEDIATELY!
-}
-```
+### Memory
 
-**Why:** The template is instantiated during parsing, and `static_assert(false)` always fails, even if the function is never called.
-
-**✅ DO - Use SFINAE instead:**
-```cpp
-// Option 1: Type traits
-template<typename T>
-struct is_register : std::false_type {};
-
-template<>
-struct is_register<TPS25751Status> : std::true_type {};
-
-template<typename T>
-typename std::enable_if<is_register<T>::value, void>::type
-processRegister(T* reg) {
-    // Implementation for valid register types
-}
-
-// Option 2: Dependent type
-template<typename T>
-struct dependent_false : std::false_type {};
-
-template<typename T>
-void processRegister(T* reg) {
-    static_assert(dependent_false<T>::value, "Not implemented");
-}
-```
-
-### Limited C++ Standard Library
-
-**Available:**
-- Basic STL containers (`std::vector`, `std::array`, `std::unique_ptr`)
-- Standard algorithms
-- Memory management (`std::move`, `std::forward`)
-- Type traits
-
-**Limited/Unavailable:**
-- Some C++17/20 features
-- Full iostream library (use Serial instead)
-- Thread support
-- Filesystem support
-
-**Best Practices:**
-- Test on actual hardware, not just desktop compiler
-- Avoid bleeding-edge C++ features
-- Use Arduino-compatible patterns where possible
-
-### Arduino Environment Integration
-
-**Serial Output:**
-```cpp
-// Use Serial, not std::cout
-Serial.println("Status");
-
-// Use F() macro to save RAM
-Serial.println(F("This string is stored in flash"));
-```
-
-**Timing:**
-```cpp
-// Use Arduino functions
-delay(1000);           // milliseconds
-delayMicroseconds(5);  // microseconds
-millis();              // milliseconds since boot
-micros();              // microseconds since boot
-```
-
-**I2C:**
-```cpp
-// Use Wire library
-Wire.begin();
-Wire.beginTransmission(address);
-Wire.write(data);
-Wire.endTransmission();
-```
+- Put string literals in flash with `F()`. A bare literal passed to `print()` costs RAM.
+- Keep large buffers off the stack. The largest in the library is the 64-byte DATA image.
+- The register base class is the only code that calls `new[]` and `delete[]`.
 
 ## I2C Protocol Details
 
 ### TPS25751 Custom I2C Protocol
 
-The TPS25751 uses a **non-standard** I2C protocol:
+Every register transaction carries a byte count that plain I2C register access does not
+have. On a read, the first byte the controller returns is the count, not data. On a
+write, the host sends the count after the register number.
 
-**Standard I2C read:**
 ```
-START | ADDR+W | REG | START | ADDR+R | DATA... | STOP
-```
-
-**TPS25751 I2C read:**
-```
-START | ADDR+W | REG | START | ADDR+R | LENGTH | DATA... | STOP
-                                        ^^^^^^^
-                                        First byte is length!
+Read:   START | ADDR+W | REG | START | ADDR+R | LENGTH | DATA... | STOP
+Write:  START | ADDR+W | REG | LENGTH | DATA... | STOP
 ```
 
-**Key Difference:** The first byte read is the **byte count**, not data.
-
-### Reading Registers
-
-**Correct implementation:**
-```cpp
-bool TPS25751::readRegister(uint8_t regAddr, uint8_t* buffer, size_t bufferSize) {
-    // Write register address
-    Wire.beginTransmission(i2cAddress_);
-    Wire.write(regAddr);
-    if (Wire.endTransmission(false) != 0) {  // Repeated start
-        return false;
-    }
-
-    // Read length byte first
-    Wire.requestFrom(i2cAddress_, 1);
-    if (Wire.available() < 1) {
-        return false;
-    }
-    uint8_t length = Wire.read();
-
-    // Validate length
-    if (length > bufferSize) {
-        return false;
-    }
-
-    // Read actual data
-    Wire.requestFrom(i2cAddress_, length);
-    for (size_t i = 0; i < length && Wire.available(); i++) {
-        buffer[i] = Wire.read();
-    }
-
-    return true;
-}
-```
-
-**Common mistake:**
-```cpp
-// WRONG - ignores length byte
-Wire.requestFrom(addr, 5);  // Reads length + 4 bytes of data
-buffer[0] = Wire.read();     // This is the LENGTH, not data!
-```
-
-### Writing Registers
-
-Writes mirror the read framing: the length byte is **sent**, not just received.
-
-**TPS25751 I2C write:**
-```
-START | ADDR+W | REG | LENGTH | DATA... | STOP
-                       ^^^^^^^
-                       Byte count, sent right after the register address
-```
-
-**Correct implementation** (`TPS25751::writeRegister`, `src/TPS25751.cpp`):
-```cpp
-bool TPS25751::writeRegister(uint8_t regAddr, const uint8_t* data, size_t length) const {
-    _wire.beginTransmission(_address);
-    _wire.write(regAddr);
-    _wire.write(static_cast<uint8_t>(length));   // length byte, same as the read path
-    size_t written = _wire.write(data, length);
-    if (written != length) return false;          // didn't queue all bytes
-    return _wire.endTransmission(true) == 0;
-}
-```
-
-**Common mistake:**
-```cpp
-// WRONG - omits the length byte; the controller will misinterpret the payload
-Wire.beginTransmission(addr);
-Wire.write(regAddr);
-Wire.write(data, length);
-Wire.endTransmission();
-```
+The private `TPS25751::readRegister()` requests the register size plus one in a single
+read and rejects a length byte that differs from the expected size.
+`TPS25751::writeRegister()` sends the length byte. No other code in the library frames a
+register transaction, and the PBM burst to 0x30 is the one transfer with no register
+number and no length byte.
 
 ### 4CC Command Interface & I2Cc Downstream-Device Proxy (TRM Sec 4.4.2/4.4.3)
 
@@ -654,49 +455,9 @@ and 82 applies it to the flash tasks. Each flash task makes the controller ignor
 I2Cc_IRQ pin until it completes, so an interrupt from a device on I2Cc can be deferred;
 that has not been measured.
 
-### Maximum Read Sizes
-
-Different registers have different maximum sizes:
-
-| Register | Max Size | Notes |
-|----------|----------|-------|
-| STATUS | 5 bytes | Fixed size |
-| MODE | 4 bytes | Fixed size |
-| DATA | 64 bytes | **Largest register** |
-| RECEIVED_SOURCE_CAPABILITIES | 53 bytes | Variable (up to 7 PDOs); see `TPS25751Registers::Registers::RECEIVED_SOURCE_CAPABILITIES` |
-| IO_CONFIG | 49 bytes | Large, boot-fixed GPIO configuration; read-only |
-
-**Implication:** Buffers must accommodate largest expected register.
-
-### I2C Timing
-
-**Clock Speed:** Typically 100 kHz or 400 kHz
-**Considerations:**
-- Slower speeds more reliable with longer cables
-- Faster speeds reduce read latency
-- Some operations require delay between transactions
-
-```cpp
-Wire.setClock(400000);  // 400 kHz
-```
-
 ## Register Access Patterns
 
 ### Read-Only Registers (R)
-
-**Examples:** STATUS, MODE, BOOT_FLAGS, RECEIVED_SOURCE_CAPABILITIES, IO_CONFIG
-
-**Characteristics:**
-- Can only be read
-- Writing has no effect or may cause errors
-- Reflect current hardware state
-
-**Implementation:**
-```cpp
-bool isReadOnly() const override {
-    return true;
-}
-```
 
 > **⚠️ Update-frequency caveat (ADC_RESULTS, 0x6A).** Not every read-only
 > register is refreshed on every read. Per the TRM, the PD controller updates
@@ -745,33 +506,10 @@ INT_CLEAR1 back carries no event state, so the library has no
 
 ### Read/Write Registers (R/W)
 
-**Examples:** PORT_CONTROL, INT_MASK1, AUTONEGOTIATE_SINK
-
-**Characteristics:**
-- Can be read and written
-- Reading returns last written value or current state
-- Support read-modify-write patterns
-
-**Implementation:**
-```cpp
-bool isReadOnly() const override {
-    return false;
-}
-
-// Support both reading and writing
-bool validateData() const override {
-    // Full validation
-    return checkReservedBits() && checkFieldRanges();
-}
-```
-
-**Usage pattern:**
-```cpp
-// Read-modify-write
-auto portControl = tps.readPortControl();
-portControl->setDataRoleSwapEnabled(true);
-tps.writePortControl(*portControl);
-```
+Read a register, change fields through its setters, and write the same object back. The
+setters change only their own bits, so whatever the firmware keeps in reserved bits goes
+back as read. The entries below are the cases where a register did not behave as the TRM
+describes.
 
 **Trap — a register's documented reset value can change between TRM revisions.**
 SLEEP_CONTROL (0x70) resets to `0x03` in SLVUCR8B Rev. B (page 52): Sleep Mode
@@ -982,79 +720,15 @@ for any caller of those methods. Set the bytes in the application configuration
 
 ### PDO (Power Data Object) Types
 
-USB PD defines 4 PDO types, each with different bit layouts:
-
-#### 1. Fixed Supply PDO (Type 00)
-
-```
-Bits 31-30: 00 (Fixed Supply)
-Bits 29-28: Dual-Role Power
-Bits 27-26: USB Suspend Supported
-Bit  25:    Unconstrained Power
-Bit  24:    USB Communications Capable
-Bits 23-22: Dual-Role Data
-Bits 21-20: Unchunked Extended Messages Supported
-Bit  19-10: Voltage in 50mV units
-Bits 9-0:   Maximum current in 10mA units
-```
-
-**Voltage calculation:**
-```cpp
-uint16_t voltageBits = (pdo >> 10) & 0x3FF;
-uint16_t voltageMillivolts = voltageBits * 50;
-```
-
-**Current calculation:**
-```cpp
-uint16_t currentBits = pdo & 0x3FF;
-uint16_t currentMilliamps = currentBits * 10;
-```
-
-#### 2. Battery PDO (Type 01)
-
-```
-Bits 31-30: 01 (Battery)
-Bits 29-20: Maximum Voltage in 50mV units
-Bits 19-10: Minimum Voltage in 50mV units
-Bits 9-0:   Maximum Allowable Power in 250mW units
-```
-
-**Power calculation:**
-```cpp
-uint16_t powerBits = pdo & 0x3FF;
-uint32_t powerMilliwatts = powerBits * 250;
-```
-
-#### 3. Variable Supply PDO (Type 10)
-
-```
-Bits 31-30: 10 (Variable)
-Bits 29-20: Maximum Voltage in 50mV units
-Bits 19-10: Minimum Voltage in 50mV units
-Bits 9-0:   Maximum current in 10mA units
-```
-
-#### 4. Augmented PDO / PPS (Type 11)
-
-```
-Bits 31-30: 11 (Augmented)
-Bits 29-28: 00 (SPR PPS APDO subtype)
-Bit  27:    PPS Power Limited (Source only; the Sink PPS PDO has no such bit)
-Bits 24-17: Maximum Voltage in 100mV units  ← 8-bit field, different unit!
-Bits 15-8:  Minimum Voltage in 100mV units  ← 8-bit field, different unit!
-Bits 6-0:   Maximum Current in 50mA units   ← 7-bit field, different unit!
-```
-
-**Note:** PPS uses **different units** than other PDO types! The max/min
-voltage fields are **8 bits** at offsets 24:17 / 15:8 and the current is **7
-bits** at 6:0 — verified against the hardware-tested decode in
-`src/TPS25751ReceivedSourceCaps.cpp`. (Earlier revisions of this section wrongly
-listed "Bits 26-17" / "Bits 16-8"; the decode `.cpp` is the source of truth —
-corrected in Batch D when the encode inverse was added.)
+`TPS25751Pdo` decodes every PDO type from USB PD R3.3 Tables 6.6 to 6.18, and
+`usb-pd-docs` serves the bit layouts, so they are not repeated here. The units differ by
+type: Fixed, Battery, and Variable PDOs use 50 mV, 10 mA, and 250 mW; an SPR PPS APDO
+uses 100 mV in two 8-bit fields (bits 24:17 and 15:8) and 50 mA in a 7-bit field (bits
+6:0).
 
 **Trap: not every Augmented PDO is a PPS PDO.** Bits 31:30 = 11b mark an
 Augmented PDO (APDO); bits 29:28 then select the APDO subtype, and only 00b is
-the SPR PPS layout above. On 2026-11-18 the test board's TRANSMIT_SOURCE_CAPS
+the SPR PPS layout. On 2026-11-18 the test board's TRANSMIT_SOURCE_CAPS
 (0x32, EEPROM configuration) carried PDO 5 = `0xE004B1F4`, subtype 10b. Read with
 the PPS layout it gave a 17700 mV minimum and a 200 mV maximum, and the whole
 register failed `isSemanticallyValid()`. USB PD R3.3 Table 6.7 defines the subtypes:
@@ -1115,35 +789,10 @@ AVS:            bits 20-9 Output Voltage (25 mV, bits 10-9 = 00b), bits 6-0 Oper
 
 ### PDO/RDO Array Handling
 
-**Source Capabilities format:**
-```
-Byte 0:      PDO Count (0-7)
-Bytes 1-4:   PDO 1 (32 bits, little-endian)
-Bytes 5-8:   PDO 2
-...
-Bytes 25-28: PDO 7
-```
+RECEIVED_SOURCE_CAPS (0x30), RECEIVED_SINK_CAPS (0x31), and TRANSMIT_SINK_CAPS (0x33)
+hold the PDO count in byte 0 and PDO n, little-endian, at byte `1 + (n-1)*4`.
 
-**Parsing:**
-```cpp
-uint8_t pdoCount = data[0];
-if (pdoCount > 7) {
-    return false;  // Invalid
-}
-
-for (uint8_t i = 0; i < pdoCount; i++) {
-    uint32_t pdo =
-        data[1 + i*4 + 0] |
-        (data[1 + i*4 + 1] << 8) |
-        (data[1 + i*4 + 2] << 16) |
-        (data[1 + i*4 + 3] << 24);
-
-    parsePDO(pdo, i);
-}
-```
-
-> **The byte-1 PDO offset above is NOT universal.** It holds for
-> RECEIVED_SOURCE/SINK_CAPS (0x30/0x31) and TRANSMIT_SINK_CAPS (0x33), but
+> **The byte-1 PDO offset is not universal.**
 > **TRANSMIT_SOURCE_CAPS (0x32)** inserts two bytes after the count byte:
 > bits 9:8 = Power Path for PDO 1 and bits 23:10 reserved (SLVUCR8B Rev. B,
 > page 36; Rev. A used bits 21:10 for Power Path for PDO 2-7), so **PDO 1
@@ -1284,189 +933,6 @@ For complete details, refer to:
   VDOs, not decoded), 6.59 (Source_Capabilities_Extended), 6.64 (Battery
   Capabilities), 6.67 (PPS Status), and 6.70 (Sink_Capabilities_Extended)
 
-## Memory Considerations
-
-### RAM Constraints
-
-**Teensy 4.0:** 512 KB RAM
-**Teensy 4.1:** 1024 KB RAM
-
-**Guidelines:**
-- Minimize global variables
-- Use `const` and `constexpr` for constants (stored in flash)
-- Use `F()` macro for string literals
-- Avoid large stack allocations
-
-### Flash Memory for Strings
-
-**❌ Waste RAM:**
-```cpp
-Serial.println("This string uses RAM");
-```
-
-**✅ Save RAM:**
-```cpp
-Serial.println(F("This string is in flash"));
-```
-
-**For const data:**
-```cpp
-// Stored in flash
-const char* CONNECTION_STATES[] PROGMEM = {
-    "Not Connected",
-    "Connected.DFP",
-    "Connected.UFP",
-    // ...
-};
-```
-
-### Stack vs Heap
-
-**Prefer stack allocation for small objects:**
-```cpp
-TPS25751Status status(data, 5);  // Stack - fast, automatic cleanup
-```
-
-**Use heap for large or dynamic objects:**
-```cpp
-auto reg = std::make_unique<TPS25751Status>();  // Heap - managed lifetime
-```
-
-**Avoid:**
-```cpp
-uint8_t largeBuffer[1024];  // Too large for stack on embedded!
-```
-
-## Common Pitfalls
-
-### 1. Forgetting I2C Length Byte
-
-**Wrong:**
-```cpp
-Wire.requestFrom(addr, 5);
-data[0] = Wire.read();  // This is LENGTH, not data!
-```
-
-**Right:**
-```cpp
-Wire.requestFrom(addr, 1);
-uint8_t length = Wire.read();
-Wire.requestFrom(addr, length);
-// Now read actual data
-```
-
-### 2. Using dynamic_cast
-
-**Wrong:**
-```cpp
-auto* status = dynamic_cast<TPS25751Status*>(reg.get());  // Won't compile!
-```
-
-**Right:**
-```cpp
-auto* status = static_cast<TPS25751Status*>(reg.get());
-```
-
-### 3. String Literals in RAM
-
-**Wrong:**
-```cpp
-for (int i = 0; i < 100; i++) {
-    Serial.println("Iteration");  // Wastes RAM
-}
-```
-
-**Right:**
-```cpp
-for (int i = 0; i < 100; i++) {
-    Serial.println(F("Iteration"));  // Stored in flash
-}
-```
-
-### 4. Incorrect PDO Unit Conversion
-
-**Wrong:**
-```cpp
-// All PDO types use same units - WRONG!
-uint16_t voltage = (pdo >> 10) & 0x3FF;
-uint16_t voltageMv = voltage * 50;  // Wrong for PPS!
-```
-
-**Right:**
-```cpp
-uint8_t type = (pdo >> 30) & 0x03;
-if (type == 0b11) {  // PPS uses 100mV units
-    uint16_t voltage = (pdo >> 17) & 0x1FF;
-    uint16_t voltageMv = voltage * 100;
-} else {  // Others use 50mV units
-    uint16_t voltage = (pdo >> 10) & 0x3FF;
-    uint16_t voltageMv = voltage * 50;
-}
-```
-
-### 5. Not Checking Reserved Bits
-
-**Wrong:**
-```cpp
-bool validateData() const {
-    return true;  // Too permissive!
-}
-```
-
-**Right:**
-```cpp
-bool validateData() const {
-    // Check reserved bits are 0
-    if ((data_[0] & RESERVED_MASK) != 0) {
-        return false;
-    }
-    return true;
-}
-```
-
-Check reserved bits against the TRM, then against hardware. If a real device
-sets a reserved bit, the check rejects every valid read from it. See the
-PD3_CONFIGURATION and GLOBAL_SYSTEM_CONFIGURATION traps under Read/Write
-Registers.
-
-### 6. Large Stack Allocations
-
-**Wrong:**
-```cpp
-void processData() {
-    uint8_t buffer[2048];  // Too large for embedded stack!
-}
-```
-
-**Right:**
-```cpp
-void processData() {
-    static uint8_t buffer[2048];  // Static/global, or
-    auto buffer = std::make_unique<uint8_t[]>(2048);  // Heap
-}
-```
-
-### 7. Forgetting the I2Cr/I2Cw Target Address Is 7-Bit
-
-**Wrong:**
-```cpp
-// WRONG - passes a raw 8-bit address (possibly including a R/W bit) straight
-// into the I2Cr/I2Cw input payload
-uint8_t in[3] = { deviceAddress, devReg, len };
-```
-
-**Right:**
-```cpp
-// RIGHT - bit 7 of the I2Cr/I2Cw target-address byte is reserved (must be 0);
-// mask it off once, e.g. in the TPS25751DownstreamDevice constructor
-_deviceAddress = static_cast<uint8_t>(deviceAddress & 0x7F);
-```
-
-Also remember the I2Cr **read data starts at DATA offset 1** (`DATA[0]` is the task
-return code), the I2Cw payload is capped at **11 bytes**, and the I2Cw **`Length`
-field counts the register-offset byte + payload (`payload_len + 1`)** — see
-[4CC Command Interface & I2Cc Downstream-Device Proxy](#4cc-command-interface--i2cc-downstream-device-proxy-trm-sec-442443).
-
 ## Downstream-Device Decode & Encode Conventions (moved to lib/BQ25798)
 
 The decode/encode conventions established for the BQ25798 downstream charger
@@ -1486,97 +952,8 @@ Two things remain true on the host side regardless of the device driver:
   TPS25751's own registers); big-endian downstream devices must assemble
   multi-byte fields manually.
 
-## Platform-Specific Workarounds
-
-### Dealing with RTTI Absence
-
-**Problem:** Need type identification without RTTI
-
-**Solution:** Use factory pattern with address-based lookup
-
-```cpp
-class TPS25751Register {
-public:
-    virtual uint8_t getAddress() const = 0;
-
-    // Type-safe casting helper — compare against the expected register's address
-    template<typename T>
-    T* as() {
-        if (getAddress() == static_cast<uint8_t>(T::staticAddress())) {
-            return static_cast<T*>(this);
-        }
-        return nullptr;
-    }
-};
-```
-
-### Template Metaprogramming Without static_assert(false)
-
-**Problem:** Need compile-time errors for invalid template instantiations
-
-**Solution:** Use dependent types
-
-```cpp
-template<typename>
-struct always_false : std::false_type {};
-
-template<typename T>
-void foo() {
-    static_assert(always_false<T>::value, "Invalid type");
-}
-```
-
 ## Reference Documents
 
-1. **TI TPS25751 Technical Reference Manual**
-   - I2C protocol details
-   - Register definitions
-   - Electrical characteristics
-
-2. **USB Power Delivery Specification R3.3 V1.0** (via the `usb-pd-docs` MCP server)
-   - PDO/RDO formats
-   - Negotiation protocols
-   - Voltage/current encoding
-
-3. **Teensy 4.x Documentation**
-   - Memory layout
-   - I2C implementation
-   - Arduino compatibility
-
-4. **ARM Cortex-M7 Technical Reference**
-   - Processor capabilities
-   - Optimization guidelines
-
-## Revision History
-
-| Version | Date | Author | Changes |
-|---------|------|--------|---------|
-| 1.0 | 2025-10-20 | Claude Code | Initial constraints document extracted from implementation plan |
-| 1.1 | 2026-06-24 | Claude Code | Added BQ25798 downstream device decode conventions (big-endian, signed ADC, LSB sources) |
-| 1.2 | 2026-07-02 | Claude Code | BQ25798 decode/encode conventions moved to the sibling lib/BQ25798 repo with the driver; generic I2Cr/I2Cw framing rules retained here |
-| 1.3 | 2026-07-07 | Claude Code | Batch C: documented the ADC_RESULTS (0x6A) update-frequency caveat — not refreshed in Unconnected Sleep, so a stale/all-zero read is expected, not an error (Read-Only Registers section) |
-| 1.4 | 2026-11-18 | Claude Code | Batch G of the rev B plan: firmware sets PD3_CONFIGURATION (0x42) reserved bits 3:0 on hardware, so validation no longer checks them (Read/Write Registers section) |
-| 1.5 | 2026-11-18 | Claude Code | Batch H of the rev B plan: GLOBAL_SYSTEM_CONFIGURATION (0x27) reports 14 bytes on hardware and the firmware sets bits in all its reserved ranges; RECEIVED_SOP_IDENTITY (0x48) status comes from Response Type, not INT_EVENT1 bit 51 (Read/Write Registers section) |
-| 1.6 | 2026-11-18 | Claude Code | LIQUID_DETECTION_CONFIG (0x98) reports 12 bytes on hardware, not 11 (Read/Write Registers section); PDO classes decode only the SPR PPS APDO subtype after a subtype 10b APDO in 0x32 failed validation (USB Power Delivery Complexity section); the firmware still uses the rev A Power Path layout in 0x32 bits 21:10 |
-| 1.7 | 2026-11-18 | Claude Code | Batch J of the rev B plan: TX_SOURCE_CAPABILITIES_EXTENDED (0x77) reads Source PDP 0x7F from firmware configuration, not the documented reset; 0x77 and TRANSMIT_SINK_CAPABILITIES_EXTENDED (0x7E) report 15 and 14 bytes as the TRM implies, and the firmware sets none of their reserved bits (Read/Write Registers section) |
-| 1.8 | 2026-11-19 | Claude Code | Batch K of the rev B plan: TX_BATTERY_CAPABILITIES (0x7D) is the first R/W register past bit 255 and uses class-local byte helpers (Read-Only Registers section, IO_CONFIG note); the TRM labels 0x7D battery 3 as battery 0; 0x7B and 0x7D report 16 and 36 bytes and round-trip on hardware; CUSTOMER_USE (0x06) ignores runtime writes (Read/Write Registers section) |
-| 1.9 | 2026-11-19 | Claude Code | CUSTOMER_USE (0x06) is read-only in the library: `writeCustomerUse()`, the class setters, and `kAddress` are removed (Read/Write Registers section) |
-| 1.10 | 2026-11-19 | Claude Code | Batches G to I bench checks: a GLOBAL_SYSTEM_CONFIGURATION (0x27) RCP write preserves the undocumented bits; RECEIVED_SOP_IDENTITY (0x48) fills about 106 ms before INT_EVENT1 bit 51 and keeps the last identity after detach; INT_EVENT1 latches only INT_MASK1-enabled sources; the firmware fills the TX_SOURCE_INFO (0x78) lower word when the board sources (Read/Write Registers section) |
-| 1.11 | 2026-11-19 | Claude Code | Batch L of the rev B plan: typed USB PD R3.3 decode for 0x48, 0x77, 0x7E, 0x7B, and 0x7D and the 0x7A PTF 00b meaning (new USB PD Specification Structures section); 0x48 decode of an iPhone on hardware; the 0x7B reset value reports a battery that 0x77 and 0x7E do not (Read/Write Registers section) |
-| 1.12 | 2026-11-19 | Claude Code | ADR-012: the base-class bit helpers take a 16-bit bit position, so IO_CONFIG (0x5C) and TX_BATTERY_CAPABILITIES (0x7D) read and write through them (Read-Only Registers section, IO_CONFIG note) |
-| 1.13 | 2026-11-19 | Claude Code | USB PD cross-check against the linked `tps25751-docs` output: 0x77 byte 14 is the EPR Source PDP Rating, 0x78 is SIDO1 and SIDO2, and the Specification block (USB PD Specification Structures section) |
-| 1.14 | 2026-11-19 | Claude Code | TX_SOURCE_INFO (0x78) semantic validation checks the USB PD R3.3 Table 6.29 and 6.30 rules: DPS Port requires both Port Type bits Managed, and the 1 W Port Maximum PDP equals the 0.5 W value rounded down (USB PD Specification Structures and Read/Write Registers sections) |
-| 1.15 | 2026-11-22 | Claude Code | PDO, APDO, and RDO cross-check against `usb-pd-docs` (device-register-mcp-server 696c854): the 0x32 subtype 10b APDO is an SPR AVS Source APDO, 0x34 First PDO Control Bits are PDO 1 bits 29:20 (confirmed on hardware), fixed-PDO flags are reserved outside PDO 1, 0x35 decodes as a Fixed or Variable RDO only, and the 0x48 Pad Object (USB PD Specification Structures section) |
-| 1.16 | 2026-11-22 | Claude Code | PDOs and RDOs decode through `TPS25751Pdo` and `TPS25751Rdo` (ADR-013): fixed-PDO flags only for PDO 1, SPR AVS Source decode, RDOs by kind, and validation of 0x30 to 0x34 per USB PD R3.3 (USB PD Specification Structures and PDO Parsing Strategy sections) |
-| 1.17 | 2026-11-23 | Claude Code | Flash tasks and EEPROM update section: result offsets, return-code compare, 32-byte chunks and the 24LC256 page, the `FLvy` limit, one-directional redundancy, the stale BOOT_FLAGS trap, DATA behaviour, timing, cold reset, and bus sharing, with the hardware results of stages 1 to 4 (ADR-014) |
-| 1.18 | 2026-11-23 | Claude Code | Flash tasks and EEPROM update section: what SLVAFL1 says about APP mode, AppConfigOffset words and recovery from PTCH (SLVAFL1 page 13) under their own headings, `FLwd` timing per run |
-| 1.19 | 2026-11-23 | Claude Code | `programBlank()` writes both AppConfigOffset words first; `coldReset()` requires an observed restart and returns `ResetNotObserved` otherwise (Flash tasks and EEPROM update section) |
-| 1.20 | 2026-11-23 | Claude Code | `updateRegion()` checks both AppConfigOffset words in its pre-flight and the target's again before the pointer write (AppConfigOffset words section); PTCH after a restart with no valid pointer observed in stage 5 |
-| 1.21 | 2026-11-23 | Claude Code | PBM: 20 ms between `PBMc` completing and the DATA read, `issueCommand()`, the stage 5 evidence and what it does not establish, the 500 µs burst spacing the figures show (Patch Burst Mode section) |
-| 1.22 | 2026-11-23 | Claude Code | The MODE read after a failed `GAID` poll failed with error 4, not a NACK (Cold reset section) |
-| 1.23 | 2026-11-23 | Claude Code | PBM: TRM Figure 5-1 has one 500 µs delay, before `PBMc`, which the loader now gives; the points where the loader departs from the documented flow; the `PBMs` timeout byte. Error 4 lists every source in the Teensy 4 driver (Cold reset section) |
-| 1.24 | 2026-11-23 | Claude Code | PBM: the app note spaces its separate burst transactions by 500 µs and the loader does not, an open decision; the loader's IRQ mode polls COMMAND instead of waiting for I2Ct_IRQ |
-| 1.25 | 2026-11-23 | Claude Code | PBM: SLVAFV8A shows both 0x31 and 0x32 for the `PBMs` timeout byte |
-| 1.26 | 2026-11-24 | Claude Code | PBM: the loader polls Ready for Patch (polling mode) and MODE before the load, reads the `PBMs` configuration back from DATA, and issues `PBMe` on the two paths of TRM Figure 5-1 |
-
-*Understanding these constraints is essential for successful implementation on the target platform.*
+- TI TPS25751 Technical Reference Manual, SLVUCR8B rev B, through the `tps25751-docs`
+  MCP server. PDFs of the TRM, the datasheet, SLVAFV8A, and SLVAFL1 are in `docs/`.
+- USB Power Delivery Specification R3.3 V1.0, through the `usb-pd-docs` MCP server.

@@ -60,7 +60,7 @@ public:
      * Per the TRM, the RDO a partner sent while this device is the Source, updated
      * once the Accept message has been sent and tSrcTransition has expired (SLVUCR8B
      * page 39). It means a partner's request only while STATUS (0x1A) reports the
-     * port role as Source. On hardware, with the board sinking, it read the same word
+     * port role as Source. On hardware, with the port sinking, it read the same word
      * as bits 31:0 with two chargers.
      *
      * The kind comes from this device's own advertised PDO at the RDO's Object

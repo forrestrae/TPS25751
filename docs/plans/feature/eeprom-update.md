@@ -1618,11 +1618,26 @@ tolerating failed reads, until it reads APP or 5 s pass (a choice, matching the 
 `coldReset()` and the loader's MODE poll), prints the time and the count of reads and
 failed reads, and only then prints the report. A controller with no bootable bundle stays
 in PTCH, costs the full 5 s, and still gets the advice to send `l` then `pb`. `r` sent
-later does not wait: the Teensy restarts with every power-on of the controller, and `x`
-already polls MODE. CONSTRAINTS.md (PTCH while the controller boots) and
-`examples/README.md` describe the wait. Verified by build only. A hardware check needs a
-power-on with the High pointer 0, the state in which stage 9 saw the race, which means
-`c1`, a power cycle, and `b` to restore: EEPROM writes that need the user's go-ahead.
+later does not wait: on this carrier the Teensy runs from the board (checked in S0 on the
+second board), so it restarts with every power-on of the controller, and `x` already
+polls MODE. A Teensy powered from USB would not restart when the controller does, and an
+`r` sent during that boot could still print the PTCH advice. CONSTRAINTS.md (PTCH while
+the controller boots) and `examples/README.md` describe the wait. Verified by build only.
+A hardware check needs a power-on with the High pointer 0, the state in which stage 9 saw
+the race, which means `c1`, a power cycle, and `b` to restore: EEPROM writes that need the
+user's go-ahead.
+
+An independent review of `97724df`, `bd5d3ad`, and `c1586ad` found no logic error in the
+wait. Its findings, fixed in the next commit: the count of power-ons is eight, not seven
+(S1, S2, S3, S4, S5, the S5 repeat, S6, S7), which the message of `97724df` also gets
+wrong; "during every boot" and "about 2 s later each" in CONSTRAINTS.md and the sketch
+said more than the record, since PTCH was read only with the High pointer 0 and only S2's
+timing is recorded; every failed MODE read during the wait printed library error lines,
+up to about 1000 with no controller answering, so the wait now turns the library's error
+output off and restores it afterwards; the timeout line said the report would show the
+mode the controller stayed in, although the report reads MODE again; and the paragraph
+above did not say that the `r` argument depends on the Teensy being powered from the
+board.
 
 Two physical points were confirmed on 2026-11-22. First, the EEPROM can be reprogrammed
 in place with a SOIC8 clip, so `write-flash.zsh` (`24LC256@SOIC8`) is a recovery path

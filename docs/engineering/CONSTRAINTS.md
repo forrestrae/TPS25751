@@ -566,12 +566,14 @@ and stage 5 ran `programBlank()`, whose word reads predate them.
 
 #### PTCH while the controller boots
 
-MODE reads PTCH for a short time during every boot from the EEPROM, not only when no
+MODE can read PTCH while a good bundle is still loading from the EEPROM, not only when no
 region loads. Hardware stage 9 (2026-11-24, a second board on a bench supply) read MODE
 PTCH, VERSION 0xF8091100, and BOOT_FLAGS `18 00 30 02 C1` (Patch Config Source None
 Loaded, Region 0 Attempted, no region Invalid) from a Teensy that started on the same
-supply, on three of seven power-ons; about 2 s later each read APP with the bundle loaded.
-The documents read for the EEPROM update plan give no boot time. Treat PTCH as "no bundle
+supply, on three of eight power-ons: the three with the High pointer 0. The other five read
+APP at the same point. An `r` started a few seconds after each of the three read APP with
+the bundle loaded; the load time itself was not measured, and the documents read for the
+EEPROM update plan give none. Treat PTCH as "no bundle
 loads" only after it has lasted: poll MODE until APP or a timeout, tolerating failed
 reads. The eeprom-update example waits 5 s at start-up. The failed boots seen so far
 (stage 5, both pointers 0, `F8 00 60 02 C1`) marked each region tried as Invalid; the

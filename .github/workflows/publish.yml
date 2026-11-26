@@ -18,11 +18,11 @@ jobs:
     # bench server tests, native tests, example build.
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0 # full history for the commit range
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
 
@@ -45,7 +45,7 @@ jobs:
           python3 test/support/pd_capture_fixture.py --check
           python3 -m unittest discover -s test/support -p "test_*.py"
 
-      - uses: astral-sh/setup-uv@v6
+      - uses: astral-sh/setup-uv@v10
         if: hashFiles('tools/pd-bench/pyproject.toml') != ''
 
       - name: Bench server tests
@@ -63,11 +63,11 @@ jobs:
     needs: verify
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
 

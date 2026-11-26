@@ -45,7 +45,7 @@ jobs:
           python3 test/support/pd_capture_fixture.py --check
           python3 -m unittest discover -s test/support -p "test_*.py"
 
-      - uses: astral-sh/setup-uv@v10
+      - uses: astral-sh/setup-uv@v10.4.0 # no major tags since v8
         if: hashFiles('tools/pd-bench/pyproject.toml') != ''
 
       - name: Bench server tests

@@ -37,13 +37,16 @@ server.
 
 ## Run the server
 
-From a checkout, in `tools/pd-bench`:
+From a checkout, at the library root. This is how this library's `.mcp.json` runs it, and
+`--project` leaves the working directory at the root, where `captures/` lives:
 
 ```bash
-uv run tps25751-pd-bench
+uv run --project tools/pd-bench tps25751-pd-bench
 ```
 
-From a release tag, with no checkout:
+From a release tag, with no checkout. A project that consumes the library uses this form,
+with the tag of the library version it depends on, so the server matches the console its
+firmware compiles in:
 
 ```bash
 uvx --from "git+https://github.com/forrestrae/TPS25751@<tag>#subdirectory=tools/pd-bench" tps25751-pd-bench
@@ -242,9 +245,9 @@ For a trigger session in Claude Code, start `claude` with the variable set in th
 KM003C_ENABLE_TRIGGER=1 claude
 ```
 
-The project's `permissions.ask` rules prompt on each trigger call, and on `bench_task`,
-`bench_write`, and `bench_renegotiate`. They do not protect a session that bypasses
-permissions.
+The `permissions.ask` rules in your `.claude/settings.local.json` prompt on each trigger
+call, and on `bench_task`, `bench_write`, and `bench_renegotiate`; AGENTS.md says where
+the rules come from. They do not protect a session that bypasses permissions.
 
 ## Copy the skill into a downstream project
 

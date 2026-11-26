@@ -12,10 +12,35 @@ env = { DEVICE_CONFIG = "specifications/USB_PD/specification.json" }
 command = "uvx"
 args = ["--from", "git+https://github.com/forrestrae/mcp-powerz-km003c@v0.2.1", "km003c-mcp"]
 env = { KM003C_CAPTURE_DIR = "captures" }
+enabled = false
+
+[mcp_servers.km003c.tools]
+device_info = { approval_mode = "approve" }
+measure = { approval_mode = "approve" }
+pd_status = { approval_mode = "approve" }
+stream_start = { approval_mode = "approve" }
+stream_status = { approval_mode = "approve" }
+stream_samples = { approval_mode = "approve" }
+stream_stop = { approval_mode = "approve" }
+pd_capture_start = { approval_mode = "approve" }
+pd_capture_wait = { approval_mode = "approve" }
+pd_capture_mark = { approval_mode = "approve" }
+pd_capture_stop = { approval_mode = "approve" }
+pd_capture_read = { approval_mode = "approve" }
+device_release = { approval_mode = "approve" }
+trigger_detect = { approval_mode = "prompt" }
+trigger_enter = { approval_mode = "prompt" }
+trigger_pd_source_caps = { approval_mode = "prompt" }
+trigger_pd_request = { approval_mode = "prompt" }
+trigger_fast_charge = { approval_mode = "prompt" }
+trigger_reset = { approval_mode = "prompt" }
+trigger_close = { approval_mode = "prompt" }
+trigger_raw = { approval_mode = "prompt" }
 
 [mcp_servers.tps25751-bench]
-command = "uvx"
-args = ["--from", "git+https://github.com/forrestrae/TPS25751@v3.3.0#subdirectory=tools/pd-bench", "tps25751-pd-bench"]
+command = "uv"
+args = ["run", "--project", "tools/pd-bench", "tps25751-pd-bench"]
+enabled = false
 
 [mcp_servers.tps25751-bench.tools.bench_task]
 approval_mode = "prompt"

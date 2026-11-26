@@ -60,7 +60,22 @@ specification table.
 
 Two more servers talk to hardware. `.mcp.json` (Claude Code) and `.codex/config.toml`
 (Codex, trusted project) configure all four, and each agent's own file is the
-authority on what is allowed without a prompt.
+authority on what is allowed without a prompt. Both agents enable only the two docs
+servers for everyone. With the meter and a board on the bench, turn the other two on
+for yourself:
+
+- Claude Code: add `km003c` and `tps25751-bench` to `enabledMcpjsonServers` in your own
+  `.claude/settings.local.json`, with their permission rules: for `km003c` the lists in
+  the km003c-mcp README, "Allow the tools in Claude Code"; for `tps25751-bench`, `allow`
+  for `bench_hello`, `bench_snapshot`, `bench_read`, and `bench_crosscheck`, and `ask`
+  for `bench_task`, `bench_write`, and `bench_renegotiate`. Without the hardware,
+  decline the two servers when Claude Code asks.
+- Codex: the project file sets `enabled = false` on both, and only a command-line
+  override beats it; a user config or profile does not. Start Codex with:
+
+```bash
+codex -c mcp_servers.km003c.enabled=true -c mcp_servers.tps25751-bench.enabled=true
+```
 
 | MCP server | Source | Use for |
 |---|---|---|

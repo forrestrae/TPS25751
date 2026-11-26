@@ -245,9 +245,9 @@ For a trigger session in Claude Code, start `claude` with the variable set in th
 KM003C_ENABLE_TRIGGER=1 claude
 ```
 
-The project's `permissions.ask` rules prompt on each trigger call, and on `bench_task`,
-`bench_write`, and `bench_renegotiate`. They do not protect a session that bypasses
-permissions.
+The `permissions.ask` rules in your `.claude/settings.local.json` prompt on each trigger
+call, and on `bench_task`, `bench_write`, and `bench_renegotiate`; AGENTS.md says where
+the rules come from. They do not protect a session that bypasses permissions.
 
 ## Copy the skill into a downstream project
 

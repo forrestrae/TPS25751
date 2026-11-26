@@ -37,13 +37,16 @@ server.
 
 ## Run the server
 
-From a checkout, in `tools/pd-bench`:
+From a checkout, at the library root. This is how this library's `.mcp.json` runs it, and
+`--project` leaves the working directory at the root, where `captures/` lives:
 
 ```bash
-uv run tps25751-pd-bench
+uv run --project tools/pd-bench tps25751-pd-bench
 ```
 
-From a release tag, with no checkout:
+From a release tag, with no checkout. A project that consumes the library uses this form,
+with the tag of the library version it depends on, so the server matches the console its
+firmware compiles in:
 
 ```bash
 uvx --from "git+https://github.com/forrestrae/TPS25751@<tag>#subdirectory=tools/pd-bench" tps25751-pd-bench

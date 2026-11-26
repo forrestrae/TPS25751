@@ -20,8 +20,8 @@
     },
     "tps25751-bench": {
       "type": "stdio",
-      "command": "uvx",
-      "args": ["--from", "git+https://github.com/forrestrae/TPS25751@v3.3.0#subdirectory=tools/pd-bench", "tps25751-pd-bench"]
+      "command": "uv",
+      "args": ["run", "--project", "tools/pd-bench", "tps25751-pd-bench"]
     }
   }
 }

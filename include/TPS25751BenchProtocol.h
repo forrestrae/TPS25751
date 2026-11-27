@@ -227,8 +227,10 @@ public:
      * - Clear events: a 1 written to INT_CLEAR1 (0x18, p.23) clears that bit of
      *   INT_EVENT1. `SNAP` already clears the bits it reports, so this is for
      *   an event `SNAP` has not read. The TRM marks 0x18 R/W but does not say
-     *   what a read returns; it is a clear request, not a copy of INT_EVENT1,
-     *   so expect `match=0` for a write with any bit set.
+     *   what a read returns. On the bench (2026-11-27, three writes) 0x18 never
+     *   read back what was written and always read the same as INT_EVENT1, so
+     *   expect `match=0` unless the write happens to equal INT_EVENT1; see
+     *   CONSTRAINTS.md, Registers written to trigger an action.
      * - The advertised capabilities: TRANSMIT_SOURCE_CAPABILITIES (0x32, p.36)
      *   and TRANSMIT_SINK_CAPABILITIES (0x33, p.37). The controller sends the
      *   new values the next time it sends that message.

@@ -502,10 +502,25 @@ The TRM (SLVUCR8B) marks no TPS25751 register write-only. COMMAND (p.16) and
 INT_CLEAR1 (p.23) are R/W registers that the host writes to trigger an action.
 `TPS25751::executeCommand()` reads COMMAND to poll for completion. Reading
 INT_CLEAR1 back carries no event state, so the library has no
-`readInterruptClear()` and only writes it. A bench console write of
-`01 00 00 00 00 00 00 00 00 00 00` on 2026-11-27 read back as
-`00 00 00 00 00 00 00 00 00 00 01`, so the readback holds neither the written bits nor
-zeros, and `WR 0x18` reports `match=0`.
+`readInterruptClear()` and only writes it.
+
+What INT_CLEAR1 reads back was sampled on 2026-11-27 through the bench console,
+with the board sinking and INT_EVENT1 holding only Patch Loaded (bit 80, byte 10):
+six reads of 0x18, counting each write's readback, and three writes, none of them to a bit set in INT_EVENT1.
+
+| Step | Written to 0x18 | 0x18 read | INT_EVENT1 (0x14) read |
+|---|---|---|---|
+| Before any write | none | `00 00 00 00 00 00 00 00 00 00 01` | `00 00 00 00 00 00 00 00 00 00 01` |
+| Write, byte 0 bit 0 (earlier session) | `01 00 00 00 00 00 00 00 00 00 00` | `00 00 00 00 00 00 00 00 00 00 01` | not read |
+| Write, all zero | `00 00 00 00 00 00 00 00 00 00 00` | `00 00 00 00 00 00 00 00 00 00 01`, twice | not read |
+| Write, byte 3 bit 0 (event bit 24, clear) | `00 00 00 01 00 00 00 00 00 00 00` | `00 00 00 00 00 00 00 00 00 00 01`, twice | `00 00 00 00 00 00 00 00 00 00 01` |
+
+Every read of 0x18 equaled INT_EVENT1 and none tracked the bytes written, so
+`WR 0x18` reports `match=0` unless the write equals INT_EVENT1. No read showed the
+bytes in reverse order: INT_MASK1 (0x16) read `00 00 00 00 00 00 00 00 00 00 03` in
+the same session, and earlier read back a byte 0 write exactly. Because INT_EVENT1 did
+not change during the sample, these reads cannot tell whether 0x18 mirrors INT_EVENT1
+or holds a fixed `01` in byte 10.
 
 ### Read/Write Registers (R/W)
 

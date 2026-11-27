@@ -52,6 +52,24 @@
  * Only `RESTART`, `CMD`, and `WR` change the controller, and `SNAP` clears the
  * INT_EVENT1 bits it reports. `HELLO`, `RD`, and `DEC` read only.
  *
+ * `WR` reads the register, checks that the payload is as long as the length
+ * byte, writes it, and reads it back. For a PD 3.x data block
+ * (TPS25751BenchProtocol::pd3EnableBit()) it then reads PD3_CONFIGURATION
+ * (0x42) and, when the block's bit is clear, sets that bit alone and writes
+ * 0x42 back. The data register's line comes first:
+ *
+ * @code
+ * @5 reg=0x7a len=4 data=... match=1     every write
+ * @5 reg=0x42 len=4 data=... match=1     the bit was clear and is now written
+ * @5 pd3=already                         or: the bit was already set, 0x42 not written
+ * @5 OK
+ * @endcode
+ *
+ * When the 0x42 read, write, or readback fails after the data write, the
+ * data line is followed by `ERR I2C the data register was written; the 0x42
+ * enable bit was not set: ...` (`was not confirmed` for the readback), which
+ * names the failed step. Any other register leaves 0x42 alone.
+ *
  * The console issues every 4CC task through TPS25751::executeCommand() and
  * loads the patch bundle with TPS25751PatchLoader::loadPatchBundle().
  */

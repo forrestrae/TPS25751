@@ -6,6 +6,7 @@
  * depends on. Time is the stub clock, which only delay() advances.
  */
 
+#include <cstdio>
 #include <cstring>
 #include <string>
 #include <vector>
@@ -668,13 +669,16 @@ void test_snapshot_with_a_silent_controller()
 void test_write_refuses_registers_off_the_allowlist()
 {
     Bench b;
-    const char *refused[] = {"@5 WR 0x33 00", "@5 WR 0x32 00", "@5 WR 0x08 47414944",
-                             "@5 WR 0x09 00", "@5 WR 0x2A 00000000", "@5 WR 0x2D 00", "@5 WR 0x70 01"};
+    // 0x78 waits for a bench probe of whether the firmware regenerates it.
+    const char *refused[] = {"@5 WR 0x78 0000000000000000", "@5 WR 0x08 47414944",
+                             "@5 WR 0x09 00", "@5 WR 0x2A 00000000", "@5 WR 0x2D 00",
+                             "@5 WR 0x14 00", "@5 WR 0x5C 00"};
     for (const char *line : refused) {
         const Lines lines = b.run(line);
         TEST_ASSERT_EQUAL(1, lines.size());
         TEST_ASSERT_EQUAL_STRING(
-            "@5 ERR REFUSED register is not on the write allowlist (0x27, 0x28, 0x29, 0x37, 0x42)",
+            "@5 ERR REFUSED register is not on the write allowlist (0x16, 0x18, 0x27, 0x28, "
+            "0x29, 0x32, 0x33, 0x37, 0x42, 0x70, 0x77, 0x7a, 0x7b, 0x7d, 0x7e, 0x98)",
             lines[0].c_str());
     }
     // A refusal costs no I2C traffic at all.
@@ -697,18 +701,27 @@ void test_write_returns_the_readback()
     TEST_ASSERT_EQUAL_HEX8_ARRAY(expected, b.fake.writes[0].data.data(), 4);
 }
 
-void test_write_accepts_all_five_allowed_registers()
+void test_write_accepts_every_allowed_register()
 {
-    Bench b;
-    const std::string zeros14(28, '0');
-    const std::string zeros17(34, '0');
-    const std::string zeros24(48, '0');
-    TEST_ASSERT_EQUAL_STRING("@5 OK", b.run(("@5 WR 0x27 " + zeros14).c_str()).back().c_str());
-    TEST_ASSERT_EQUAL_STRING("@5 OK", b.run(("@5 WR 0x28 " + zeros17).c_str()).back().c_str());
-    TEST_ASSERT_EQUAL_STRING("@5 OK", b.run("@5 WR 0x29 00000000").back().c_str());
-    TEST_ASSERT_EQUAL_STRING("@5 OK", b.run(("@5 WR 0x37 " + zeros24).c_str()).back().c_str());
-    TEST_ASSERT_EQUAL_STRING("@5 OK", b.run("@5 WR 0x42 00000000").back().c_str());
-    TEST_ASSERT_EQUAL(5, b.fake.writes.size());
+    // Each register written whole at the size the fake reports, which is its
+    // RegisterInfo size. For a PD 3.x data block 0x42 is written too.
+    const uint8_t allowed[] = {0x16, 0x18, 0x27, 0x28, 0x29, 0x32, 0x33, 0x37,
+                               0x42, 0x70, 0x77, 0x7A, 0x7B, 0x7D, 0x7E, 0x98};
+    for (uint8_t address : allowed) {
+        Bench b;
+        const size_t size = b.fake.registers[address].size();
+        char line[TPS25751BenchProtocol::kMaxLineLength + 1];
+        snprintf(line, sizeof(line), "@5 WR 0x%02x %s", address,
+                 std::string(size * 2, '0').c_str());
+        const Lines lines = b.run(line);
+        TEST_ASSERT_EQUAL_STRING_MESSAGE("@5 OK", lines.back().c_str(), line);
+        TEST_ASSERT_EQUAL_MESSAGE(1, b.fake.writeCount(address), line);
+        const bool coupled =
+            TPS25751BenchProtocol::pd3EnableBit(address) != TPS25751BenchProtocol::kNoPd3EnableBit;
+        if (address != 0x42) {
+            TEST_ASSERT_EQUAL_MESSAGE(coupled ? 1 : 0, b.fake.writeCount(0x42), line);
+        }
+    }
 }
 
 void test_write_port_control_returns_the_readback()
@@ -776,6 +789,208 @@ void test_write_reports_i2c_failures()
     };
     TEST_ASSERT_EQUAL_STRING("@5 ERR I2C register read failed after the write",
                              b.run("@5 WR 0x42 1a000800")[0].c_str());
+}
+
+// PD3_CONFIGURATION as the bench board read it on 2026-11-18, 0x0008001A
+// (TPS25751PD3Config.h): Support Get Revision (bit 19), Unchunked Supported
+// (bit 4), and the firmware's reserved bits 3 and 1.
+const uint8_t kPd3Bench[4] = {0x1A, 0x00, 0x08, 0x00};
+
+// TRANSMIT_PPS_STATUS (0x7A, SLVUCR8B p.56; USB PD R3.3 Table 6.67): Output
+// Voltage 9000 mV / 20 mV = 450 = 0x01C2 in bits 15:0, Output Current
+// 2000 mA / 50 mA = 40 = 0x28 in bits 23:16, PTF 01b (normal) in bits 26:25
+// = 0x02000000. Word 0x022801C2, little-endian c2012802.
+const char kWritePps[] = "@5 WR 0x7A c2012802";
+
+void test_write_coupled_block_sets_its_pd3_bit()
+{
+    // 0x7A is gated by Support PPS Status, bit 20 = byte 2, bit 4: the bench
+    // value 0x0008001A becomes 0x0018001A, buffer {0x1A, 0x00, 0x18, 0x00}.
+    Bench b;
+    b.fake.setRegister(0x42, kPd3Bench, sizeof(kPd3Bench));
+    const Lines lines = b.run(kWritePps);
+    TEST_ASSERT_EQUAL(3, lines.size());
+    TEST_ASSERT_EQUAL_STRING("@5 reg=0x7a len=4 data=c2012802 match=1", lines[0].c_str());
+    TEST_ASSERT_EQUAL_STRING("@5 reg=0x42 len=4 data=1a001800 match=1", lines[1].c_str());
+    TEST_ASSERT_EQUAL_STRING("@5 OK", lines[2].c_str());
+
+    // The data register first, then 0x42 with only bit 20 added.
+    TEST_ASSERT_EQUAL(2, b.fake.writes.size());
+    TEST_ASSERT_EQUAL_HEX8(0x7A, b.fake.writes[0].reg);
+    TEST_ASSERT_EQUAL_HEX8(0x42, b.fake.writes[1].reg);
+    const uint8_t expected[] = {0x1A, 0x00, 0x18, 0x00};
+    TEST_ASSERT_EQUAL(4, b.fake.writes[1].data.size());
+    TEST_ASSERT_EQUAL_HEX8_ARRAY(expected, b.fake.writes[1].data.data(), 4);
+}
+
+void test_write_sets_the_right_pd3_bit_for_each_block()
+{
+    // Bit n is byte n / 8, bit n % 8 of the 0x42 buffer (SLVUCR8B p.46):
+    //   0x77 bit 8  -> byte 1, 0x01    0x7B bit 11 -> byte 1, 0x08
+    //   0x7D bit 10 -> byte 1, 0x04    0x7E bit 17 -> byte 2, 0x02
+    //   0x7A bit 20 -> byte 2, 0x10
+    struct Case {
+        uint8_t address;
+        uint8_t byte;
+        uint8_t mask;
+    };
+    const Case cases[] = {{0x77, 1, 0x01}, {0x7A, 2, 0x10}, {0x7B, 1, 0x08},
+                          {0x7D, 1, 0x04}, {0x7E, 2, 0x02}};
+    for (const Case &c : cases) {
+        Bench b;
+        const size_t size = b.fake.registers[c.address].size();
+        char line[TPS25751BenchProtocol::kMaxLineLength + 1];
+        snprintf(line, sizeof(line), "@5 WR 0x%02x %s", c.address,
+                 std::string(size * 2, '0').c_str());
+        const Lines lines = b.run(line);
+        TEST_ASSERT_EQUAL_STRING_MESSAGE("@5 OK", lines.back().c_str(), line);
+        const FakeBenchTarget::Write *pd3 = b.fake.lastWrite(0x42);
+        TEST_ASSERT_NOT_NULL_MESSAGE(pd3, line);
+        uint8_t expected[4] = {0, 0, 0, 0};
+        expected[c.byte] = c.mask;
+        TEST_ASSERT_EQUAL_HEX8_ARRAY_MESSAGE(expected, pd3->data.data(), 4, line);
+    }
+}
+
+void test_write_coupled_block_with_its_bit_already_set()
+{
+    // 0x0018001A already has bit 20, so 0x42 is read and not written.
+    Bench b;
+    b.fake.setRegister(0x42, {0x1A, 0x00, 0x18, 0x00});
+    const Lines lines = b.run(kWritePps);
+    TEST_ASSERT_EQUAL(3, lines.size());
+    TEST_ASSERT_EQUAL_STRING("@5 reg=0x7a len=4 data=c2012802 match=1", lines[0].c_str());
+    TEST_ASSERT_EQUAL_STRING("@5 pd3=already", lines[1].c_str());
+    TEST_ASSERT_EQUAL_STRING("@5 OK", lines[2].c_str());
+    TEST_ASSERT_EQUAL(0, b.fake.writeCount(0x42));
+    TEST_ASSERT_EQUAL(1, b.fake.writes.size());
+}
+
+void test_write_reports_pd3_failures_after_the_data_write()
+{
+    {
+        // 0x42 does not answer: the data write stands, 0x42 is not written.
+        Bench b;
+        b.fake.setRegister(0x42, kPd3Bench, sizeof(kPd3Bench));
+        b.fake.failRead[0x42] = true;
+        const Lines lines = b.run(kWritePps);
+        TEST_ASSERT_EQUAL(2, lines.size());
+        TEST_ASSERT_EQUAL_STRING("@5 reg=0x7a len=4 data=c2012802 match=1", lines[0].c_str());
+        TEST_ASSERT_EQUAL_STRING("@5 ERR I2C the data register was written; the 0x42 enable bit "
+                                 "was not set: PD3_CONFIGURATION read failed",
+                                 lines[1].c_str());
+        TEST_ASSERT_EQUAL(1, b.fake.writeCount(0x7A));
+        TEST_ASSERT_EQUAL(0, b.fake.writeCount(0x42));
+    }
+    {
+        // 0x42 reports a length other than its 4 bytes: treated as a failed read.
+        Bench b;
+        b.fake.setRegister(0x42, {0x1A, 0x00});
+        const Lines lines = b.run(kWritePps);
+        TEST_ASSERT_EQUAL_STRING("@5 ERR I2C the data register was written; the 0x42 enable bit "
+                                 "was not set: PD3_CONFIGURATION read failed",
+                                 lines.back().c_str());
+        TEST_ASSERT_EQUAL(0, b.fake.writeCount(0x42));
+    }
+    {
+        // The 0x42 write is not acknowledged.
+        Bench b;
+        b.fake.setRegister(0x42, kPd3Bench, sizeof(kPd3Bench));
+        b.fake.failWrite[0x42] = true;
+        const Lines lines = b.run(kWritePps);
+        TEST_ASSERT_EQUAL(2, lines.size());
+        TEST_ASSERT_EQUAL_STRING("@5 reg=0x7a len=4 data=c2012802 match=1", lines[0].c_str());
+        TEST_ASSERT_EQUAL_STRING("@5 ERR I2C the data register was written; the 0x42 enable bit "
+                                 "was not set: PD3_CONFIGURATION write failed",
+                                 lines[1].c_str());
+    }
+    {
+        // The 0x42 write goes through and its readback does not answer.
+        Bench b;
+        b.fake.setRegister(0x42, kPd3Bench, sizeof(kPd3Bench));
+        b.fake.afterWrite = [](FakeBenchTarget &f, uint8_t reg) {
+            if (reg == 0x42) f.failRead[0x42] = true;
+        };
+        const Lines lines = b.run(kWritePps);
+        TEST_ASSERT_EQUAL(2, lines.size());
+        TEST_ASSERT_EQUAL_STRING("@5 reg=0x7a len=4 data=c2012802 match=1", lines[0].c_str());
+        TEST_ASSERT_EQUAL_STRING("@5 ERR I2C the data register was written; the 0x42 enable bit "
+                                 "was not confirmed: PD3_CONFIGURATION read failed after its write",
+                                 lines[1].c_str());
+        TEST_ASSERT_EQUAL(1, b.fake.writeCount(0x42));
+    }
+    {
+        // The controller keeps its old 0x42: the line says match=0.
+        Bench b;
+        b.fake.setRegister(0x42, kPd3Bench, sizeof(kPd3Bench));
+        b.fake.ignoreWrite[0x42] = true;
+        const Lines lines = b.run(kWritePps);
+        TEST_ASSERT_EQUAL_STRING("@5 reg=0x42 len=4 data=1a000800 match=0", lines[1].c_str());
+        TEST_ASSERT_EQUAL_STRING("@5 OK", lines[2].c_str());
+    }
+}
+
+void test_write_failure_of_a_coupled_block_leaves_pd3_alone()
+{
+    Bench b;
+    b.fake.setRegister(0x42, kPd3Bench, sizeof(kPd3Bench));
+    b.fake.failWrite[0x7A] = true;
+    const Lines lines = b.run(kWritePps);
+    TEST_ASSERT_EQUAL(1, lines.size());
+    TEST_ASSERT_EQUAL_STRING("@5 ERR I2C register write failed", lines[0].c_str());
+    for (const auto &read : b.fake.reads) TEST_ASSERT_NOT_EQUAL(0x42, read.first);
+    TEST_ASSERT_EQUAL(0, b.fake.writeCount(0x42));
+}
+
+void test_write_uncoupled_register_leaves_pd3_alone()
+{
+    Bench b;
+    b.fake.setRegister(0x42, kPd3Bench, sizeof(kPd3Bench));
+    const Lines lines = b.run(("@5 WR 0x70 03"));
+    TEST_ASSERT_EQUAL(2, lines.size());
+    TEST_ASSERT_EQUAL_STRING("@5 reg=0x70 len=1 data=03 match=1", lines[0].c_str());
+    TEST_ASSERT_EQUAL_STRING("@5 OK", lines[1].c_str());
+    for (const auto &read : b.fake.reads) TEST_ASSERT_NOT_EQUAL(0x42, read.first);
+    TEST_ASSERT_EQUAL(0, b.fake.writeCount(0x42));
+}
+
+void test_write_full_transmit_source_caps_with_the_longest_id()
+{
+    // TRANSMIT_SOURCE_CAPABILITIES (0x32) is 63 bytes, the longest register on
+    // the allowlist: "@12345678 WR 0x32 " is 18 characters and the data 126,
+    // 144 in all, under kMaxLineLength (160). Fed through poll() so the line
+    // buffer is exercised too. Byte i is i, so a dropped or shifted byte shows.
+    Bench b;
+    std::vector<uint8_t> payload(63);
+    for (size_t i = 0; i < payload.size(); ++i) payload[i] = static_cast<uint8_t>(i);
+    const std::string line = "@12345678 WR 0x32 " + hexOf(payload);
+    TEST_ASSERT_EQUAL(144, line.size());
+    TEST_ASSERT_TRUE(line.size() <= TPS25751BenchProtocol::kMaxLineLength);
+
+    b.io.feed(line + "\n");
+    b.console.poll();
+    const Lines lines = b.io.takeLines();
+    TEST_ASSERT_EQUAL(2, lines.size());
+    TEST_ASSERT_EQUAL_STRING(("@12345678 reg=0x32 len=63 data=" + hexOf(payload) + " match=1").c_str(),
+                             lines[0].c_str());
+    TEST_ASSERT_EQUAL_STRING("@12345678 OK", lines[1].c_str());
+    TEST_ASSERT_EQUAL(0, b.fake.writeCount(0x42));
+}
+
+void test_write_int_clear_reads_back_as_a_clear_request()
+{
+    // INT_CLEAR1 (0x18): a 1 clears that INT_EVENT1 bit (SLVUCR8B p.23). This
+    // target keeps 0x18 at zero and clears the event, the readback the
+    // isWriteAllowed() documentation tells the host to expect. Plug Insert or
+    // Removal is bit 3, byte 0 mask 0x08.
+    Bench b;
+    b.fake.registers[0x14][0] = 0x08;
+    std::string clear = "08" + std::string(20, '0');
+    const Lines lines = b.run(("@5 WR 0x18 " + clear).c_str());
+    TEST_ASSERT_EQUAL_STRING(("@5 reg=0x18 len=11 data=" + std::string(22, '0') + " match=0").c_str(),
+                             lines[0].c_str());
+    TEST_ASSERT_EQUAL_STRING("@5 OK", lines[1].c_str());
+    TEST_ASSERT_EQUAL_HEX8(0x00, b.fake.registers[0x14][0]);
 }
 
 // ---------------------------------------------------------------------------
@@ -1975,11 +2190,19 @@ int main(int, char **)
 
     RUN_TEST(test_write_refuses_registers_off_the_allowlist);
     RUN_TEST(test_write_returns_the_readback);
-    RUN_TEST(test_write_accepts_all_five_allowed_registers);
+    RUN_TEST(test_write_accepts_every_allowed_register);
     RUN_TEST(test_write_port_control_returns_the_readback);
     RUN_TEST(test_write_reports_a_readback_that_differs);
     RUN_TEST(test_write_requires_the_whole_register);
     RUN_TEST(test_write_reports_i2c_failures);
+    RUN_TEST(test_write_coupled_block_sets_its_pd3_bit);
+    RUN_TEST(test_write_sets_the_right_pd3_bit_for_each_block);
+    RUN_TEST(test_write_coupled_block_with_its_bit_already_set);
+    RUN_TEST(test_write_reports_pd3_failures_after_the_data_write);
+    RUN_TEST(test_write_failure_of_a_coupled_block_leaves_pd3_alone);
+    RUN_TEST(test_write_uncoupled_register_leaves_pd3_alone);
+    RUN_TEST(test_write_full_transmit_source_caps_with_the_longest_id);
+    RUN_TEST(test_write_int_clear_reads_back_as_a_clear_request);
 
     RUN_TEST(test_task_runs_and_returns_data);
     RUN_TEST(test_task_passes_the_payload_through_data);

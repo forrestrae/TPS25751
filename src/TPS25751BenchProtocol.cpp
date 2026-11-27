@@ -2,6 +2,8 @@
 
 #include <string.h>
 
+#include "TPS25751PD3Config.h"
+
 namespace {
 
 // Task timeouts, see taskTimeoutMs().
@@ -9,12 +11,28 @@ constexpr uint32_t kPdMessageTaskTimeoutMs = 2000;
 constexpr uint32_t kGetMessageTaskTimeoutMs = 5000;
 constexpr uint32_t kLocalTaskTimeoutMs = 1000;
 
-// The registers `WR` may write. 0x27 and 0x28 disconnect and reconnect the
-// port when written (SLVUCR8B p.28, p.29); 0x29 takes effect "the next time the
-// appropriate policy is invoked" and does not disconnect (p.31), for example
-// whether the port initiates or accepts a PR_Swap; 0x37 steers the sink request (p.40);
-// 0x42 enables the PD 3.x replies (p.46).
-constexpr uint8_t kWritableRegisters[] = {0x27, 0x28, 0x29, 0x37, 0x42};
+// The registers `WR` may write, in address order; isWriteAllowed() documents
+// what a write to each does. writeRefusalText() lists the same addresses, and
+// the protocol suite checks that the two agree.
+constexpr uint8_t kWritableRegisters[] = {0x16, 0x18, 0x27, 0x28, 0x29, 0x32, 0x33, 0x37,
+                                          0x42, 0x70, 0x77, 0x7A, 0x7B, 0x7D, 0x7E, 0x98};
+
+// The PD 3.x data blocks and the PD3_CONFIGURATION (0x42) bit that enables
+// each one's reply (SLVUCR8B Table 3-26, p.46). Every address here must also
+// be in kWritableRegisters. TRANSMIT_SOURCE_INFO joins with
+// {0x78, TPS25751PD3Config::kSupportGetSourceInfoBit} (bit 18) once it is on
+// the allowlist.
+struct Pd3Coupling {
+    uint8_t address;
+    uint8_t bit;
+};
+constexpr Pd3Coupling kPd3Couplings[] = {
+    {0x77, TPS25751PD3Config::kSupportSourceExtendedBit},       // 8
+    {0x7A, TPS25751PD3Config::kSupportPpsStatusBit},            // 20
+    {0x7B, TPS25751PD3Config::kSupportBatteryStatusBit},        // 11
+    {0x7D, TPS25751PD3Config::kSupportBatteryCapabilitiesBit},  // 10
+    {0x7E, TPS25751PD3Config::kSupportSinkCapExtendedBit},      // 17
+};
 
 constexpr size_t kMaxCommandWordLength = 8;
 
@@ -275,6 +293,20 @@ bool TPS25751BenchProtocol::isWriteAllowed(uint8_t address)
         if (allowed == address) return true;
     }
     return false;
+}
+
+uint8_t TPS25751BenchProtocol::pd3EnableBit(uint8_t address)
+{
+    for (const Pd3Coupling &coupling : kPd3Couplings) {
+        if (coupling.address == address) return coupling.bit;
+    }
+    return kNoPd3EnableBit;
+}
+
+const __FlashStringHelper *TPS25751BenchProtocol::writeRefusalText()
+{
+    return F("register is not on the write allowlist (0x16, 0x18, 0x27, 0x28, 0x29, 0x32, "
+             "0x33, 0x37, 0x42, 0x70, 0x77, 0x7a, 0x7b, 0x7d, 0x7e, 0x98)");
 }
 
 const char *TPS25751BenchProtocol::errorCode(TPS25751BenchError error)

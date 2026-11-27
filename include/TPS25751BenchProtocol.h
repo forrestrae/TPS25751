@@ -35,7 +35,7 @@
  * | `DEC <addr>` | The `RD` line, then the register's debugPrint() output |
  * | `SNAP` | One `RD` line per snapshot register, then clears INT_EVENT1 |
  * | `CMD <4cc> [hex]` | Task status, return code, and the 64 DATA bytes |
- * | `WR <addr> <hex>` | Writes one of the allowed registers and returns the readback |
+ * | `WR <addr> <hex>` | Writes one of the allowed registers (isWriteAllowed()) and returns the readback; for a PD 3.x data block also sets its PD3_CONFIGURATION bit |
  *
  * This is not a register class: it does not inherit TPS25751Register and is not
  * part of the register factory.
@@ -131,8 +131,9 @@ public:
     static constexpr uint8_t kVersion = 1;
 
     /// Longest request line the console accepts, without the line feed. The
-    /// longest valid line is `@<8-char id> CMD <4cc> <128 hex digits>`, 147
-    /// characters.
+    /// longest valid line with single spaces is `@<8-char id> CMD <4cc> <128
+    /// hex digits>`, 147 characters. The longest `WR` is 0x32, 63 bytes:
+    /// `@<8-char id> WR 0x32 <126 hex digits>`, 144 characters.
     static constexpr size_t kMaxLineLength = 160;
 
     /// Number of registers in a snapshot.
@@ -211,17 +212,63 @@ public:
     /**
      * @brief Whether `WR` may write a register
      *
-     * Allowed: GLOBAL_SYSTEM_CONFIGURATION (0x27), PORT_CONFIGURATION (0x28),
-     * PORT_CONTROL (0x29), AUTONEGOTIATE_SINK (0x37), and PD3_CONFIGURATION
-     * (0x42), each as a whole register. A write to 0x27 or 0x28 disconnects and
-     * reconnects the port. A write to 0x29 does not; it takes effect the next
-     * time the policy it governs runs (SLVUCR8B p.31), such as whether the port
-     * next initiates or accepts a PR_Swap (bits 5 and 4).
+     * Each register is written whole. Grouped by what a write does
+     * (SLVUCR8B Rev. B, page of each register's table):
+     *
+     * - Disconnect and reconnect the port: GLOBAL_SYSTEM_CONFIGURATION (0x27,
+     *   p.28) and PORT_CONFIGURATION (0x28, p.29).
+     * - Take effect the next time the policy it governs runs, without a
+     *   disconnect: PORT_CONTROL (0x29, p.31), such as whether the port next
+     *   initiates or accepts a PR_Swap (bits 5 and 4).
+     * - Steer the sink request: AUTONEGOTIATE_SINK (0x37, p.40).
+     * - Enable the PD 3.x replies: PD3_CONFIGURATION (0x42, p.46).
+     * - Mask interrupts: INT_MASK1 (0x16, p.21) selects which INT_EVENT1 events
+     *   assert I2Ct_IRQ.
+     * - Clear events: a 1 written to INT_CLEAR1 (0x18, p.23) clears that bit of
+     *   INT_EVENT1. `SNAP` already clears the bits it reports, so this is for
+     *   an event `SNAP` has not read. The TRM marks 0x18 R/W but does not say
+     *   what a read returns; it is a clear request, not a copy of INT_EVENT1,
+     *   so expect `match=0` for a write with any bit set.
+     * - The advertised capabilities: TRANSMIT_SOURCE_CAPABILITIES (0x32, p.36)
+     *   and TRANSMIT_SINK_CAPABILITIES (0x33, p.37). The controller sends the
+     *   new values the next time it sends that message.
+     * - Sleep: SLEEP_CONTROL (0x70, p.52), whether and after how long the
+     *   controller may sleep when idle.
+     * - Liquid detection: LIQUID_DETECTION_CONFIG (0x98, p.60).
+     * - The PD 3.x data blocks, each sent only while its PD3_CONFIGURATION bit
+     *   is set (otherwise the controller answers Not_Supported): 0x77 (p.54,
+     *   bit 8), 0x7A (p.56, bit 20), 0x7B (p.57, bit 11), 0x7D (p.58, bit 10),
+     *   and 0x7E (p.59, bit 17). `WR` sets that bit after writing the block;
+     *   see pd3EnableBit().
+     *
+     * TRANSMIT_SOURCE_INFO (0x78, p.55, bit 18) is not allowed yet: a bench
+     * probe has to show first whether the firmware regenerates it.
      *
      * @param address Register address
-     * @return true for the five addresses above
+     * @return true for the sixteen addresses above
      */
     static bool isWriteAllowed(uint8_t address);
+
+    /// pd3EnableBit() result for a register that has no PD3_CONFIGURATION bit.
+    static constexpr uint8_t kNoPd3EnableBit = 0xFF;
+
+    /**
+     * @brief The PD3_CONFIGURATION (0x42) bit that enables a data block's reply
+     *
+     * 0x77 gives 8 (Support Source Extended Message), 0x7A 20 (Support PPS
+     * Status), 0x7B 11 (Support Battery Status Message), 0x7D 10 (Support
+     * Battery Capabilities Message), and 0x7E 17 (Support Sink Cap Extended),
+     * the bit positions of TPS25751PD3Config (SLVUCR8B Table 3-26, p.46).
+     * 0x78 would give 18 (Support Get Source Info) once it is on the write
+     * allowlist; until then it is not coupled.
+     *
+     * @param address Register address
+     * @return The bit number, or kNoPd3EnableBit for any other address
+     */
+    static uint8_t pd3EnableBit(uint8_t address);
+
+    /// Reason text for `ERR REFUSED` from `WR`, listing the allowlist.
+    static const __FlashStringHelper *writeRefusalText();
 
     /**
      * @brief The code word printed after `ERR`

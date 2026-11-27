@@ -7,6 +7,7 @@
 #include "TPS25751BootFlags.h"
 #include "TPS25751InterruptEvent.h"
 #include "TPS25751Mode.h"
+#include "TPS25751PD3Config.h"
 #include "TPS25751PatchLoader.h"
 #include "TPS25751Rdo.h"
 #include "TPS25751RegisterFactory.h"
@@ -55,6 +56,39 @@ void printSent(Stream &out, bool sent)
 void printToken(Stream &out, const char *text)
 {
     for (; *text != '\0'; ++text) out.print(*text == ' ' ? '_' : *text);
+}
+
+// The PD3_CONFIGURATION bits that TPS25751BenchProtocol::pd3EnableBit() can
+// return, with the TPS25751PD3Config accessor and setter of each. All six
+// "Support" bits for a data block are here, including bit 18 for 0x78, so a new
+// coupling in the protocol needs no change in the console.
+struct Pd3Switch {
+    uint8_t bit;
+    bool (TPS25751PD3Config::*isSet)() const;
+    void (TPS25751PD3Config::*set)(bool);
+};
+const Pd3Switch kPd3Switches[] = {
+    {TPS25751PD3Config::kSupportSourceExtendedBit, &TPS25751PD3Config::supportSourceExtended,
+     &TPS25751PD3Config::setSupportSourceExtended},
+    {TPS25751PD3Config::kSupportBatteryCapabilitiesBit,
+     &TPS25751PD3Config::supportBatteryCapabilities,
+     &TPS25751PD3Config::setSupportBatteryCapabilities},
+    {TPS25751PD3Config::kSupportBatteryStatusBit, &TPS25751PD3Config::supportBatteryStatus,
+     &TPS25751PD3Config::setSupportBatteryStatus},
+    {TPS25751PD3Config::kSupportSinkCapExtendedBit, &TPS25751PD3Config::supportSinkCapExtended,
+     &TPS25751PD3Config::setSupportSinkCapExtended},
+    {TPS25751PD3Config::kSupportGetSourceInfoBit, &TPS25751PD3Config::supportGetSourceInfo,
+     &TPS25751PD3Config::setSupportGetSourceInfo},
+    {TPS25751PD3Config::kSupportPpsStatusBit, &TPS25751PD3Config::supportPpsStatus,
+     &TPS25751PD3Config::setSupportPpsStatus},
+};
+
+const Pd3Switch *pd3SwitchFor(uint8_t bit)
+{
+    for (const Pd3Switch &entry : kPd3Switches) {
+        if (entry.bit == bit) return &entry;
+    }
+    return nullptr;
 }
 
 const __FlashStringHelper *taskStatusText(TPS25751TaskStatus status)
@@ -615,8 +649,7 @@ void TPS25751BenchConsole::handleWrite(const TPS25751BenchRequest &request)
 {
     const char *id = request.id;
     if (!Protocol::isWriteAllowed(request.address)) {
-        fail(id, TPS25751BenchError::Refused,
-             F("register is not on the write allowlist (0x27, 0x28, 0x29, 0x37, 0x42)"));
+        fail(id, TPS25751BenchError::Refused, Protocol::writeRefusalText());
         return;
     }
 
@@ -650,11 +683,81 @@ void TPS25751BenchConsole::handleWrite(const TPS25751BenchRequest &request)
     const bool match = readback.dataLength == request.payloadLength &&
                        memcmp(readback.data, request.payload, request.payloadLength) == 0;
 
+    // A PD 3.x data block is sent only while its PD3_CONFIGURATION bit is set
+    // (SLVUCR8B p.46), so set that bit from a fresh read of 0x42 and touch
+    // nothing else. Every transaction comes before the first reply line, so a
+    // message on the library's debug stream cannot land inside one.
+    enum class Pd3Step : uint8_t { NotCoupled, AlreadySet, Written, ReadFailed, WriteFailed,
+                                   ReadbackFailed };
+    Pd3Step pd3Step = Pd3Step::NotCoupled;
+    RawRegister pd3Readback;
+    bool pd3Match = false;
+
+    const uint8_t pd3Bit = Protocol::pd3EnableBit(request.address);
+    const Pd3Switch *pd3Switch = pd3SwitchFor(pd3Bit);
+    if (pd3Switch != nullptr) {
+        constexpr size_t kPd3Size = TPS25751Registers::Registers::PD3_CONFIGURATION.size;
+        RawRegister pd3Current;
+        if (!readRaw(static_cast<uint8_t>(Address::PD3_CONFIGURATION), pd3Current) ||
+            pd3Current.dataLength != kPd3Size) {
+            pd3Step = Pd3Step::ReadFailed;
+        } else {
+            TPS25751PD3Config pd3(pd3Current.data, pd3Current.dataLength);
+            if ((pd3.*(pd3Switch->isSet))()) {
+                pd3Step = Pd3Step::AlreadySet;
+            } else {
+                (pd3.*(pd3Switch->set))(true);
+                if (!_pd.writeRegister(Address::PD3_CONFIGURATION, pd3.raw(), pd3.size())) {
+                    pd3Step = Pd3Step::WriteFailed;
+                } else if (!readRaw(static_cast<uint8_t>(Address::PD3_CONFIGURATION),
+                                    pd3Readback)) {
+                    pd3Step = Pd3Step::ReadbackFailed;
+                } else {
+                    pd3Step = Pd3Step::Written;
+                    pd3Match = pd3Readback.dataLength == pd3.size() &&
+                               memcmp(pd3Readback.data, pd3.raw(), pd3.size()) == 0;
+                }
+            }
+        }
+    }
+
     Protocol::beginLine(_io, id);
     Protocol::printRegister(_io, request.address, readback.lengthByte, readback.data,
                             readback.dataLength);
     _io.print(F(" match="));
     _io.println(match ? '1' : '0');
+
+    switch (pd3Step) {
+        case Pd3Step::NotCoupled:
+            break;
+        case Pd3Step::AlreadySet:
+            Protocol::beginLine(_io, id);
+            _io.println(F("pd3=already"));
+            break;
+        case Pd3Step::Written:
+            Protocol::beginLine(_io, id);
+            Protocol::printRegister(_io, static_cast<uint8_t>(Address::PD3_CONFIGURATION),
+                                    pd3Readback.lengthByte, pd3Readback.data,
+                                    pd3Readback.dataLength);
+            _io.print(F(" match="));
+            _io.println(pd3Match ? '1' : '0');
+            break;
+        case Pd3Step::ReadFailed:
+            fail(id, TPS25751BenchError::I2C,
+                 F("the data register was written; the 0x42 enable bit was not set: "
+                   "PD3_CONFIGURATION read failed"));
+            return;
+        case Pd3Step::WriteFailed:
+            fail(id, TPS25751BenchError::I2C,
+                 F("the data register was written; the 0x42 enable bit was not set: "
+                   "PD3_CONFIGURATION write failed"));
+            return;
+        case Pd3Step::ReadbackFailed:
+            fail(id, TPS25751BenchError::I2C,
+                 F("the data register was written; the 0x42 enable bit was not confirmed: "
+                   "PD3_CONFIGURATION read failed after its write"));
+            return;
+    }
     finishOk(id);
 }
 

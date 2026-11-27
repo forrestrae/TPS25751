@@ -493,6 +493,8 @@ def build_tools(service: BenchService) -> SimpleNamespace:
           readback the console sets the block's bit in 0x42 (PD3_CONFIGURATION) so
           the controller sends the block: 0x77 bit 8, 0x78 bit 18, 0x7A bit 20, 0x7B
           bit 11, 0x7D bit 10, 0x7E bit 17. That is a second write, to 0x42.
+          Writing a block back to its old value sets the bit again, so restore 0x42
+          last, after the data blocks.
         - 0x78 (TX_SOURCE_INFO) is also written by the firmware, which has rewritten
           its lower word when the board attached as source; read it again after an
           attach.

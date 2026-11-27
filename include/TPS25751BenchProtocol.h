@@ -242,9 +242,9 @@ public:
      *   writing the block; see pd3EnableBit().
      *
      * The TRM says the firmware updates TRANSMIT_SOURCE_INFO (0x78) itself. On
-     * the bench (2026-11-27) it did not follow a lower PDO written to 0x32, not
-     * even across a port reset that brought the port up as source, so `WR` writes
-     * 0x78 directly like the other blocks.
+     * the bench (2026-11-27) it did not follow a lower PDO written to 0x32 at
+     * run time, not even across a port reset that brought the port up as
+     * source, so `WR` writes 0x78 directly like the other blocks.
      *
      * @param address Register address
      * @return true for the seventeen addresses above
@@ -258,8 +258,8 @@ public:
      * @brief The PD3_CONFIGURATION (0x42) bit that enables a data block's reply
      *
      * 0x77 gives 8 (Support Source Extended Message), 0x78 18 (Support Get
-     * Source Info), 0x7A 20 (Support PPS Status), 0x7B 11 (Support Battery Status Message), 0x7D 10 (Support
-     * Battery Capabilities Message), and 0x7E 17 (Support Sink Cap Extended),
+     * Source Info), 0x7A 20 (Support PPS Status), 0x7B 11 (Support Battery
+     * Status Message), 0x7D 10 (Support Battery Capabilities Message), and 0x7E 17 (Support Sink Cap Extended),
      * the bit positions of TPS25751PD3Config (SLVUCR8B Table 3-26, p.46).
      *
      * @param address Register address

@@ -70,6 +70,9 @@
  * enable bit was not set: ...` (`was not confirmed` for the readback), which
  * names the failed step. Any other register leaves 0x42 alone.
  *
+ * Because every write to a data block sets its bit again, a host that restores
+ * the bench writes 0x42 last, after the data blocks.
+ *
  * The console issues every 4CC task through TPS25751::executeCommand() and
  * loads the patch bundle with TPS25751PatchLoader::loadPatchBundle().
  */

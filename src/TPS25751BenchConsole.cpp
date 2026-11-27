@@ -687,20 +687,25 @@ void TPS25751BenchConsole::handleWrite(const TPS25751BenchRequest &request)
     // (SLVUCR8B p.46), so set that bit from a fresh read of 0x42 and touch
     // nothing else. Every transaction comes before the first reply line, so a
     // message on the library's debug stream cannot land inside one.
-    enum class Pd3Step : uint8_t { NotCoupled, AlreadySet, Written, ReadFailed, WriteFailed,
-                                   ReadbackFailed };
+    enum class Pd3Step : uint8_t { NotCoupled, NoSwitch, AlreadySet, Written, ReadFailed,
+                                   WrongLength, WriteFailed, ReadbackFailed };
     Pd3Step pd3Step = Pd3Step::NotCoupled;
     RawRegister pd3Readback;
     bool pd3Match = false;
 
     const uint8_t pd3Bit = Protocol::pd3EnableBit(request.address);
     const Pd3Switch *pd3Switch = pd3SwitchFor(pd3Bit);
-    if (pd3Switch != nullptr) {
-        constexpr size_t kPd3Size = TPS25751Registers::Registers::PD3_CONFIGURATION.size;
-        RawRegister pd3Current;
-        if (!readRaw(static_cast<uint8_t>(Address::PD3_CONFIGURATION), pd3Current) ||
-            pd3Current.dataLength != kPd3Size) {
+    constexpr size_t kPd3Size = TPS25751Registers::Registers::PD3_CONFIGURATION.size;
+    RawRegister pd3Current;
+    if (pd3Bit != Protocol::kNoPd3EnableBit && pd3Switch == nullptr) {
+        // The protocol couples this register to a bit kPd3Switches does not
+        // list: refuse to report success for a reply that was never enabled.
+        pd3Step = Pd3Step::NoSwitch;
+    } else if (pd3Switch != nullptr) {
+        if (!readRaw(static_cast<uint8_t>(Address::PD3_CONFIGURATION), pd3Current)) {
             pd3Step = Pd3Step::ReadFailed;
+        } else if (pd3Current.dataLength != kPd3Size) {
+            pd3Step = Pd3Step::WrongLength;
         } else {
             TPS25751PD3Config pd3(pd3Current.data, pd3Current.dataLength);
             if ((pd3.*(pd3Switch->isSet))()) {
@@ -730,6 +735,20 @@ void TPS25751BenchConsole::handleWrite(const TPS25751BenchRequest &request)
     switch (pd3Step) {
         case Pd3Step::NotCoupled:
             break;
+        case Pd3Step::NoSwitch:
+            beginFail(id, TPS25751BenchError::I2C);
+            _io.print(F("the data register was written; the 0x42 enable bit was not set: "
+                        "the console has no setter for bit "));
+            _io.println(static_cast<unsigned int>(pd3Bit));
+            return;
+        case Pd3Step::WrongLength:
+            beginFail(id, TPS25751BenchError::I2C);
+            _io.print(F("the data register was written; the 0x42 enable bit was not set: "
+                        "PD3_CONFIGURATION is "));
+            _io.print(static_cast<unsigned int>(pd3Current.dataLength));
+            _io.print(F(" bytes, expected "));
+            _io.println(static_cast<unsigned int>(kPd3Size));
+            return;
         case Pd3Step::AlreadySet:
             Protocol::beginLine(_io, id);
             _io.println(F("pd3=already"));

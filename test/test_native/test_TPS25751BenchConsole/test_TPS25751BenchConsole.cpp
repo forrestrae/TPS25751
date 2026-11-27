@@ -882,12 +882,12 @@ void test_write_reports_pd3_failures_after_the_data_write()
         TEST_ASSERT_EQUAL(0, b.fake.writeCount(0x42));
     }
     {
-        // 0x42 reports a length other than its 4 bytes: treated as a failed read.
+        // 0x42 reports a length other than its 4 bytes: named as a length mismatch.
         Bench b;
         b.fake.setRegister(0x42, {0x1A, 0x00});
         const Lines lines = b.run(kWritePps);
         TEST_ASSERT_EQUAL_STRING("@5 ERR I2C the data register was written; the 0x42 enable bit "
-                                 "was not set: PD3_CONFIGURATION read failed",
+                                 "was not set: PD3_CONFIGURATION is 2 bytes, expected 4",
                                  lines.back().c_str());
         TEST_ASSERT_EQUAL(0, b.fake.writeCount(0x42));
     }

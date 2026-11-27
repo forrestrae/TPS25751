@@ -410,11 +410,11 @@ void test_same_task()
 // Write allowlist and snapshot list
 // ---------------------------------------------------------------------------
 
-// The sixteen registers WR may write, in address order (isWriteAllowed()).
+// The seventeen registers WR may write, in address order (isWriteAllowed()).
 const uint8_t kAllowed[] = {0x16, 0x18, 0x27, 0x28, 0x29, 0x32, 0x33, 0x37,
-                            0x42, 0x70, 0x77, 0x7A, 0x7B, 0x7D, 0x7E, 0x98};
+                            0x42, 0x70, 0x77, 0x78, 0x7A, 0x7B, 0x7D, 0x7E, 0x98};
 
-void test_write_allowlist_is_exactly_the_sixteen_registers()
+void test_write_allowlist_is_exactly_the_seventeen_registers()
 {
     for (uint8_t address : kAllowed) {
         TEST_ASSERT_TRUE_MESSAGE(Protocol::isWriteAllowed(address), std::to_string(address).c_str());
@@ -424,9 +424,7 @@ void test_write_allowlist_is_exactly_the_sixteen_registers()
         if (Protocol::isWriteAllowed(static_cast<uint8_t>(address))) ++allowed;
     }
     TEST_ASSERT_EQUAL(sizeof(kAllowed), allowed);
-    // 0x78 waits for a bench probe; the others are neighbors and the registers
-    // a careless write would hurt most.
-    TEST_ASSERT_FALSE(Protocol::isWriteAllowed(0x78));  // TRANSMIT_SOURCE_INFO
+    // Neighbors, and the registers a careless write would hurt most.
     TEST_ASSERT_FALSE(Protocol::isWriteAllowed(0x08));  // COMMAND
     TEST_ASSERT_FALSE(Protocol::isWriteAllowed(0x09));  // DATA
     TEST_ASSERT_FALSE(Protocol::isWriteAllowed(0x14));  // INT_EVENT1
@@ -461,22 +459,22 @@ void test_pd3_enable_bit_of_each_coupled_register()
     TEST_ASSERT_EQUAL(10, Protocol::pd3EnableBit(0x7D));  // Support Battery Capabilities Message
     TEST_ASSERT_EQUAL(17, Protocol::pd3EnableBit(0x7E));  // Support Sink Cap Extended
 
-    // 0x78 (bit 18) is not coupled until it is on the allowlist.
-    TEST_ASSERT_EQUAL(Protocol::kNoPd3EnableBit, Protocol::pd3EnableBit(0x78));
+    TEST_ASSERT_EQUAL(18, Protocol::pd3EnableBit(0x78));  // Support Get Source Info
+
     TEST_ASSERT_EQUAL(Protocol::kNoPd3EnableBit, Protocol::pd3EnableBit(0x42));
     TEST_ASSERT_EQUAL(Protocol::kNoPd3EnableBit, Protocol::pd3EnableBit(0x32));
     TEST_ASSERT_EQUAL(Protocol::kNoPd3EnableBit, Protocol::pd3EnableBit(0x70));
     TEST_ASSERT_EQUAL(Protocol::kNoPd3EnableBit, Protocol::pd3EnableBit(0x00));
     TEST_ASSERT_EQUAL(Protocol::kNoPd3EnableBit, Protocol::pd3EnableBit(0xFF));
 
-    // Exactly five coupled registers, each one writable.
+    // Exactly six coupled registers, each one writable.
     unsigned coupled = 0;
     for (unsigned address = 0; address <= 0xFF; ++address) {
         if (Protocol::pd3EnableBit(static_cast<uint8_t>(address)) == Protocol::kNoPd3EnableBit) continue;
         ++coupled;
         TEST_ASSERT_TRUE(Protocol::isWriteAllowed(static_cast<uint8_t>(address)));
     }
-    TEST_ASSERT_EQUAL(5, coupled);
+    TEST_ASSERT_EQUAL(6, coupled);
 }
 
 void test_parse_write_of_the_longest_register_with_the_longest_id()
@@ -715,7 +713,7 @@ int main(int, char **)
     RUN_TEST(test_task_timeouts);
     RUN_TEST(test_same_task);
 
-    RUN_TEST(test_write_allowlist_is_exactly_the_sixteen_registers);
+    RUN_TEST(test_write_allowlist_is_exactly_the_seventeen_registers);
     RUN_TEST(test_write_refusal_text_lists_the_allowlist);
     RUN_TEST(test_pd3_enable_bit_of_each_coupled_register);
     RUN_TEST(test_parse_write_of_the_longest_register_with_the_longest_id);

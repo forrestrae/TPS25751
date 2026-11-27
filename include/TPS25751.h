@@ -357,7 +357,9 @@ public:
      *
      * TRM: "This register is automatically updated by the PD firmware and does
      * not require any EC implementation." The firmware may overwrite what you
-     * write. The controller sends this register's contents in reply to
+     * write: it has rewritten the lower word when the port attached as source.
+     * It does not derive the register from TRANSMIT_SOURCE_CAPABILITIES (0x32);
+     * CONSTRAINTS.md, TX_SOURCE_INFO, has the bench evidence. The controller sends this register's contents in reply to
      * Get_Source_Info only while PD3_CONFIGURATION (0x42) bit 18
      * (TPS25751PD3Config::supportGetSourceInfo()) is set; with it clear the
      * controller answers Not_Supported.

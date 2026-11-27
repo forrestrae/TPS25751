@@ -974,8 +974,8 @@ Decision:
 - `TPS25751.h` does not include the console, so firmware that leaves it out does not
   compile it in.
 - Default deny. `CMD` runs only the tasks on the allowlist, and `WR` writes only 0x16, 0x18,
-  0x27, 0x28, 0x29, 0x32, 0x33, 0x37, 0x42, 0x70, 0x77, 0x7A, 0x7B, 0x7D, 0x7E, and 0x98, as a whole
-  register. After a write to a PD 3.x data block (0x77, 0x7A, 0x7B, 0x7D, 0x7E) the console sets
+  0x27, 0x28, 0x29, 0x32, 0x33, 0x37, 0x42, 0x70, 0x77, 0x78, 0x7A, 0x7B, 0x7D, 0x7E, and 0x98, as a whole
+  register. After a write to a PD 3.x data block (0x77, 0x78, 0x7A, 0x7B, 0x7D, 0x7E) the console sets
   that block's bit in 0x42 and replies with a second register line. 0x29 joined on 2026-11-25 so the bench
   can keep a sourcing board from swapping to sink: bit 5 (Initiate Swap to Sink) makes it
   send PR_Swap and bit 4 (Process Swap to Sink) makes it accept one. A 0x29 write takes effect

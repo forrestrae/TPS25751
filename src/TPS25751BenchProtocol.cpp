@@ -15,19 +15,19 @@ constexpr uint32_t kLocalTaskTimeoutMs = 1000;
 // what a write to each does. writeRefusalText() lists the same addresses, and
 // the protocol suite checks that the two agree.
 constexpr uint8_t kWritableRegisters[] = {0x16, 0x18, 0x27, 0x28, 0x29, 0x32, 0x33, 0x37,
-                                          0x42, 0x70, 0x77, 0x7A, 0x7B, 0x7D, 0x7E, 0x98};
+                                          0x42, 0x70, 0x77, 0x78, 0x7A, 0x7B, 0x7D, 0x7E,
+                                          0x98};
 
 // The PD 3.x data blocks and the PD3_CONFIGURATION (0x42) bit that enables
 // each one's reply (SLVUCR8B Table 3-26, p.46). Every address here must also
-// be in kWritableRegisters. TRANSMIT_SOURCE_INFO joins with
-// {0x78, TPS25751PD3Config::kSupportGetSourceInfoBit} (bit 18) once it is on
-// the allowlist.
+// be in kWritableRegisters.
 struct Pd3Coupling {
     uint8_t address;
     uint8_t bit;
 };
 constexpr Pd3Coupling kPd3Couplings[] = {
     {0x77, TPS25751PD3Config::kSupportSourceExtendedBit},       // 8
+    {0x78, TPS25751PD3Config::kSupportGetSourceInfoBit},        // 18
     {0x7A, TPS25751PD3Config::kSupportPpsStatusBit},            // 20
     {0x7B, TPS25751PD3Config::kSupportBatteryStatusBit},        // 11
     {0x7D, TPS25751PD3Config::kSupportBatteryCapabilitiesBit},  // 10
@@ -306,7 +306,7 @@ uint8_t TPS25751BenchProtocol::pd3EnableBit(uint8_t address)
 const __FlashStringHelper *TPS25751BenchProtocol::writeRefusalText()
 {
     return F("register is not on the write allowlist (0x16, 0x18, 0x27, 0x28, 0x29, 0x32, "
-             "0x33, 0x37, 0x42, 0x70, 0x77, 0x7a, 0x7b, 0x7d, 0x7e, 0x98)");
+             "0x33, 0x37, 0x42, 0x70, 0x77, 0x78, 0x7a, 0x7b, 0x7d, 0x7e, 0x98)");
 }
 
 const char *TPS25751BenchProtocol::errorCode(TPS25751BenchError error)

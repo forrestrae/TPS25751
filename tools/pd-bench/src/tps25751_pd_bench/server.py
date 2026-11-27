@@ -489,12 +489,15 @@ def build_tools(service: BenchService) -> SimpleNamespace:
           governs runs, such as the board initiating (bit 5) or accepting (bit 4)
           the next PR_Swap to sink.
         - 0x16, 0x32, 0x33, 0x37, 0x42, 0x70, and 0x98 take effect at their next use.
-        - 0x77, 0x7A, 0x7B, 0x7D, and 0x7E are PD 3.x data blocks. After the readback
-          the console sets the block's bit in 0x42 (PD3_CONFIGURATION) so the
-          controller sends the block: 0x77 bit 8, 0x7A bit 20, 0x7B bit 11, 0x7D
-          bit 10, 0x7E bit 17. That is a second write, to 0x42.
+        - 0x77, 0x78, 0x7A, 0x7B, 0x7D, and 0x7E are PD 3.x data blocks. After the
+          readback the console sets the block's bit in 0x42 (PD3_CONFIGURATION) so
+          the controller sends the block: 0x77 bit 8, 0x78 bit 18, 0x7A bit 20, 0x7B
+          bit 11, 0x7D bit 10, 0x7E bit 17. That is a second write, to 0x42.
+        - 0x78 (TX_SOURCE_INFO) is also written by the firmware, which has rewritten
+          its lower word when the board attached as source; read it again after an
+          attach.
         - 0x18 reads back with match false, expected for that register.
-        0x78 is refused for now. hex must be the whole register, as many bytes as its
+        hex must be the whole register, as many bytes as its
         length byte. Start a write from a fresh bench_read: the firmware keeps values
         in bits the TRM calls reserved. Host-written values last until the next restart.
 

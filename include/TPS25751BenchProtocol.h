@@ -237,15 +237,17 @@ public:
      * - Liquid detection: LIQUID_DETECTION_CONFIG (0x98, p.60).
      * - The PD 3.x data blocks, each sent only while its PD3_CONFIGURATION bit
      *   is set (otherwise the controller answers Not_Supported): 0x77 (p.54,
-     *   bit 8), 0x7A (p.56, bit 20), 0x7B (p.57, bit 11), 0x7D (p.58, bit 10),
-     *   and 0x7E (p.59, bit 17). `WR` sets that bit after writing the block;
-     *   see pd3EnableBit().
+     *   bit 8), 0x78 (p.55, bit 18), 0x7A (p.56, bit 20), 0x7B (p.57, bit 11),
+     *   0x7D (p.58, bit 10), and 0x7E (p.59, bit 17). `WR` sets that bit after
+     *   writing the block; see pd3EnableBit().
      *
-     * TRANSMIT_SOURCE_INFO (0x78, p.55, bit 18) is not allowed yet: a bench
-     * probe has to show first whether the firmware regenerates it.
+     * The TRM says the firmware updates TRANSMIT_SOURCE_INFO (0x78) itself. On
+     * the bench (2026-11-27) it did not follow a lower PDO written to 0x32, not
+     * even across a port reset that brought the port up as source, so `WR` writes
+     * 0x78 directly like the other blocks.
      *
      * @param address Register address
-     * @return true for the sixteen addresses above
+     * @return true for the seventeen addresses above
      */
     static bool isWriteAllowed(uint8_t address);
 
@@ -255,12 +257,10 @@ public:
     /**
      * @brief The PD3_CONFIGURATION (0x42) bit that enables a data block's reply
      *
-     * 0x77 gives 8 (Support Source Extended Message), 0x7A 20 (Support PPS
-     * Status), 0x7B 11 (Support Battery Status Message), 0x7D 10 (Support
+     * 0x77 gives 8 (Support Source Extended Message), 0x78 18 (Support Get
+     * Source Info), 0x7A 20 (Support PPS Status), 0x7B 11 (Support Battery Status Message), 0x7D 10 (Support
      * Battery Capabilities Message), and 0x7E 17 (Support Sink Cap Extended),
      * the bit positions of TPS25751PD3Config (SLVUCR8B Table 3-26, p.46).
-     * 0x78 would give 18 (Support Get Source Info) once it is on the write
-     * allowlist; until then it is not coupled.
      *
      * @param address Register address
      * @return The bit number, or kNoPd3EnableBit for any other address

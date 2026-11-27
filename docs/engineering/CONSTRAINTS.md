@@ -646,6 +646,16 @@ state. The firmware leaves both of those fields at 0, so hardware has not
 exercised the rule; if firmware-written data breaks it, drop the rule under
 "Validation tiers" in the plan.
 
+The firmware does not derive 0x78 from TX_SOURCE_CAPABILITIES (0x32). On
+2026-11-27 the board, sinking with the configuration EEPROM loaded, read 0x78 as
+`3c 3c 3c 00 1e f0 00 00`: 60 W Maximum, Present, and Reported PDP, which is the
+20 V 3 A top PDO of 0x32, and 15 W Guaranteed PDP in the upper word. Lowering
+that PDO to 1.5 A (30 W) left 0x78 unchanged, both at once and after a 0x28
+port reset that brought the port up as source. The bench console therefore
+writes 0x78 directly, like the other PD 3.x data blocks, and sets bit 18 of
+0x42. Because the firmware has rewritten the lower word on an attach as source,
+read 0x78 again after an attach before relying on a host-written value.
+
 TRANSMITTED_PPS_STATUS (0x7A) reported a length byte of 4 on the same board, read
 `00 00 00 00`, and round-tripped a written value (`FA 00 3C 02`: 5000 mV,
 3000 mA, temperature normal, constant voltage) and the restore exactly. The

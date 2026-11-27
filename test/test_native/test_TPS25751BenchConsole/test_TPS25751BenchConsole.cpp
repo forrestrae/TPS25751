@@ -669,8 +669,7 @@ void test_snapshot_with_a_silent_controller()
 void test_write_refuses_registers_off_the_allowlist()
 {
     Bench b;
-    // 0x78 waits for a bench probe of whether the firmware regenerates it.
-    const char *refused[] = {"@5 WR 0x78 0000000000000000", "@5 WR 0x08 47414944",
+    const char *refused[] = {"@5 WR 0x79 00", "@5 WR 0x08 47414944",
                              "@5 WR 0x09 00", "@5 WR 0x2A 00000000", "@5 WR 0x2D 00",
                              "@5 WR 0x14 00", "@5 WR 0x5C 00"};
     for (const char *line : refused) {
@@ -678,7 +677,7 @@ void test_write_refuses_registers_off_the_allowlist()
         TEST_ASSERT_EQUAL(1, lines.size());
         TEST_ASSERT_EQUAL_STRING(
             "@5 ERR REFUSED register is not on the write allowlist (0x16, 0x18, 0x27, 0x28, "
-            "0x29, 0x32, 0x33, 0x37, 0x42, 0x70, 0x77, 0x7a, 0x7b, 0x7d, 0x7e, 0x98)",
+            "0x29, 0x32, 0x33, 0x37, 0x42, 0x70, 0x77, 0x78, 0x7a, 0x7b, 0x7d, 0x7e, 0x98)",
             lines[0].c_str());
     }
     // A refusal costs no I2C traffic at all.
@@ -706,7 +705,7 @@ void test_write_accepts_every_allowed_register()
     // Each register written whole at the size the fake reports, which is its
     // RegisterInfo size. For a PD 3.x data block 0x42 is written too.
     const uint8_t allowed[] = {0x16, 0x18, 0x27, 0x28, 0x29, 0x32, 0x33, 0x37,
-                               0x42, 0x70, 0x77, 0x7A, 0x7B, 0x7D, 0x7E, 0x98};
+                               0x42, 0x70, 0x77, 0x78, 0x7A, 0x7B, 0x7D, 0x7E, 0x98};
     for (uint8_t address : allowed) {
         Bench b;
         const size_t size = b.fake.registers[address].size();
@@ -828,14 +827,14 @@ void test_write_sets_the_right_pd3_bit_for_each_block()
     // Bit n is byte n / 8, bit n % 8 of the 0x42 buffer (SLVUCR8B p.46):
     //   0x77 bit 8  -> byte 1, 0x01    0x7B bit 11 -> byte 1, 0x08
     //   0x7D bit 10 -> byte 1, 0x04    0x7E bit 17 -> byte 2, 0x02
-    //   0x7A bit 20 -> byte 2, 0x10
+    //   0x7A bit 20 -> byte 2, 0x10    0x78 bit 18 -> byte 2, 0x04
     struct Case {
         uint8_t address;
         uint8_t byte;
         uint8_t mask;
     };
     const Case cases[] = {{0x77, 1, 0x01}, {0x7A, 2, 0x10}, {0x7B, 1, 0x08},
-                          {0x7D, 1, 0x04}, {0x7E, 2, 0x02}};
+                          {0x7D, 1, 0x04}, {0x7E, 2, 0x02}, {0x78, 2, 0x04}};
     for (const Case &c : cases) {
         Bench b;
         const size_t size = b.fake.registers[c.address].size();

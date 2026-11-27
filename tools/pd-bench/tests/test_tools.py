@@ -206,7 +206,7 @@ def test_write_port_control(bench):
 
 
 def test_write_refusals_and_errors(bench):
-    refused = bench.tools.bench_write("0x78", "00")
+    refused = bench.tools.bench_write("0x79", "00")
     assert refused["code"] == "REFUSED"
     assert bench.tools.bench_write("0x2a", "00000000")["code"] == "REFUSED"
     short = bench.tools.bench_write("0x42", "1a0008")

@@ -24,6 +24,7 @@
 #include <unity.h>
 
 #include <cstdio>
+#include <cstring>
 #include <string>
 
 #include "TPS25751PortConfig.h"
@@ -440,9 +441,145 @@ void test_state_machine_decodes_sink_only_and_source_only()
     TEST_ASSERT_EQUAL(TypeCStateMachine::SinkOnly, TPS25751PortConfig(snkOnly, PORT_CONFIG_SIZE).typeCStateMachine());
 }
 
+// --- Setters ------------------------------------------------------------------
+// Each setter is run from an all-ones and an all-zeros register. Only the
+// field's own bits may change, and the getter must read the value back.
+
+namespace {
+
+uint32_t bitsOf(const uint8_t *buf, unsigned lo, unsigned len)
+{
+    uint32_t v = 0;
+    for (unsigned i = 0; i < len; ++i)
+        v |= static_cast<uint32_t>((buf[(lo + i) / 8] >> ((lo + i) % 8)) & 1u) << i;
+    return v;
+}
+
+// Everything outside [lo, lo+len) must equal the starting pattern.
+bool othersUnchanged(const uint8_t *before, const uint8_t *after, unsigned lo, unsigned len)
+{
+    for (unsigned bit = 0; bit < 17 * 8u; ++bit)
+    {
+        if (bit >= lo && bit < lo + len) continue;
+        if (bitsOf(before, bit, 1) != bitsOf(after, bit, 1)) return false;
+    }
+    return true;
+}
+
+template <typename E, typename Set, typename Get>
+void checkEnumSetter(Set set, Get get, unsigned lo, unsigned len, uint8_t maxValue)
+{
+    for (uint8_t fill : {static_cast<uint8_t>(0xFF), static_cast<uint8_t>(0x00)})
+    {
+        for (uint8_t v = 0; v <= maxValue; ++v)
+        {
+            uint8_t start[17];
+            memset(start, fill, sizeof(start));
+            TPS25751PortConfig reg(start);
+            (reg.*set)(static_cast<E>(v));
+            TEST_ASSERT_EQUAL_UINT32(v, bitsOf(reg.raw(), lo, len));
+            TEST_ASSERT_EQUAL_UINT8(v, static_cast<uint8_t>((reg.*get)()));
+            TEST_ASSERT_TRUE(othersUnchanged(start, reg.raw(), lo, len));
+        }
+    }
+}
+
+template <typename Set, typename Get>
+void checkBoolSetter(Set set, Get get, unsigned bit)
+{
+    for (uint8_t fill : {static_cast<uint8_t>(0xFF), static_cast<uint8_t>(0x00)})
+    {
+        for (bool v : {true, false})
+        {
+            uint8_t start[17];
+            memset(start, fill, sizeof(start));
+            TPS25751PortConfig reg(start);
+            (reg.*set)(v);
+            TEST_ASSERT_EQUAL_UINT32(v ? 1u : 0u, bitsOf(reg.raw(), bit, 1));
+            TEST_ASSERT_EQUAL(v, (reg.*get)());
+            TEST_ASSERT_TRUE(othersUnchanged(start, reg.raw(), bit, 1));
+        }
+    }
+}
+
+}  // namespace
+
+void test_k_address_identity()
+{
+    TEST_ASSERT_TRUE(TPS25751PortConfig::kAddress == TPS25751Registers::Address::PORT_CONFIGURATION);
+}
+
+void test_set_TypeCStateMachine()
+{
+    checkEnumSetter<TypeCStateMachine>(&TPS25751PortConfig::setTypeCStateMachine, &TPS25751PortConfig::typeCStateMachine, 0, 2, 3);
+}
+
+void test_set_TypeCSupportOptions()
+{
+    checkEnumSetter<TypeCSupportOptions>(&TPS25751PortConfig::setTypeCSupportOptions, &TPS25751PortConfig::typeCSupportOptions, 8, 2, 3);
+}
+
+void test_set_DisablePD()
+{
+    checkBoolSetter(&TPS25751PortConfig::setDisablePD, &TPS25751PortConfig::disablePD, 10);
+}
+
+void test_set_VbusOVPUsage()
+{
+    checkEnumSetter<VbusOVPUsage>(&TPS25751PortConfig::setVbusOVPUsage, &TPS25751PortConfig::vbusOVPUsage, 16, 2, 3);
+}
+
+void test_set_OvpPP5V()
+{
+    checkEnumSetter<OVP_PP5V>(&TPS25751PortConfig::setOvpPP5V, &TPS25751PortConfig::ovpPP5V, 20, 2, 3);
+}
+
+void test_set_VbusUVPTripHV()
+{
+    checkEnumSetter<VbusUVPTripHV>(&TPS25751PortConfig::setVbusUVPTripHV, &TPS25751PortConfig::vbusUVPTripHV, 24, 3, 7);
+}
+
+void test_set_Usb3Rate()
+{
+    checkEnumSetter<USB3Rate>(&TPS25751PortConfig::setUsb3Rate, &TPS25751PortConfig::usb3Rate, 13, 2, 3);
+}
+
+void test_set_DebugAccessorySupport()
+{
+    checkBoolSetter(&TPS25751PortConfig::setDebugAccessorySupport, &TPS25751PortConfig::debugAccessorySupport, 12);
+}
+
+void test_set_UsbCommunicationCapable()
+{
+    checkBoolSetter(&TPS25751PortConfig::setUsbCommunicationCapable, &TPS25751PortConfig::usbCommunicationCapable, 11);
+}
+
+void test_set_ApdoIlimOvershoot()
+{
+    checkEnumSetter<ApdoIlimOvershoot>(&TPS25751PortConfig::setApdoIlimOvershoot, &TPS25751PortConfig::apdoIlimOvershoot, 29, 2, 3);
+}
+
+void test_set_ApdoVbusUvpThreshold()
+{
+    checkEnumSetter<ApdoVbusUvpThreshold>(&TPS25751PortConfig::setApdoVbusUvpThreshold, &TPS25751PortConfig::apdoVbusUvpThreshold, 27, 2, 3);
+}
+
 int main(int, char **)
 {
     UNITY_BEGIN();
+
+    RUN_TEST(test_k_address_identity);
+    RUN_TEST(test_set_TypeCStateMachine);
+    RUN_TEST(test_set_TypeCSupportOptions);
+    RUN_TEST(test_set_DisablePD);
+    RUN_TEST(test_set_VbusOVPUsage);
+    RUN_TEST(test_set_OvpPP5V);
+    RUN_TEST(test_set_VbusUVPTripHV);
+    RUN_TEST(test_set_Usb3Rate);
+    RUN_TEST(test_set_DebugAccessorySupport);
+    RUN_TEST(test_set_UsbCommunicationCapable);
+    RUN_TEST(test_set_ApdoIlimOvershoot);
+    RUN_TEST(test_set_ApdoVbusUvpThreshold);
 
     RUN_TEST(test_size_is_17_bytes);
     RUN_TEST(test_reset_value_decodes_rev_b_defaults);

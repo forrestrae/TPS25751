@@ -23,6 +23,7 @@
 #include <unity.h>
 #include <string>
 #include <cstdio>
+#include <cstring>
 
 #include "TPS25751PortControl.h"
 #include "TPS25751Register.h"
@@ -458,9 +459,175 @@ void test_debug_print_every_flag_set()
 
 // --- Runner -----------------------------------------------------------------
 
+// --- Setters ------------------------------------------------------------------
+// Each setter is run from an all-ones and an all-zeros register. Only the
+// field's own bits may change, and the getter must read the value back.
+
+namespace {
+
+uint32_t bitsOf(const uint8_t *buf, unsigned lo, unsigned len)
+{
+    uint32_t v = 0;
+    for (unsigned i = 0; i < len; ++i)
+        v |= static_cast<uint32_t>((buf[(lo + i) / 8] >> ((lo + i) % 8)) & 1u) << i;
+    return v;
+}
+
+// Everything outside [lo, lo+len) must equal the starting pattern.
+bool othersUnchanged(const uint8_t *before, const uint8_t *after, unsigned lo, unsigned len)
+{
+    for (unsigned bit = 0; bit < 4 * 8u; ++bit)
+    {
+        if (bit >= lo && bit < lo + len) continue;
+        if (bitsOf(before, bit, 1) != bitsOf(after, bit, 1)) return false;
+    }
+    return true;
+}
+
+template <typename E, typename Set, typename Get>
+void checkEnumSetter(Set set, Get get, unsigned lo, unsigned len, uint8_t maxValue)
+{
+    for (uint8_t fill : {static_cast<uint8_t>(0xFF), static_cast<uint8_t>(0x00)})
+    {
+        for (uint8_t v = 0; v <= maxValue; ++v)
+        {
+            uint8_t start[4];
+            memset(start, fill, sizeof(start));
+            TPS25751PortControl reg(start);
+            (reg.*set)(static_cast<E>(v));
+            TEST_ASSERT_EQUAL_UINT32(v, bitsOf(reg.raw(), lo, len));
+            TEST_ASSERT_EQUAL_UINT8(v, static_cast<uint8_t>((reg.*get)()));
+            TEST_ASSERT_TRUE(othersUnchanged(start, reg.raw(), lo, len));
+        }
+    }
+}
+
+template <typename Set, typename Get>
+void checkBoolSetter(Set set, Get get, unsigned bit)
+{
+    for (uint8_t fill : {static_cast<uint8_t>(0xFF), static_cast<uint8_t>(0x00)})
+    {
+        for (bool v : {true, false})
+        {
+            uint8_t start[4];
+            memset(start, fill, sizeof(start));
+            TPS25751PortControl reg(start);
+            (reg.*set)(v);
+            TEST_ASSERT_EQUAL_UINT32(v ? 1u : 0u, bitsOf(reg.raw(), bit, 1));
+            TEST_ASSERT_EQUAL(v, (reg.*get)());
+            TEST_ASSERT_TRUE(othersUnchanged(start, reg.raw(), bit, 1));
+        }
+    }
+}
+
+}  // namespace
+
+void test_k_address_identity()
+{
+    TEST_ASSERT_TRUE(TPS25751PortControl::kAddress == TPS25751Registers::Address::PORT_CONTROL);
+}
+
+void test_set_ChargerDetectEnable()
+{
+    checkEnumSetter<ChargerDetectEnable>(&TPS25751PortControl::setChargerDetectEnable, &TPS25751PortControl::chargerDetectEnable, 30, 2, 3);
+}
+
+void test_set_ChargerAdvertiseEnable()
+{
+    checkEnumSetter<ChargerAdvertiseEnable>(&TPS25751PortControl::setChargerAdvertiseEnable, &TPS25751PortControl::chargerAdvertiseEnable, 26, 3, 7);
+}
+
+void test_set_Resistor15kPresent()
+{
+    checkBoolSetter(&TPS25751PortControl::setResistor15kPresent, &TPS25751PortControl::resistor15kPresent, 24);
+}
+
+void test_set_DcdEnable()
+{
+    checkBoolSetter(&TPS25751PortControl::setDcdEnable, &TPS25751PortControl::dcdEnable, 25);
+}
+
+void test_set_AutomaticIdRequest()
+{
+    checkBoolSetter(&TPS25751PortControl::setAutomaticIdRequest, &TPS25751PortControl::automaticIdRequest, 16);
+}
+
+void test_set_EnableCurrentMonitor()
+{
+    checkBoolSetter(&TPS25751PortControl::setEnableCurrentMonitor, &TPS25751PortControl::enableCurrentMonitor, 20);
+}
+
+void test_set_UnconstrainedPower()
+{
+    checkBoolSetter(&TPS25751PortControl::setUnconstrainedPower, &TPS25751PortControl::unconstrainedPower, 19);
+}
+
+void test_set_InitiateSwapToDFP()
+{
+    checkBoolSetter(&TPS25751PortControl::setInitiateSwapToDFP, &TPS25751PortControl::initiateSwapToDFP, 15);
+}
+
+void test_set_ProcessSwapToDFP()
+{
+    checkBoolSetter(&TPS25751PortControl::setProcessSwapToDFP, &TPS25751PortControl::processSwapToDFP, 14);
+}
+
+void test_set_InitiateSwapToUFP()
+{
+    checkBoolSetter(&TPS25751PortControl::setInitiateSwapToUFP, &TPS25751PortControl::initiateSwapToUFP, 13);
+}
+
+void test_set_ProcessSwapToUFP()
+{
+    checkBoolSetter(&TPS25751PortControl::setProcessSwapToUFP, &TPS25751PortControl::processSwapToUFP, 12);
+}
+
+void test_set_InitiateSwapToSource()
+{
+    checkBoolSetter(&TPS25751PortControl::setInitiateSwapToSource, &TPS25751PortControl::initiateSwapToSource, 7);
+}
+
+void test_set_ProcessSwapToSource()
+{
+    checkBoolSetter(&TPS25751PortControl::setProcessSwapToSource, &TPS25751PortControl::processSwapToSource, 6);
+}
+
+void test_set_InitiateSwapToSink()
+{
+    checkBoolSetter(&TPS25751PortControl::setInitiateSwapToSink, &TPS25751PortControl::initiateSwapToSink, 5);
+}
+
+void test_set_ProcessSwapToSink()
+{
+    checkBoolSetter(&TPS25751PortControl::setProcessSwapToSink, &TPS25751PortControl::processSwapToSink, 4);
+}
+
+void test_set_TypeCCurrent()
+{
+    checkEnumSetter<TypeCCurrent>(&TPS25751PortControl::setTypeCCurrent, &TPS25751PortControl::typeCCurrent, 0, 2, 3);
+}
+
 int main(int, char **)
 {
     UNITY_BEGIN();
+
+    RUN_TEST(test_k_address_identity);
+    RUN_TEST(test_set_ChargerDetectEnable);
+    RUN_TEST(test_set_ChargerAdvertiseEnable);
+    RUN_TEST(test_set_Resistor15kPresent);
+    RUN_TEST(test_set_DcdEnable);
+    RUN_TEST(test_set_AutomaticIdRequest);
+    RUN_TEST(test_set_EnableCurrentMonitor);
+    RUN_TEST(test_set_UnconstrainedPower);
+    RUN_TEST(test_set_InitiateSwapToDFP);
+    RUN_TEST(test_set_ProcessSwapToDFP);
+    RUN_TEST(test_set_InitiateSwapToUFP);
+    RUN_TEST(test_set_ProcessSwapToUFP);
+    RUN_TEST(test_set_InitiateSwapToSource);
+    RUN_TEST(test_set_ProcessSwapToSource);
+    RUN_TEST(test_set_InitiateSwapToSink);
+    RUN_TEST(test_set_ProcessSwapToSink);
+    RUN_TEST(test_set_TypeCCurrent);
 
     RUN_TEST(test_default_constructor_allocates_zeroed_buffer);
     RUN_TEST(test_reset_value_decodes_rev_b_defaults);

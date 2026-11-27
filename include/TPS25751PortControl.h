@@ -72,6 +72,9 @@ public:
     TPS25751PortControl(const uint8_t *data, const size_t len) : TPS25751Register(data, len) {}
     explicit TPS25751PortControl(TPS25751Registers::RegisterInfo regInfo) : TPS25751Register(regInfo.size) {}
 
+    /// @brief Register identity for the typed TPS25751::writeRegister<T>() write path.
+    static constexpr TPS25751Registers::Address kAddress = TPS25751Registers::Address::PORT_CONTROL;
+
     // Charger detection and advertisement
     ChargerDetectEnable chargerDetectEnable() const;
     ChargerAdvertiseEnable chargerAdvertiseEnable() const;
@@ -114,6 +117,42 @@ public:
 
     // Type-C current
     TypeCCurrent typeCCurrent() const;
+
+    // --- Setters: each a single setBits() call, touching only its own field ----
+    // Bit positions: SLVUCR8B (Rev. B, 2026-08), page 31.
+
+    /// @brief Set Charger Detect Enable (bits 31:30)
+    void setChargerDetectEnable(ChargerDetectEnable value);
+    /// @brief Set Charger Advertise Enable (bits 28:26)
+    void setChargerAdvertiseEnable(ChargerAdvertiseEnable value);
+    /// @brief Set Resistor 15k Present (bit 24)
+    void setResistor15kPresent(bool present);
+    /// @brief Set DCD Enable (bit 25)
+    void setDcdEnable(bool enable);
+    /// @brief Set Automatic ID Request (bit 16)
+    void setAutomaticIdRequest(bool enable);
+    /// @brief Set Enable Current Monitor (bit 20)
+    void setEnableCurrentMonitor(bool enable);
+    /// @brief Set Unconstrained Power (bit 19)
+    void setUnconstrainedPower(bool enable);
+    /// @brief Set Initiate Swap to DFP (bit 15)
+    void setInitiateSwapToDFP(bool enable);
+    /// @brief Set Process Swap to DFP (bit 14)
+    void setProcessSwapToDFP(bool enable);
+    /// @brief Set Initiate Swap to UFP (bit 13)
+    void setInitiateSwapToUFP(bool enable);
+    /// @brief Set Process Swap to UFP (bit 12)
+    void setProcessSwapToUFP(bool enable);
+    /// @brief Set Initiate Swap to Source (bit 7)
+    void setInitiateSwapToSource(bool enable);
+    /// @brief Set Process Swap to Source (bit 6)
+    void setProcessSwapToSource(bool enable);
+    /// @brief Set Initiate Swap to Sink (bit 5)
+    void setInitiateSwapToSink(bool enable);
+    /// @brief Set Process Swap to Sink (bit 4)
+    void setProcessSwapToSink(bool enable);
+    /// @brief Set TypeC Current (bits 1:0)
+    void setTypeCCurrent(TypeCCurrent value);
 
     void debugPrint(Stream &s = Serial) const override;
 

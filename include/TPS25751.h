@@ -436,6 +436,38 @@ public:
      */
     bool writeLiquidDetectionConfig(const TPS25751LiquidDetectionConfig &liquidDetectionConfig) const;
 
+    /**
+     * @brief Write the Port Configuration register (0x28)
+     *
+     * TRM SLVUCR8B p.28/29: "Any modifications to this register will cause a
+     * port disconnect and reconnect with the new settings." The register
+     * configures port-specific hardware (Type-C state machine, OVP and UVP
+     * thresholds), so a wrong value can drop the contract or change the port's
+     * role. The firmware stores undocumented values in bits the TRM lists as
+     * reserved, so start from a fresh readPortConfig() and change only the
+     * fields you mean to.
+     *
+     * @param portConfig Register object holding the bytes to write
+     * @return false if @p portConfig is not valid or not the expected size;
+     *         otherwise the result of the underlying I2C write
+     */
+    bool writePortConfig(const TPS25751PortConfig &portConfig) const;
+
+    /**
+     * @brief Write the Port Control register (0x29)
+     *
+     * TRM SLVUCR8B p.31: the controller takes no immediate action on a write;
+     * the change takes effect the next time the governing policy runs (for
+     * example the next swap request or the next Type-C current advertisement).
+     * Start from a fresh readPortControl() and change only the fields you mean
+     * to, because the firmware may set bits the TRM lists as reserved.
+     *
+     * @param portControl Register object holding the bytes to write
+     * @return false if @p portControl is not valid or not the expected size;
+     *         otherwise the result of the underlying I2C write
+     */
+    bool writePortControl(const TPS25751PortControl &portControl) const;
+
     // Type-safe register reading methods
     bool readRegister(TPS25751Registers::RegisterInfo regInfo, uint8_t *buffer) const;
     bool readRegister(TPS25751Registers::Address addr, uint8_t *buffer, size_t length) const;

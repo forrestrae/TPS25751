@@ -139,6 +139,63 @@ ApdoVbusUvpThreshold TPS25751PortConfig::apdoVbusUvpThreshold() const
     return extractEnum<ApdoVbusUvpThreshold>(27, 2, static_cast<uint8_t>(ApdoVbusUvpThreshold::Reserved), ApdoVbusUvpThreshold::Percent90);
 }
 
+// --- Setters: each a single setBits() call; setBits() itself guards !isValid() ---
+
+void TPS25751PortConfig::setTypeCStateMachine(TypeCStateMachine value)
+{
+    setBits(0, 2, static_cast<uint32_t>(value));
+}
+
+void TPS25751PortConfig::setTypeCSupportOptions(TypeCSupportOptions value)
+{
+    setBits(8, 2, static_cast<uint32_t>(value));
+}
+
+void TPS25751PortConfig::setDisablePD(bool disable)
+{
+    setBits(10, 1, disable ? 1u : 0u);
+}
+
+void TPS25751PortConfig::setVbusOVPUsage(VbusOVPUsage value)
+{
+    setBits(16, 2, static_cast<uint32_t>(value));
+}
+
+void TPS25751PortConfig::setOvpPP5V(OVP_PP5V value)
+{
+    setBits(20, 2, static_cast<uint32_t>(value));
+}
+
+void TPS25751PortConfig::setVbusUVPTripHV(VbusUVPTripHV value)
+{
+    setBits(24, 3, static_cast<uint32_t>(value));
+}
+
+void TPS25751PortConfig::setUsb3Rate(USB3Rate value)
+{
+    setBits(13, 2, static_cast<uint32_t>(value));
+}
+
+void TPS25751PortConfig::setDebugAccessorySupport(bool enable)
+{
+    setBits(12, 1, enable ? 1u : 0u);
+}
+
+void TPS25751PortConfig::setUsbCommunicationCapable(bool capable)
+{
+    setBits(11, 1, capable ? 1u : 0u);
+}
+
+void TPS25751PortConfig::setApdoIlimOvershoot(ApdoIlimOvershoot value)
+{
+    setBits(29, 2, static_cast<uint32_t>(value));
+}
+
+void TPS25751PortConfig::setApdoVbusUvpThreshold(ApdoVbusUvpThreshold value)
+{
+    setBits(27, 2, static_cast<uint32_t>(value));
+}
+
 void TPS25751PortConfig::debugPrint(Stream &s) const {
     s.println(F("=== Port Configuration Register (0x28) ==="));
     s.print(F("  Type-C State Machine: ")); s.println(toString(typeCStateMachine()));

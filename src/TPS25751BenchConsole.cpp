@@ -115,6 +115,11 @@ void TPS25751BenchConsole::setPatchBundle(const uint8_t *image, size_t length)
     _patchBundleLength = length;
 }
 
+bool TPS25751BenchConsole::canSetPd3Bit(uint8_t bit)
+{
+    return pd3SwitchFor(bit) != nullptr;
+}
+
 bool TPS25751BenchConsole::hasPatchBundle() const
 {
     return _patchBundle != nullptr && _patchBundleLength > 0;

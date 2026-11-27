@@ -112,6 +112,20 @@ public:
     static constexpr uint32_t kPatchReadyTimeoutMs = 3000;
 
     /**
+     * @brief Whether `WR` can set a PD3_CONFIGURATION (0x42) bit
+     *
+     * The console sets a data block's enable bit through a table of
+     * TPS25751PD3Config getters and setters. Every bit that
+     * TPS25751BenchProtocol::pd3EnableBit() returns must be in that table;
+     * otherwise `WR` on the block answers `ERR I2C ... the console has no
+     * setter for bit N`. The native tests check the two tables agree.
+     *
+     * @param bit A bit number of PD3_CONFIGURATION
+     * @return true if the console has a getter and setter for @p bit
+     */
+    static bool canSetPd3Bit(uint8_t bit);
+
+    /**
      * @brief Construct a console
      * @param pd                The controller to drive; must outlive the console
      * @param io                Stream that carries the protocol

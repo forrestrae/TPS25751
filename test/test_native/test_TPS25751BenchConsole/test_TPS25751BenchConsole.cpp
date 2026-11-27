@@ -822,6 +822,20 @@ void test_write_coupled_block_sets_its_pd3_bit()
     TEST_ASSERT_EQUAL_HEX8_ARRAY(expected, b.fake.writes[1].data.data(), 4);
 }
 
+void test_every_coupled_pd3_bit_has_a_console_setter()
+{
+    // pd3EnableBit() (protocol) and the console's setter table are separate
+    // lists; a coupled bit missing from the second makes WR answer ERR I2C.
+    for (unsigned address = 0; address <= 0xFF; ++address) {
+        const uint8_t bit = TPS25751BenchProtocol::pd3EnableBit(static_cast<uint8_t>(address));
+        if (bit == TPS25751BenchProtocol::kNoPd3EnableBit) continue;
+        char message[48];
+        snprintf(message, sizeof(message), "address 0x%02x, bit %u", address,
+                 static_cast<unsigned>(bit));
+        TEST_ASSERT_TRUE_MESSAGE(TPS25751BenchConsole::canSetPd3Bit(bit), message);
+    }
+}
+
 void test_write_sets_the_right_pd3_bit_for_each_block()
 {
     // Bit n is byte n / 8, bit n % 8 of the 0x42 buffer (SLVUCR8B p.46):
@@ -2195,6 +2209,7 @@ int main(int, char **)
     RUN_TEST(test_write_requires_the_whole_register);
     RUN_TEST(test_write_reports_i2c_failures);
     RUN_TEST(test_write_coupled_block_sets_its_pd3_bit);
+    RUN_TEST(test_every_coupled_pd3_bit_has_a_console_setter);
     RUN_TEST(test_write_sets_the_right_pd3_bit_for_each_block);
     RUN_TEST(test_write_coupled_block_with_its_bit_already_set);
     RUN_TEST(test_write_reports_pd3_failures_after_the_data_write);

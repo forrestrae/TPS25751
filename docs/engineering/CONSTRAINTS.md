@@ -502,7 +502,10 @@ The TRM (SLVUCR8B) marks no TPS25751 register write-only. COMMAND (p.16) and
 INT_CLEAR1 (p.23) are R/W registers that the host writes to trigger an action.
 `TPS25751::executeCommand()` reads COMMAND to poll for completion. Reading
 INT_CLEAR1 back carries no event state, so the library has no
-`readInterruptClear()` and only writes it.
+`readInterruptClear()` and only writes it. A bench console write of
+`01 00 00 00 00 00 00 00 00 00 00` on 2026-11-27 read back as
+`00 00 00 00 00 00 00 00 00 00 01`, so the readback holds neither the written bits nor
+zeros, and `WR 0x18` reports `match=0`.
 
 ### Read/Write Registers (R/W)
 

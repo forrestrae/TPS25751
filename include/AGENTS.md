@@ -27,7 +27,7 @@ register is `TPS25751<Name>` in `TPS25751<Name>.h`.
 | Capabilities and contract | 0x30 `ReceivedSourceCaps`, 0x31 `ReceivedSinkCaps`, 0x32 `TransmitSourceCaps`, 0x33 `TransmitSinkCaps`, 0x34 `ActivePDOContract`, 0x35 `ActiveRDOContract` |
 | USB PD data blocks | 0x48 `ReceivedSOPIdentity`, 0x77 `TransmitSourceCapsExtended`, 0x78 `TransmitSourceInfo`, 0x7A `TransmitPPSStatus`, 0x7B `TransmitBatteryStatus`, 0x7D `TransmitBatteryCapabilities`, 0x7E `TransmitSinkCapsExtended` |
 
-Writable through a `write<Name>()` method: 0x16, 0x18, 0x27, 0x32, 0x33, 0x37, 0x42,
+Writable through a `write<Name>()` method: 0x16, 0x18, 0x27, 0x28, 0x29, 0x32, 0x33, 0x37, 0x42,
 0x70, 0x77, 0x78, 0x7A, 0x7B, 0x7D, 0x7E, and 0x98. `TPS25751.h` is the authority.
 `CustomerUse` and `IOConfig` are read-only at runtime and have no setters.
 

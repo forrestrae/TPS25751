@@ -120,6 +120,9 @@ public:
     TPS25751PortConfig(const uint8_t *data, const size_t len) : TPS25751Register(data, len) {};
     explicit TPS25751PortConfig(TPS25751Registers::RegisterInfo regInfo) : TPS25751Register(regInfo.size) {};
 
+    /// @brief Register identity for the typed TPS25751::writeRegister<T>() write path.
+    static constexpr TPS25751Registers::Address kAddress = TPS25751Registers::Address::PORT_CONFIGURATION;
+
     TypeCStateMachine typeCStateMachine() const;
 
     TypeCSupportOptions typeCSupportOptions() const;
@@ -151,6 +154,32 @@ public:
 
     /// APDO VBUS UVP Threshold (bits 28:27). Value table added in Rev. B.
     ApdoVbusUvpThreshold apdoVbusUvpThreshold() const;
+
+    // --- Setters: each a single setBits() call, touching only its own field ----
+    // Bit positions: SLVUCR8B (Rev. B, 2026-08), page 29.
+
+    /// @brief Set TypeC State machine (bits 1:0)
+    void setTypeCStateMachine(TypeCStateMachine value);
+    /// @brief Set TypeC Support Options (bits 9:8)
+    void setTypeCSupportOptions(TypeCSupportOptions value);
+    /// @brief Set Disable PD (bit 10)
+    void setDisablePD(bool disable);
+    /// @brief Set VBUS OVP Usage (bits 17:16)
+    void setVbusOVPUsage(VbusOVPUsage value);
+    /// @brief Set OVP for PP5V (bits 21:20)
+    void setOvpPP5V(OVP_PP5V value);
+    /// @brief Set VBUS Sink UVP Trip HV (bits 26:24)
+    void setVbusUVPTripHV(VbusUVPTripHV value);
+    /// @brief Set USB3 Rate (bits 14:13)
+    void setUsb3Rate(USB3Rate value);
+    /// @brief Set DebugAccessory Support (bit 12)
+    void setDebugAccessorySupport(bool enable);
+    /// @brief Set USB Communication Capable (bit 11)
+    void setUsbCommunicationCapable(bool capable);
+    /// @brief Set APDO ILIM Over Shoot (bits 30:29)
+    void setApdoIlimOvershoot(ApdoIlimOvershoot value);
+    /// @brief Set APDO VBUS UVP Threshold (bits 28:27)
+    void setApdoVbusUvpThreshold(ApdoVbusUvpThreshold value);
 
     void debugPrint(Stream &s = Serial) const override ;
 

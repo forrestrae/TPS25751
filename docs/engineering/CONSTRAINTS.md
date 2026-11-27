@@ -504,6 +504,24 @@ INT_CLEAR1 (p.23) are R/W registers that the host writes to trigger an action.
 INT_CLEAR1 back carries no event state, so the library has no
 `readInterruptClear()` and only writes it.
 
+What INT_CLEAR1 reads back was sampled on 2026-11-27 through the bench console,
+with the board sinking and INT_EVENT1 holding only Patch Loaded (bit 80, byte 10):
+six reads of 0x18, counting each write's readback, and three writes, none of them to a bit set in INT_EVENT1.
+
+| Step | Written to 0x18 | 0x18 read | INT_EVENT1 (0x14) read |
+|---|---|---|---|
+| Before any write | none | `00 00 00 00 00 00 00 00 00 00 01` | `00 00 00 00 00 00 00 00 00 00 01` |
+| Write, byte 0 bit 0 (earlier session) | `01 00 00 00 00 00 00 00 00 00 00` | `00 00 00 00 00 00 00 00 00 00 01` | not read |
+| Write, all zero | `00 00 00 00 00 00 00 00 00 00 00` | `00 00 00 00 00 00 00 00 00 00 01`, twice | not read |
+| Write, byte 3 bit 0 (event bit 24, clear) | `00 00 00 01 00 00 00 00 00 00 00` | `00 00 00 00 00 00 00 00 00 00 01`, twice | `00 00 00 00 00 00 00 00 00 00 01` |
+
+Every read of 0x18 equaled INT_EVENT1 and none tracked the bytes written, so
+`WR 0x18` reports `match=0` unless the write equals INT_EVENT1. No read showed the
+bytes in reverse order: INT_MASK1 (0x16) read `00 00 00 00 00 00 00 00 00 00 03` in
+the same session, and earlier read back a byte 0 write exactly. Because INT_EVENT1 did
+not change during the sample, these reads cannot tell whether 0x18 mirrors INT_EVENT1
+or holds a fixed `01` in byte 10.
+
 ### Read/Write Registers (R/W)
 
 Read a register, change fields through its setters, and write the same object back. The
@@ -645,6 +663,19 @@ Guaranteed PDP at most Maximum PDP rule on the upper word that the TRM does not
 state. The firmware leaves both of those fields at 0, so hardware has not
 exercised the rule; if firmware-written data breaks it, drop the rule under
 "Validation tiers" in the plan.
+
+The firmware does not update 0x78 from a runtime write to TX_SOURCE_CAPABILITIES
+(0x32). On
+2026-11-27 the board, sinking with the configuration EEPROM loaded, read 0x78 as
+`3c 3c 3c 00 1e f0 00 00`: 60 W Maximum, Present, and Reported PDP, which is the
+20 V 3 A top PDO of 0x32, and 15 W Guaranteed PDP in the upper word. Lowering
+that PDO to 1.5 A (30 W) left 0x78 unchanged, both at once and after a 0x28
+port reset that brought the port up as source. The configuration EEPROM writes
+0x78 at boot, which is where the 60 W value matching the top PDO comes from. The
+bench console therefore
+writes 0x78 directly, like the other PD 3.x data blocks, and sets bit 18 of
+0x42. Because the firmware has rewritten the lower word on an attach as source,
+read 0x78 again after an attach before relying on a host-written value.
 
 TRANSMITTED_PPS_STATUS (0x7A) reported a length byte of 4 on the same board, read
 `00 00 00 00`, and round-tripped a written value (`FA 00 3C 02`: 5000 mV,

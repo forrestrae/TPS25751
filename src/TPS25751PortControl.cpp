@@ -64,6 +64,88 @@ TypeCCurrent TPS25751PortControl::typeCCurrent() const {
     return extractEnum<TypeCCurrent>(0, 2, static_cast<uint8_t>(TypeCCurrent::Reserved), TypeCCurrent::USBDefault);
 }
 
+// --- Setters: each a single setBits() call; setBits() itself guards !isValid() ---
+
+void TPS25751PortControl::setChargerDetectEnable(ChargerDetectEnable value)
+{
+    setBits(30, 2, static_cast<uint32_t>(value));
+}
+
+void TPS25751PortControl::setChargerAdvertiseEnable(ChargerAdvertiseEnable value)
+{
+    setBits(26, 3, static_cast<uint32_t>(value));
+}
+
+void TPS25751PortControl::setTypeCCurrent(TypeCCurrent value)
+{
+    setBits(0, 2, static_cast<uint32_t>(value));
+}
+
+void TPS25751PortControl::setResistor15kPresent(bool present)
+{
+    setBits(24, 1, present ? 1u : 0u);
+}
+
+void TPS25751PortControl::setDcdEnable(bool enable)
+{
+    setBits(25, 1, enable ? 1u : 0u);
+}
+
+void TPS25751PortControl::setAutomaticIdRequest(bool enable)
+{
+    setBits(16, 1, enable ? 1u : 0u);
+}
+
+void TPS25751PortControl::setEnableCurrentMonitor(bool enable)
+{
+    setBits(20, 1, enable ? 1u : 0u);
+}
+
+void TPS25751PortControl::setUnconstrainedPower(bool enable)
+{
+    setBits(19, 1, enable ? 1u : 0u);
+}
+
+void TPS25751PortControl::setInitiateSwapToDFP(bool enable)
+{
+    setBits(15, 1, enable ? 1u : 0u);
+}
+
+void TPS25751PortControl::setProcessSwapToDFP(bool enable)
+{
+    setBits(14, 1, enable ? 1u : 0u);
+}
+
+void TPS25751PortControl::setInitiateSwapToUFP(bool enable)
+{
+    setBits(13, 1, enable ? 1u : 0u);
+}
+
+void TPS25751PortControl::setProcessSwapToUFP(bool enable)
+{
+    setBits(12, 1, enable ? 1u : 0u);
+}
+
+void TPS25751PortControl::setInitiateSwapToSource(bool enable)
+{
+    setBits(7, 1, enable ? 1u : 0u);
+}
+
+void TPS25751PortControl::setProcessSwapToSource(bool enable)
+{
+    setBits(6, 1, enable ? 1u : 0u);
+}
+
+void TPS25751PortControl::setInitiateSwapToSink(bool enable)
+{
+    setBits(5, 1, enable ? 1u : 0u);
+}
+
+void TPS25751PortControl::setProcessSwapToSink(bool enable)
+{
+    setBits(4, 1, enable ? 1u : 0u);
+}
+
 void TPS25751PortControl::debugPrint(Stream &s) const {
     s.println(F("=== Port Control Register (0x29) ==="));
 

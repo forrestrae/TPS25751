@@ -206,7 +206,7 @@ def test_write_port_control(bench):
 
 
 def test_write_refusals_and_errors(bench):
-    refused = bench.tools.bench_write("0x33", "00")
+    refused = bench.tools.bench_write("0x79", "00")
     assert refused["code"] == "REFUSED"
     assert bench.tools.bench_write("0x2a", "00000000")["code"] == "REFUSED"
     short = bench.tools.bench_write("0x42", "1a0008")
@@ -219,6 +219,38 @@ def test_write_reports_a_readback_that_differs(bench):
     bench.console.script["WR 0x42 ffffffff"] = [["reg=0x42 len=4 data=1a1f0f1d match=0", "OK"]]
     result = bench.tools.bench_write(0x42, "ffffffff")
     assert (result["match"], result["data"], result["written"]) == (False, "1a1f0f1d", "ffffffff")
+
+
+def test_write_coupled_block_returns_pd3_config(bench):
+    result = bench.tools.bench_write("0x7a", "c2012802")
+    assert result["address"] == "0x7A" and result["match"] is True
+    assert result["pd3_config"]["address"] == "0x42"
+    assert result["pd3_config"]["data"] == "1a001800" and result["pd3_config"]["match"] is True
+
+
+def test_write_coupled_block_with_bit_already_set(bench):
+    bench.console.registers[0x42] = bytes.fromhex("1a001800")
+    result = bench.tools.bench_write("0x7a", "c2012802")
+    assert result["pd3_config"] == "already"
+    assert bench.console.registers[0x42].hex() == "1a001800"
+
+
+def test_write_uncoupled_register_has_no_pd3_config(bench):
+    for address in ("0x42", "0x16", "0x33"):
+        length = len(bench.console.registers[int(address, 16)])
+        assert "pd3_config" not in bench.tools.bench_write(address, "00" * length)
+
+
+def test_write_0x18_reads_back_with_match_false(bench):
+    assert bench.tools.bench_write("0x18", "0100000000000000000000")["match"] is False
+
+
+def test_write_error_after_the_data_write_says_so(bench):
+    bench.console.pd3_fail = "0x42 read failed"
+    result = bench.tools.bench_write("0x7a", "c2012802")
+    assert result["code"] == "I2C" and "the data register was written" in result["error"]
+    assert result["reply_lines"][0].startswith("reg=0x7a")
+    assert "pd3_config" not in result
 
 
 # ----- bench_snapshot -----

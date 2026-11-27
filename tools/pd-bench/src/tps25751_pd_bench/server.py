@@ -272,6 +272,22 @@ def _register_from(reply: Reply) -> dict:
     raise BenchProtocolError(f"the reply to '{reply.request}' has no register line")
 
 
+def _pd3_config_from(reply: Reply) -> dict | str | None:
+    """The 0x42 line of a coupled write as a register dict, "already", or None."""
+    lines = reply.data_lines()
+    for line in lines[1:]:
+        tokens = parse_tokens(line)
+        if tokens.get("pd3") == "already":
+            return "already"
+        if "reg" in tokens and "len" in tokens:
+            address, length, data = registers.parse_register_tokens(tokens)
+            entry = registers.register_entry(address, length, data)
+            if "match" in tokens:
+                entry["match"] = tokens["match"] == "1"
+            return entry
+    return None
+
+
 def _read(session: Session, address: int) -> dict:
     return _register_from(session.link.command(f"RD 0x{address:02x}", READ_TIMEOUT_S))
 
@@ -467,16 +483,34 @@ def build_tools(service: BenchService) -> SimpleNamespace:
     def bench_write(addr: int | str, hex: str) -> dict:  # noqa: A002 (the tool's argument name)
         """Write a whole TPS25751 register and return the readback. Can drop VBUS.
 
-        The console allows 0x27, 0x28, 0x29, 0x37, and 0x42 only. hex must be the
-        whole register, as many bytes as its length byte. A write to 0x27 or 0x28
-        disconnects and reconnects the port. A write to 0x29 (PORT_CONTROL) does
-        not: it takes effect the next time the policy it governs runs, such as the
-        board initiating (bit 5) or accepting (bit 4) the next PR_Swap to sink.
-        Start a 0x27 write from a fresh bench_read: the firmware keeps values in bits
-        the TRM calls reserved. Host-written values last until the next restart.
+        The console allows these registers only, grouped by what a write does:
+        - 0x27 and 0x28 disconnect and reconnect the port.
+        - 0x29 (PORT_CONTROL) does not; it takes effect the next time the policy it
+          governs runs, such as the board initiating (bit 5) or accepting (bit 4)
+          the next PR_Swap to sink.
+        - 0x16, 0x32, 0x33, 0x37, 0x42, 0x70, and 0x98 take effect at their next use.
+        - 0x77, 0x78, 0x7A, 0x7B, 0x7D, and 0x7E are PD 3.x data blocks. After the
+          readback the console sets the block's bit in 0x42 (PD3_CONFIGURATION) so
+          the controller sends the block: 0x77 bit 8, 0x78 bit 18, 0x7A bit 20, 0x7B
+          bit 11, 0x7D bit 10, 0x7E bit 17. That is a second write, to 0x42.
+          Writing a block back to its old value sets the bit again, so restore 0x42
+          last, after the data blocks.
+        - 0x78 (TX_SOURCE_INFO) is also written by the firmware, which has rewritten
+          its lower word when the board attached as source; read it again after an
+          attach.
+        - 0x18 reads back with match false, expected for that register.
+        hex must be the whole register, as many bytes as its
+        length byte. Start a write from a fresh bench_read: the firmware keeps values
+        in bits the TRM calls reserved. Host-written values last until the next restart.
 
         Returns the register as read back and match, which is false when the
-        controller kept other bytes than the ones written.
+        controller kept other bytes than the ones written. For a data block it also
+        returns pd3_config: the 0x42 register as read back after the bit was set, or
+        "already" when the bit was set and 0x42 was left alone. Uncoupled registers
+        have no pd3_config. If the 0x42 step fails after the data write, the result
+        is an error whose text says the data register was written and the 0x42
+        enable bit was not set (or not confirmed), and reply_lines holds the data
+        register's line.
         """
         address = parse_address(addr)
         payload = clean_hex(hex, "hex")
@@ -486,6 +520,9 @@ def build_tools(service: BenchService) -> SimpleNamespace:
             reply = session.link.command(f"WR 0x{address:02x} {payload}", WRITE_TIMEOUT_S)
         result = _register_from(reply)
         result["written"] = payload
+        pd3 = _pd3_config_from(reply)
+        if pd3 is not None:
+            result["pd3_config"] = pd3
         result["sent_utc"] = reply.sent_utc
         result["finished_utc"] = reply.finished_utc
         result.update(reply.extras())

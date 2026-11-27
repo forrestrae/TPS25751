@@ -238,6 +238,8 @@ TYPED_WRITE(TransmitBatteryStatus, TPS25751TransmitBatteryStatus, TRANSMIT_BATTE
 TYPED_WRITE(TransmitBatteryCapabilities, TPS25751TransmitBatteryCapabilities, TRANSMIT_BATTERY_CAPABILITIES)
 TYPED_WRITE(TransmitSinkCapsExtended, TPS25751TransmitSinkCapsExtended, TRANSMIT_SINK_CAPABILITIES_EXTENDED)
 TYPED_WRITE(LiquidDetectionConfig, TPS25751LiquidDetectionConfig, LIQUID_DETECTION_CONFIG)
+TYPED_WRITE(PortConfig, TPS25751PortConfig, PORT_CONFIGURATION)
+TYPED_WRITE(PortControl, TPS25751PortControl, PORT_CONTROL)
 
 // --- Factory reads: readXRegister(validate) ---------------------------------------------
 
@@ -550,6 +552,7 @@ int main()
     RUN_WRITE(PD3Config); RUN_WRITE(SleepControl); RUN_WRITE(TransmitSourceCapsExtended);
     RUN_WRITE(TransmitSourceInfo); RUN_WRITE(TransmitPPSStatus); RUN_WRITE(TransmitBatteryStatus);
     RUN_WRITE(TransmitBatteryCapabilities); RUN_WRITE(TransmitSinkCapsExtended); RUN_WRITE(LiquidDetectionConfig);
+    RUN_WRITE(PortConfig); RUN_WRITE(PortControl);
 
     RUN_FACTORY(Mode); RUN_FACTORY(CustomerUse); RUN_FACTORY(Command); RUN_FACTORY(Data); RUN_FACTORY(Version);
     RUN_FACTORY(InterruptEvent); RUN_FACTORY(InterruptMask); RUN_FACTORY(InterruptClear); RUN_FACTORY(Status); RUN_FACTORY(PowerPathStatus);

@@ -340,6 +340,16 @@ bool TPS25751::writeLiquidDetectionConfig(const TPS25751LiquidDetectionConfig &l
     return writeRegister(liquidDetectionConfig);
 }
 
+bool TPS25751::writePortConfig(const TPS25751PortConfig &portConfig) const
+{
+    return writeRegister(portConfig);
+}
+
+bool TPS25751::writePortControl(const TPS25751PortControl &portControl) const
+{
+    return writeRegister(portControl);
+}
+
 // Type-safe register reading methods
 bool TPS25751::readRegister(TPS25751Registers::RegisterInfo regInfo, uint8_t *buffer) const
 {

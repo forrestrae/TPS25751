@@ -32,6 +32,11 @@ SNAPSHOT_ORDER = [0x03, 0x14, 0x1A, 0x26, 0x30, 0x31, 0x32, 0x33, 0x34, 0x35,
                   0x37, 0x3F, 0x40, 0x42, 0x48, 0x69, 0x6A]
 
 
+WRITE_ALLOWED = {0x16, 0x18, 0x27, 0x28, 0x29, 0x32, 0x33, 0x37, 0x42, 0x70,
+                 0x77, 0x7A, 0x7B, 0x7D, 0x7E, 0x98}
+PD3_ENABLE_BIT = {0x77: 8, 0x7A: 20, 0x7B: 11, 0x7D: 10, 0x7E: 17}
+
+
 def default_registers() -> dict[int, bytes]:
     return {
         0x03: b"APP ",
@@ -52,6 +57,8 @@ def default_registers() -> dict[int, bytes]:
         0x3F: bytes(2),
         0x40: bytes(4),
         0x42: bytes.fromhex("1a000800"),
+        0x16: bytes(11), 0x18: bytes(11), 0x70: bytes(1), 0x77: bytes(15), 0x7A: bytes(4),
+        0x7B: bytes(16), 0x7D: bytes(36), 0x7E: bytes(14), 0x98: bytes(12),
         0x48: bytes(25),
         0x69: bytes(4),
         0x6A: bytes(13),
@@ -90,6 +97,7 @@ class FakeConsole:
         self.requests: list[str] = []        # request text, without the id
         self.script: dict[str, list] = {}    # request text -> replies, used in order
         self.noise: list[str] = []           # lines put before every reply line
+        self.pd3_fail: str | None = None     # text of an ERR after the data line of a coupled WR
         self.on_write = None                 # called with (address, bytes) after a WR
         self.model_aneg = True               # CMD ANeg moves 0x34 and 0x35 the way 0x37 asks
         self.decoders = {0x1A: ["=== Status Register (0x1A) ===", "  Plug Present: Yes", ""]}
@@ -163,15 +171,26 @@ class FakeConsole:
                     + ["int_clear=ok", "OK"])
         if command == "WR":
             address = int(words[1], 16)
-            if address not in (0x27, 0x28, 0x29, 0x37, 0x42):
-                return ["ERR REFUSED register is not on the write allowlist (0x27, 0x28, 0x29, 0x37, 0x42)"]
+            if address not in WRITE_ALLOWED:
+                return ["ERR REFUSED register is not on the write allowlist (" + ", ".join(f"0x{a:02x}" for a in sorted(WRITE_ALLOWED)) + ")"]
             data = bytes.fromhex(words[2])
             if len(data) != len(self.registers[address]):
                 return [f"ERR BADARG the register is {len(self.registers[address])} bytes, got {len(data)}"]
             self.registers[address] = data
             if self.on_write:
                 self.on_write(address, data)
-            return [self.register_line(address) + " match=1", "OK"]
+            match = 0 if address == 0x18 else 1
+            lines = [self.register_line(address) + f" match={match}"]
+            bit = PD3_ENABLE_BIT.get(address)
+            if bit is None:
+                return lines + ["OK"]
+            if self.pd3_fail:
+                return lines + [f"ERR I2C the data register was written; the 0x42 enable bit was not set: {self.pd3_fail}"]
+            config = int.from_bytes(self.registers[0x42], "little")
+            if config >> bit & 1:
+                return lines + ["pd3=already", "OK"]
+            self.registers[0x42] = (config | 1 << bit).to_bytes(4, "little")
+            return lines + [self.register_line(0x42) + " match=1", "OK"]
         if command == "CMD":
             if words[1] in ("PBMs", "I2Cw"):
                 return ["ERR REFUSED task is not on the allowlist"]

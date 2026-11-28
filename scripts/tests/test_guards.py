@@ -132,6 +132,22 @@ class ClaudeGuardBashTests(unittest.TestCase):
                   "scripts/integrate.py feat/x", "python3 scripts/release_level.py v1..HEAD"):
             self.allowed(c)
 
+    def test_tooling_reads_with_other_redirects_allowed(self):
+        # A redirect anywhere in the command used to count as a write to the tooling.
+        for c in ("grep -n native scripts/verify.py 2>/dev/null",
+                  "ls 2>/dev/null; grep -n native scripts/verify.py",
+                  "grep -n native scripts/verify.py > /tmp/out.txt",
+                  "sed -n 1,5p scripts/verify.py 2>&1 | head",
+                  "git log -- scripts/verify.py > /tmp/log.txt"):
+            self.allowed(c)
+
+    def test_redirects_into_tooling_denied(self):
+        for c in ("cat a.txt >> scripts/verify.py", "sed s/a/b/ x > scripts/agent_guard.py",
+                  "grep x y 2> .githooks/pre-push", "ls &> scripts/gitguard.py",
+                  "git show HEAD~1:scripts/verify.py > scripts/verify.py",
+                  "python3 scripts/verify.py > scripts/integrate.py"):
+            self.denied(c)
+
     def test_gate_checks_editable(self):
         for c in ("echo x >> scripts/verify_gate.py", "sed -i '' s/x/y/ scripts/check_commits.py",
                   "echo x >> scripts/release_level.py"):

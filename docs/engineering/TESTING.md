@@ -390,6 +390,32 @@ suite run a full update once for every call of an update, and take 15 s at the d
 `-O0` against 1 s at `-O1`. `[env:native-coverage]` sets `-O0` again after the inherited
 flags, so the coverage build still maps each source line to code.
 
+### Fast Local Runs
+
+`test/native_fast.py` runs the same suites about 20 times faster than `pio test -e
+native`, for the edit and test loop. Use `pio test -e native` before finishing a branch;
+the verify gate and CI run only that.
+
+```bash
+# Every suite
+test/native_fast.py
+
+# Suites matching a pattern, as with pio test -f (repeatable)
+test/native_fast.py -f "test_native/test_TPS25751Status" -f "*Pdo"
+
+# Every suite's output, passing tests included
+test/native_fast.py -v
+```
+
+PlatformIO spends about 0.4 s per suite outside the compiler, even when every object
+comes from the build cache, so 51 suites cost about 19 s with nothing to rebuild. The
+script reads the sources, `build_flags`, and `test_filter` from `[env:native]`, compiles
+each file once into `.pio/native-fast/`, and rebuilds a file only when it, a header it
+includes, or the flags change. It links one program per suite and runs them all in
+parallel. A run with nothing to rebuild takes about 1 s; after a change to a header that
+every file includes, about 3.5 s. It writes its own `unity_config.h` and compiles Unity
+from `.pio/libdeps/native/Unity`, which the first `pio test -e native` installs.
+
 ### Script Tests
 
 The Python tools under `scripts/` have their own tests in `scripts/tests/`. Run them from

@@ -18,6 +18,14 @@ pio test -e native -f "test_native/test_TPS25751Status"
 test/coverage.sh
 ```
 
+While working, `test/native_fast.py` builds and runs the same suites in parallel in about
+a second, and takes `-f` patterns like `pio test`. It is a quick check, not the gate:
+run `pio test -e native` before finishing a branch.
+
+```bash
+test/native_fast.py -f "*EepromUpdater"
+```
+
 ## Rules
 
 - One suite per class in `test_native/test_TPS25751<Name>/`. Copy

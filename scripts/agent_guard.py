@@ -104,6 +104,11 @@ def _mentions_protected(text: str) -> bool:
     return any(p in text for p in PROTECTED_PATHS)
 
 
+def _redirect_targets(argv: list[str]) -> list[str]:
+    """The files a command segment writes through output redirects."""
+    return [argv[i + 1] for i, tok in enumerate(argv[:-1]) if tok in REDIRECTS]
+
+
 # `git commit` short options that consume a value (attached or as the next token)
 COMMIT_VALUE_FLAGS = set("mFCcSt")
 
@@ -163,7 +168,6 @@ def check_bash(command: str, depth: int = 0) -> None:
     if any(name in command for name in STAMP_NAMES):
         raise Denied("the verify stamp files are written only by scripts/verify.py and setup")
     tokens = _tokenize(command)
-    writes_redirect = any(t in REDIRECTS for t in tokens)
     for seg in _segments(tokens):
         argv = list(seg)
         while argv and "=" in argv[0] and not argv[0].startswith("-") and argv[0].split("=")[0].isidentifier():
@@ -179,6 +183,10 @@ def check_bash(command: str, depth: int = 0) -> None:
         if not argv:
             continue
         prog = os.path.basename(argv[0])
+        # A redirect writes only its own target, so a read of the tooling that
+        # sends output or errors elsewhere (2>/dev/null, > out.txt) stays a read.
+        if any(_mentions_protected(t) for t in _redirect_targets(argv)):
+            raise Denied("a redirect into workflow tooling; the human maintains those files")
 
         if prog == "git":
             _check_git(argv[1:])
@@ -195,9 +203,9 @@ def check_bash(command: str, depth: int = 0) -> None:
             continue
         if any(argv[0].endswith(e) for e in WORKFLOW_ENTRYPOINTS):
             continue
-        if prog in READ_ONLY_PROGRAMS and not writes_redirect:
+        if prog in READ_ONLY_PROGRAMS:
             continue
-        if prog == "sed" and "-i" not in argv and not any(a.startswith("-i") for a in argv) and not writes_redirect:
+        if prog == "sed" and "-i" not in argv and not any(a.startswith("-i") for a in argv):
             continue
         raise Denied(f"`{prog}` touching workflow tooling; the human maintains those files")
 

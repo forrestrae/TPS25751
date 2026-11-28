@@ -265,6 +265,39 @@ See `TPS25751PatchLoader` (`include/TPS25751PatchLoader.h`, `src/TPS25751PatchLo
 for the complete 17-step implementation, and ADR-011 in ARCHITECTURE.md for the
 design rationale.
 
+### Patch bundle app config block
+
+A low-region binary from TI's USBCPD Application Customization Tool carries, besides the
+firmware patch, an app config block of register records that the controller loads at
+boot. TI documents neither its layout nor its CRC. Both come from the tool's own
+JavaScript (`AppConfigService.generateAppConfig()` and `LowRegionService`, tool version
+2.0.2, read 2026-11-28), and `TPS25751AppConfigImage.h` gives the layout field by field.
+What matters outside that header:
+
+- The block's CRC is not a plain CRC-32 of the block. It is the CRC-32 of the block
+  without bytes 0x04 to 0x0B, complemented and bit-reversed. The customer version byte
+  at 0x08 is therefore not covered. The code patch CRC at image offset 0x10 uses the
+  same transform over the patch. Checked on six block copies from three tool exports and
+  on the code patch of one; rebuilding the board's low region and full-flash image from
+  the parsed records gives byte-identical files.
+- A record's data is the register's bytes as an I2C read returns them after the length
+  byte: 0x32 is 63 bytes, 0x70 one byte. So a record decodes with the register class.
+- The tool leaves out a register whose data is all zero, so the controller keeps that
+  register's firmware default. 0x06 is in the tool's project file but not in the image
+  for that reason. The editor writes what it is given.
+- The image holds records the tool's project file does not list, and the other way
+  round: 0x17, 0x2B, 0x47, 0x55, 0x56, 0x62, 0x64, and 0x95 have no register class here.
+  Edit the binary, not the project file.
+- The controller accepts the CRC. On 2026-11-28 the board's export with 0x70 changed
+  from 0x03 to 0x05 (CRC 0x7EEB66A8, five bytes different) went into the Low region
+  through the eeprom-update example's `u`: `FLvy` and the `FLrd` compare passed. After
+  `x` the controller reached APP in 1.9 s with BOOT_FLAGS `18 00 F0 A2 C1` (EEPROM
+  loaded, Region 0 attempted, no Invalid or CRC flag), and 0x70 read 0x05. One edit of
+  one register is the whole sample.
+- A CRC error in the Low region ends the load without trying High (Flash tasks below).
+  Write an edited image with the updater, whose `FLvy` and compare run before the
+  pointer switch, so a rejected image leaves the old region booting.
+
 ### Flash tasks and EEPROM update
 
 The four flash tasks reach the external EEPROM (0x50 on I2Cc), and they do not share one

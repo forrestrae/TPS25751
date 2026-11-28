@@ -22,7 +22,8 @@ no `Wire`, no Arduino framework. The `[env:native]` environment in
   RDO value types, and the factory via `build_src_filter` (`test_build_src =
   yes`), listed in register address order, followed by
   `TPS25751EepromUpdater.cpp`, which reaches the controller only through the
-  `TPS25751CommandExecutor` interface, and by `TPS25751.cpp` and
+  `TPS25751CommandExecutor` interface, by `TPS25751AppConfigImage.cpp`, which
+  works on a buffer only, and by `TPS25751.cpp` and
   `TPS25751PatchLoader.cpp`, which reach the bus through the TwoWire fake (see
   "I2C Tests: the Wire Fake" below), and by the bench console
   (`TPS25751BenchProtocol.cpp` and `TPS25751BenchConsole.cpp`). `TPS25751HostExecutor.cpp` and
@@ -398,7 +399,11 @@ binary into the header `examples/eeprom-update` embeds. It checks that the bytes
 trip, the declarations and the provenance comment (size, SHA-256, version word), that the
 output is reproducible and compiles as C++17, and that the script applies the checks of
 `TPS25751EepromUpdater::checkImage()` (Header_ID, minimum length, one region at most) and
-writes no header for a rejected file. The other files test the git workflow tooling. The
+writes no header for a rejected file. `test_appconfig_image.py` covers
+`scripts/appconfig_image.py`. It reads the bytes of the native fixture in
+`test/test_native/test_TPS25751AppConfigImage/AppConfigFixture.h` and expects the same CRCs
+as that suite, so the host editor and `TPS25751AppConfigImage` cannot drift apart. The
+other files test the git workflow tooling. The
 verify gate runs this suite.
 
 ### Bench server tests

@@ -1038,4 +1038,7 @@ private:
 #include "TPS25751HostExecutor.h"
 #include "TPS25751EepromUpdater.h"
 
+// The patch bundle app config editor, which needs no controller (ADR-016).
+#include "TPS25751AppConfigImage.h"
+
 #endif // TPS25751_H

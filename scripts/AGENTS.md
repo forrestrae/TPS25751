@@ -111,3 +111,9 @@ The workflow needs a `PLATFORMIO_AUTH_TOKEN` repository secret, generated with
 `bin_to_header.py` turns a low-region binary into the header that
 `examples/eeprom-update` embeds, applying the image checks of
 `TPS25751EepromUpdater::checkImage()`. Its tests are in `scripts/tests/`.
+
+`appconfig_image.py` shows and edits the app config block of a low-region binary
+(`show`, `edit --set REG=HEX --remove REG`) and builds the full-flash image
+(`full-flash`, or `edit --full-flash`). It implements the format of
+`TPS25751AppConfigImage`; its tests read that class's native fixture, so both are
+checked against the same CRC from TI's tool.

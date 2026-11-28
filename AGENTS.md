@@ -15,6 +15,9 @@ change, and points to the place where the detail for each area lives.
   PD R3.3 for the registers that carry specification objects.
 - The 4CC command-task interface, the I2Cc downstream-device proxy, the Patch Burst Mode
   loader, and the EEPROM updater are implemented and were run on hardware.
+- An editor for the app config block of a patch bundle (`TPS25751AppConfigImage`, and
+  `scripts/appconfig_image.py` on the host) changes the boot configuration without TI's
+  tool. One edited image was written and booted on hardware (CONSTRAINTS.md).
 - A bench console (`TPS25751BenchConsole`) and its MCP server (`tools/pd-bench`) give a
   host program register reads, allowlisted tasks and writes, and restarts over a serial
   line protocol, for checks against a USB PD analyzer.
@@ -138,6 +141,7 @@ components, each documented in its header:
 | `TPS25751DownstreamDevice` | Register access to a part on the I2Cc bus through `I2Cr` and `I2Cw`, or directly on a `TwoWire` | ADR-007, ADR-010 |
 | `TPS25751PatchLoader` | Loads a firmware and configuration image into a controller in PTCH (TI SLVAFV8A) | ADR-011; CONSTRAINTS.md, Patch Burst Mode |
 | `TPS25751EepromUpdater` on `TPS25751CommandExecutor` | Updates, reads back, and blank-programs the configuration EEPROM (TI SLVAFL1) | ADR-014; CONSTRAINTS.md, Flash tasks and EEPROM update |
+| `TPS25751AppConfigImage` | Reads and edits the app config block of a patch bundle in a caller's buffer: records as register classes, length and CRC kept correct. `scripts/appconfig_image.py` does the same on the host | ADR-016; CONSTRAINTS.md, Patch bundle app config block |
 | `TPS25751BenchConsole` on `TPS25751BenchProtocol` | Answers a line protocol on a `Stream`: raw and decoded register reads, a snapshot, allowlisted tasks and writes, and restarts. Not included by `TPS25751.h` | ADR-015; tools/pd-bench/README.md |
 
 The typed driver for the BQ25798 charger lives in the sibling `lib/BQ25798` repository

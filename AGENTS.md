@@ -187,7 +187,8 @@ pio run -e example-read-registers -t upload
 ```
 
 `pio test` without `-e native` targets the hardware environments and tries to upload.
-A green native run is required for every change. The serial monitor runs at 115200 baud.
+A green native run is required for every change. Between edits, `test/native_fast.py`
+runs the same suites in parallel in about a second (TESTING.md, Fast Local Runs). The serial monitor runs at 115200 baud.
 
 The bench server has its own tests, which use a fake serial port and never open a real
 one:

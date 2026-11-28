@@ -62,6 +62,11 @@ consumption and are not the primary build path used in this repo.
   purpose, for hardware stage 5; its plan names `pb` as the next step, before any reset.
   `u`, `b`, and `c1` to `c4` rely on `updateRegion()` to refuse when an AppConfigOffset
   word is not 0; keep the library as the place that check is made.
+  `eeprom-auto-update` writes the EEPROM with no confirmation, by design: it runs once
+  at power-up and writes only when the region the controller boots differs from the
+  embedded image. Keep that compare ahead of every write, so a power cycle never
+  rewrites an image that is already there. It does not recover a board in PTCH; that
+  stays in `eeprom-update`.
   `pd-bench` is the other exception: a host program drives it, and its `CMD`, `WR`, and
   `RESTART` commands change the controller. The allowlists that bound them are in
   `TPS25751BenchProtocol`; keep the limits there, not in the sketch.

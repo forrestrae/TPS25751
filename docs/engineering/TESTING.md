@@ -385,6 +385,11 @@ pio test -e native -v
 (`default_envs`) and will try to upload to a Teensy — always pass `-e native`
 for unit tests.
 
+`[env:native]` builds at `-O1`. The four fault sweeps in the `TPS25751EepromUpdater`
+suite run a full update once for every call of an update, and take 15 s at the default
+`-O0` against 1 s at `-O1`. `[env:native-coverage]` sets `-O0` again after the inherited
+flags, so the coverage build still maps each source line to code.
+
 ### Script Tests
 
 The Python tools under `scripts/` have their own tests in `scripts/tests/`. Run them from

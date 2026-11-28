@@ -59,10 +59,10 @@ Writable through a `write<Name>()` method: 0x16, 0x18, 0x27, 0x28, 0x29, 0x32, 0
 ## Classes that are not registers
 
 `TPS25751PatchLoader`, `TPS25751EepromUpdater`, `TPS25751CommandExecutor`,
-`TPS25751HostExecutor`, `TPS25751DownstreamDevice`, `TPS25751BenchProtocol`, and
-`TPS25751BenchConsole` do not inherit `TPS25751Register` and are not in the factory.
-STANDARDS.md does not govern them; their headers and ADR-007, ADR-011, ADR-014, and
-ADR-015 in [ARCHITECTURE.md](../docs/engineering/ARCHITECTURE.md) do.
+`TPS25751HostExecutor`, `TPS25751DownstreamDevice`, `TPS25751BenchProtocol`,
+`TPS25751BenchConsole`, and `TPS25751AppConfigImage` do not inherit `TPS25751Register` and
+are not in the factory. STANDARDS.md does not govern them; their headers and ADR-007,
+ADR-011, ADR-014, ADR-015, and ADR-016 in [ARCHITECTURE.md](../docs/engineering/ARCHITECTURE.md) do.
 
 `TPS25751BenchConsole.h` is the one header `TPS25751.h` does not include; firmware that
 wants the console includes it. `TPS25751BenchProtocol.h` holds the line protocol, the

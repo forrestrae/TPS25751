@@ -1028,3 +1028,37 @@ Consequences:
 
 The protocol, the allowlists, and the restart sequence are in `TPS25751BenchProtocol.h`,
 `TPS25751BenchConsole.h`, and `tools/pd-bench/README.md`.
+
+### ADR-016: App Config Image Editor, on a Buffer
+
+Status: accepted, 2026-11-28.
+
+Context: changing a setting in the configuration the controller boots from meant a round
+trip through TI's web tool for every change. The tool's export is a binary whose app
+config block is a list of register records under a CRC, and the library already has a
+class for most of those registers.
+
+Decision:
+
+- `TPS25751AppConfigImage` wraps an image the caller owns and edits it in place. It does
+  not allocate, apart from the register object `recordAs<T>()` returns, and it has no
+  I2C and no clock. It is not a register and is not in the factory.
+- Records go in and out as register classes. `recordAs<T>()` decodes a record through
+  the factory, and `setRecord(const T&)` takes a read/write class, which names its own
+  address through `kAddress`. Byte-level `setRecord()` and `removeRecord()` cover the
+  records the library has no class for.
+- Nothing edits an image that does not check, so an edit cannot re-seal a damaged
+  image under a new CRC. Every edit rewrites the length and the CRC before it returns.
+- Only the layout the tool writes is accepted: one-byte port masks and no every-device
+  records. The bin table is moved, never parsed.
+- `scripts/appconfig_image.py` implements the same format on the host, for the build
+  scripts that turn an export into an EEPROM image. Both are tested against the CRC the
+  tool wrote into a real export.
+
+Consequences:
+
+- The format is TI's, undocumented, and read from one tool version. A later tool that
+  changes the CRC or the header is likely to fail `check()`; one that changes the meaning
+  of a record without changing its shape would not be caught.
+- Firmware can change its own boot configuration, for example in the image it gives the
+  EEPROM updater, without the web tool.

@@ -286,8 +286,19 @@ What matters outside that header:
   register's firmware default. 0x06 is in the tool's project file but not in the image
   for that reason. The editor writes what it is given.
 - The image holds records the tool's project file does not list, and the other way
-  round: 0x17, 0x2B, 0x47, 0x55, 0x56, 0x62, 0x64, and 0x95 have no register class here.
-  Edit the binary, not the project file.
+  round. Edit the binary, not the project file. Eight of the image's registers are not
+  in the TRM and have no register class here: 0x17, 0x2B, 0x47, 0x55, 0x56, 0x62, 0x64,
+  and 0x95. The tool's register file for this firmware,
+  `src/assets/xml-assets/TPS25751x_D_intel_Register_Detail_V0.8.xml`, names them and
+  their fields; it marks all eight hidden, which is why the project file leaves them out.
+  `TPS25751AppConfigImage.h` lists the names. The XML is a tool asset at version 0.8,
+  not a TI publication, so treat its field definitions as unconfirmed against hardware.
+- Two of those registers tie the image's opaque parts to a charger. 0x62 says the bin
+  table holds 42 I2C controller events, and 0x64 sets the external DC/DC target address
+  to 0x6B, the BQ25798's address. 0x95 gives the voltage and current scaling the
+  controller uses to build those writes. The controller can therefore write the charger
+  on its own, so code that drives the BQ25798 over I2Cc shares the part with it. What the
+  42 events write has not been decoded.
 - The controller accepts the CRC. On 2026-11-28 the board's export with 0x70 changed
   from 0x03 to 0x05 (CRC 0x7EEB66A8, five bytes different) went into the Low region
   through the eeprom-update example's `u`: `FLvy` and the `FLrd` compare passed. After

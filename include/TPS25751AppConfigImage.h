@@ -55,6 +55,23 @@
  * what it is given, zeros included.
  *
  * The bin table is opaque to this class and is moved, never changed.
+ *
+ * Registers in the board's image that the TRM leaves out. They have no
+ * register class and no Address, so findRecord() returns their bytes and
+ * recordRegister() cannot reach them. Names are from the tool's register file for
+ * firmware F809.11.66, TPS25751x_D_intel_Register_Detail_V0.8.xml (CONSTRAINTS.md,
+ * Patch bundle app config block):
+ *
+ * | Address | Name | Bytes |
+ * |---|---|---|
+ * | 0x17 | Interrupt Mask for I2C2 | 11 |
+ * | 0x2B | Misc Control | 8 |
+ * | 0x47 | Tx Identity | 49 |
+ * | 0x55 | Special Configuration | 4 |
+ * | 0x56 | Prochot Configuration | 2 |
+ * | 0x62 | APP Config Binary Data Indices: where the bin table's I2C events start, and how many | 8 |
+ * | 0x64 | I2C Controller Config: target addresses for those events, external DC/DC included | 12 |
+ * | 0x95 | External DCDC Parameters: voltage and current scaling for the external DC/DC | 55 |
  */
 
 #include <Arduino.h>

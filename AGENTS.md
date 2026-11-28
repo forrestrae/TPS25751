@@ -17,7 +17,7 @@ change, and points to the place where the detail for each area lives.
   loader, and the EEPROM updater are implemented and were run on hardware.
 - An editor for the app config block of a patch bundle (`TPS25751AppConfigImage`, and
   `scripts/appconfig_image.py` on the host) changes the boot configuration without TI's
-  tool. Not yet run on hardware.
+  tool. One edited image was written and booted on hardware (CONSTRAINTS.md).
 - A bench console (`TPS25751BenchConsole`) and its MCP server (`tools/pd-bench`) give a
   host program register reads, allowlisted tasks and writes, and restarts over a serial
   line protocol, for checks against a USB PD analyzer.

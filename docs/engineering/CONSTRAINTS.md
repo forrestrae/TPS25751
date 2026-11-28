@@ -288,10 +288,15 @@ What matters outside that header:
 - The image holds records the tool's project file does not list, and the other way
   round: 0x17, 0x2B, 0x47, 0x55, 0x56, 0x62, 0x64, and 0x95 have no register class here.
   Edit the binary, not the project file.
-- The controller checks a CRC while it loads a bundle (SLVAFL1, Boot Process), and a
-  CRC error in the Low region ends the load (Flash tasks below). Neither an edited image
-  in the controller nor one in the EEPROM has been tried yet. Load an edited image with
-  PBM first, which leaves the EEPROM alone, before writing it with the updater.
+- The controller accepts the CRC. On 2026-11-28 the board's export with 0x70 changed
+  from 0x03 to 0x05 (CRC 0x7EEB66A8, five bytes different) went into the Low region
+  through the eeprom-update example's `u`: `FLvy` and the `FLrd` compare passed. After
+  `x` the controller reached APP in 1.9 s with BOOT_FLAGS `18 00 F0 A2 C1` (EEPROM
+  loaded, Region 0 attempted, no Invalid or CRC flag), and 0x70 read 0x05. One edit of
+  one register is the whole sample.
+- A CRC error in the Low region ends the load without trying High (Flash tasks below).
+  Write an edited image with the updater, whose `FLvy` and compare run before the
+  pointer switch, so a rejected image leaves the old region booting.
 
 ### Flash tasks and EEPROM update
 
